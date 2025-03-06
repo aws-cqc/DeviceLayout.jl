@@ -152,7 +152,7 @@ function qpu17_demo(; savegds=true, dir=pwd())
 
     #### Autofill with ground plane holes
     hole_cs = CoordinateSystem("gnd_hole") # Coordinate system for a single hole
-    place!(hole_cs, Circle(GROUND_HOLE_RADIUS), METAL_NEGATIVE)
+    place!(hole_cs, not_simulated(Circle(GROUND_HOLE_RADIUS)), METAL_NEGATIVE)
     bnds = bounds(schematic, find_components(ExampleChip, schematic)...) # bounds of the chip node
     exclusion = make_halo(50μm; ignore_layers=[CHIP_AREA]) # function to create exclusion area
     x_grid = (lowerleft(bnds).x + 600μm):GROUND_HOLE_SPACING:(upperright(bnds).x - 600μm) # raster x-coordinates

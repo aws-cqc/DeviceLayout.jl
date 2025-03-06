@@ -380,7 +380,7 @@ LINE_SPECIFICATIONS = [# Manual port assignment, we'll just list them out
     ("Z", (3, 5), [Point(5000, -1800)]μm),
     ("XY", (3, 4), [Point(4600, -2300)]μm),
     ("Z", (3, 4), [Point(4600, -3000)]μm),
-    ("XY", (4, 4), [Point(4200, -3000)]μm),
+    ("XY", (4, 4), [Point(3300, -2100)]μm),
     # SE corner
     ("Z", (4, 4), [Point(4100, -4200)]μm),
     ("XY", (5, 4), [Point(4100, -4600)]μm),
@@ -704,7 +704,7 @@ Many quantum devices fill the ground plane with small holes to reduce loss assoc
 ```julia
 #### Autofill with ground plane holes
 hole_cs = CoordinateSystem("gnd_hole") # Coordinate system for a single hole
-place!(hole_cs, Circle(GROUND_HOLE_RADIUS), METAL_NEGATIVE)
+place!(hole_cs, not_simulated(Circle(GROUND_HOLE_RADIUS)), METAL_NEGATIVE)
 bnds = bounds(schematic, find_components(ExampleChip, schematic)...) # bounds of the chip node
 exclusion = make_halo(50μm; ignore_layers=[CHIP_AREA]) # function to create exclusion area
 x_grid = (lowerleft(bnds).x + 600μm):GROUND_HOLE_SPACING:(upperright(bnds).x - 600μm) # raster x-coordinates

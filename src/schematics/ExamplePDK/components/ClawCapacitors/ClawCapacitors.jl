@@ -87,7 +87,8 @@ function SchematicDrivenLayout._geometry!(
     path = _path(cc)
     place!(cs, path)
     claw_cutout = RotationPi(1 // 2)(_series_claw(cc))
-    place!(cs, Align.rightof(claw_cutout, path, centered=true), METAL_NEGATIVE)
+    ms = MeshSized(critical_dimension(cc))
+    place!(cs, ms(Align.rightof(claw_cutout, path, centered=true)), METAL_NEGATIVE)
 
     return cs
 end
@@ -261,7 +262,8 @@ function SchematicDrivenLayout._geometry!(
     # Align claw below tap before attaching bridge, which may extend below tap
     claw_cutout = Align.below(claw_cutout, tap; centered=true)
     !isnothing(cc.bridge) && attach!(tap, sref(cc.bridge), pathlength(tap[end]) / 2)
-    place!(cs, claw_cutout, METAL_NEGATIVE)
+    ms = MeshSized(critical_dimension(cc))
+    place!(cs, ms(claw_cutout), METAL_NEGATIVE)
 
     return cs
 end

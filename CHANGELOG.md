@@ -8,6 +8,7 @@ The format of this changelog is based on
 
   - `SolidModels.check_overlap` now skips empty groups
   - Built-in components `Spacer`, `ArrowAnnotation`, and `WeatherVane` now default to coordinate type `typeof(1.0UPREFERRED)` if no coordinate type is specified in the constructor
+  - Improvements to ExamplePDK/DemoQPU17 component mesh sizing
   - Minor documentation improvements
 
 ## 1.4.0 (2025-07-01)

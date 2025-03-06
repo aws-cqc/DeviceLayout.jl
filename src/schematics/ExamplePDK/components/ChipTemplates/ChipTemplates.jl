@@ -52,13 +52,13 @@ A `Component` with rectangular geometry in the CHIP_AREA layer and uniformly spa
 end
 
 function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, c::ExampleChip)
-    return place!(
-        cs,
-        OptionalStyle(DeviceLayout.NoRender(), DeviceLayout.Plain(), :artwork, false)(
-            centered(Rectangle(c.length_x, c.length_y))
-        ),
-        CHIP_AREA
-    )
+    chip_rect = centered(Rectangle(c.length_x, c.length_y))
+    # only_simulated would make these invisible to `bounds`, which we don't want
+    # so these render by default and ignore for artwork
+    not_artwork =
+        OptionalStyle(DeviceLayout.NoRender(), DeviceLayout.Plain(), :artwork, false)
+    place!(cs, not_artwork(chip_rect), CHIP_AREA)
+    return place!(cs, not_artwork(chip_rect), WRITEABLE_AREA)
 end
 
 function SchematicDrivenLayout.hooks(c::ExampleChip)
@@ -89,10 +89,11 @@ end
 """
     example_launcher(port_spec)
 
-Create a coplanar-waveguide "launcher" in `METAL_NEGATIVE` created using `launch!` with its defaults.
+Create a coplanar-waveguide "launcher" in `METAL_NEGATIVE` created using `launch!`.
 
 Returns a `Path` named `"launcher_\$role_\$target"`, where `role` and `target` are the first two
-elements of `port_spec`. Hooks are given by [`hooks(::Path)`](@ref).
+elements of `port_spec`. Hooks are given by [`hooks(::Path)`](@ref). Uses default parameters
+for `launch!` with rounding turned off.
 
 This method exists for use in demonstrations. The launcher design is not optimized
 for microwave properties.
@@ -101,7 +102,11 @@ function example_launcher(port_spec)
     isnothing(port_spec) && return nothing
     path =
         Path(nm; name="launcher_$(port_spec[1])_$(port_spec[2])", metadata=METAL_NEGATIVE)
-    launch!(path)
+    launch!(path, extround=0μm)
+    port_cs = CoordinateSystem(uniquename("launcherport"))
+    gap0 = path[1].sty.gap # Launcher pad gap
+    render!(port_cs, only_simulated(centered(Rectangle(gap0, gap0))), PORT)
+    attach!(path, sref(port_cs), path[1].sty.gap / 2, i=1)
     return path
 end
 ###

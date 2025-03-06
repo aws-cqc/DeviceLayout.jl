@@ -102,7 +102,7 @@ function level_z(l::Integer; t_chips=[525μm, 525μm], t_gaps=[5μm])
     # Add up stacks above 1, subtract stacks below 1
     z_chip =
         sum(t_chips[(2):chip_idx]) + sum(t_gaps[1:(chip_idx - 1)]) -
-        (sum(t_chips[(chip_idx + 1):1]) + sum(t_gaps[chip_idx:-1]))
+        (sum(t_chips[(chip_idx + 1):1]) + sum(t_gaps[chip_idx:0]))
     if iseven(l)
         return z_chip - t_chips[chip_idx] # even is bottom of substrate
     end

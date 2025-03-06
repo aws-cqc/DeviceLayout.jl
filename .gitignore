@@ -11,3 +11,5 @@ Manifest.toml
 .DS_Store
 .gitlab-ci-local
 coverage/
+*.xao
+*.msh2
