@@ -1,4 +1,4 @@
-import DeviceLayout: flushtop, flushleft, flushright, below
+import DeviceLayout: flushtop, flushleft, flushright, below, above
 
 import .ExamplePDK: filter_params, tap!
 import .ExamplePDK.Transmons: ExampleRectangleTransmon
@@ -50,61 +50,63 @@ function SchematicDrivenLayout._geometry!(
     cs::CoordinateSystem,
     rres::ExampleClawedMeanderReadout
 )
-    params = parameters(rres)
+    (;
+        style,
+        total_length,
+        coupling_length,
+        coupling_gap,
+        bend_radius,
+        n_meander_turns,
+        total_height,
+        hanger_length,
+        w_shield,
+        w_claw,
+        l_claw,
+        claw_gap,
+        w_grasp,
+        bridge
+    ) = parameters(rres)
     # Center vertical axis is midpoint of coupling section
     pres = Path(
-        Point(
-            -params.coupling_length / 2,
-            -params.coupling_gap - params.style.gap - params.style.trace / 2
-        ),
+        Point(-coupling_length / 2, -coupling_gap - style.gap - style.trace / 2),
         α0=0°
     )
-    n_bends = 3 + 2 * params.n_meander_turns # number of 90 degree bends
+    n_bends = 3 + 2 * n_meander_turns # number of 90 degree bends
     arm_length = (
-        params.total_height - params.hanger_length - n_bends * params.bend_radius -
-        params.coupling_gap - params.style.gap - params.style.trace / 2 -
-        params.w_shield - 2 * params.claw_gap - params.w_claw
+        total_height - hanger_length - n_bends * bend_radius - coupling_gap - style.gap - style.trace / 2 - w_shield - 2 * claw_gap - w_claw
     )
 
     # Length of straight sections in meander
     straight_length =
         (
-            params.total_length - 3 * params.coupling_length / 2 -
-            n_bends * pi * params.bend_radius / 2 - arm_length - params.hanger_length
-        ) / params.n_meander_turns
+            total_length - 3 * coupling_length / 2 - n_bends * pi * bend_radius / 2 -
+            arm_length - hanger_length
+        ) / n_meander_turns
 
-    bb_cs = params.bridge
-    ###
-
-    straight!(pres, params.coupling_length, params.style)
-    turn!(pres, -90°, params.bend_radius)
-    straight!(pres, params.hanger_length)
-    attach!(pres, CoordinateSystemReference(bb_cs), params.hanger_length / 2)
-    turn!(pres, -90°, params.bend_radius)
+    ### CPW path
+    straight!(pres, coupling_length, style)
+    turn!(pres, -90°, bend_radius)
+    straight!(pres, hanger_length)
+    attach!(pres, CoordinateSystemReference(bridge), hanger_length / 2)
+    turn!(pres, -90°, bend_radius)
     # Center of the straight section of meander lines up with coupling midpoint (and claw)
-    straight!(pres, straight_length / 2 + params.coupling_length / 2)
-    turn!(pres, 180°, params.bend_radius)
+    straight!(pres, straight_length / 2 + coupling_length / 2)
+    turn!(pres, 180°, bend_radius)
 
     # Start the meander with a full straight section
     meander_length =
-        (params.n_meander_turns - 1) * (straight_length + pi * params.bend_radius) +
-        straight_length / 2 - params.bend_radius
-    meander!(pres, meander_length, straight_length, params.bend_radius, -180°)
-    turn!(pres, -90°, params.bend_radius)
+        (n_meander_turns - 1) * (straight_length + pi * bend_radius) + straight_length / 2 -
+        bend_radius
+    meander!(pres, meander_length, straight_length, bend_radius, -180°)
+    turn!(pres, -90°, bend_radius)
     straight!(pres, arm_length)
-    attach!(pres, CoordinateSystemReference(bb_cs), arm_length / 2)
+    attach!(pres, CoordinateSystemReference(bridge), arm_length / 2)
 
     ### Claw
-    w_shield = params.w_shield
-    w_claw = params.w_claw
-    l_claw = params.l_claw
-    claw_gap = params.claw_gap
-    arm_trace = params.style.trace
-    w_grasp = params.w_grasp # qubit cap trace width + 2 gap width
+    arm_trace = style.trace
+    pt0 = p1(pres.nodes[end].seg)
 
-    p0 = p1(pres.nodes[end].seg)
-
-    claw_hole1 = Rectangle(arm_trace, claw_gap) + p0 + Point(-arm_trace / 2, -claw_gap)
+    claw_hole1 = Rectangle(arm_trace, claw_gap) + pt0 + Point(-arm_trace / 2, -claw_gap)
 
     claw_hole2 =
         Rectangle(w_grasp + 2 * w_shield + 4 * claw_gap + 2 * w_claw, w_claw + 2 * claw_gap)
@@ -131,7 +133,20 @@ function SchematicDrivenLayout._geometry!(
         [claw1, claw2, claw3, claw4]
     )
 
-    render!.(cs, [pres, claw], METAL_NEGATIVE)
+    render!.(cs, [pres, MeshSized(2 * claw_gap)(claw)], METAL_NEGATIVE)
+
+    # This component creates narrow regions defined by the gap between it and others
+    # For now we should explicitly set mesh sizing since meshing doesn't use proximity
+    ### Mesh control on shield ground plane strip
+    shield1 = below(Rectangle(w_grasp + 2 * w_shield, w_shield), claw_hole2, centered=true)
+    shield2 = flushleft(below(Rectangle(w_shield, l_claw + claw_gap), shield1), shield1)
+    shield3 = flushright(below(Rectangle(w_shield, l_claw + claw_gap), shield1), shield1)
+    shield = union2d([shield1, shield2, shield3])
+    render!(cs, MeshSized(2 * w_shield)(only_simulated(shield)), MESH_CONTROL)
+
+    ### Mesh control on feedline coupler ground plane strip
+    strip = above(Rectangle(coupling_length, coupling_gap), pres[1], centered=true)
+    render!(cs, MeshSized(2 * coupling_gap)(only_simulated(strip)), MESH_CONTROL)
     return cs
 end
 
@@ -146,9 +161,8 @@ end
     with the claw.
 """
 function SchematicDrivenLayout.hooks(rres::ExampleClawedMeanderReadout)
-    params = parameters(rres)
-    qubit_hook = PointHook(Point(zero(params.w_claw), -params.total_height), 90°)
-    feedline_hook = PointHook(zero(Point{typeof(params.w_claw)}), -90°)
+    qubit_hook = PointHook(Point(zero(rres.w_claw), -rres.total_height), 90°)
+    feedline_hook = PointHook(zero(Point{typeof(rres.w_claw)}), -90°)
     return (qubit=qubit_hook, feedline=feedline_hook)
 end
 

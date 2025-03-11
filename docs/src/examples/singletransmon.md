@@ -3,23 +3,26 @@
 In this example, we demonstrate the layout and solid model generation of a single transmon
 coupled to a readout resonator. In particular, this example demonstrates the additional steps
 necessary to generate a mesh suitable for electromagnetic simulation using external
-applications, such as the [*Palace*](https://github.com/awslabs/palace) solver. This example
+applications, such as the [*Palace*](https://github.com/awslabs/palace) solver. *Palace* is
+an open-source, parallel finite element code for full-wave 3D electromagnetic simulations. This example
 constructs the geometry used in [the *Palace* release documentation](https://aws.amazon.com/blogs/quantum-computing/aws-releases-open-source-software-palace-for-cloud-based-electromagnetics-simulations-of-quantum-computing-hardware/) and is aimed at
 demonstrating the power of the [`SolidModels`](../schematicdriven/solidmodels.md)
-capability.
+capability for electronic design automation in an open-source toolchain.
 
 The full code for this example can be found [in `examples/SingleTransmon/SingleTransmon.jl` in the `DeviceLayout.jl` repository](https://github.com/aws-cqc/DeviceLayout.jl/blob/main/examples/SingleTransmon/SingleTransmon.jl). Components and process technology are drawn from the
 [ExamplePDK](examplepdk.md).
 
 ## Overview
 
-The single transmon schematic design is simple, consisting of three components: an
+The single transmon schematic is simple, consisting of three components: an
 [`ExampleRectangleTransmon`](./examplepdk.md#Transmons), an
-[`ExampleClawedMeanderReadout`](./examplepdk.md#ReadoutResonators), and a coplanar waveguide path. The path additionally demonstrates how to terminate a path using lumped ports.
+[`ExampleClawedMeanderReadout`](./examplepdk.md#ReadoutResonators), and a coplanar-waveguide readout line.
+The readout line additionally demonstrates how to terminate a path using lumped ports. The `single_transmon`
+function generates the schematic, renders it to a `SolidModel`, and generates a mesh.
 
-Once the mesh has been generated, `configfile(sm::SolidModel; palace_build=nothing)` will
+Once the mesh has been generated, the `configfile` function will
 ingest the `SolidModel` and return a dictionary representing a *Palace* configuration. If
-the optional `palace_build` directory is also passed then the configuration file will be
+a *Palace* build directory is provided, then the configuration file will be
 validated using the *Palace* provided JSON schema.
 
 The generated configuration and mesh files can then be run directly from within `julia`
@@ -28,11 +31,56 @@ to `config.json` and if `np > 0` attempt to run the *Palace* job from within the
 shell mode. If `np>0` the configuration file will be written to disk ready for a manual call
 to *Palace* outside of `julia`.
 
-These three functions are all wrapped together in `main(palace_build, np=0)` which will
-build the `SolidModel`, and write the mesh and configuration file to disk, before optionally
-attempting to run *Palace*.
+These three functions are all wrapped together in `compute_eigenfrequencies` which will
+build the `SolidModel` and write the mesh and configuration file to disk, before optionally
+attempting to run *Palace*:
 
-## SolidModel construction
+```julia
+"""
+    compute_eigenfrequencies(palace_build, np=1; solver_order=2, mesh_order=2, cap_length=620μm, total_length=5000μm))
+
+Given a build of Palace found at `palace_build`, assemble a `SolidModel` of the single
+transmon example, mesh the geometry, define a configuration file for the geometry, and if
+`np > 0`, launch Palace from the provided `palace_build`. (If `0`, use `palace_build`
+only to validate config.)
+
+# Keyword arguments
+
+  - `solver_order = 2`: Finite element order (degree) for the solver. Palace supports arbitrary
+    high-order spaces.
+  - `mesh_order = 2`: Element order for the mesh.
+  - `cap_length = 620μm`: Length of transmon island capacitor.
+  - `total_length = 5000μm`: Total length of readout resonator.
+"""
+function compute_eigenfrequencies(
+    palace_build,
+    np=1;
+    solver_order=2,
+    mesh_order=2,
+    cap_length=620μm,
+    total_length=5000μm
+)
+    # Construct the SolidModel
+    @time "SolidModel + Meshing" sm = single_transmon(
+        save_mesh=true;
+        cap_length=cap_length,
+        total_length=total_length,
+        mesh_order=mesh_order
+    )
+    # Assemble the configuration
+    @time "Configuration" config = configfile(sm; palace_build, solver_order=solver_order)
+    # Call Palace
+    @time "Palace" freqs = palace_job(config; palace_build, np)
+    return freqs
+end
+```
+
+Each of these three steps is discussed in more detail below.
+
+In the final section, we use this pipeline inside an optimization routine
+to tune up the transmon and resonator frequencies to desired targets.
+
+## SolidModel construction and meshing
 
 To run the example we `include` the `example/SingleTransmon/SingleTransmon.jl` file and
 then call `single_transmon()`. This will construct the schematic and render the design to
@@ -58,13 +106,21 @@ established. Aside from the design parameters there are two processing arguments
 `save_mesh::Bool`, which performs the meshing of the `SolidModel` and writes the resulting
 mesh to disk as `single_transmon.msh2` in the Gmsh 2.2 mesh format, and
 `save_gds::Bool`, which generates a GDS of the schematic and writes the resulting design to
-`single_transmon.gds`.
+`single_transmon.gds`. Finally, there's a `mesh_order` keyword that sets the element
+order for the generated mesh.
 
 The schematic design is significantly simplied compared to that of the [quantum processor
-example](qpu17.md), but has the same general structure: the three components are
-added to the schematic graph and attached to each other before being placed by `plan` into a floorplan, which is then furnished with air bridges.
+example](qpu17.md), but has the same general structure. The three components are
+added to the schematic graph and attached to each other before being placed by `plan` into a floorplan,
+which is then furnished with air bridges.
 
-What differs from the processor example is the construction of the `SolidModel`. When we `render!` the floorplan to a `SolidModel`, instead of a `LayoutTarget` we provide a [`SolidModelTarget`](@ref SchematicDrivenLayout.SolidModelTarget) containing information about how to generate the 3D model. The `SolidModelTarget` is based on this definition from `ExamplePDK`:
+The transmon and resonator definitions in ExamplePDK take steps to improve the quality of the initial mesh—for example,
+to avoid creating long, skinny triangles. In many cases, defaults are sufficient to resolve
+the geometry as a starting point for refinement, but component designers can often use their knowledge
+to make improvements. This is accomplished by adding [mesh sizing information](@ref MeshSized)
+to particular shapes in a component's `_geometry!` functions.
+
+When we `render!` the floorplan to a `SolidModel`, instead of a `LayoutTarget` we provide a [`SolidModelTarget`](@ref SchematicDrivenLayout.SolidModelTarget) containing information about how to generate the 3D model. The `SolidModelTarget` is based on this definition from `ExamplePDK`:
 
 ```julia
 """
@@ -144,7 +200,7 @@ By construction, the `SolidModel` contains physical groups identifying the volum
 
 ```julia
 """
-    configfile(sm::SolidModel; palace_build=nothing)
+    configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0)
 
 Given a `SolidModel`, assemble a dictionary defining a configuration file for use within
 Palace.
@@ -152,8 +208,11 @@ Palace.
   - `sm`: The `SolidModel`from which to construct the configuration file
   - `palace_build = nothing`: Path to a Palace build directory, used to perform validation of
     the configuration file. If not present, no validation is performed.
+  - `solver_order = 2`: Finite element order (degree) for the solver. Palace supports arbitrary
+    high-order spaces.
+  - `amr = 0`: Maximum number of adaptive mesh refinement (AMR) iterations.
 """
-function configfile(sm::SolidModel; palace_build=nothing)
+function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0)
     attributes = SolidModels.attributes(sm)
 
     config = Dict(
@@ -164,9 +223,9 @@ function configfile(sm::SolidModel; palace_build=nothing)
         ),
         "Model" => Dict(
             "Mesh" => joinpath(@__DIR__, "single_transmon.msh2"),
-            "L0" => DeviceLayout.ustrip(m, 1SolidModels.STP_UNIT), # um is Palace default; record it anyway
+            "L0" => 1e-6, # um is Palace default; record it anyway
             "Refinement" => Dict(
-                "MaxIts" => 0 # Increase to enable AMR
+                "MaxIts" => amr # Nonzero to enable AMR
             )
         ),
         "Domains" => Dict(
@@ -220,8 +279,8 @@ function configfile(sm::SolidModel; palace_build=nothing)
             ]
         ),
         "Solver" => Dict(
-            "Order" => 1,
-            "Eigenmode" => Dict("N" => 2, "Tol" => 1.0e-6, "Target" => 2, "Save" => 2),
+            "Order" => solver_order,
+            "Eigenmode" => Dict("N" => 2, "Tol" => 1.0e-6, "Target" => 1, "Save" => 2),
             "Linear" => Dict("Type" => "Default", "Tol" => 1.0e-7, "MaxIts" => 500)
         )
     )
@@ -300,17 +359,188 @@ function palace_job(config::Dict; palace_build, np=0, nt=1)
         freq = CSV.File(joinpath(postprodir, "eig.csv"); header=1) |> DataFrame
 
         println("Eigenmode Frequencies (GHz): ", freq[:, 2])
+        return freq[:, 2]
     end
     return nothing
 end
 ```
 
-The output should look like this:
+For a quick demo to show a working pipeline, we'll run the example with `solver_order=1` and `mesh_order=1`,
+sacrificing accuracy for speed. The output should look like this:
 
-```jl
+```julia
+julia> SingleTransmon.compute_eigenfrequencies("/path/to/palace", 1; solver_order=1, mesh_order=1)
+[output from generating SolidModel and mesh...]
+[output from generating and validating configuration...]
 Writing configuration file to /path/to/your/config.json
 Running Palace: stdout sent to log.out, stderr sent to err.out
 Complete.
-Eigenmode Frequencies (GHz): [3.161773657, 4.878135762]
-Palace: 52.914418 seconds (669 allocations: 46.422 KiB)
+Eigenmode Frequencies (GHz): [3.370141242, 5.24366656]
+Palace: 63.673291 seconds (671 allocations: 47.422 KiB)
 ```
+
+You might get different frequencies, because with these order settings, the results are quite
+sensitive to the discretization. The *Palace* solver is deterministic (although you may see slight changes
+as you change the number of MPI processes), but the meshing algorithm is deterministic only when
+single-threaded.
+Even in a deterministic setting, because of this sensitivity, changes in parameters
+can result in "noisy" changes in the solution since the discretization will change unpredictably.
+Moreover, changes between DeviceLayout versions may also affect this example, and the above snippet
+is not necessarily updated with each version.
+
+!!! info
+    
+    The mesh order and solver order are two different but related things. They work together to improve the accuracy
+    of your modeling in different ways. In both cases, the order is telling you the degree of the polynomial used
+    either to construct the mesh elements or to approximate the solution within each finite element. High-order
+    mesh elements are particularly useful for discretizing curved geometries, while increasing the solver order
+    can be understood as an alternative to mesh refinement to better model fine variation in solution fields.
+    Notably, a second order mesh is ignored if the solver is only first order, but a second order solver is still
+    useful if a first order mesh is used.
+
+## Closed-loop optimization
+
+Above, we demonstrated the `compute_eigenfrequencies` function, which runs CAD, meshing, and finite element analysis,
+and returns the eigenfrequencies of the transmon and readout resonator. Now we show how such a function can be used
+inside an optimization routine.
+
+For this example, we create a function for optimization to minimize, which computes the average squared error
+between the computed eigenfrequencies and specified target frequencies:
+
+```julia
+"""
+    frequency_targeting_errfunc(targets_GHz, palace_build, np, solver_order, mesh_order, freq_log, param_log)
+
+Create an error function that can be minimized by an optimization routine to reach target frequencies.
+
+The returned function takes parameters that control the transmon's capacitor length and resonator's total length.
+It runs `compute_eigenfrequencies` and returns the mean squared relative error between the computed
+eigenfrequencies and `targets_GHz`.
+It also pushes frequencies and parameter values to the provided arrays `freq_log` and `param_log`.
+"""
+function frequency_targeting_errfunc(
+    targets_GHz,
+    palace_build,
+    np,
+    solver_order,
+    mesh_order,
+    freq_log,
+    param_log
+)
+    return function errfunc(x, p=()) # Many optimizer interfaces require a second argument for fixed parameters
+        freqs = compute_eigenfrequencies(
+            palace_build,
+            np;
+            cap_length=(1 / x[1]^2) * 620μm, # Transform so that frequency(x) is approximately linear
+            total_length=(1 / x[2]) * 5000μm, # ... and x_i are all ~1
+            solver_order,
+            mesh_order
+        )[1:2] # [1:2] because technically Palace can find more than two eigenfrequencies
+        push!(freq_log, freqs) # Log for later convenience
+        push!(param_log, copy(x)) # Copy because `x` gets reused
+        return sum((freqs .- targets_GHz) .^ 2 ./ targets_GHz .^ 2) / 2 # Mean squared relative error
+    end
+end
+```
+
+This objective function can be used with any black-box (gradient-free) optimization method. As a demonstration,
+we use [PRIMA](https://github.com/libprima/prima), a modern re-implementation of Powell's methods with
+[a Julia interface](https://github.com/libprima/prima.jl). These are a family
+of trust-region methods that build a quadratic approximation to the objective function.
+We take certain steps to improve the convergence of optimization:
+
+  - We use transformed parameters `x` to approximately linearize the frequencies as a function of `x`,
+    with each element of `x` having similar magnitude around `1.0`.
+  - We use `solver_order=2` and `mesh_order=2` to reduce sensitivity to the discretization, since if we use order 1 as above, the results
+    are too noisy for optimization to converge. Note that this does not
+    mean that the eigenfrequencies found by *Palace* will have converged to their true values—only that small changes in the model
+    will not produce random changes in solutions that are large compared to our desired tolerance.
+
+We run the optimization routine with the following function:
+
+```julia
+"""
+    run_optimization(palace_build, np=1; targets_GHz=[3.0, 4.0], reltol=1e-2, solver_order=2, mesh_order=2)
+
+Optimize the single-transmon model to find transmon and resonator parameters that achieve target frequencies.
+
+The objective function generates a new schematic, SolidModel, and mesh;
+generates and validates a new Palace configuration file; runs Palace using the mesh and configuration file; and
+returns the mean squared relative error between the computed eigenfrequencies and `targets_GHz`.
+The optimization routine stops when the mean squared relative error is less than `reltol^2`.
+
+`np`, `solver_order`, and `mesh_order` are used for configuring and running Palace as in `compute_eigenfrequencies`.
+"""
+function run_optimization(
+    palace_build,
+    np=1;
+    targets_GHz=[3.0, 4.0],
+    reltol=1e-2,
+    solver_order=2,
+    mesh_order=2
+)
+    freq_log = []
+    param_log = []
+    errfunc = frequency_targeting_errfunc( # Create the objective function for optimization
+        targets_GHz,
+        palace_build,
+        np,
+        solver_order,
+        mesh_order,
+        freq_log,
+        param_log
+    )
+    final_params, info = prima( # Run the optimization
+        errfunc,
+        [1.0, 1.0]; # Initial parameters
+        ftarget=reltol^2, # Stop when `errfunc(x) < reltol^2`
+        xl=[0.6, 0.6], # Lower bounds
+        xu=[1.4, 1.4], # Upper bounds
+        rhobeg=0.2 # Initial trust region radius
+    )
+    println("""
+        Number of Palace runs: $(info.nf)
+        Initial parameters:
+            Transmon capacitor_length = 620.0μm
+            Resonator total_length = 5000.0μm
+        Initial frequencies: $(round.(first(freq_log), digits=3)) GHz
+        Final parameters:
+            Transmon capacitor_length = $(round(μm, 620.0μm/final_params[1]^2, digits=3))
+            Resonator total_length = $(round(μm, 5000.0μm/final_params[2], digits=3))
+        Final frequencies: $(round.(last(freq_log), digits=3)) GHz
+        """)
+    return final_params, info, freq_log, param_log
+end
+```
+
+We can run this with the default settings to tune the frequencies to within 1% of the targets.
+If running *Palace* with a single process, this can take several hours. If we run with
+`np = 8` on a single [m6i.4xlarge instance](https://aws.amazon.com/ec2/instance-types/m6i/),
+the results look like this:
+
+```julia
+julia> @time "Total" SingleTransmon.run_optimization("/path/to/palace", 8)
+[output from each iteration...]
+Number of Palace runs: 9
+Initial parameters:
+    Transmon capacitor_length = 620.0μm
+    Resonator total_length = 5000.0μm
+Initial frequencies: [4.14, 5.591] GHz
+Final parameters:
+    Transmon capacitor_length = 1217.678 μm
+    Resonator total_length = 7243.955 μm
+Final frequencies: [3.005, 3.982] GHz
+
+Total: 2425.515197 seconds (2.21 M allocations: 154.640 MiB, 0.01% gc time, 0.00% compilation time)
+```
+
+You may get slightly different results for given parameter values, but any differences
+should be much smaller than with the `solver_order=1, mesh_order=1` example above. Optimization
+should converge in around 10 iterations regardless of these small differences.
+
+As a final note, this example isn't meant to demonstrate a practical method for tuning up a real device.
+It's meant to demonstrate a closed loop built on an automated pipeline that includes schematic
+specification, 3D model generation, and finite element analysis. Here, the black-box optimization
+routine from PRIMA provides the outer logic that handles simulation results and starts the next
+iteration, but being able to run the inner pipeline within a Julia session enables many options for
+electronic design automation.

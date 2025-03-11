@@ -324,11 +324,7 @@ function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, r::ExampleRectan
     )
     diff = Rounded(island_rounding)(difference2d(r2, r1))
 
-    return render!(
-        cs,
-        meshsized_entity(diff, 2 * min(cap_width, cap_length)),
-        METAL_NEGATIVE
-    )
+    return render!(cs, meshsized_entity(diff, 2 * min(cap_width, cap_gap)), METAL_NEGATIVE)
 end
 
 end # module

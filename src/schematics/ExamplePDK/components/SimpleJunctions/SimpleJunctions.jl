@@ -74,8 +74,8 @@ function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, jj::ExampleSimpl
         Align.above(Rectangle(w_jj, (h_ground_island - h_jj) / 2), jj_rect; centered=true)
     bot_lead = Align.below(top_lead, jj_rect)
     place!(cs, only_simulated(jj_rect), LUMPED_ELEMENT)
-    place!(cs, MeshSized(w_jj)(only_simulated(top_lead)), METAL_POSITIVE)
-    place!(cs, MeshSized(w_jj)(only_simulated(bot_lead)), METAL_POSITIVE)
+    place!(cs, MeshSized(2 * w_jj)(only_simulated(top_lead)), METAL_POSITIVE)
+    place!(cs, MeshSized(2 * w_jj)(only_simulated(bot_lead)), METAL_POSITIVE)
     # artwork geometry
     top_lead_art = Align.above(
         Rectangle(w_jj, (h_ground_island - h_jj) / 2 + h_excess),
