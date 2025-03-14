@@ -1,0 +1,68 @@
+"""
+    module {{{PKG}}}
+
+A process design kit (PDK) containing process technology information and related tools.
+"""
+module {{{PKG}}}
+
+using DeviceLayout, .SchematicDrivenLayout, .PreferredUnits
+
+const COMPONENTS_DIR = joinpath(dirname(@__DIR__), "components")
+
+##### Layers
+"""
+    const LAYER_RECORD
+
+A `NamedTuple` mapping semantic layer name `Symbol`s to GDS layer and datatype.
+
+[List of layers.]
+"""
+const LAYER_RECORD = (;
+    # layer_name = GDSMeta(gdslayer, datatype),
+    # ...
+)
+
+"""
+    module LayerVocabulary
+
+Exports constants for each layer name in `ExamplePDK.LAYER_RECORD`.
+
+For example, defines `const LAYER_NAME = SemanticMeta(:layer_name)`, then exports
+it so that `using LayerVocabulary` brings `LAYER_NAME` into the namespace.
+"""
+module LayerVocabulary
+# Module that exports `LAYER_NAME = SemanticMeta(:layer_name)` for each layer in `LAYER_RECORD`
+import ..{{{PKG}}}: LAYER_RECORD, SemanticMeta
+_vocabulary_const_symbol(layer::Symbol) = Symbol(uppercase(string(layer)))
+for layer in keys(LAYER_RECORD)
+    const_sym = _vocabulary_const_symbol(layer)
+    meta = SemanticMeta(layer)
+    @eval const $const_sym = $meta # e.g., const LAYER_NAME = SemanticMeta(:layer_name)
+    @eval export $const_sym # e.g., export LAYER_NAME
+    import ..DeviceLayout.NORENDER_META
+    export NORENDER_META
+end
+end # LayerVocabulary
+
+##### Process technologies
+const MY_PROCESS_TECHNOLOGY = ProcessTechnology(
+    LAYER_RECORD,
+    (; # Technology parameters
+    )
+)
+
+##### Rendering targets
+const MY_ARTWORK_TARGET = ArtworkTarget(MY_PROCESS_TECHNOLOGY)
+
+const MY_SOLIDMODEL_TARGET = SolidModelTarget(
+    MY_PROCESS_TECHNOLOGY;
+    simulation=true,
+    ## Other options
+    # bounding_layers=[layer symbols for layers defining simulation bounds],
+    # substrate_layers=[layer symbols for layers extruded into the substrate],
+    # indexed_layers=[layer symbols to be automatically indexed],
+    # postrender_ops=[operations like extrusions and booleans to run after rendering],
+    # retained_physical_groups=[physical group names and dimensions to retain after rendering]
+)
+
+end # module

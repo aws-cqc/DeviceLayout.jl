@@ -132,6 +132,7 @@ include("components/builtin_components.jl")
 include("routes.jl")
 include("components/variants.jl")
 include("solidmodels.jl")
+include("pdktools.jl")
 
 include("ExamplePDK/ExamplePDK.jl")
 

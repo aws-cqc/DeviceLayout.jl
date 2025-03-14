@@ -1,0 +1,76 @@
+"""
+    module {{{PKG}}}
+
+<Description of the module defining the {{{compname}}} component.>
+"""
+module {{{PKG}}}
+
+using DeviceLayout, .SchematicDrivenLayout, .PreferredUnits
+using {{{pdkname}}}, .LayerVocabulary
+
+"""
+    struct {{{compname}}} <: CompositeComponent
+
+<One-line description of component.>
+
+<Optional: Longer description of component>
+
+<Optional: Annotated ASCII illustration>
+
+# Parameters
+
+  - `name`: Name of component
+  - `<p>`: <Parameter description>
+  - ...
+
+# Hooks
+
+  - ...
+
+# Subcomponents
+
+ 1. `comp1::MySubComp1`
+ 2. ...
+"""
+@compdef struct {{{compname}}} <: CompositeComponent
+    name::String = "{{{compname}}}"
+    # ...
+end
+
+function SchematicDrivenLayout._graph!(
+    g::SchematicGraph,
+    comp::{{{compname}}},
+    subcomps::NamedTuple
+)
+    # node_1 = add_node!(g, subcomps.comp1)
+    # node_2 = fuse!(g, node_1=>:hook1, subcomps.comp2=>:hook21)
+    # node_3 = fuse!(g, node_2=>:hook22, subcomps.comp3=>:hook3)
+end
+
+function SchematicDrivenLayout._build_subcomponents(comp::{{{compname}}})
+    # @component comp1 = MySubComp1 begin
+    #     param1 = val1
+    #     # ...
+    # end
+
+    # @component comp2 = MySubComp1 begin
+    #     param1 = val1
+    #     # ...
+    # end
+
+    # # ...
+    # return ( # Return a tuple of subcomponents
+    #     # comp1, comp2, ...,
+    # )
+end
+
+function SchematicDrivenLayout.map_hooks(::Type{{{{compname}}}})
+    ###### Dictionary mapping (graph node index => subcomp hook name) => {{{compname}}} hook name
+    return Dict(
+    # (1 => :subcomp1_hook1) => :myhook1,
+    # (1 => :subcomp1_hook2) => :myhook2,
+    # (2 => :subcomp2_hook) => :myhook3
+    )
+end
+
+end # module

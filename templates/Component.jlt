@@ -1,0 +1,46 @@
+"""
+    module {{{PKG}}}
+
+<Description of the module defining the {{{compname}}} component.>
+"""
+module {{{PKG}}}
+
+using DeviceLayout, .SchematicDrivenLayout, .PreferredUnits
+using {{{pdkname}}}, .LayerVocabulary
+
+"""
+    struct {{{compname}}} <: Component
+
+<One-line description of component.>
+
+<Optional: Longer description of component>
+
+<Optional: Annotated ASCII illustration>
+
+# Parameters
+
+  - `name`: Name of component
+  - `<p>`: <Parameter description>
+  - ...
+
+# Hooks
+
+  - `<hook1>`: Description
+  - ...
+"""
+@compdef struct {{{compname}}} <: Component
+    name::String = "{{{compname}}}"
+    # ...
+end
+
+function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, c::{{{compname}}})
+    # render geometry to cs
+end
+
+function SchematicDrivenLayout.hooks(c::{{{compname}}})
+    return (;
+    # hook1 = ...,
+    )
+end
+
+end # module

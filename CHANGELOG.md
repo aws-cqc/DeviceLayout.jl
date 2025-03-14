@@ -6,6 +6,11 @@ The format of this changelog is based on
 
 ## Upcoming
 
+  - Added `generate_pdk`, `generate_component_package`, and `generate_component_definition` to `SchematicDrivenLayout` to help users create packages and files from templates
+  - Lowered default for meshing parameter `α_default` from `1.0` to `0.9` to improve robustness
+  - Docs: Added closed-loop optimization example with single transmon
+  - Docs: Updated to clarify that `build!` is not necessary
+
 ### Fixed
 
   - `launch!` without rounding now has the correct gap behind the pad
