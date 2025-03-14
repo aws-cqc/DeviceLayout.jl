@@ -136,7 +136,7 @@ function SchematicDrivenLayout._geometry!(
     render!.(cs, [pres, MeshSized(2 * claw_gap)(claw)], METAL_NEGATIVE)
 
     # This component creates narrow regions defined by the gap between it and others
-    # For now we should explicitly set mesh sizing since meshing doesn't use proximity
+    # We should explicitly set mesh sizing since meshing doesn't use proximity
     ### Mesh control on shield ground plane strip
     shield1 = below(Rectangle(w_grasp + 2 * w_shield, w_shield), claw_hole2, centered=true)
     shield2 = flushleft(below(Rectangle(w_shield, l_claw + claw_gap), shield1), shield1)

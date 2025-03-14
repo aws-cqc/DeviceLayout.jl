@@ -26,10 +26,10 @@ a *Palace* build directory is provided, then the configuration file will be
 validated using the *Palace* provided JSON schema.
 
 The generated configuration and mesh files can then be run directly from within `julia`
-using the `palace_job(config::Dict; palace_build, np=0, nt=1)` which will write the `config`
+using `palace_job(config::Dict; palace_build, np=0, nt=1)` which will write the `config`
 to `config.json` and if `np > 0` attempt to run the *Palace* job from within the `julia`
-shell mode. If `np>0` the configuration file will be written to disk ready for a manual call
-to *Palace* outside of `julia`.
+shell mode. If `np = 0` the configuration file will still be written to disk ready for a manual
+call to *Palace* outside of `julia`.
 
 These three functions are all wrapped together in `compute_eigenfrequencies` which will
 build the `SolidModel` and write the mesh and configuration file to disk, before optionally
@@ -48,7 +48,7 @@ only to validate config.)
 
   - `solver_order = 2`: Finite element order (degree) for the solver. Palace supports arbitrary
     high-order spaces.
-  - `mesh_order = 2`: Element order for the mesh.
+  - `mesh_order = 2`: Polynomial order used to represent the element geometries in the mesh.
   - `cap_length = 620μm`: Length of transmon island capacitor.
   - `total_length = 5000μm`: Total length of readout resonator.
 """
@@ -462,14 +462,16 @@ We run the optimization routine with the following function:
 """
     run_optimization(palace_build, np=1; targets_GHz=[3.0, 4.0], reltol=1e-2, solver_order=2, mesh_order=2)
 
-Optimize the single-transmon model to find transmon and resonator parameters that achieve target frequencies.
+Optimize the transmon and resonator parameters to achieve target frequencies.
 
 The objective function generates a new schematic, SolidModel, and mesh;
-generates and validates a new Palace configuration file; runs Palace using the mesh and configuration file; and
-returns the mean squared relative error between the computed eigenfrequencies and `targets_GHz`.
+generates and validates a new Palace configuration file; runs Palace using the mesh
+and configuration file; and returns the mean squared relative error between the
+computed eigenfrequencies and `targets_GHz`.
 The optimization routine stops when the mean squared relative error is less than `reltol^2`.
 
-`np`, `solver_order`, and `mesh_order` are used for configuring and running Palace as in `compute_eigenfrequencies`.
+`np`, `solver_order`, and `mesh_order` are used for configuring and running Palace as in
+`compute_eigenfrequencies`.
 """
 function run_optimization(
     palace_build,
