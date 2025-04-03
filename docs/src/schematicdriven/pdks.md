@@ -75,3 +75,13 @@ Here, component packages have their own `Project.toml` file distinct from MyPDKP
 with all Julia packages it is not advised to actually commit `Manifest.toml` files, although it is useful to commit them to one-off "projects" like analyses and layout scripts to enable fully reproducible environments.
 
 This structure can be combined with [LocalRegistry](https://github.com/GunnarFarneback/LocalRegistry.jl/) to make the PDK and component packages available from a private registry. Doing so allows you to use the full power of the [Julia package manager](https://pkgdocs.julialang.org/) by versioning physical designs using semantic versioning, seamlessly tracking and switching between versions as needed.
+
+## PDK tools
+
+DeviceLayout.jl provides some utilities for generating packages and files for PDKs and components from templates:
+
+```@docs
+SchematicDrivenLayout.generate_component_definition
+SchematicDrivenLayout.generate_component_package
+SchematicDrivenLayout.generate_pdk
+```

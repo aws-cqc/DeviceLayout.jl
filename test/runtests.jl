@@ -38,6 +38,8 @@ include("test_solidmodel.jl")
     include("test_schematicdriven.jl")
 end
 
+include("test_pdktools.jl")
+
 @testset "ExamplePDK" begin
     include("../examples/DemoQPU17/DemoQPU17.jl")
     @time "Total" schematic, artwork = DemoQPU17.qpu17_demo(dir=tdir)

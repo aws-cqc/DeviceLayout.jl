@@ -2,9 +2,11 @@ using Pkg, UUIDs
 using LocalRegistry, PkgTemplates
 
 """
-    generate_pdk(name="MyPDK"; dir=pwd())
+    generate_pdk(name="MyPDK"; dir=pwd(), template=get_template("PDK.jlt"), kwargs...)
 
-Generates a PDK package named `name` in the parent directory `dir`.
+Generates a PDK package named `name` in the parent directory `dir` based on `template`.
+
+Additional keyword arguments are forwarded to [`PkgTemplates.Template`](https://juliaci.github.io/PkgTemplates.jl/stable/user/#PkgTemplates.Template).
 
 The PDK package can be registered in your private registry `MyRegistry` as follows
 using the `LocalRegistry` package. First, make sure you are on a branch of the
@@ -104,15 +106,15 @@ Generates a new component package named `name` in the components directory of `p
 
 Adds `pdk` and `DeviceLayout` as dependencies and sets non-inclusive upper bounds of the
 next major versions.
-Creates a template for a `Component` type named `compname` in the main module file, using
+Creates a definition for a `Component` type named `compname` in the main module file, using
 a template for standard components or for composite components depending on the keyword
 argument `composite`.
-
-Uses a template at the file path `template` for standard components or for composite components
-depending on the keyword argument `composite`. If the `template` keyword is not
+If the `template` keyword is not
 explicitly used, then if the PDK defines a `Component.jlt` or `CompositeComponent.jlt`
 template in a `templates` folder at the package root, that will be used; otherwise,
 the built-in DeviceLayout templates are used.
+The source file generated in this way should not be `include`d from the PDK source files,
+since it is an independent package even if it is tracked in the same Git repository.
 
 The component package can be registered in your private registry `MyRegistry`
 as follows using the `LocalRegistry` package. First,
@@ -148,15 +150,15 @@ function generate_component_package(
     dl_uuid = projtoml["uuid"]
     dl_major = VersionNumber(projtoml["version"]).major
 
-    # get UUID for PDK
-    pdk_uuid = projtoml["deps"][string(pdk)]
+    # get UUID and major version for PDK
+    pdktoml = Pkg.TOML.parsefile(joinpath(pkgdir(pdk), "Project.toml"))
+    pdk_uuid = pdktoml["uuid"]
+    pdk_major = VersionNumber(projtoml["version"]).major
     # is dev'd or not?
     pdk_pkginfo = Pkg.dependencies()[UUID(pdk_uuid)]
     pdk_pkginfo.is_tracking_path || error(
         "you must run `import Pkg; Pkg.dev(\"$pdk\")` before generating a component package."
     )
-    # get major version of PDK
-    pdk_major = pdk_pkginfo.version.major
 
     # Allow component template to use provided names
     user_view(::SrcDir, ::Template, ::AbstractString) =
