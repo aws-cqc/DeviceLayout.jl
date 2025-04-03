@@ -36,6 +36,7 @@ jobs:
       matrix:
         version:
           - '1.10'
+          - '1.11'
           - 'pre'
         os:
           - ubuntu-latest
@@ -44,6 +45,9 @@ jobs:
     needs: [julia-format]
     steps:
       - uses: actions/checkout@v4
+      - run: |
+          git config --global user.name github-actions
+          git config --global user.email github-actions@github.com
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
