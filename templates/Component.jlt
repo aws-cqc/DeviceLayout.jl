@@ -6,7 +6,9 @@
 module {{{PKG}}}
 
 using DeviceLayout, .SchematicDrivenLayout, .PreferredUnits
-using {{{pdkname}}}, .LayerVocabulary
+using {{{pdkname}}}, {{{pdkname}}}.LayerVocabulary
+
+export {{{compname}}}
 
 """
     struct {{{compname}}} <: Component

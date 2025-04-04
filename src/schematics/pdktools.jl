@@ -29,11 +29,6 @@ For more information about creating and using a local registry,
 see [the LocalRegistry README](https://github.com/GunnarFarneback/LocalRegistry.jl?tab=readme-ov-file#localregistry).
 """
 function generate_pdk(name="MyPDK"; dir=pwd(), template=get_template("PDK.jlt"), kwargs...)
-    # Get UUID and major version for DeviceLayout
-    projtoml = Pkg.TOML.parsefile(joinpath(pkgdir(@__MODULE__), "Project.toml"))
-    dl_uuid = projtoml["uuid"]
-    dl_major = VersionNumber(projtoml["version"]).major
-
     # Create package template
     t = Template(;
         dir=dir,
@@ -43,39 +38,29 @@ function generate_pdk(name="MyPDK"; dir=pwd(), template=get_template("PDK.jlt"),
             !TagBot,
             !GitHubActions,
             !Dependabot,
-            SrcDir(; file=template)
+            SrcDir(; file=template),
+            Documenter{NoDeploy}(),
+            Git(
+                ignore=[
+                    "components/*/Manifest.toml",
+                    "components/*/docs/Manifest.toml",
+                    "components/*/docs/build/"
+                ]
+            )
         ],
-        julia=VersionNumber(projtoml["compat"]["julia"]),
         kwargs...
     )
 
     # Generate package from template, but don't automatically precompile (no deps yet)
-    pc = get(ENV, "JULIA_PKG_PRECOMPILE_AUTO", nothing) # original setting to restore later
-    ENV["JULIA_PKG_PRECOMPILE_AUTO"] = 0
-    t(name)
-    if !isnothing(pc) # restore old setting if it was explicit
-        ENV["JULIA_PKG_PRECOMPILE_AUTO"] = pc
-    else # delete key so default is used again
-        delete!(ENV, "JULIA_PKG_PRECOMPILE_AUTO")
+    without_precompile() do
+        return t(name)
     end
 
     # Upper-bound the PDK package by major version and add deps.
-    pdkpath = joinpath(dir, name)
-    pdktoml = Pkg.TOML.parsefile(joinpath(pdkpath, "Project.toml"))
-    pdktoml["compat"]["DeviceLayout"] = "$(Int64(dl_major))"
-    pdktoml["deps"] = Dict("DeviceLayout" => "$(dl_uuid)")
-    if !haskey(pdktoml, "preferences")
-        pdktoml["preferences"] = Dict{String, Any}()
-    end
-    pdktoml["preferences"]["DeviceLayout"] =
-        Dict("units" => "$(DeviceLayout.unit_preference)")
-
-    open(joinpath(pdkpath, "Project.toml"), "w") do io
-        return Pkg.TOML.print(io, pdktoml)
-    end
+    update_package_toml!(joinpath(dir, name), ["DeviceLayout"])
 
     # Create components directory
-    mkdir(joinpath(pdkpath, "components"))
+    mkdir(joinpath(dir, name, "components"))
 
     return
 end
@@ -97,10 +82,57 @@ function get_template(template; pdk=nothing)
     return joinpath(pkgdir(@__MODULE__), "templates", template)
 end
 
+function without_precompile(f)
+    pc = get(ENV, "JULIA_PKG_PRECOMPILE_AUTO", nothing) # Original setting
+    ENV["JULIA_PKG_PRECOMPILE_AUTO"] = 0 # Zero => don't precompile, any other setting => do
+    try
+        f()
+    finally
+        if isnothing(pc)
+            delete!(ENV, "JULIA_PKG_PRECOMPILE_AUTO") # Restore default behavior
+        else
+            ENV["JULIA_PKG_PRECOMPILE_AUTO"] = pc # Restore original setting
+        end
+    end
+end
+
+function update_package_toml!(path, add_pkgs, dev_paths=[]; set_unit_pref=true, compat=true)
+    PkgTemplates.with_project(path) do # This is very slow, maybe just write TOML directly?
+        without_precompile() do
+            Pkg.add(add_pkgs)
+            for path in dev_paths
+                Pkg.develop(path=path)
+            end
+            if compat
+                # Usually `add` automatically adds compat if active env is a package
+                # But we have to do it manually for some reason
+                for (name, uuid) in pairs(Pkg.project().dependencies)
+                    v = Pkg.dependencies()[uuid].version
+                    Pkg.compat(name, join([v.major, v.minor, v.patch], "."))
+                end
+            end
+        end
+    end
+    if set_unit_pref # Set unit preference to current environment's value
+        # Edit the TOML directly, no need to precompile anything
+        pkgtoml = Pkg.TOML.parsefile(joinpath(path, "Project.toml"))
+        pkgtoml["preferences"] = merge(
+            get(pkgtoml, "preferences", Dict()),
+            Dict("DeviceLayout" => Dict("units" => DeviceLayout.unit_preference))
+        )
+        open(joinpath(path, "Project.toml"), "w") do io # Write back to file
+            return Pkg.TOML.print(io, pkgtoml)
+        end
+    end
+end
+
 """
-    generate_component_package(name::AbstractString, pdk::Module,
-        compname="MyComp"; composite=false,
-        template=get_template(composite ? "CompositeComponent.jlt" : "Component.jlt", pdk=pdk))
+    generate_component_package(name::AbstractString, pdk::Module, compname="MyComp";
+        composite=false,
+        template=get_template(composite ? "CompositeComponent.jlt" : "Component.jlt", pdk=pdk)
+        docs_template=get_template("Component.mdt", pdk=pdk),
+        kwargs...
+    )
 
 Generates a new component package named `name` in the components directory of `pdk`.
 
@@ -115,6 +147,8 @@ template in a `templates` folder at the package root, that will be used; otherwi
 the built-in DeviceLayout templates are used.
 The source file generated in this way should not be `include`d from the PDK source files,
 since it is an independent package even if it is tracked in the same Git repository.
+
+Also generates documentation based on `docs_template`.
 
 The component package can be registered in your private registry `MyRegistry`
 as follows using the `LocalRegistry` package. First,
@@ -143,30 +177,20 @@ function generate_component_package(
     compname="MyComp";
     composite=false,
     template=get_template(composite ? "CompositeComponent.jlt" : "Component.jlt", pdk=pdk),
+    docs_template=get_template("Component.mdt", pdk=pdk),
     kwargs...
 )
-    # Get UUID and major version for DeviceLayout
-    projtoml = Pkg.TOML.parsefile(joinpath(pkgdir(@__MODULE__), "Project.toml"))
-    dl_uuid = projtoml["uuid"]
-    dl_major = VersionNumber(projtoml["version"]).major
-
-    # get UUID and major version for PDK
-    pdktoml = Pkg.TOML.parsefile(joinpath(pkgdir(pdk), "Project.toml"))
-    pdk_uuid = pdktoml["uuid"]
-    pdk_major = VersionNumber(projtoml["version"]).major
-    # is dev'd or not?
-    pdk_pkginfo = Pkg.dependencies()[UUID(pdk_uuid)]
-    pdk_pkginfo.is_tracking_path || error(
-        "you must run `import Pkg; Pkg.dev(\"$pdk\")` before generating a component package."
-    )
-
-    # Allow component template to use provided names
-    user_view(::SrcDir, ::Template, ::AbstractString) =
-        Dict{String, Any}("pdkname" => pdk, "compname" => compname)
+    # Is PDK dev'd or not?
+    if !(Pkg.project().name == string(pdk)) # (or the active project, that works too)
+        pdk_pkginfo = Pkg.dependencies()[Pkg.project().dependencies[string(pdk)]]
+        pdk_pkginfo.is_tracking_path || error(
+            "$pdk must be the active project or you must run `using Pkg; Pkg.develop(\"$pdk\")` before generating a component package."
+        )
+    end
 
     # Create package template
     t = Template(;
-        dir=joinpath(pdk.COMPONENTS_DIR),
+        dir=pdk.COMPONENTS_DIR,
         plugins=[
             !Git,
             !License,
@@ -174,39 +198,65 @@ function generate_component_package(
             !TagBot,
             !GitHubActions,
             !Dependabot,
-            SrcDir(; file=template)
+            SrcDir(; file=template),
+            Documenter{NoDeploy}(index_md=docs_template, devbranch="broken") # https://github.com/JuliaCI/PkgTemplates.jl/issues/463
         ],
-        julia=VersionNumber(projtoml["compat"]["julia"]),
         kwargs...
     )
 
     # Generate package from template, but don't automatically precompile (no deps yet)
-    pc = get(ENV, "JULIA_PKG_PRECOMPILE_AUTO", nothing) # original setting to restore later
-    ENV["JULIA_PKG_PRECOMPILE_AUTO"] = 0
-    t(name)
-    if !isnothing(pc) # restore old setting if it was explicit
-        ENV["JULIA_PKG_PRECOMPILE_AUTO"] = pc
-    else # delete key so default is used again
-        delete!(ENV, "JULIA_PKG_PRECOMPILE_AUTO")
+    without_precompile() do
+        return t(name)
     end
+
+    # Make src/docs template replacements manually
+    # (because we can't dynamically redefine PkgTemplates.user_view methods)
+    # (well, we could, but this way avoids both eval tricks and piracy)
+    write_from_template(
+        joinpath(pdk.COMPONENTS_DIR, name, "src", name * ".jl"),
+        template,
+        string(pdk),
+        name,
+        compname
+    )
+    write_from_template(
+        joinpath(pdk.COMPONENTS_DIR, name, "docs", "src", "index.md"),
+        docs_template,
+        string(pdk),
+        name,
+        compname
+    )
 
     # upper-bound the PDK package by major version and add deps.
-    componentpath = joinpath(pdk.COMPONENTS_DIR, name)
-    pdktoml = Pkg.TOML.parsefile(joinpath(componentpath, "Project.toml"))
-    pdktoml["compat"]["DeviceLayout"] = "$(Int64(dl_major))"
-    pdktoml["compat"][string(pdk)] = "$(Int64(pdk_major))"
-    pdktoml["deps"] = Dict("DeviceLayout" => "$(dl_uuid)", string(pdk) => "$(pdk_uuid)")
-    if !haskey(pdktoml, "preferences")
-        pdktoml["preferences"] = Dict{String, Any}()
-    end
-    pdktoml["preferences"]["DeviceLayout"] =
-        Dict("units" => "$(DeviceLayout.unit_preference)")
-
-    open(joinpath(componentpath, "Project.toml"), "w") do io
-        return Pkg.TOML.print(io, pdktoml)
-    end
+    update_package_toml!(
+        joinpath(pdk.COMPONENTS_DIR, name),
+        ["DeviceLayout"],
+        [pkgdir(pdk)] # dev pdk
+    )
+    # Same thing for docs
+    update_package_toml!(
+        joinpath(pdk.COMPONENTS_DIR, name, "docs"),
+        ["DeviceLayout", "FileIO"], # add FileIO for convenience
+        [pkgdir(pdk)], # dev pdk
+        compat=false
+    )
 
     return nothing
+end
+
+function write_from_template(filepath, template, pdkname, pkgname, compname)
+    open(template, "r") do io
+        template = read(io, String)
+        str = replace(
+            template,
+            "{{{pdkname}}}" => pdkname,
+            "{{{PKG}}}" => pkgname,
+            "{{{compname}}}" => compname
+        )
+        open(filepath, "w") do io
+            return write(io, str)
+        end
+    end
 end
 
 """
@@ -224,8 +274,10 @@ the built-in DeviceLayout templates are used.
 For generating a new component package, see `generate_component_package`.
 Closely related components that should always be versioned together can be defined in
 the same package, in which case this method can be used to generate only the file defining
-a component. The built-in template defines a module, but it is not necessary for
-every component to be in its own module.
+a component. That file can then be `include`d from the file defining the root package module.
+
+The built-in template defines a module because it's also used for package generation,
+but it is not necessary for every component in a package to be in its own module.
 """
 function generate_component_definition(
     compname::AbstractString,
@@ -234,16 +286,5 @@ function generate_component_definition(
     composite=false,
     template=get_template(composite ? "CompositeComponent.jlt" : "Component.jlt", pdk=pdk)
 )
-    open(template, "r") do io
-        template = read(io, String)
-        str = replace(
-            template,
-            "{{{compname}}}" => compname,
-            "{{{pdkname}}}" => string(pdk),
-            "{{{PKG}}}" => compname * "s"
-        )
-        open(filepath, "w") do io
-            return write(io, str)
-        end
-    end
+    return write_from_template(filepath, template, string(pdk), compname * "s", compname)
 end

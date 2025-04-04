@@ -1,20 +1,32 @@
 @testset "PDK Tools" begin
+    # PDK
     SchematicDrivenLayout.generate_pdk("MyPDK"; dir=tdir, user="testuser")
     pdkpath = joinpath(tdir, "MyPDK")
     using Pkg
     Pkg.develop(path=pdkpath)
     using MyPDK
-    SchematicDrivenLayout.generate_component_package("MyComponents", MyPDK)
-    comppkg = joinpath(pdkpath, "components", "MyComponents")
+    pdktoml = Pkg.TOML.parsefile(joinpath(pkgdir(MyPDK), "Project.toml"))
+    @test haskey(pdktoml["compat"], "DeviceLayout")
+    @test pdktoml["preferences"]["DeviceLayout"]["units"] == DeviceLayout.unit_preference
+
+    # Component package
+    SchematicDrivenLayout.without_precompile() do
+        SchematicDrivenLayout.generate_component_package("MyComps", MyPDK, user="testuser")
+        @test ENV["JULIA_PKG_PRECOMPILE_AUTO"] == "0" # Environment variable is not changed
+    end
+    @test !haskey(ENV, "JULIA_PKG_PRECOMPILE_AUTO") # Temporary env var was removed
+    comppkg = joinpath(pdkpath, "components", "MyComps")
+    @test isfile(joinpath(comppkg, "test", "runtests.jl")) # Package template includes tests
+    Pkg.develop(path=comppkg)
+
+    # Component file
     SchematicDrivenLayout.generate_component_definition(
         "MyComposite",
         MyPDK,
         joinpath(comppkg, "src", "MyComposites.jl");
         composite=true
     )
-    @test isfile(joinpath(comppkg, "src", "MyComposites.jl"))
-    @test isfile(joinpath(comppkg, "test", "runtests.jl"))
-    Pkg.develop(path=comppkg)
-    Pkg.rm("MyComponents")
+    @test isfile(joinpath(comppkg, "src", "MyComposites.jl")) # File was generated
+    Pkg.rm("MyComps")
     Pkg.rm("MyPDK")
 end

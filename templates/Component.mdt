@@ -1,0 +1,31 @@
+```@meta
+CurrentModule = {{{PKG}}}
+```
+
+# {{{PKG}}}
+
+Documentation for {{{PKG}}}.
+
+```@index
+```
+
+```@autodocs
+Modules = [{{{PKG}}}]
+```
+
+## {{{compname}}}
+
+```@example
+using DeviceLayout, .SchematicDrivenLayout, .PreferredUnits
+using FileIO
+using {{{pdkname}}}, {{{PKG}}}
+
+comp = {{{compname}}}()
+cs = SchematicDrivenLayout.annotated_geometry(comp)
+gds_layers = merge({{{pdkname}}}.LAYER_RECORD, (; annotation=GDSMeta(102)))
+cell = Cell(cs, map_meta=(meta) -> gds_layers[layer(meta)])
+save("{{{compname}}}_demo.svg", flatten(cell));
+nothing; # hide
+```
+
+![Example {{{compname}}} with annotations]({{{compname}}}_demo.svg)
