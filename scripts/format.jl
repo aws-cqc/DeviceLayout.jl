@@ -1,6 +1,6 @@
 # Usage: julia format.jl <action>
 using Pkg
-Pkg.add("JuliaFormatter")
+Pkg.add(name="JuliaFormatter", version="1")
 using JuliaFormatter
 # Directories to format (recursive); paths relative to repo root
 dirs = ["src", "test", "scripts"]
