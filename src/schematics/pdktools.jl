@@ -1,5 +1,5 @@
 using Pkg, UUIDs
-using LocalRegistry, PkgTemplates
+using PkgTemplates
 
 """
     generate_pdk(name="MyPDK"; dir=pwd(), template=get_template("PDK.jlt"), kwargs...)
@@ -97,32 +97,41 @@ function without_precompile(f)
 end
 
 function update_package_toml!(path, add_pkgs, dev_paths=[]; set_unit_pref=true, compat=true)
-    PkgTemplates.with_project(path) do # This is very slow, maybe just write TOML directly?
+    compat_dict = Dict{String, String}()
+    PkgTemplates.with_project(path) do
+        # Use Pkg to make sure manifest is immediately usable without needing resolve or dev
         without_precompile() do
             Pkg.add(add_pkgs)
             for path in dev_paths
                 Pkg.develop(path=path)
             end
-            if compat
-                # Usually `add` automatically adds compat if active env is a package
-                # But we have to do it manually for some reason
-                for (name, uuid) in pairs(Pkg.project().dependencies)
-                    v = Pkg.dependencies()[uuid].version
-                    Pkg.compat(name, join([v.major, v.minor, v.patch], "."))
-                end
+        end
+        if compat # Add versions to dict, we'll write to TOML later ourselves
+            for (name, uuid) in pairs(Pkg.project().dependencies)
+                v = Pkg.dependencies()[uuid].version # Could be v"x.y.z-DEV" etc
+                compat_dict[name] = join([v.major, v.minor, v.patch], ".") # Just "x.y.z"
             end
         end
     end
+    !(set_unit_pref || compat) && return
+    # Write remaining project info manually
+    pkgtoml = Pkg.TOML.parsefile(joinpath(path, "Project.toml"))
     if set_unit_pref # Set unit preference to current environment's value
         # Edit the TOML directly, no need to precompile anything
-        pkgtoml = Pkg.TOML.parsefile(joinpath(path, "Project.toml"))
         pkgtoml["preferences"] = merge(
             get(pkgtoml, "preferences", Dict()),
             Dict("DeviceLayout" => Dict("units" => DeviceLayout.unit_preference))
         )
-        open(joinpath(path, "Project.toml"), "w") do io # Write back to file
-            return Pkg.TOML.print(io, pkgtoml)
-        end
+    end
+    if compat
+        # Usually `add` automatically adds compat if active env is a package
+        # But we have to do it manually for some reason
+        # We'll write it to Project.toml directly rather than use Pkg.compat
+        # Because we know currently used versions are valid and can avoid slow checks
+        pkgtoml["compat"] = merge(get(pkgtoml, "compat", Dict()), compat_dict)
+    end
+    open(joinpath(path, "Project.toml"), "w") do io # Write back to file
+        return Pkg.TOML.print(io, pkgtoml)
     end
 end
 
@@ -237,7 +246,7 @@ function generate_component_package(
     update_package_toml!(
         joinpath(pdk.COMPONENTS_DIR, name, "docs"),
         ["DeviceLayout", "FileIO"], # add FileIO for convenience
-        [pkgdir(pdk)], # dev pdk
+        [pkgdir(pdk)], # dev pdk (component package is already dev'd)
         compat=false
     )
 

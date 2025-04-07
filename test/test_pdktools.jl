@@ -6,7 +6,7 @@
     Pkg.develop(path=pdkpath)
     using MyPDK
     pdktoml = Pkg.TOML.parsefile(joinpath(pkgdir(MyPDK), "Project.toml"))
-    @test haskey(pdktoml["compat"], "DeviceLayout")
+    @test VersionNumber(pdktoml["compat"]["DeviceLayout"]).major == 1
     @test pdktoml["preferences"]["DeviceLayout"]["units"] == DeviceLayout.unit_preference
 
     # Component package
