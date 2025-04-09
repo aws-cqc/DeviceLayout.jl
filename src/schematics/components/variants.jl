@@ -81,6 +81,7 @@ function composite_variant_expr(
             parameters::NamedTuple
             _graph::SchematicGraph
             _schematic::Schematic{coordinatetype($T)}
+            _hooks::Dict{Symbol, Union{Hook, <:Vector{Hook}}}
         end)
 
         SchematicDrivenLayout.parameters(comp::$escname) = comp.parameters
@@ -94,15 +95,21 @@ function composite_variant_expr(
             prop === :_geometry && return getfield(comp, :_geometry)
             prop === :_graph && return getfield(comp, :_graph)
             prop === :_schematic && return getfield(comp, :_schematic)
+            prop === :_hooks && return getfield(comp, :_hooks)
             return getfield(getfield(comp, :parameters), prop)
         end
         Base.propertynames(comp::$escname) =
-            union(parameter_names(comp), [:parameters, :_graph, :_schematic])
+            union(parameter_names(comp), [:parameters, :_graph, :_schematic, :_hooks])
         function ($escname)(; kwargs...)
             params = merge_recursive(default_parameters($escname), (; pairs(kwargs)...))
             uname = uniquename(params.name)
             g = SchematicGraph(uname)
-            return ($escname)(params, g, Schematic{coordinatetype($T)}(g; log_dir=nothing))
+            return ($escname)(
+                params,
+                g,
+                Schematic{coordinatetype($T)}(g; log_dir=nothing),
+                Dict{Symbol, Union{Hook, <:Vector{Hook}}}()
+            )
         end
 
         # Base variant has the same name and parameters (for shared parameters)

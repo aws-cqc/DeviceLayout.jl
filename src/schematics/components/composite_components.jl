@@ -170,7 +170,10 @@ A hook `hcc` is returned for each hook (name `h`) of every subcomponent node (in
 `keys(map_hooks(cc))` contains `i => h`, then the corresponding composite hook is
 `map_hooks(cc)[h]`. Otherwise, it is `_\$(i)_\$h`.
 """
-function hooks(cc::AbstractCompositeComponent)
+function hooks(cc::T) where {T <: AbstractCompositeComponent}
+    if hasfield(T, :_hooks)
+        !isempty(cc._hooks) && return (; pairs(cc._hooks)...)
+    end
     floorplan = schematic(cc)
     hooknames = [keys(hooks(floorplan, node)) for node in nodes(graph(cc))]
     cc_names = [
@@ -178,7 +181,11 @@ function hooks(cc::AbstractCompositeComponent)
         hookname in hnames
     ]
     cc_hooks = [values(hooks(floorplan, node)) for node in nodes(graph(cc))]
-
+    if hasfield(T, :_hooks)
+        for (name, hook) in zip(cc_names, Iterators.flatten(cc_hooks))
+            cc._hooks[name] = hook
+        end
+    end
     return NamedTuple{(cc_names...,)}(Iterators.flatten(cc_hooks))
 end
 

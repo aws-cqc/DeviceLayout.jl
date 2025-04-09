@@ -676,6 +676,7 @@ end
 
     SchematicDrivenLayout.map_hooks(::Type{Test2BQ}) =
         Dict((1 => :xy) => :xy1, (2 => :xy) => :xy2, (1 => :z) => :z1, (2 => :z) => :z2)
+    empty!(bq2._hooks)
 
     @test hooks(bq2, "bq1", :xy) == hooks(bq2, 1 => :xy) # using subcomp name or index=>hsym
     @test keys(SchematicDrivenLayout.subcomponents(bq2)) == (:bq1, :bq2, :pz)
@@ -910,7 +911,7 @@ end
     add_node!(g, BasicComponent(cs_1))
     # Test composite component with port
     g2 = SchematicGraph("c2")
-    add_node!(g, BasicComponent(cs_2))
+    add_node!(g2, BasicComponent(cs_2))
     c2 = BasicCompositeComponent(g2)
     add_node!(g, c2)
 

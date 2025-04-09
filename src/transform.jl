@@ -16,7 +16,7 @@ import CoordinateTransformations:
 import Unitful: °, uconvert, NoUnits
 import StaticArrays
 
-import DeviceLayout: Point, getx, gety
+import DeviceLayout: Coordinate, Point, getx, gety
 
 export Reflection,
     Rotation, RotationPi, ScaledIsometry, Translation, XReflection, YReflection
@@ -379,6 +379,17 @@ function Base.:(==)(t1::ScaledIsometry, t2::ScaledIsometry)
            t1.xrefl == t2.xrefl &&
            t1.mag == t2.mag
 end
+
+# Base.convert(::Type{ScaledIsometry{S}}, f::ScaledIsometry{S}) where {S} = f
+function Base.convert(
+    ::Type{ScaledIsometry{Point{S}}},
+    f::ScaledIsometry
+) where {S <: Coordinate}
+    orig = isnothing(f.origin) ? zero(Point{S}) : convert(Point{S}, f.origin)
+    return ScaledIsometry(orig, f.rotation, f.xrefl, f.mag)
+end
+Base.convert(::Type{ScaledIsometry{Point{S}}}, f::Transformation) where {S <: Coordinate} =
+    convert(ScaledIsometry{Point{S}}, ScaledIsometry(f))
 
 Base.isapprox(t1::Transformation, t2::ScaledIsometry; kwargs...) =
     isapprox(t1, affine(t2), kwargs...)

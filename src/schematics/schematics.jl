@@ -599,13 +599,45 @@ coordinate system of the node to the global coordinate system of `sch`.
 
 Effectively a wrapper around `DeviceLayout.transformation(::CoordinateSystem, ::CoordSysRef)`.
 """
-function transformation(sch::Schematic{S}, node::ComponentNode) where {S}
+function transformation(sch::Schematic, node::ComponentNode)
     if haskey(sch.ref_dict, node)
-        return transformation(sch.coordinate_system, sch.ref_dict[node])
+        # We could do `transformation(sch.coordinate_system, sch.ref_dict[node])`
+        # But that would search for references inside component geometries
+        # Which can be quite expensive
+        # Instead we'll work upwards from node and only check its neighbors
+        return _transformation(sch, node)
     else
         idx = find_nodes(x -> x === node, sch.graph)
         return transformation(sch, only(idx))
     end
+end
+
+function _transformation(sch::Schematic, n0::ComponentNode)
+    a = transformation(sch.ref_dict[n0])
+    current_node = n0
+    current_ref = sch.ref_dict[n0]
+    toplevel = false
+    while !toplevel
+        found_parent = false
+        # Check neighbors to find parent, then compose its transformation
+        for node_idx in neighbors(sch.graph, current_node)
+            node = sch.graph[node_idx]
+            if !haskey(sch.ref_dict, node)
+                continue # hasn't been placed so can't be parent
+            end
+            # Is this `n0`'s parent?
+            if current_ref in refs(structure(sch.ref_dict[node]))
+                a = transformation(sch.ref_dict[node]) ∘ a
+                current_node = node
+                current_ref = sch.ref_dict[node]
+                found_parent = true
+                break # Restart with parent as current node
+            end
+        end
+        toplevel = !found_parent
+    end
+
+    return a
 end
 
 function transformation(
@@ -901,6 +933,7 @@ function plan(
     id_prefix=""
 )
     S = typeof(1.0DeviceLayout.UPREFERRED)
+    !isempty(nodes(g)) && (S = coordinatetype(component(g[1])))
     floorplan = Schematic{S}(g; log_dir=log_dir, log_level=log_level)
     with_logger(floorplan.logger) do
         # Place constrained element
@@ -1049,8 +1082,13 @@ function _plan!(sch::Schematic{S}, node_cs, node, hooks_fn=hooks, id_prefix="") 
 
         try
             child_node_cs = CoordinateSystem{S}(id_prefix * child_node.id * "_node")
-            child_ref =
-                sref(child_node_cs, transformation(sch.graph, node, child_node, hooks_fn))
+            child_ref = sref(
+                child_node_cs,
+                convert(
+                    ScaledIsometry{Point{S}},
+                    transformation(sch.graph, node, child_node, hooks_fn)
+                )
+            )
             addref!(node_cs, child_ref)
             sch.ref_dict[child_node] = child_ref
             _plan!(sch, child_node_cs, child_node, hooks_fn, id_prefix)

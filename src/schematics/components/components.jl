@@ -22,7 +22,7 @@ default_parameters(::T) where {T <: AbstractComponent} = default_parameters(T)
 Parameter name `Symbol`s for component type `T`.
 """
 parameter_names(::Type{T}) where {T <: AbstractComponent} =
-    setdiff(fieldnames(T), [:_geometry, :_graph, :_schematic])
+    setdiff(fieldnames(T), [:_geometry, :_graph, :_schematic, :_hooks])
 parameter_names(::T) where {T <: AbstractComponent} = parameter_names(T)
 
 ##### Creation
@@ -113,7 +113,7 @@ A `NamedTuple` of the parameters of `c` that were set to values other than their
 function non_default_parameters(c::AbstractComponent)
     changed = Symbol[]
     for (k, v) in pairs(parameters(c))
-        (k == :_geometry || k == :_graph || k == :_schematic) && continue
+        (k == :_geometry || k == :_graph || k == :_schematic || k == :_hooks) && continue
         if !haskey(default_parameters(c), k) || !(default_parameters(c)[k] == v)
             if v isa Tuple && all(v .== default_parameters(c)[k])
                 continue

@@ -55,8 +55,8 @@ macro compdef(expr)
     params_ex = Expr(:parameters)
     call_args = Any[]
     _kwdef!(expr.args[3], params_ex.args, call_args, T, U, composite)
-    # Composite component has private graph and schematic; component just has geometry
-    public_defaults = composite ? params_ex.args[1:(end - 2)] : params_ex.args[1:(end - 1)]
+    # Composite component has private graph, schematic, hooks; component just has geometry
+    public_defaults = composite ? params_ex.args[1:(end - 3)] : params_ex.args[1:(end - 1)]
     # Only define a constructor if the type has fields, otherwise we'll get a stack
     # overflow on construction
     if !isempty(params_ex.args)
@@ -203,6 +203,14 @@ function _kwdef!(blk, params_args, call_args, T, U, composite)
         var = :_schematic
         lhs = Expr(:(::), var, :(Schematic{$U}))
         defexpr = :(Schematic{$(esc(U))}(_graph; log_dir=nothing))
+
+        push!(params_args, Expr(:kw, var, defexpr))
+        push!(call_args, var)
+        push!(blk.args, lhs)
+
+        var = :_hooks
+        lhs = Expr(:(::), var, :(Dict{Symbol, Union{Hook, Vector{<:Hook}}}))
+        defexpr = :(Dict{Symbol, Union{Hook, Vector{<:Hook}}}())
 
         push!(params_args, Expr(:kw, var, defexpr))
         push!(call_args, var)

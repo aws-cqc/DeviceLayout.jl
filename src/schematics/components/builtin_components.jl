@@ -216,10 +216,15 @@ Default values are provided by the components in `g`.
 struct BasicCompositeComponent{T} <: AbstractCompositeComponent{T}
     graph::SchematicGraph
     _schematic::Schematic{T}
-    function BasicCompositeComponent(g::SchematicGraph; coordtype=typeof(1.0nm))
+    _hooks::Dict{Symbol, Union{Hook, Vector{<:Hook}}}
+    function BasicCompositeComponent(g::SchematicGraph; coordtype=typeof(1.0UPREFERRED))
         newg = SchematicGraph(name(g))
         add_graph!(newg, g; id_prefix="")
-        return new{coordtype}(newg, Schematic{coordtype}(newg; log_dir=nothing))
+        return new{coordtype}(
+            newg,
+            Schematic{coordtype}(newg; log_dir=nothing),
+            Dict{Symbol, Union{Hook, Vector{<:Hook}}}()
+        )
     end
 end
 name(c::BasicCompositeComponent) = c.graph.name
@@ -231,7 +236,7 @@ function (cc::BasicCompositeComponent)(
 )
     length(param_sets) == 0 && (param_sets = Tuple(repeat([(;)], length(components(cc)))))
     idx_param_values = [(decompose_basic_composite(k)..., v) for (k, v) in kwargs]
-    cc2 = BasicCompositeComponent(SchematicGraph(compname))
+    cc2 = BasicCompositeComponent(SchematicGraph(compname); coordtype=coordinatetype(cc))
     g2 = graph(cc2)
     add_graph!(g2, cc.graph; id_prefix="")
     for (idx, p) in enumerate(param_sets)
