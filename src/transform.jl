@@ -380,7 +380,6 @@ function Base.:(==)(t1::ScaledIsometry, t2::ScaledIsometry)
            t1.mag == t2.mag
 end
 
-# Base.convert(::Type{ScaledIsometry{S}}, f::ScaledIsometry{S}) where {S} = f
 function Base.convert(
     ::Type{ScaledIsometry{Point{S}}},
     f::ScaledIsometry

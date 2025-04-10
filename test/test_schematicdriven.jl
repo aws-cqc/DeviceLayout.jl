@@ -105,6 +105,14 @@ end
     end
     @test size(arrow_arr) == (3, 2)
     @test arrow_arr[3, 2].length == arrow[1].length
+
+    @compdef struct NoName <: AbstractComponent{typeof(1.0nm)}
+        x::Int
+        y
+    end
+    @test name(NoName(x=1, y=2)) == "NoName"
+    @test_throws UndefKeywordError NoName(x=1)
+    @test_throws InexactError NoName(x=1.5, y=2)
 end
 
 @testset "Schematics" begin

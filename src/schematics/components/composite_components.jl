@@ -1,9 +1,9 @@
 """
     abstract type AbstractCompositeComponent{T} <: AbstractComponent{T}
 
-A `Component` with geometry derived from that of a `SchematicGraph` of subcomponents.
+An `AbstractComponent` with geometry derived from that of a `SchematicGraph` of subcomponents.
 
-The alias `CompositeComponent = AbstractCompositeComponent{typeof(1.0nm)}` is provided for convenience.
+The alias `CompositeComponent = AbstractCompositeComponent{typeof(1.0UPREFERRED)}` is provided for convenience.
 
 A standard `Component` `c` is described by its [`geometry(c)`](@ref), [`parameters(c)`](@ref), and
 [`hooks(c)`](@ref). In contrast, a `CompositeComponent` `cc` also has `parameters`, but
@@ -19,12 +19,14 @@ can return nodes in the subgraph. You can also `flatten!(g)` to simply replace
 The list of subcomponents in the graph can be obtained with `components(cc)` (equivalent to
 `components(graph(cc))`).
 
-In order to take advantage of this interface, the implementation of a `CompositeComponent`
-should contain the following fields, in order:
+# Implementing subtypes
 
-  - `parameters::NamedTuple`: A collection of parameters
+Components must have a `name` field. Defining components with [`@compdef`](@ref) is
+recommended, since it creates a `name` field if not specified, allows specification
+of default parameters, creates fields for storing the schematic, graph, and
+hooks after they are first calculated, and defines a `default_parameters` method.
 
-A `CompositeComponent` must also implement the following specializations:
+A `CompositeComponent` must implement the following specializations:
 
   - `_build_subcomponents`: Returns a `Tuple` of subcomponents
   - `_graph!(g::SchematicGraph, cc::MyComponent, subcomps::NamedTuple)`: Populates and connects the schematic graph corresponding to `cc`,
@@ -32,10 +34,7 @@ A `CompositeComponent` must also implement the following specializations:
   - `map_hooks(::Type{MyComponent})`: A `Dict{Pair{Int, Symbol}, Symbol` mapping subcomponent hooks
     to hooks presented by the composite component.
 
-Validation or reconciling of parameters should be done in an inner constructor that
-replaces the default inner constructor.
-
-If you define your own abstract composite component subtype you should define
+If you define your own abstract composite component subtype, you should define
 `SchematicDrivenLayout.iscomposite(::Val{:MyAbstractCompositeComponent}) = true` to allow
 the `@compdef` macro to recognize that the component is composite.
 """

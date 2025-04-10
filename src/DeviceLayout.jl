@@ -240,7 +240,7 @@ export element_metadata,
 
 A parameterized layout element, to be used as a building block in schematic-driven design.
 
-The alias `Component = AbstractComponent{typeof(1.0nm)}` is provided for convenience.
+The alias `Component = AbstractComponent{typeof(1.0UPREFERRED)}` is provided for convenience.
 
 Each `AbstractComponent` comes with the necessary parameters and methods to render its geometry and
 to attach it to other components in a schematic. Something similar to this concept may be
@@ -277,11 +277,24 @@ by a `StructureReference`. Other `GeometryStructure` interface methods, includin
 `element_metadata`, `refs`, `flatten`,  `footprint`, `halo`, and `transform` operate on `geometry(mycomp)`.
 
 The `name` of a component is not guaranteed to be unique. Instances of components within
-schematics as well as coordinate systems within a layout will always have unique identifiers,
+schematics as well as their coordinate systems within a layout will always have unique identifiers,
 which are automatically constructed from a component's name using `uniquename` if it is not
-already unique. For this reason, it is often best for designers
-to give important components unique names, guaranteeing that the corresponding identifiers
+already unique. For this reason, it is still often helpful for designers to explicitly
+give important components unique names, guaranteeing that the corresponding identifiers
 are the same.
+
+# Implementing subtypes
+
+Components must have a `name` field. Defining components with [`@compdef`](@ref) is
+recommended, since it creates a `name` field if not specified, allows specification of default parameters,
+creates a field to store the geometry after it is first calculated, and defines a `default_parameters` method.
+
+Non-composite components must implement the following specializations:
+
+  - `_geometry!(cs::CoordinateSystem, comp::MyComponent)`: Add the geometry to cs
+  - `hooks(comp::MyComponent)`: Return a `NamedTuple` of `Hook`s
+
+For composite components (those with subcomponents), see [`DeviceLayout.AbstractCompositeComponent`](@ref).
 """
 abstract type AbstractComponent{T} <: GeometryStructure{T} end
 function parameters end

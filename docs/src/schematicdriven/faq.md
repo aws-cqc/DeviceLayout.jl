@@ -107,4 +107,4 @@ First, make sure the new code is being loaded. You can use [Revise](https://timh
 
 Most component types, including those defined using `@compdef`, contain a `_geometry` field
 that allows them to store their geometry so that it is only generated once.
-It is not marked as dirty or automatically regenerated when geometry methods change. Currently, to regenerate the geometry, you have to instantiate a new component.
+It is not marked as dirty or automatically regenerated when geometry methods change. Currently, to regenerate the geometry, you have to empty the geometry or instantiate a new component. (For composite components, there are also similar fields for their graph, schematic, and hooks.)

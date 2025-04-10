@@ -13,9 +13,12 @@ This generates a `default_parameters` method for the defined type, which returns
 default parameters as a `NamedTuple`. If any parameters are required (have no default),
 they do not appear in `default_parameters`.
 
-The new type will also have a `_geometry` field for caching geometry, or `_graph` and
-`_schematic` fields for composite components. Note that if you want to use your own
-abstract composite supertype you should define
+The new type will also have a `_geometry` field for caching geometry, or `_graph`,
+`_schematic`, and `_hooks` fields for composite components. If there is no `name`
+field, one will automatically be created with a default name of the type name
+(as a string).
+
+If you want to use your own abstract composite supertype, you should define
 `SchematicDrivenLayout.iscomposite(::Val{:MyAbstractCompositeComponent}) = true`.
 
 # Examples
