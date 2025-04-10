@@ -285,7 +285,7 @@ are the same.
 
 # Implementing subtypes
 
-Components must have a `name` field. Defining components with [`@compdef`](@ref) is
+Components must have a `name` field. Defining components with [`@compdef`](@ref SchematicDrivenLayout.@compdef) is
 recommended, since it creates a `name` field if not specified, allows specification of default parameters,
 creates a field to store the geometry after it is first calculated, and defines a `default_parameters` method.
 
@@ -294,7 +294,7 @@ Non-composite components must implement the following specializations:
   - `_geometry!(cs::CoordinateSystem, comp::MyComponent)`: Add the geometry to cs
   - `hooks(comp::MyComponent)`: Return a `NamedTuple` of `Hook`s
 
-For composite components (those with subcomponents), see [`DeviceLayout.AbstractCompositeComponent`](@ref).
+For composite components (those with subcomponents), see [`AbstractCompositeComponent`](@ref SchematicDrivenLayout.AbstractCompositeComponent).
 """
 abstract type AbstractComponent{T} <: GeometryStructure{T} end
 function parameters end
