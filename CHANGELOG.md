@@ -4,9 +4,11 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Upcoming
+## 1.1.1 (2025-04-16)
 
-  - Improved performance of nested CompositeComponents
+  - Improved performance of nested `CompositeComponent`s by storing hooks after first computation
+  - Improved performance of `ComponentNode` global transformation calculations by traversing the coordinate system hierarchy bottom-up
+  - Updated compat for MetaGraphs.jl to require 0.8, fixing precompilation on Julia v1.12 beta
 
 ## 1.1.0 (2025-04-07)
 
