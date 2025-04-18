@@ -82,6 +82,10 @@ function subcomp_namedtuple(comp_tuple)
     # Will throw "duplicate field name" error if different components share a name
     return NamedTuple{(keys...,)}(u_comps)
 end
+
+# If a named tuple is provided, the tuple element names are used for sub-componenet fields
+subcomp_namedtuple(comp_tuple::NamedTuple) = comp_tuple
+
 # Subtypes must implement _build_subcomponents(c::MyCompositeComponent)
 function _build_subcomponents end
 
