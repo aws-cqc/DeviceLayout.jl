@@ -892,11 +892,12 @@ function _add_to_current_solidmodel!(
     k;
     zmap=(_) -> zero(T),
     points_tree=nothing,
+    atol=DeviceLayout.onenanometer(T),
     kwargs...
 ) where {T}
     z = zmap(m) # map from m using kwargs
     # Add as curve loop to get point deduplication
-    loop = _add_loop!(CurvilinearPolygon(points(poly)), k, z; points_tree=points_tree)
+    loop = _add_loop!(CurvilinearPolygon(points(poly)), k, z; points_tree, atol)
     surf = k.add_plane_surface([loop])
 
     return (Int32(2), surf)
@@ -917,11 +918,12 @@ function _add_to_current_solidmodel!(
     k;
     zmap=(_) -> zero(T),
     points_tree=nothing,
+    atol=DeviceLayout.onenanometer(T),
     kwargs...
 ) where {T}
     z = zmap(m) # map from m using kwargs
-    outer_loop = _add_loop!(surf.exterior, k, z, points_tree=points_tree)
-    hole_loops = _add_loop!.(surf.holes, k, z, points_tree=points_tree)
+    outer_loop = _add_loop!(surf.exterior, k, z; points_tree, atol)
+    hole_loops = _add_loop!.(surf.holes, k, z; points_tree, atol)
 
     surftag = k.add_plane_surface([outer_loop])
     if !isempty(hole_loops)
@@ -933,7 +935,13 @@ function _add_to_current_solidmodel!(
 end
 
 # Sub-primitive methods for loops and curves
-function _add_loop!(cl::CurvilinearPolygon, k, z; points_tree=nothing)
+function _add_loop!(
+    cl::CurvilinearPolygon,
+    k,
+    z;
+    points_tree=nothing,
+    atol=DeviceLayout.onenanometer(coordinatetype(cl))
+)
     pts = _get_or_add_points!(k, points(cl), z, points_tree)
     endpoint_pairs = zip(pts, circshift(pts, -1))
     curves = map(enumerate(endpoint_pairs)) do (i, endpoints)
@@ -944,19 +952,19 @@ function _add_loop!(cl::CurvilinearPolygon, k, z; points_tree=nothing)
             if isnothing(curve_idx) # nope, just a line
                 return k.add_line(endpoints[1], endpoints[2])
             else # negative index => reverse endpoints
-                c = _add_curve!(reverse(endpoints), cl.curves[curve_idx], k, z)
+                c = _add_curve!(reverse(endpoints), cl.curves[curve_idx], k, z; atol)
                 !isempty(size(c)) && return reverse(c)
                 return c
             end
         else # add the curve whose start index is i
-            return _add_curve!(endpoints, cl.curves[curve_idx], k, z)
+            return _add_curve!(endpoints, cl.curves[curve_idx], k, z; atol)
         end
     end
     return k.add_curve_loop(collect(Iterators.flatten(curves)))
 end
 
 # Exact circular arc
-function _add_curve!(endpoints, seg::Paths.Turn, k::OpenCascade, z)
+function _add_curve!(endpoints, seg::Paths.Turn, k::OpenCascade, z; kwargs...)
     center_pt =
         seg.p0 + Point(-seg.r * sign(seg.α)sin(seg.α0), seg.r * sign(seg.α)cos(seg.α0))
     cen = k.add_point(
@@ -988,7 +996,7 @@ end
 
 # Exact *interpolating* cubic BSpline in OCC
 # (occ.addBSpline and geo.addBSpline instead use control points, and geo.addSpline uses Catmull-Rom splines)
-function _add_curve!(endpoints, seg::Paths.BSpline, k::OpenCascade, z)
+function _add_curve!(endpoints, seg::Paths.BSpline, k::OpenCascade, z; kwargs...)
     midpts =
         k.add_point.(
             ustrip.(STP_UNIT, getx.(seg.p[2:(end - 1)])),
@@ -1013,10 +1021,10 @@ function _add_curve!(endpoints, seg::Paths.BSpline, k::OpenCascade, z)
 end
 
 # Offset curves
-_add_curve!(endpoints, seg::Paths.OffsetSegment, k, z) =
-    _add_offset_curve!(endpoints, seg.seg, seg.offset, k, z)
+_add_curve!(endpoints, seg::Paths.OffsetSegment, k, z; kwargs...) =
+    _add_offset_curve!(endpoints, seg.seg, seg.offset, k, z; kwargs...)
 # Turns with constant offsets are still circular arcs
-function _add_offset_curve!(endpoints, seg::Paths.Turn, offset::Coordinate, k, z)
+function _add_offset_curve!(endpoints, seg::Paths.Turn, offset::Coordinate, k, z; kwargs...)
     return _add_curve!(
         endpoints,
         Paths.Turn(
@@ -1031,7 +1039,24 @@ function _add_offset_curve!(endpoints, seg::Paths.Turn, offset::Coordinate, k, z
 end
 
 # Any other offset curve (BSpline or variable offset) will be approximated by a BSpline
-function _add_offset_curve!(endpoints, seg::Paths.Segment, offset, k, z)
-    bspline_approx = bspline_approximation(Paths.offset(seg, offset))
-    return _add_curve!(endpoints, bspline_approx, k, z)
+function _add_offset_curve!(
+    endpoints,
+    seg::Paths.Segment,
+    offset,
+    k,
+    z;
+    atol=DeviceLayout.onenanometer(typeof(offset))
+)
+    bspline_approx = bspline_approximation(Paths.offset(seg, offset); atol)
+    newstarts = DeviceLayout.p0.(bspline_approx.segments)[2:end]
+    newpts =
+        k.add_point.(
+            ustrip.(STP_UNIT, getx.(newstarts)),
+            ustrip.(STP_UNIT, gety.(newstarts)),
+            ustrip(STP_UNIT, z)
+        )
+    starts = [first(endpoints), newpts...]
+    stops = [newpts..., last(endpoints)]
+    endp_pairs = [[start, stop] for (start, stop) in zip(starts, stops)]
+    return _add_curve!.(endp_pairs, bspline_approx.segments, k, z)
 end

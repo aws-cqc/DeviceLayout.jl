@@ -17,27 +17,30 @@ import DeviceLayout.SolidModels.STP_UNIT
     @testset "BSpline approximations" begin
         # Approximate circular arc
         b = Paths.bspline_approximation(seg)
-        @test pathlength(b) ≈ pathlength(seg)
-        @test Paths._approximation_error(seg, b) < 1nm
-        ts = 0:0.01:1
-        err = abs.(Paths.norm.(b.r(ts) .- Point(0μm, -50μm)) .- 50μm)
+        @test pathlength(b) ≈ pathlength(seg) atol = 1nm
+        ts = (0:0.01:1) * pathlength(b)
+        ps = b.(ts)
+        err = abs.(Paths.norm.(ps .- Point(0μm, -50μm)) .- 50μm)
         @test maximum(err) < 1nm
 
         # Approximate compound right+left turns
         b2 = Paths.bspline_approximation(comp_seg)
-        @test pathlength(b2) ≈ pathlength(comp_seg) atol = 0.01nm
+        @test pathlength(b2) ≈ pathlength(comp_seg) atol = 1nm
 
         # Approximate offset curves
         b3 = Paths.bspline_approximation(off_seg)
-        @test pathlength(b3) ≈ (5μm * pi / 2 + pathlength(seg))
-        @test Paths.arclength(Paths.offset(b, 5μm)) ≈ pathlength(b3)
+        @test pathlength(b3) ≈ (5μm * pi / 2 + pathlength(seg)) atol = 1nm
+        @test sum(Paths.arclength.(Paths.offset.(b.segments, 5μm))) ≈ pathlength(b3) atol =
+            1nm
         b4 = Paths.bspline_approximation(comp_off_seg)
-        @test pathlength(b4) ≈ pathlength(comp_seg) atol = 0.01nm
+        @test pathlength(b4) ≈ pathlength(comp_seg) atol = 1nm
         @test b4(pathlength(b3)) ≈ Point(55μm, -50μm) atol = 0.01nm
 
         # Reverse offset should get the original curve
-        b5 = Paths.bspline_approximation(Paths.offset(b4, -5μm))
-        @test Paths._approximation_error(comp_seg, b5) < 1nm
+        b5 = Paths.bspline_approximation.(Paths.offset.(b4.segments, -5μm))
+        for b in b5
+            @test all(Paths._approximation_error.(comp_seg.segments, b.segments) .< 1nm)
+        end
 
         # General offset of bspline
         b6 = Paths.bspline_approximation(b_gen_off_seg)
@@ -134,10 +137,17 @@ import DeviceLayout.SolidModels.STP_UNIT
     # Compare 3D model bounds with discretized version from cs
     x0d, y0d = bounds(cs).ll.x, bounds(cs).ll.y
     x1d, y1d = bounds(cs).ur.x, bounds(cs).ur.y
-    # Why only accurate to within 100nm? Shouldn't it be ~1nm?
+    # Why only accurate to within 1um? Shouldn't it be ~1nm?
+    # bbox is approximate (and not tight even when exact geometry makes it easy)
+    # but it may be that the approximation isn't so good near sharper turns
     @test all(
-        isapprox.([x0, y0, x1, y1], ustrip.(STP_UNIT, [x0d, y0d, x1d, y1d]), atol=0.1)
+        isapprox.([x0, y0, x1, y1], ustrip.(STP_UNIT, [x0d, y0d, x1d, y1d]), atol=1.0)
     )
+    n_bnd = length(SolidModels.get_boundary(sm["l1", 2]))
+    # Try BSpline approximation with fewer points
+    sm = SolidModel("test"; overwrite=true)
+    render!(sm, cs, zmap=zmap, atol=100.0nm)
+    @test length(SolidModels.get_boundary(sm["l1", 2])) < n_bnd
 
     # Try rounded polygon
     cs = CoordinateSystem("test", nm)

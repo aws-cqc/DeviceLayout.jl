@@ -1,65 +1,28 @@
-# Calculate approximation error
-function _approximation_error(
-    f::Paths.Segment{T},
-    f_approx::Paths.BSpline,
-    testvals=nothing
-) where {T}
-    # In this case, testvals are chosen based on f_approx, so they will be different every iteration
-    tgrid, exact, exact_normal, _ = _testvals(f, f_approx)
-    approx = f_approx.r.(tgrid)
-    # f_approx may not be arclength-parameterized
-    # but each exact point should be within 1nm of some line segment on
-    # the discretization of f_approx
-    idx_0 = 1
-    maxerr = zero(T)
-    for (p, normal) in zip(exact, exact_normal) # For each exact point, project it onto the approximate segments        
-        # Find the first approx segment where the projection lies on that segment
-        # (Starting with the approximate segment previously found)
-        for idx = idx_0:(length(approx) - 1)
-            intersects, ixn = Polygons.intersection(
-                Polygons.Ray(p, p + normal),
-                Polygons.LineSegment(approx[idx], approx[idx + 1])
-            )
-            if !intersects # Maybe we checked the ray in the wrong direction
-                intersects, ixn = Polygons.intersection(
-                    Polygons.Ray(p, p - normal),
-                    Polygons.LineSegment(approx[idx], approx[idx + 1])
-                )
-            end
-            if intersects # We found a projection that lies on the approximation
-                idx_0 = idx
-                maxerr = max(maxerr, norm(p - ixn))
-                break
-            end
-        end
-    end
-    return maxerr
-end
-
+# Arbitrary segment: Discretize according to approximation's curvature
 function _testvals(f::Paths.Segment{T}, f_approx::Paths.BSpline) where {T}
     l = Paths.pathlength(f)
-    h(t) = Paths.Interpolations.hessian(f_approx.r, t)[1]
-    tgrid = DeviceLayout.discretization_grid(h, _default_curve_atol(T))
-    exact = f.(tgrid * l)
-    dir = direction.(Ref(f), tgrid * l)
+    tgrid = DeviceLayout.discretization_grid(f, _default_curve_atol(T))
+    sgrid = tgrid * l
+    offsets = fill(zero(T), length(tgrid))
+    exact = f.(sgrid)
+    dir = direction.(Ref(f), sgrid)
     normal = oneunit(T) * Point.(-sin.(dir), cos.(dir))
-    return tgrid, exact, normal, nothing
+    return tgrid, exact, normal, offsets
 end
 
-function _testvals(
-    f::Paths.ConstantOffset{T, BSpline{T}},
-    f_approx::Paths.BSpline
-) where {T}
-    h(t) = Paths.Interpolations.hessian(f.seg.r, t)[1]
-    tgrid = DeviceLayout.discretization_grid(h, _default_curve_atol(T))
-    off = abs(getoffset(f))
+function _testvals(f::Paths.OffsetSegment{T}, f_approx::Paths.BSpline) where {T}
+    l = Paths.pathlength(f)
+    tgrid = DeviceLayout.discretization_grid(f, _default_curve_atol(T))
+    sgrid = tgrid * l
     # Don't actually calculate the exact curve, we'll only check that the offset is correct
-    exact = f.seg.r.(tgrid)
-    tangent = first.(Paths.Interpolations.gradient.(Ref(f.seg.r), tgrid))
-    normal = Point.(-gety.(tangent), getx.(tangent))
-    return tgrid, exact, normal, off
+    offsets = abs.(getoffset.(Ref(f), sgrid))
+    exact = f.seg.(sgrid)
+    dir = direction.(Ref(f.seg), sgrid)
+    normal = oneunit(T) * Point.(-sin.(dir), cos.(dir))
+    return tgrid, exact, normal, offsets
 end
 
+# Offset bsplines use tgrid directly to calculate a bit faster
 function _testvals(f::Paths.GeneralOffset{T, BSpline{T}}, f_approx::Paths.BSpline) where {T}
     h(t) = Paths.Interpolations.hessian(f.seg.r, t)[1]
     tgrid = DeviceLayout.discretization_grid(h, _default_curve_atol(T))
@@ -72,46 +35,52 @@ function _testvals(f::Paths.GeneralOffset{T, BSpline{T}}, f_approx::Paths.BSplin
     return tgrid, exact, normal, offsets
 end
 
-# For BSpline offsets, use t parameterization rather than arclength (much faster)
-function _approximation_error(
+# don't even need to calculate sgrid for constant offset BSpline
+function _testvals(
     f::Paths.ConstantOffset{T, BSpline{T}},
-    f_approx::Paths.BSpline{T},
-    testvals=_testvals(f, f_approx)
+    f_approx::Paths.BSpline
 ) where {T}
-    tgrid, exact, exact_normal, off = testvals
-    approx = f_approx.r.(tgrid)
-    # f_approx may not be arclength-parameterized
-    # but each exact point should be within 1nm of some line segment on
-    # the discretization of f_approx
-    idx_0 = 1
-    maxerr = zero(T)
-    for (p, normal) in zip(exact, exact_normal) # For each exact point, project it onto the approximate segments        
-        # Find the first approx segment where the projection lies on that segment
-        # (Starting with the approximate segment previously found)
-        for idx = idx_0:(length(approx) - 1)
-            intersects, ixn = Polygons.intersection(
-                Polygons.Ray(p, p + normal),
-                Polygons.LineSegment(approx[idx], approx[idx + 1])
-            )
-            if !intersects # Maybe we checked the ray in the wrong direction
-                intersects, ixn = Polygons.intersection(
-                    Polygons.Ray(p, p - normal),
-                    Polygons.LineSegment(approx[idx], approx[idx + 1])
-                )
-            end
-            if intersects # We found a projection that lies on the approximation
-                idx_0 = idx
-                maxerr = max(maxerr, abs(norm(p - ixn) - off))
-                break
-            end
-        end
-    end
-    return maxerr
+    h(t) = Paths.Interpolations.hessian(f.seg.r, t)[1]
+    tgrid = DeviceLayout.discretization_grid(h, _default_curve_atol(T))
+    off = abs(getoffset(f))
+    # Don't actually calculate the exact curve, we'll only check that the offset is correct
+    exact = f.seg.r.(tgrid)
+    tangent = first.(Paths.Interpolations.gradient.(Ref(f.seg.r), tgrid))
+    normal = Point.(-gety.(tangent), getx.(tangent))
+    return tgrid, exact, normal, fill(off, length(tgrid))
 end
 
-# For BSpline variable offsets, we need arclength-parameterized offsets for every test point
+_t_halflength(::Segment) = 0.5
+_t_halflength(seg::OffsetSegment) = _t_halflength(seg.seg)
+_t_halflength(seg::BSpline) = arclength_to_t(seg, pathlength(seg) / 2)
+
+function _split_testvals(testvals, seg::Segment{T}) where {T}
+    tgrid, exact, normal, offset = testvals
+    t_half = _t_halflength(seg)
+    idx_h2 = findfirst(t -> t > t_half, tgrid)
+    isnothing(idx_h2) &&
+        error("B-spline approximation of $seg is not converging; try increasing `atol`.")
+    t_h1 = tgrid[1:(idx_h2 - 1)]
+    t_h2 = tgrid[idx_h2:end]
+    new_tgrid_h1 = t_h1 / t_half
+    new_tgrid_h2 = (t_h2 .- t_half) / (1 - t_half)
+    return (
+        new_tgrid_h1,
+        (@view exact[1:(idx_h2 - 1)]),
+        (@view normal[1:(idx_h2 - 1)]),
+        (@view offset[1:(idx_h2 - 1)])
+    ),
+    (
+        new_tgrid_h2,
+        (@view exact[idx_h2:end]),
+        (@view normal[idx_h2:end]),
+        (@view offset[idx_h2:end])
+    )
+end
+
+# For offsets, we use the underlying curve and check that the approximation is offset away
 function _approximation_error(
-    f::Paths.GeneralOffset{T, BSpline{T}},
+    f::Paths.Segment{T},
     f_approx::Paths.BSpline{T},
     testvals=_testvals(f, f_approx)
 ) where {T}
@@ -146,67 +115,18 @@ function _approximation_error(
     return maxerr
 end
 
-function _sample_points(f::Paths.Segment{T}, num_points) where {T}
-    s = range(zero(T), pathlength(f), length=num_points)
-    return [p0(f), (f.(s[2:(end - 1)]))..., p1(f)]
-end
-
-function _sample_points(b::Paths.BSpline{T}, num_points) where {T}
-    t = range(0.0, 1.0, length=num_points)
-    return [p0(b), (b.r.(t[2:(end - 1)]))..., p1(b)]
-end
-
-function _sample_points(f::Paths.ConstantOffset{T, BSpline{T}}, num_points) where {T}
-    b = f.seg
-    t = range(0.0, 1.0, length=num_points)[2:(end - 1)]
-    G = StaticArrays.@MVector [zero(Point{T})]
-    perp(t) = begin
-        Interpolations.gradient!(G, b.r, t)
-        return Point(-G[1].y, G[1].x) / norm(G[1])
-    end
-    return [p0(f), (b.r.(t) .+ (f.offset * perp.(t)))..., p1(f)]
-end
-
-function _sample_points(f::Paths.GeneralOffset{T, BSpline{T}}, num_points) where {T}
-    b = f.seg
-    t = range(0.0, 1.0, length=num_points)[2:(end - 1)]
-    G = StaticArrays.@MVector [zero(Point{T})]
-    perp(t) = begin
-        Interpolations.gradient!(G, b.r, t)
-        return Point(-G[1].y, G[1].x) / norm(G[1])
-    end
-    return [
-        p0(f),
-        (b.r.(t) .+ (getoffset(f).(t_to_arclength.(Ref(b), t)) .* perp.(t)))...,
-        p1(f)
-    ]
-end
-
-function _initial_guess(f::Paths.Segment{T}) where {T}
-    # Scaling tangents by pathlength/2 seems to improve convergence
-    # (compared with scaling by pathlength)
-    l = pathlength(f)
-    t0 = Point(cos(α0(f)), sin(α0(f))) * l / 2
-    t1 = Point(cos(α1(f)), sin(α1(f))) * l / 2
+function _initial_guess(f::Paths.Segment{T}; len=nothing) where {T}
+    l = arclength(f) # *Not* pathlength!
+    t0 = Point(cos(α0(f)), sin(α0(f))) * l
+    t1 = Point(cos(α1(f)), sin(α1(f))) * l
     return BSpline{T}([p0(f), p1(f)], t0, t1)
 end
 
-function _initial_guess(f::Paths.ConstantOffset{T, BSpline{T}}) where {T}
-    # Original bspline has points evenly spaced in t from 0 to 1
-    # If these were important for defining the original, the offset curve might need them
-    b = f.seg
-    pts = _sample_points(f, length(b.p))
-    return BSpline{T}(pts, f.seg.t0, f.seg.t1) # tangents are the same
-end
-
-function _initial_guess(f::Paths.GeneralOffset{T, BSpline{T}}) where {T}
-    # Original bspline has points evenly spaced in t from 0 to 1
-    b = f.seg
-    pts = _sample_points(f, length(b.p))
-    # Non-constant offset means endpoint tangents may be different
-    t0 = Point(cos(α0(f)), sin(α0(f))) * norm(f.seg.t0)
-    t1 = Point(cos(α1(f)), sin(α1(f))) * norm(f.seg.t1)
-    return BSpline{T}(pts, t0, t1)
+function _initial_guess(f::Paths.OffsetSegment{T, BSpline{T}}; len=pathlength(f)) where {T}
+    # Can do a little better with BSpline offsets by taking into account non-arclength parameterization
+    t0 = tangent(f, zero(T)) * dsdt(0.0, f.seg.r)
+    t1 = tangent(f, len) * dsdt(1.0, f.seg.r)
+    return BSpline{T}([p0(f), p1(f)], t0, t1) # Don't even worry about original knots
 end
 
 _default_curve_atol(::Type{<:Real}) = 1e-3
@@ -216,7 +136,7 @@ _default_curve_atol(::Type{<:Length}) = 1nm
 function bspline_approximation(
     f::Paths.Segment{T};
     atol=_default_curve_atol(T),
-    maxits=20
+    maxits=10
 ) where {T}
     # Sample points from f and use them to create the BSpline interpolation
     approx = _initial_guess(f)
@@ -228,20 +148,45 @@ function bspline_approximation(
     err = _approximation_error(f, approx, testvals)
     # Double the number of interpolation points until the error is below tolerance
     refine = 1
+    segs = Segment{T}[f]
+    approxs = BSpline{T}[approx]
+    seg_errs = T[err]
+    split_tv = [testvals]
     while err > atol
-        refine > maxits && error(
-            "Maximum iterations $maxits reached for B-spline approximation: Error $err > $atol"
-        )
-        # Double the number of interpolation segments with equal lengths in t
-        npoints = 2 * length(approx.p) - 1
-        approx.p = _sample_points(f, npoints)
-        approx.t0 = approx.t0 / 2 # Halve the endpoint tangents when doubling the npoints
-        approx.t1 = approx.t1 / 2
-        Paths._update_interpolation!(approx)
-        err = _approximation_error(f, approx, testvals)
+        if refine > maxits
+            @warn "Maximum error $err > tolerance $atol with $(refine-1) refinement iterations. Increase `maxits` to refine further or increase `atol` to relax tolerance."
+            break
+        end
+        err = 0.0 * oneunit(T)
+        idx = 1
+        while idx <= length(segs)
+            if seg_errs[idx] > atol # Only split if tolerance is not yet met
+                seg = segs[idx]
+                approx = approxs[idx]
+                tv = split_tv[idx]
+                # Split segment and corresponding testvals in half by pathlength
+                # (for offset paths this splits by underlying pathlength, not arclength of offset)
+                halfseg_length = pathlength(seg) / 2
+                subsegs = split(seg, halfseg_length)
+                sub_tvs = _split_testvals(tv, seg)
+                # Get approximation and estimate error for each subsegment
+                approx_and_err = map(zip(subsegs, sub_tvs)) do (subseg, sub_tv)
+                    approx = _initial_guess(subseg; len=halfseg_length)
+                    seg_err = _approximation_error(subseg, approx, sub_tv)
+                    return approx, seg_err
+                end
+                splice!(segs, idx, subsegs)
+                splice!(approxs, idx, first.(approx_and_err))
+                splice!(seg_errs, idx, last.(approx_and_err))
+                splice!(split_tv, idx, sub_tvs)
+                idx += 1 # Extra increment because we increased length(segs) by 1
+            end
+            idx += 1
+        end
+        err = maximum(seg_errs)
         refine = refine + 1
     end
-    return approx
+    return CompoundSegment(convert(Vector{Segment{T}}, approxs))
 end
 
 bspline_approximation(b::Paths.BSpline; kwargs...) = copy(b)
