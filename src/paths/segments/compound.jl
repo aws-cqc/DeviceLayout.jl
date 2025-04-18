@@ -35,6 +35,20 @@ convert(::Type{CompoundSegment{T}}, x::CompoundSegment) where {T} =
     CompoundSegment{T}(convert.(Segment{T}, x.segments), x.tag)
 convert(::Type{Segment{T}}, x::CompoundSegment) where {T} = convert(CompoundSegment{T}, x)
 
+function subsegment(s::CompoundSegment{T}, t) where {T}
+    l0 = zero(T)
+    for seg in s.segments
+        l1 = l0 + pathlength(seg)
+        t < l1 && return seg, t - l0
+        l0 = l1
+    end
+    return last(s.segments), t - l0
+end
+
+function curvatureradius(s::CompoundSegment, t)
+    return curvatureradius(subsegment(s, t)...)
+end
+
 # Parametric function over the domain [zero(T),pathlength(c)] that represents the
 # compound segments.
 function (s::CompoundSegment{T})(t) where {T}

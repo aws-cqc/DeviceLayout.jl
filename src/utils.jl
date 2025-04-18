@@ -190,11 +190,32 @@ function discretize_curve(f, ddf, tolerance)
     return f.(ts)
 end
 
-function discretization_grid(ddf, tolerance)
-    bnds = (0.0, 1.0)
+function discretize_curve(s::Paths.Segment, tolerance)
+    return s.(discretization_grid(s, tolerance) * pathlength(s))
+end
 
+function discretize_curve(s::Paths.BSpline, tolerance)
+    return s.r.(discretization_grid(s, tolerance))
+end
+
+function discretization_grid(s::Paths.Segment, tolerance)
+    l = pathlength(s)
+    return discretization_grid(t -> Paths.signed_curvature(s, t * l), tolerance; t_scale=l)
+end
+
+function discretization_grid(s::Paths.BSpline, tolerance)
+    h(t) = Paths.Interpolations.hessian(s.r, t)[1]
+    return discretization_grid(h, tolerance)
+end
+
+function discretization_grid(
+    ddf,
+    tolerance,
+    bnds::Tuple{Float64, Float64}=(0.0, 1.0);
+    t_scale=1.0
+)
     dt = 0.01
-    ts = zeros(typeof(bnds[1]), 4000)
+    ts = zeros(4000)
     ts[1] = bnds[1]
     t = bnds[1]
     i = 1
@@ -206,12 +227,14 @@ function discretization_grid(ddf, tolerance)
         t = ts[i - 1]
         cc = norm(ddf(t))
         if cc >= 1e-9 * oneunit(typeof(cc))
-            dt = sqrt(8 * tolerance / cc) #  Also assumes third derivative is small
+            dt = uconvert(NoUnits, sqrt(8 * tolerance / cc) / t_scale)
+            # Also assumes third derivative is small
         end
         if t + dt >= bnds[2]
             dt = bnds[2] - t
         end
         ts[i] = min(bnds[2], t + dt)
+        t = ts[i]
     end
 
     return ts[1:i]

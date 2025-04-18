@@ -101,3 +101,50 @@
     @test (pa2[1].seg)(Paths.t_to_arclength(pa2[1].seg, 0.2)) ≈
           splice_transform(b4.r(tsplit2 + (1 - tsplit2) * 0.2)) atol = 1e-9
 end
+
+@testset "BSpline approximation" begin
+    pa = Path(Point(0.0, 0.0)nm, α0=90°)
+    bspline!(
+        pa,
+        [Point(1000.0μm, 1000.0μm), Point(2500.0μm, 2500.0μm)],
+        -90°,
+        Paths.SimpleCPW(20μm, 10μm)
+    )
+    bspline!(pa, [Point(100.0μm, 100.0μm)], 270°, Paths.TaperCPW(20μm, 10μm, 2μm, 1μm))
+    turn!(pa, 90°, 100μm, Paths.TaperCPW(2μm, 1μm, 20μm, 10μm))
+    turn!(pa, -90°, 100μm, Paths.CPW(20μm, 10μm))
+    curv = vcat(pathtopolys(pa)...)
+    # First BSpline is hardest, maybe due to intermediate waypoint?
+    lims = [45, 45, 20, 20, 9, 9, 9, 9]
+    for (poly, lim) in zip(curv, lims)
+        for curve in poly.curves
+            approx = Paths.bspline_approximation(curve)
+            @test length(approx.segments) < lim
+            @test Paths.arclength(approx) ≈ Paths.arclength(curve) atol = 1nm
+        end
+    end
+    # Relaxed tolerance
+    approx = Paths.bspline_approximation(curv[1].curves[1], atol=100nm)
+    @test length(approx.segments) < 20
+    # Non-offset curve approximation
+    approx = Paths.bspline_approximation(pa[4].seg)
+    @test length(approx.segments) < 9
+    # Offset curvatureradius
+    g_fd(c, s, ds=1.0nm) = (c(s + ds / 2) - c(s - ds / 2)) / ds
+    h_fd(c, s, ds=1.0nm) = g_fd(s_ -> g_fd(c, s_, ds), s, ds)
+    curvatureradius_fd(c, s, ds=1.0nm) = begin
+        g = g_fd(c, s, ds)
+        h = h_fd(c, s, ds)
+        ((g.x^2 + g.y^2)^(3 // 2)) / (g.x * h.y - g.y * h.x)
+    end
+    # Arbitrary curvature radius calculation is only approximate...
+    c = curv[1].curves[1]
+    @test abs(curvatureradius_fd(c, 10μm) - Paths.curvatureradius(c, 10μm)) < 100nm
+    c = curv[3].curves[1]
+    @test abs(curvatureradius_fd(c, 10μm) - Paths.curvatureradius(c, 10μm)) < 200nm
+    c = curv[5].curves[1]
+    @test abs(curvatureradius_fd(c, 10μm) - Paths.curvatureradius(c, 10μm)) < 600nm
+    c = curv[8].curves[1]
+    @test Paths.curvatureradius(c, 10μm) == sign(c.seg.α) * c.seg.r - c.offset
+    @test curvatureradius_fd(c, 10μm) ≈ Paths.curvatureradius(c, 10μm) atol = 1nm
+end
