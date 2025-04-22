@@ -315,6 +315,12 @@ rng = MersenneTwister(1337)
     @test Point(0.0μm, 1.0μm) ∈ pp
     @test Point(0.0μm, -2.0μm) ∈ pp
     @test Point(0.0μm, -1.0μm) ∈ pp
+
+    # DeviceLayout#24 Rounding occasionally fails when radius equals min_side_len
+    r = Rectangle(1.0μm, 1.0μm)
+    rr = Polygons._round_poly(r, 500.0nm; corner_indices=[2, 4])
+    rrr = Polygons._round_poly(rr, 500.0nm; corner_indices=[1]) # Round point at (0,0)
+    @test !iszero(points(rrr)[1]) # first point would be (0,0) if rounding failed
 end
 
 @testset "Curvilinear" begin

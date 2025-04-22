@@ -683,6 +683,7 @@ function _round_poly(
     relative::Bool = (T <: Length) && (S <: Real),
     min_side_len   = relative ? zero(T) : radius
 ) where {T, S <: Coordinate}
+    iszero(radius) && return pol
     # If radius is dimensional, non-relative rounding.
     V = ((S <: Length && T <: Length) || (S <: Real && T <: Real)) ? promote_type(T, S) : T
     # Tie break for Real, Real introduces a type instability for non-dimensional.
@@ -709,7 +710,7 @@ function _round_poly(
                     atol=atol,
                     min_side_len=min_side_len,
                     min_angle=min_angle
-                )
+                ) # Includes endpoints -- may duplicate points
             )
         end
     end
@@ -767,7 +768,10 @@ function rounded_corner(
     α1 = atan(v1.y, v1.x)
     α2 = atan(v2.y, v2.x)
 
-    if min_side_len > norm(p1 - p0) || min_side_len > norm(p2 - p1) # checks that the side lengths against min_side_len
+    l1 = min_side_len - norm(p1 - p0)
+    l2 = min_side_len - norm(p2 - p1)
+    if (l1 > zero(l1) && !isapprox(l1, zero(l1), atol=atol)) ||
+        (l2 > zero(l2) && !isapprox(l2, zero(l2), atol=atol)) # checks that the side lengths against min_side_len
         return [p1]
     elseif isapprox(rem2pi(α1 - α2, RoundNearest), 0, atol=min_angle) # checks if the points are collinear, within tolerance
         return [p1]

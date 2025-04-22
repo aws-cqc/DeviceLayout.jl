@@ -45,16 +45,22 @@ function circular_arc(
     θ_0=0,
     center=zero(Point{T})
 ) where {T <: Coordinate}
-    dθ = 2 * sqrt(2 * tolerance / r) # r - r cos dθ/2 ≈ tolerance
-    arc = []
-    θ_i = θ_0
-    dir = sign(θ - θ_0)
-    while dir * θ_i < dir * θ
-        push!(arc, center + Point(r * cos(θ_i), r * sin(θ_i)))
-        θ_i = θ_i + dir * dθ
-    end
-    push!(arc, center + Point(r * cos(θ), r * sin(θ)))
-    return arc
+    iszero(r) && return [center]
+    dθ_max = 2 * sqrt(2 * tolerance / abs(r)) # r - r cos dθ/2 ≈ tolerance
+    return circular_arc(θ_0, θ, dθ_max, r, center)
+end
+
+"""
+    circular_arc(θ_0, θ_1, dθ_max, r, center)
+
+Discretizes a circular arc from `θ_0` to `θ_1` with a maximum angular step `dθ_max`.
+
+If `θ_1 > θ_0`, the arc is drawn counterclockwise.
+"""
+function circular_arc(θ_0, θ_1, dθ_max, r, center)
+    iszero(r) && return [center]
+    θs = range(θ_0, stop=θ_1, length=1 + Int(ceil(abs(θ_1 - θ_0)/dθ_max)))
+    return Translation(center).(Point.(r*cos.(θs), r*sin.(θs)))
 end
 
 # modifying circular_arc so that it draws the shorter arc from θ1 to θ2, which may be clockwise. Inputting θ as a
