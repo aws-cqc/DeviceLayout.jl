@@ -771,7 +771,7 @@ function rounded_corner(
     l1 = min_side_len - norm(p1 - p0)
     l2 = min_side_len - norm(p2 - p1)
     if (l1 > zero(l1) && !isapprox(l1, zero(l1), atol=atol)) ||
-        (l2 > zero(l2) && !isapprox(l2, zero(l2), atol=atol)) # checks that the side lengths against min_side_len
+       (l2 > zero(l2) && !isapprox(l2, zero(l2), atol=atol)) # checks that the side lengths against min_side_len
         return [p1]
     elseif isapprox(rem2pi(α1 - α2, RoundNearest), 0, atol=min_angle) # checks if the points are collinear, within tolerance
         return [p1]

@@ -56,6 +56,30 @@ function to_polygons(f::Paths.Straight{T}, s::Paths.SimpleCPW; kwargs...) where 
 end
 
 function to_polygons(
+    f::Paths.Turn{T},
+    s::Paths.SimpleCPW;
+    atol=DeviceLayout.onenanometer(T),
+    kwargs...
+) where {T}
+    dir = sign(f.α)
+    # Use the same θ step for all curves, worst case is outer curve
+    dθ_max = 2 * sqrt(2 * atol / (f.r + Paths.extent(s))) # r - r cos dθ/2 ≈ tolerance
+    pts(sgn1::Int, sgn2::Int) = circular_arc(
+        f.α0 - dir * 90°,
+        f.α0 + f.α - dir * 90°,
+        dθ_max,
+        f.r +
+        dir * sgn1 * (Paths.trace(s) / 2 + Paths.gap(s) / 2 - sgn2 * Paths.gap(s) / 2),
+        Paths.curvaturecenter(f)
+    )
+
+    ppts = [pts(1, -1); @view pts(1, 1)[end:-1:1]]
+    mpts = [pts(-1, 1); @view pts(-1, -1)[end:-1:1]]
+
+    return [Polygon(ppts), Polygon(mpts)]
+end
+
+function to_polygons(
     f::Paths.BSpline{T},
     s::Paths.SimpleCPW;
     atol=DeviceLayout.onenanometer(T),

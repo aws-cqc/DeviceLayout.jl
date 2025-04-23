@@ -140,7 +140,7 @@ end
     render!(filler2, centered(Rectangle(1μm, 1μm)), SemanticMeta(:fill))
     hfunc = make_halo(1μm)
     origins_2 = autofill!(cs, filler2, grid_x2, grid_y2, hfunc)
-    @test length(origins_2) == 1227
+    @test length(origins_2) == 1226
 
     addref!(cs, cs3)
     h = halo(cs, 1μm)

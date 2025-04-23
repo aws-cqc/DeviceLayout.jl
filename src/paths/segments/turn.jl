@@ -38,11 +38,14 @@ p0(s::Turn) = s.p0
 # positive curvature radius is a left handed turn, negative right handed.
 curvatureradius(s::Turn, length) = s.α > zero(s.α) ? s.r : -s.r
 summary(s::Turn) = "Turn by $(s.α) with radius $(s.r)"
+function curvaturecenter(s::Turn{T}) where {T}
+    return p0(s) + curvatureradius(s, zero(T)) * Point(-sin(α0(s)), cos(α0(s)))
+end
 
 function pathlength_nearest(seg::Paths.Turn, pt::Point)
     dir = sign(seg.α)
     # get pt relative to center of turn circle
-    pt_rel = pt - (p0(seg) + dir * seg.r * Point(-sin(α0(seg)), cos(α0(seg))))
+    pt_rel = pt - curvaturecenter(seg)
 
     # find out whether point is in the sector of the turn
     # value in [0, 2π] if CCW, [-2π, 0] if CW
