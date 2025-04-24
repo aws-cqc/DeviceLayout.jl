@@ -258,6 +258,11 @@ end
     @test !xrefl(trU)
     @test xrefl(rotFlt ∘ XReflection() ∘ rotDeg ∘ trU)
     @test !xrefl(rotFlt ∘ YReflection() ∘ trU ∘ XReflection() ∘ rotDeg)
+
+    tr = convert(ScaledIsometry{Nothing}, ScaledIsometry())
+    @test iszero(@allocated tr2 = convert(ScaledIsometry{Nothing}, tr))
+    @test convert(ScaledIsometry{Point{Int}}, tr).origin isa Point{Int}
+    @test hash(ScaledIsometry()) == hash(ScaledIsometry(Point(0, 0)))
 end
 
 @testset "Polygon rendering" begin

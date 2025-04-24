@@ -10,9 +10,10 @@ The format of this changelog is based on
 
 ### Fixed
 
-  - Rounding no longer fails when radius is less than `min_side_len` only due to numerical precision issues
+  - Rounding no longer fails when available length is less than `min_side_len` only due to numerical precision issues
   - Circular arcs in rounded polygons will no longer occasionally produce very short edges near the endpoints, and are instead now drawn with equally spaced points including the endpoints
   - `Turn` segments with `SimpleTrace` or `SimpleCPW` styles now use `atol` to determine the discretization; this is faster and in some cases more accurate than the fallback method using `adapted_grid`
+  - Added missing `hash` and `convert` methods for `ScaledIsometry`
 
 ## 1.1.1 (2025-04-16)
 

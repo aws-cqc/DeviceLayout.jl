@@ -380,15 +380,33 @@ function Base.:(==)(t1::ScaledIsometry, t2::ScaledIsometry)
            t1.mag == t2.mag
 end
 
-function Base.convert(
-    ::Type{ScaledIsometry{Point{S}}},
-    f::ScaledIsometry
-) where {S <: Coordinate}
-    orig = isnothing(f.origin) ? zero(Point{S}) : convert(Point{S}, f.origin)
-    return ScaledIsometry(orig, f.rotation, f.xrefl, f.mag)
+function Base.hash(f::ScaledIsometry, h::UInt)
+    h = hash(ScaledIsometry, h)
+    # zero origin and nothing are == so should hash to the same thing
+    orig = (isnothing(f.origin) || iszero(f.origin)) ? nothing : f.origin
+    h = hash(orig, h)
+    h = hash(f.rotation % 360°, h)
+    h = hash(f.xrefl, h)
+    return hash(f.mag, h)
 end
-Base.convert(::Type{ScaledIsometry{Point{S}}}, f::Transformation) where {S <: Coordinate} =
-    convert(ScaledIsometry{Point{S}}, ScaledIsometry(f))
+
+Base.convert(::Type{ScaledIsometry{Nothing}}, f::ScaledIsometry{Nothing}) = f
+Base.convert(::Type{ScaledIsometry{T}}, f::ScaledIsometry{T}) where {T <: Point} = f
+function Base.convert(
+    ::Type{ScaledIsometry{S}},
+    f::ScaledIsometry{T}
+) where {S <: Point, T <: Point}
+    return ScaledIsometry(convert(S, f.origin), f.rotation, f.xrefl, f.mag)
+end
+function Base.convert(
+    ::Type{ScaledIsometry{S}},
+    f::ScaledIsometry{Nothing}
+) where {S <: Point}
+    return ScaledIsometry(zero(S), f.rotation, f.xrefl, f.mag)
+end
+Base.convert(::Type{ScaledIsometry{S}}, f::Transformation) where {S <: Point} =
+    convert(ScaledIsometry{S}, ScaledIsometry(f))
+# Cannot convert *to* ScaledIsometry{Nothing} in general
 
 Base.isapprox(t1::Transformation, t2::ScaledIsometry; kwargs...) =
     isapprox(t1, affine(t2), kwargs...)
