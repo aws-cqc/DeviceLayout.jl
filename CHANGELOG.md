@@ -4,15 +4,15 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Upcoming
+## 1.2.0 (2025-04-28)
 
   - Composite components can define `_build_subcomponents` to return a `NamedTuple` with keys that differ from component names
+  - `Turn` segments with `SimpleTrace` or `SimpleCPW` styles now use `atol` to determine the discretization; this is faster and in some cases more accurate than the fallback method using `adapted_grid`
 
 ### Fixed
 
   - Rounding no longer fails when available length is less than `min_side_len` only due to numerical precision issues
   - Circular arcs in rounded polygons will no longer occasionally produce very short edges near the endpoints, and are instead now drawn with equally spaced points including the endpoints
-  - `Turn` segments with `SimpleTrace` or `SimpleCPW` styles now use `atol` to determine the discretization; this is faster and in some cases more accurate than the fallback method using `adapted_grid`
   - Added missing `hash` and `convert` methods for `ScaledIsometry`
 
 ## 1.1.1 (2025-04-16)
