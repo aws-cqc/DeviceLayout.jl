@@ -809,8 +809,8 @@ function fragment_geom!(
 end
 
 """
-    get_boundary(group::AbstractPhysicalGroup; combined=true, oriented=true, recursive=false)
-    get_boundary(sm::SolidModel, groupname, dim=2; combined=true, oriented=true, recursive=false)
+    get_boundary(group::AbstractPhysicalGroup; combined=true, oriented=true, recursive=false, direction="all", position="all")
+    get_boundary(sm::SolidModel, groupname, dim=2; combined=true, oriented=true, recursive=false, direction="all", position="all")
 
 Get the boundary of the model entities in `group`, given as a vector of (dim, tag) tuples.
 
@@ -821,6 +821,9 @@ Return tags multiplied by the sign of the boundary entity if `oriented` is true.
 
 Apply the boundary operator recursively down to dimension 0 (i.e. to points) if `recursive`
 is true.
+
+If `direction` is specified, return only the boundaries perperdicular to the x, y, or z axis. If `position` is also specified,
+return only the boundaries at the min or max position along the specified `direction`.
 """
 function get_boundary(
     sm::SolidModel,
@@ -828,26 +831,143 @@ function get_boundary(
     dim=2;
     combined=true,
     oriented=true,
-    recursive=false
+    recursive=false,
+    direction="all",
+    position="all",
 )
     if !hasgroup(sm, group, dim)
         @info "get_boundary(sm, $group, $dim): ($group, $dim) is not a physical group, thus has no boundary."
         return Tuple{Int32, Int32}[]
     end
+    if lowercase(direction) ∉ ["all", "x", "y", "z"]
+        @info "get_boundary(sm, $group, $dim): $direction should be all, X, Y, or Z."
+    end
+    if lowercase(position) ∉ ["all", "min", "max"]
+        @info "get_boundary(sm, $group, $dim): $position should be all, min, or max."
+    end
     return get_boundary(
         sm[group, dim];
         combined=combined,
         oriented=oriented,
-        recursive=recursive
+        recursive=recursive,
+        direction=direction,
+        position=position
     )
 end
 function get_boundary(
     group::AbstractPhysicalGroup;
     combined=true,
     oriented=true,
-    recursive=false
+    recursive=false,
+    direction="all",
+    position="all"
 )
-    return gmsh.model.getBoundary(dimtags(group), combined, oriented, recursive)
+    all_bc_entities = gmsh.model.getBoundary(dimtags(group), combined, oriented, recursive)
+    if direction == "all"
+        return all_bc_entities
+    else
+        direction_map = Dict("x" => 1, "y" => 2, "z" => 3)
+        direction_id = direction_map[lowercase(direction)]
+        bboxes = Dict()
+        for (dim, tag) in all_bc_entities
+            bboxes[tag] = gmsh.model.getBoundingBox(dim, abs(tag))
+        end
+        target_min = minimum(bbox[direction_id] for bbox in values(bboxes))
+        target_max = maximum(bbox[direction_id + 3] for bbox in values(bboxes))
+
+        bc_entities = []
+        for (dim, tag) in all_bc_entities
+            bbox = bboxes[tag]
+            min_val = bbox[direction_id]
+            max_val = bbox[direction_id + 3]
+
+            # Check if the boundary is perpendicular to the direction
+            !isapprox(min_val, max_val) && continue
+
+            # Check if at domain min/max position
+            if lowercase(position) == "min" || lowercase(position) == "all"
+                isapprox(min_val, target_min) && push!(bc_entities, (dim, tag))
+            end
+            if lowercase(position) == "max" || lowercase(position) == "all"
+                isapprox(max_val, target_max) && push!(bc_entities, (dim, tag))
+            end
+        end
+        return bc_entities
+    end
+end
+
+function get_physical_group_bounding_box(dim, tags)
+    xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(dim, tags[1])
+
+    for tag in tags[2:end]
+        x_min, y_min, z_min, x_max, y_max, z_max = gmsh.model.getBoundingBox(dim, tag)
+        xmin = min(xmin, x_min)
+        ymin = min(ymin, y_min)
+        zmin = min(zmin, z_min)
+        xmax = max(xmax, x_max)
+        ymax = max(ymax, y_max)
+        zmax = max(zmax, z_max)
+    end
+
+    return (xmin, ymin, zmin, xmax, ymax, zmax)
+end
+
+"""
+    set_periodic!(group1::AbstractPhyiscalGroup, group2::AbstractPhyiscalGroup; dim=2)
+    set_periodic!(sm, group1, group2, d1=2, d2=2)
+
+Set the model entities in `group1` and `group2` to be periodic. Only supports `d1` = `d2` = 2
+and surfaces in both groups need to be parallel and axis-aligned.
+"""
+function set_periodic!(
+    sm::SolidModel,
+    group1::Union{String, Symbol},
+    group2::Union{String, Symbol},
+    d1=2,
+    d2=2
+)
+    if (d1 != 2 || d2 != 2)
+        @info "set_periodic(sm, $group1, $group2, $d1, $d2) only supports d1 = d2 = 2."
+        return Tuple{Int32, Int32}[]
+    end
+    return set_periodic!(sm[group1, d1], sm[group2, d2]; dim=d1)
+end
+
+function set_periodic!(
+    group1::AbstractPhysicalGroup,
+    group2::AbstractPhysicalGroup;
+    dim=2
+)
+    tags1 = [dt[2] for dt in dimtags(group1)]
+    tags2 = [dt[2] for dt in dimtags(group2)]
+
+    bbox1 = get_physical_group_bounding_box(dim, tags1)
+    bbox2 = get_physical_group_bounding_box(dim, tags2)
+
+    # Check if surfaces are aligned with x, y, or z axis
+    plane1 = [isapprox(bbox1[i], bbox1[i+3]) for i in 1:3]
+    plane2 = [isapprox(bbox2[i], bbox2[i+3]) for i in 1:3]
+
+    # Set periodicity if both surfaces are perpendicular to the same axis
+    dist = [0.0, 0.0, 0.0]
+    for i in 1:3
+        if plane1[i] && plane2[i]
+            dist[i] = bbox1[i] - bbox2[i]
+        end
+    end
+    if isapprox(sum(abs.(dist)), 0.0) || count(!iszero, dist) > 1
+        @info "set_periodic only supports distinct parallel axis-aligned surfaces."
+        return Tuple{Int32, Int32}[]
+    end
+
+    gmsh.model.mesh.set_periodic(
+        dim,
+        tags1,
+        tags2,
+        [1, 0, 0, dist[1], 0, 1, 0, dist[2], 0, 0, 1, dist[3], 0, 0, 0, 1]
+    )
+
+    return vcat(dimtags(group1), dimtags(group2))
 end
 
 """
