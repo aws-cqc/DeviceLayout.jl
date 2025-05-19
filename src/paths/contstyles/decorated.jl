@@ -42,6 +42,8 @@ extent(s::AbstractDecoratedStyle, t...) = extent(undecorated(s), t...)
 
 isvirtual(s::AbstractDecoratedStyle) = isvirtual(undecorated(s))
 
+trace(s::AbstractDecoratedStyle, t...) = trace(undecorated(s).s, t...)
+
 """
     Base.copy(sty::DecoratedStyle)
 
