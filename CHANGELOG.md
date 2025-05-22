@@ -4,6 +4,10 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Upcoming
+
+  - Added `set_periodic!` to `SolidModels` to enable periodic meshes.
+
 ## 1.2.0 (2025-04-28)
 
   - Composite components can define `_build_subcomponents` to return a `NamedTuple` with keys that differ from component names

@@ -60,6 +60,7 @@ Other operations:
     SolidModels.remove_group!
     SolidModels.restrict_to_volume!
     SolidModels.revolve!
+    SolidModels.set_periodic!
     SolidModels.translate!
 ```
 
