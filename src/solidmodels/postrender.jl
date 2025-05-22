@@ -833,7 +833,7 @@ function get_boundary(
     oriented=true,
     recursive=false,
     direction="all",
-    position="all",
+    position="all"
 )
     if !hasgroup(sm, group, dim)
         @info "get_boundary(sm, $group, $dim): ($group, $dim) is not a physical group, thus has no boundary."
@@ -933,11 +933,7 @@ function set_periodic!(
     return set_periodic!(sm[group1, d1], sm[group2, d2]; dim=d1)
 end
 
-function set_periodic!(
-    group1::AbstractPhysicalGroup,
-    group2::AbstractPhysicalGroup;
-    dim=2
-)
+function set_periodic!(group1::AbstractPhysicalGroup, group2::AbstractPhysicalGroup; dim=2)
     tags1 = [dt[2] for dt in dimtags(group1)]
     tags2 = [dt[2] for dt in dimtags(group2)]
 
@@ -945,12 +941,12 @@ function set_periodic!(
     bbox2 = get_physical_group_bounding_box(dim, tags2)
 
     # Check if surfaces are aligned with x, y, or z axis
-    plane1 = [isapprox(bbox1[i], bbox1[i+3]) for i in 1:3]
-    plane2 = [isapprox(bbox2[i], bbox2[i+3]) for i in 1:3]
+    plane1 = [isapprox(bbox1[i], bbox1[i + 3]) for i = 1:3]
+    plane2 = [isapprox(bbox2[i], bbox2[i + 3]) for i = 1:3]
 
     # Set periodicity if both surfaces are perpendicular to the same axis
     dist = [0.0, 0.0, 0.0]
-    for i in 1:3
+    for i = 1:3
         if plane1[i] && plane2[i]
             dist[i] = bbox1[i] - bbox2[i]
         end
