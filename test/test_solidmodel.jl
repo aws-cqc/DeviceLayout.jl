@@ -999,7 +999,7 @@ import DeviceLayout.SolidModels.STP_UNIT
     sm = test_sm()
     render!(sm, cs) # runs without error
 
-    # Use get_boundary, get_physical_group_bounding_box, and set_periodic!
+    # Use get_boundary, get_bounding_box, and set_periodic!
     cs = CoordinateSystem("test", nm)
     place!(cs, centered(Rectangle(500μm, 100μm)), :l1)
     postrender_ops = [("ext", SolidModels.extrude_z!, (:l1, 20μm))]
@@ -1023,7 +1023,7 @@ import DeviceLayout.SolidModels.STP_UNIT
     )
     @test all(
         isapprox.(
-            SolidModels.get_physical_group_bounding_box(2, [3, 5]),
+            SolidModels.get_bounding_box(2, [3, 5]),
             ustrip.(STP_UNIT, (-250μm, -50μm, 0μm, 250μm, 50μm, 20μm)),
             atol=1e-6
         )

@@ -898,7 +898,7 @@ function get_boundary(
     end
 end
 
-function get_physical_group_bounding_box(dim, tags)
+function get_bounding_box(dim, tags)
     xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(dim, tags[1])
 
     for tag in tags[2:end]
@@ -915,7 +915,7 @@ function get_physical_group_bounding_box(dim, tags)
 end
 
 """
-    set_periodic!(group1::AbstractPhyiscalGroup, group2::AbstractPhyiscalGroup; dim=2)
+    set_periodic!(group1::AbstractPhysicalGroup, group2::AbstractPhysicalGroup; dim=2)
     set_periodic!(sm, group1, group2, d1=2, d2=2)
 
 Set the model entities in `group1` and `group2` to be periodic. Only supports `d1` = `d2` = 2
@@ -939,8 +939,8 @@ function set_periodic!(group1::AbstractPhysicalGroup, group2::AbstractPhysicalGr
     tags1 = [dt[2] for dt in dimtags(group1)]
     tags2 = [dt[2] for dt in dimtags(group2)]
 
-    bbox1 = get_physical_group_bounding_box(dim, tags1)
-    bbox2 = get_physical_group_bounding_box(dim, tags2)
+    bbox1 = get_bounding_box(dim, tags1)
+    bbox2 = get_bounding_box(dim, tags2)
 
     # Check if surfaces are aligned with x, y, or z axis
     plane1 = [isapprox(bbox1[i], bbox1[i + 3], atol=1e-6) for i = 1:3]
