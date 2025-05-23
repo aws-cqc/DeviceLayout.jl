@@ -218,9 +218,41 @@ import DeviceLayout.SolidModels.STP_UNIT
         isapprox.([x0, y0, x1, y1], ustrip.(STP_UNIT, [x0d, y0d, x1d, y1d]), atol=1e-6)
     )
     sm["test_bdy"] = SolidModels.get_boundary(sm["test", 2])
+    sm["test_bdy_xmin"] =
+        SolidModels.get_boundary(sm["test", 2]; direction="X", position="min")
+    sm["test_bdy_xmax"] =
+        SolidModels.get_boundary(sm["test", 2]; direction="X", position="max")
+    sm["test_bdy_ymin"] =
+        SolidModels.get_boundary(sm["test", 2]; direction="Y", position="min")
+    sm["test_bdy_ymax"] =
+        SolidModels.get_boundary(sm["test", 2]; direction="Y", position="max")
+    sm["test_bdy_zmin"] =
+        SolidModels.get_boundary(sm["test", 2]; direction="Z", position="min")
+    sm["test_bdy_zmax"] =
+        SolidModels.get_boundary(sm["test", 2]; direction="Z", position="max")
+
+    @test isempty(
+        @test_logs (
+            :info,
+            "get_boundary(sm, Physical Group test of dimension 2 with 4 entities): direction a is not all, X, Y, or Z, thus has no boundary."
+        ) SolidModels.get_boundary(sm["test", 2]; direction="a", position="min")
+    )
+    @test isempty(
+        @test_logs (
+            :info,
+            "get_boundary(sm, Physical Group test of dimension 2 with 4 entities): position no is not all, min, or max, thus has no boundary."
+        ) SolidModels.get_boundary(sm["test", 2]; direction="X", position="no")
+    )
+
     SolidModels.remove_group!(sm, "test", 2; recursive=false)
     @test !SolidModels.hasgroup(sm, "test", 2)
     @test !isempty(SolidModels.dimtags(sm["test_bdy", 1]))
+    @test !isempty(SolidModels.dimtags(sm["test_bdy_xmin", 1]))
+    @test !isempty(SolidModels.dimtags(sm["test_bdy_xmax", 1]))
+    @test !isempty(SolidModels.dimtags(sm["test_bdy_ymin", 1]))
+    @test !isempty(SolidModels.dimtags(sm["test_bdy_ymax", 1]))
+    @test !isempty(SolidModels.dimtags(sm["test_bdy_zmin", 1]))
+    @test !isempty(SolidModels.dimtags(sm["test_bdy_zmax", 1]))
 
     @test SolidModels.dimtags(get(sm, "foo", 2, sm["test_bdy", 1])) ==
           SolidModels.dimtags(sm["test_bdy", 1])

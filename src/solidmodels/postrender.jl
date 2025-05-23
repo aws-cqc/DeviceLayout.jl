@@ -839,12 +839,6 @@ function get_boundary(
         @info "get_boundary(sm, $group, $dim): ($group, $dim) is not a physical group, thus has no boundary."
         return Tuple{Int32, Int32}[]
     end
-    if lowercase(direction) ∉ ["all", "x", "y", "z"]
-        @info "get_boundary(sm, $group, $dim): $direction should be all, X, Y, or Z."
-    end
-    if lowercase(position) ∉ ["all", "min", "max"]
-        @info "get_boundary(sm, $group, $dim): $position should be all, min, or max."
-    end
     return get_boundary(
         sm[group, dim];
         combined=combined,
@@ -866,6 +860,14 @@ function get_boundary(
     if direction == "all"
         return all_bc_entities
     else
+        if lowercase(direction) ∉ ["all", "x", "y", "z"]
+            @info "get_boundary(sm, $group): direction $direction is not all, X, Y, or Z, thus has no boundary."
+            return Tuple{Int32, Int32}[]
+        end
+        if lowercase(position) ∉ ["all", "min", "max"]
+            @info "get_boundary(sm, $group): position $position is not all, min, or max, thus has no boundary."
+            return Tuple{Int32, Int32}[]
+        end
         direction_map = Dict("x" => 1, "y" => 2, "z" => 3)
         direction_id = direction_map[lowercase(direction)]
         bboxes = Dict()
@@ -882,17 +884,17 @@ function get_boundary(
             max_val = bbox[direction_id + 3]
 
             # Check if the boundary is perpendicular to the direction
-            !isapprox(min_val, max_val) && continue
+            !isapprox(min_val, max_val, atol=1e-6) && continue
 
             # Check if at domain min/max position
             if lowercase(position) == "min" || lowercase(position) == "all"
-                isapprox(min_val, target_min) && push!(bc_entities, (dim, tag))
+                isapprox(min_val, target_min, atol=1e-6) && push!(bc_entities, (dim, tag))
             end
             if lowercase(position) == "max" || lowercase(position) == "all"
-                isapprox(max_val, target_max) && push!(bc_entities, (dim, tag))
+                isapprox(max_val, target_max, atol=1e-6) && push!(bc_entities, (dim, tag))
             end
         end
-        return bc_entities
+        return unique(bc_entities)
     end
 end
 
@@ -941,8 +943,8 @@ function set_periodic!(group1::AbstractPhysicalGroup, group2::AbstractPhysicalGr
     bbox2 = get_physical_group_bounding_box(dim, tags2)
 
     # Check if surfaces are aligned with x, y, or z axis
-    plane1 = [isapprox(bbox1[i], bbox1[i + 3]) for i = 1:3]
-    plane2 = [isapprox(bbox2[i], bbox2[i + 3]) for i = 1:3]
+    plane1 = [isapprox(bbox1[i], bbox1[i + 3], atol=1e-6) for i = 1:3]
+    plane2 = [isapprox(bbox2[i], bbox2[i + 3], atol=1e-6) for i = 1:3]
 
     # Set periodicity if both surfaces are perpendicular to the same axis
     dist = [0.0, 0.0, 0.0]
