@@ -60,7 +60,7 @@ function makegrid(segments::AbstractVector{T}, styles) where {T <: Segment}
     return cumsum!(grid, grid)
 end
 
-for x in (:extent, :width)
+for x in (:extent, :width, :trace, :gap)
     @eval function ($x)(s::CompoundStyle, t)
         sty, teff = s(t)
         return ($x)(sty, teff)

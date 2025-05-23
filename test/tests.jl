@@ -650,6 +650,29 @@ end
         @test_throws DimensionError launch!(pa, trace1=3.0)
     end
 
+    @testset "> Decorated Paths" begin
+        # Bumps
+        rr = centered(Rectangle(10μm, 10μm))
+        cs_rr = CoordinateSystem(uniquename("test"), nm)
+        place!(cs_rr, rr, SemanticMeta(:bump))
+
+        # Trace
+        pth = Path(Point(100μm, 100μm); α0=π / 2)
+        straight!(pth, 800μm, Paths.Trace(20.0μm))
+        attach!(pth, sref(cs_rr), (0μm):(50μm):(800μm))
+        @test Paths.trace(pth.nodes[1].sty) === 20.0μm
+        @test Paths.width(pth.nodes[1].sty) === 20.0μm
+        @test Paths.extent(pth.nodes[1].sty) === 10.0μm
+
+        # CPW
+        pth = Path(Point(100μm, 100μm); α0=π / 2)
+        straight!(pth, 800μm, Paths.SimpleCPW(10.0μm, 6.0μm))
+        attach!(pth, sref(cs_rr), (0μm):(50μm):(800μm))
+        @test Paths.trace(pth.nodes[1].sty) === 10.0μm
+        @test Paths.gap(pth.nodes[1].sty) === 6.0μm
+        @test Paths.extent(pth.nodes[1].sty) === 11.0μm
+    end
+
     @testset "> CompoundSegment" begin
         pa = Path{Float64}()
         straight!(pa, 200.0, Paths.Trace(10))

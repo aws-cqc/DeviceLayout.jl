@@ -44,6 +44,10 @@ isvirtual(s::AbstractDecoratedStyle) = isvirtual(undecorated(s))
 
 trace(s::AbstractDecoratedStyle, t...) = trace(undecorated(s), t...)
 
+gap(s::AbstractDecoratedStyle, t...) = gap(undecorated(s), t...)
+
+width(s::AbstractDecoratedStyle, t...) = width(undecorated(s), t...)
+
 """
     Base.copy(sty::DecoratedStyle)
 
