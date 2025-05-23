@@ -234,6 +234,12 @@ import DeviceLayout.SolidModels.STP_UNIT
     @test isempty(
         @test_logs (
             :info,
+            "get_boundary(sm, test, 3): (test, 3) is not a physical group, thus has no boundary."
+        ) SolidModels.get_boundary(sm, "test", 3)
+    )
+    @test isempty(
+        @test_logs (
+            :info,
             "get_boundary(sm, Physical Group test of dimension 2 with 4 entities): direction a is not all, X, Y, or Z, thus has no boundary."
         ) SolidModels.get_boundary(sm["test", 2]; direction="a", position="min")
     )
@@ -992,6 +998,31 @@ import DeviceLayout.SolidModels.STP_UNIT
     place!(cs, Rectangle(0.5μm, 0.5μm), :test)
     sm = test_sm()
     render!(sm, cs) # runs without error
+
+    # Use get_boundary and set_periodic!
+    cs = CoordinateSystem("test", nm)
+    place!(cs, centered(Rectangle(500μm, 100μm)), :l1)
+    postrender_ops = [("ext", SolidModels.extrude_z!, (:l1, 20μm))]
+    sm = SolidModel("test"; overwrite=true)
+    zmap = (m) -> (0μm)
+    render!(sm, cs, zmap=zmap, postrender_ops=postrender_ops)
+    sm["Xmin"] = SolidModels.get_boundary(sm["ext", 3]; direction="X", position="min")
+    sm["Xmax"] = SolidModels.get_boundary(sm["ext", 3]; direction="X", position="max")
+    sm["Ymax"] = SolidModels.get_boundary(sm["ext", 3]; direction="Y", position="max")
+    @test isempty(
+        @test_logs (
+            :info,
+            "set_periodic!(sm, Xmin, Xmax, 1, 1) only supports d1 = d2 = 2."
+        ) SolidModels.set_periodic!(sm, "Xmin", "Xmax", 1, 1)
+    )
+    @test isempty(
+        @test_logs (
+            :info,
+            "set_periodic! only supports distinct parallel axis-aligned surfaces."
+        ) SolidModels.set_periodic!(sm, "Xmin", "Ymax")
+    )
+    periodic_tags = SolidModels.set_periodic!(sm["Xmin", 2], sm["Xmax", 2])
+    @test !isempty(periodic_tags)
 
     # TODO: Composing OptionalStyle
 

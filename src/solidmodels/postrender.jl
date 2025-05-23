@@ -929,7 +929,7 @@ function set_periodic!(
     d2=2
 )
     if (d1 != 2 || d2 != 2)
-        @info "set_periodic(sm, $group1, $group2, $d1, $d2) only supports d1 = d2 = 2."
+        @info "set_periodic!(sm, $group1, $group2, $d1, $d2) only supports d1 = d2 = 2."
         return Tuple{Int32, Int32}[]
     end
     return set_periodic!(sm[group1, d1], sm[group2, d2]; dim=d1)
@@ -954,7 +954,7 @@ function set_periodic!(group1::AbstractPhysicalGroup, group2::AbstractPhysicalGr
         end
     end
     if isapprox(sum(abs.(dist)), 0.0) || count(!iszero, dist) > 1
-        @info "set_periodic only supports distinct parallel axis-aligned surfaces."
+        @info "set_periodic! only supports distinct parallel axis-aligned surfaces."
         return Tuple{Int32, Int32}[]
     end
 
