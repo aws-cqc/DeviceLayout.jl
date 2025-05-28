@@ -91,6 +91,7 @@ bounds(geo0::AbstractGeometry, geo1::AbstractGeometry, geo::AbstractGeometry...)
     center(geos)
 
 Return the center of the bounding rectangle [`bounds(geo)`](@ref) or `bounds(geos)`.
+Note that this point doesn't have to be in `ent`.
 
 Will not throw an `InexactError` even if `geo` has integer coordinates, but instead return
 floating point coordinates.

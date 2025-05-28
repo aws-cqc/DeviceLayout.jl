@@ -6,7 +6,7 @@ Any `AbstractGeometry` subtype will have a bounding box and associated methods. 
     DeviceLayout.AbstractGeometry
     coordinatetype
     bounds(::DeviceLayout.AbstractGeometry)
-    center
+    center(::DeviceLayout.AbstractGeometry)
     lowerleft
     upperright
     footprint

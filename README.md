@@ -24,14 +24,14 @@ DeviceLayout.jl provides functionality for 2D/2.5D device CAD, including generat
 
 ## Installation
 
-Julia can be downloaded [here](https://julialang.org/downloads/). We support Julia v1.10 or later.
+You can follow [these instructions](https://julialang.org/install/) to install Julia. We support Julia v1.10 or later.
 
-From Julia, install DeviceLayout.jl using the built-in package manager:
+From Julia, install DeviceLayout.jl using the built-in package manager, [Pkg.jl](https://pkgdocs.julialang.org/v1/getting-started/):
 
-```julia
-import Pkg
-Pkg.activate(".") # Activates an environment in the current directory
-Pkg.add("DeviceLayout")
+```r
+julia> ] # Pressing ] in the Julia REPL activates the Pkg REPL mode
+pkg> activate . # Activates an environment in the current directory
+pkg> add DeviceLayout # Adds DeviceLayout.jl to the environment
 ```
 
 We recommend [using an environment for each project](https://julialang.github.io/Pkg.jl/v1/environments/) rather than installing packages in the default environment.
@@ -47,15 +47,16 @@ The recommended IDE for Julia is [Visual Studio Code](https://code.visualstudio.
 with the [Julia for Visual Studio Code extension](https://www.julia-vscode.org/).
 
 Since Julia has a just-in-time compiler, the first time code is executed may take much
-longer than any other times. This means that a lot of time will be wasted repeating
-compilations if you run DeviceLayout.jl in a script like you would in other languages. For
-readability, it is best to split up your CAD code into functions that have clearly named
-inputs and perform a well-defined task.
+longer than subsequent times in the same Julia session. This means that a lot of time will be wasted repeating
+compilations if you run your DeviceLayout.jl code by calling a script from the command line each time,
+like you might in other languages.
 
-It is also best to avoid writing statements in global scope. In other words, put most of
-your code in a function. Your CAD script should ideally look like the following:
+For readability, it is best to split up your CAD code into functions that have clearly named
+inputs and perform a well-defined task. It is also best to avoid writing statements in global scope.
+In other words, put most of your code in a function. Your CAD script should ideally look like the following:
 
 ```julia
+# mycad.jl
 using DeviceLayout, DeviceLayout.PreferredUnits, FileIO
 
 function subroutine1()

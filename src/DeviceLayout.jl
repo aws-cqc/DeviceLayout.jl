@@ -346,7 +346,7 @@ export GDSMeta,
     abstract type AbstractPolygon{T} <: GeometryEntity{T} end
 
 Anything you could call a polygon regardless of the underlying representation.
-Currently only `Rectangle` or `Polygon` are concrete subtypes, but one could
+Currently only `Rectangle`, `Polygon`, and `ClippedPolygon` are concrete subtypes, but one could
 imagine further subtypes to represent specific shapes that appear in highly
 optimized pattern formats. Examples include the OASIS format (which has 25
 implementations of trapezoids) or e-beam lithography pattern files like the Raith

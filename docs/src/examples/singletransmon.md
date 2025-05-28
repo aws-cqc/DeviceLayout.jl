@@ -109,7 +109,7 @@ mesh to disk as `single_transmon.msh2` in the Gmsh 2.2 mesh format, and
 `single_transmon.gds`. Finally, there's a `mesh_order` keyword that sets the element
 order for the generated mesh.
 
-The schematic design is significantly simplied compared to that of the [quantum processor
+The schematic design is significantly simplified compared to that of the [quantum processor
 example](qpu17.md), but has the same general structure. The three components are
 added to the schematic graph and attached to each other before being placed by `plan` into a floorplan,
 which is then furnished with air bridges.

@@ -8,6 +8,10 @@ The format of this changelog is based on
 
   - Added `set_periodic!` to `SolidModels` to enable periodic meshes.
 
+### Fixed
+
+  - `DecoratedStyle` and `CompoundStyle` are no longer missing any of the methods `width`, `trace`, or `gap` (forwarded to the underlying style)
+
 ## 1.2.0 (2025-04-28)
 
   - Composite components can define `_build_subcomponents` to return a `NamedTuple` with keys that differ from component names

@@ -414,30 +414,9 @@ function DeviceLayout.transform(c::ClippedPolygon, f::Transformation)
     return ClippedPolygon(t)
 end
 
-"""
-    lowerleft(x::Polygon)
-
-Return the lower-left-most corner of a rectangle bounding polygon `x`.
-Note that this point doesn't have to be in the polygon.
-"""
 DeviceLayout.lowerleft(x::Polygon) = lowerleft(x.p)
-
-"""
-    upperright(x::Polygon)
-
-Return the upper-right-most corner of a rectangle bounding polygon `x`.
-Note that this point doesn't have to be in the polygon.
-"""
 DeviceLayout.upperright(x::Polygon) = upperright(x.p)
-
 DeviceLayout.footprint(x::Polygon) = x
-
-@doc """
-    center(p::Polygon)
-
-Return the center of a polygon's bounding box (`Point` object).
-Note that this point doesn't have to be in the polygon.
-""" center(p::Polygon)
 
 function convert(::Type{Polygon{T}}, s::Rectangle) where {T}
     ll = convert(Point{T}, s.ll)
