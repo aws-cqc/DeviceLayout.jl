@@ -79,12 +79,15 @@ This component is intended for use in demonstrations.
 
 # Subcomponents
 
-  1. `island::ExampleStarIsland`
-  2. `junction::typeof(jj_template)`
-  3. `readout_coupler::Path`
-  4-7. `coupler_1::Path` - `coupler_4::Path` (N, E, S, W)
-  8. `xy::ExampleXYTermination`
-  9. `z::ExampleZTermination`
+ 1. `island::ExampleStarIsland`
+ 2. `junction::typeof(jj_template)`
+ 3. `readout_coupler::Path`
+ 4. `coupler_1::Path` (N in transmon coordinate system)
+ 5. `coupler_2::Path` (E)
+ 6. `coupler_3::Path` (S)
+ 7. `coupler_4::Path` (W)
+ 8. `xy::ExampleXYTermination`
+ 9. `z::ExampleZTermination`
 """
 @compdef struct ExampleStarTransmon <: CompositeComponent
     name = "transmon"
@@ -222,8 +225,8 @@ Transmon component with a rectangular island acting as a shunt capacitor across 
 
 # Subcomponents
 
-  1. `island::ExampleRectangleIsland`
-  2. `junction::typeof(jj_template)`
+ 1. `island::ExampleRectangleIsland`
+ 2. `junction::typeof(jj_template)`
 """
 @compdef struct ExampleRectangleTransmon <: CompositeComponent
     name = "tr"

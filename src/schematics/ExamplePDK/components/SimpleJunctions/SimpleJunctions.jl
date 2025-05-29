@@ -26,9 +26,9 @@ that metal pattern based on process parameters like resist thicknesses and depos
 in this case, we take a shortcut and just define different rectangles for "artwork" and
 "simulation" which will be used or ignored based on rendering options.
 
-The "artwork" geometry contains an unrealistic placeholder pattern in a single JUNCTION_PATTERN
-layer. The "simulation" geometry adds METAL_POSITIVE rectangles representing junction leads,
-connected by a LUMPED_ELEMENT rectangle.
+The "artwork" geometry contains an unrealistic placeholder pattern in a single `JUNCTION_PATTERN`
+layer. The "simulation" geometry adds `METAL_POSITIVE` rectangles representing junction leads,
+connected by a `LUMPED_ELEMENT` rectangle.
 
      :island hook
         ↓    
@@ -102,9 +102,9 @@ SchematicDrivenLayout.allowed_rotation_angles(::ExampleSimpleJunction) = [0°, 1
 
 An example SQUID consisting of two [`ExampleSimpleJunction`](@ref)s.
 
-The "artwork" geometry contains an unrealistic placeholder pattern in a single JUNCTION_PATTERN
-layer. The "simulation" geometry adds METAL_POSITIVE rectangles representing junction leads,
-connected by a LUMPED_ELEMENT rectangle.
+The "artwork" geometry contains an unrealistic placeholder pattern in a single `JUNCTION_PATTERN`
+layer. The "simulation" geometry adds `METAL_POSITIVE` rectangles representing junction leads,
+connected by a `LUMPED_ELEMENT` rectangle.
 
       :island hook
          ↓    

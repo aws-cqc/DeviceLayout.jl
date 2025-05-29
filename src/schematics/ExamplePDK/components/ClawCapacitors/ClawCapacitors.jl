@@ -268,8 +268,7 @@ end
 
 # Helper function to generate paths, used in both `_geometry!` and `hooks`
 function _paths(cc::ExampleShuntClawCapacitor)
-    (; feedline_style, feedline_length, input_style, input_length, rounding, bridge) =
-        cc
+    (; feedline_style, feedline_length, input_style, input_length, rounding, bridge) = cc
     pa = Path(metadata=METAL_NEGATIVE, name=uniquename("$(cc.name)feed"))
     straight!(pa, feedline_length / 2 - Paths.extent(input_style), feedline_style)
     !isnothing(bridge) && attach!(pa, sref(bridge), zero(feedline_length))
