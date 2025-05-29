@@ -3,6 +3,7 @@
 ```@docs
     SolidModel
     SolidModels.SolidModelKernel
+    SolidModels.attributes
 ```
 
 ## Physical groups
@@ -11,6 +12,7 @@
     SolidModels.PhysicalGroup
     SolidModels.dimtags
     SolidModels.entitytags
+    SolidModels.bounds3d
 ```
 
 ## Rendering to a SolidModel

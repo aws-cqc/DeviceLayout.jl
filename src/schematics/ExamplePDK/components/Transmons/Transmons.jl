@@ -261,8 +261,6 @@ function SchematicDrivenLayout._graph!(
     return fuse!(g, island_node => :junction, subcomps.junction => :island)
 end
 
-SchematicDrivenLayout.hooks(::ExampleRectangleTransmon)
-
 function SchematicDrivenLayout.map_hooks(::Type{ExampleRectangleTransmon})
     return Dict((1 => :readout) => :readout, (1 => :xy) => :xy, (1 => :z) => :z)
 end

@@ -118,6 +118,7 @@ with the same name will be deleted and a new model will be created.
 A `SolidModel` can be saved to a file with `FileIO.save(filename, sm)`.
 Supported filetypes for OpenCASCADE geometries are `.brep` and `.stp`.
 Meshes can be exported as `.msh2` (compatible with Palace) or `.msh` (most recent Gmsh format) files.
+Other filetypes supported by `gmsh.write()` like `.xao` can be used with `DeviceLayout.save`.
 """
 struct SolidModel{T <: SolidModelKernel}
     name::String
@@ -282,8 +283,10 @@ end
 
 Save a `SolidModel` instance to a `file` or `filename`.
 
-Supported filetypes for OpenCASCADE geometries are `.brep` and `.stp`.
+Using `FileIO.save`, supported filetypes using for OpenCASCADE geometries are `.brep` and `.stp`.
 Meshes can be exported as `.msh2` (compatible with Palace) or `.msh` (most recent Gmsh format) files.
+
+Using `DeviceLayout.save`, you can also choose any other extension supported by `gmsh.write()` like `.xao`.
 """
 function save(file::File, sm::SolidModel)
     gmsh.model.set_current(name(sm))
@@ -297,9 +300,13 @@ function save(filename::String, sm::SolidModel)
 end
 
 """
-    bounds3d(group::AbstractPhysicalGroup; delta=1e-7)
+    bounds3d(group::AbstractPhysicalGroup; delta=0)
+    bounds3d(dimtags; delta=0)
 
-Return the rectangular prism defined bounding `group` with an offset of `delta`.
+Return the rectangular prism defined bounding `group` or `dimtags` with an offset of `delta`.
+
+Note that OpenCASCADE bounding boxes are not tight, and will typically extend beyond the exact
+bounding box by 1e-7μm at each face.
 
 The result is returned as the tuple `(xmin, ymin, zmin, xmax, ymax, zmax)`.
 """

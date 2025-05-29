@@ -805,7 +805,7 @@ function _get_boundary_points(dts)
     return filter(ent -> iszero(first(ent)), ents)
 end
 
-const POINT_MERGE_ATOL = 1e-9 # in STP_UNIT, i.e. atol=0.001nm
+const POINT_MERGE_ATOL = 1e-9 # in STP_UNIT, i.e. atol=1e-6nm
 function _get_or_add_points!(k, pts_xy, z, points_tree; atol=POINT_MERGE_ATOL)
     return _get_or_add_point!.(
         k,
