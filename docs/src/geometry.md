@@ -71,9 +71,9 @@ xrefl(::DeviceLayout.GeometryReference)
 
 ### Resolving references
 
-Sometimes it can be helpful to transform between coordinate systems and the coordinate
-systems they reference. This package provides methods to generate affine transforms
-to do this as easily as possible.
+If a structure contains a reference somewhere in its reference hierarchy,
+we can use `transformation` to find the total transformation of that
+reference relative to the top-level structure:
 
 ```@docs
     transformation(::DeviceLayout.GeometryStructure, ::DeviceLayout.GeometryReference)
@@ -82,7 +82,7 @@ to do this as easily as possible.
 
 ### Flattening
 
-Sometimes it's also helpful use an operation called "flattening" to produce an equivalent coordinate system with no references—that is, with all its elements at the top level.
+Sometimes it's also helpful to use an operation called "flattening" to produce an equivalent coordinate system with no references—that is, with all its elements at the top level.
 
 ```@docs
     flatten(::DeviceLayout.GeometryStructure)

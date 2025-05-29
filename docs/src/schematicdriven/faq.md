@@ -4,13 +4,9 @@
 
 Rendering with a `LayoutTarget` will skip all entities with the special metadata `DeviceLayout.NORENDER_META = SemanticMeta(:norender)`, so there's a workaround: Try running `map_metadata!(component(mynode), (_) -> DeviceLayout.NORENDER_META)` before calling `build!` or `render!`.
 
-**How do I attach components like readout resonators along a route in the schematic?**
+**How do I attach components along a path in the schematic?**
 
-If you have an existing node created by `route!`, you can attach `CoordinateSystemReferences` with the function `attach!(r::RouteComponent, c::CoordSysRef, t::Coordinate; location::Int=0)` and it works like attaching things to a `Path`. Right now there's no way to attach a Component to a `RouteComponent` so that it becomes part of the schematic. For that, use a `Path` with `attach!(::SchematicGraph, ...)`.
-
-**How do I attach components like readout resonators along a path in the schematic?**
-
-I recommend creating a straight Path, then attaching your component to that. For example:
+Given a schematic node containing the `Path`, you can attach your component to that with `attach!(::SchematicGraph, ...)`. For example:
 
 ```julia
 pa = Path(
@@ -25,14 +21,18 @@ coupling_seg_node = add_node!(g, pa)
 rres_node = add_node!(g, readout_resonator)
 attach!.(
     g,
-    segnode,
+    coupling_seg_node,
     rres_node => :readout_line,
-    pathlength(SchematicDrivenLayout.component(segnode).path) / 2,
+    pathlength(SchematicDrivenLayout.component(coupling_seg_node).path) / 2,
     i=1,
     location=1
 )
 # ... then fuse/route these to other nodes as usual
 ```
+
+**How do I attach components along a route in the schematic?**
+
+If you have an existing component created by `route!(::SchematicGraph, ...)`, you can attach `CoordinateSystemReferences` with the function `attach!(r::RouteComponent, c::CoordSysRef, t::Coordinate; location::Int=0)`, and it works like attaching things to a single-segment `Path`. Right now there's no way to attach a `Component` along a `RouteComponent` so that it becomes part of the schematic. For that, use a `Path` with `attach!(::SchematicGraph, ...)`.
 
 **What's with all the semicolons?**
 
@@ -73,7 +73,11 @@ spacernode = add_node!(g, Spacer(p1=Point(6mm, 1mm)))
 fuse!(g, spacernode => :p1_north, mycomp => :myhook)
 ```
 
-Any "root" node (one that's not attached to any previously added node by any chain of connections; this always includes the first node added to a graph) will have its origin at the global origin.
+Any "root" node (one that's not attached to any previously added non-route node by any chain of connections; this always includes the first node added to a graph) will have its origin at the global origin.
+
+In many cases, it's useful to start with a "template" component containing multiple required fixed-position hooks.
+This is how [`ExampleChip`](../examples/examplepdk.md#ChipTemplates) in [the DemoQPU17 example](../examples/qpu17.md)
+fixes the positions of ports on the edge of the chip.
 
 **How do I attach one component to another if there's no hook where I need it?**
 
@@ -88,7 +92,8 @@ labeling and annotation:
 fuse!(
     g,
     mynode => PointHook(0.5mm, 0.5mm, 90°),
-    ArrowAnnotation(text="(0.5mm, 0.5mm) in mynode's coordinate system") => :tip
+    ArrowAnnotation{typeof(1.0nm)}(text="(0.5mm, 0.5mm) in mynode's coordinate system") =>
+        :tip
 )
 ```
 
@@ -97,13 +102,9 @@ needing a consistent hook that doesn't already exist for `MyComponent`, then it'
 better to update the component definition so that the hook is available by name through
 `hooks(::MyComponent)`.
 
-**How do I make sure there aren't any bridges along feedline segments with coupled devices?**
-
-You can define a short, straight `Path` and couple each device to one of those, then route the feedline between the endpoints of coupling segments.
-
 **I edited a component's `_geometry!` method but I'm still getting the old geometry. Can I get the new geometry without restarting Julia?**
 
-First, make sure the new code is being loaded. You can use [Revise](https://timholy.github.io/Revise.jl/stable/) to automatically use updated code within any package you load with `import` or `using` as well as any scripts loaded with `includet`.
+First, make sure the new code is being loaded. You can use [Revise](https://timholy.github.io/Revise.jl/stable/) to automatically use updated code within any package loaded after Revise with `import` or `using` as well as any scripts loaded with `includet`.
 
 Most component types, including those defined using `@compdef`, contain a `_geometry` field
 that allows them to store their geometry so that it is only generated once.

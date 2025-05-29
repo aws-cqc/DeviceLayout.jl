@@ -45,7 +45,7 @@ end
 
 A DeviceLayout.jl PDK would also define any [`Component`s](@ref SchematicDrivenLayout.AbstractComponent) to be used in building schematics. We provide [ExamplePDK](../examples/examplepdk.md) as a module within DeviceLayout.jl as an example.
 
-One way we recommend organizing your own PDK for use with DeviceLayout.jl is as a single version-controlled repository, with a `MyPDK.jl` package at the top level, defining a module like the above snippet, and independently versioned component packages in a subdirectory. For example:
+One way we recommend organizing your own PDK for use with DeviceLayout.jl is as a single version-controlled repository, with a `MyPDK.jl` package at the top level, defining a module like the above snippet, and component packages in a subdirectory. For example:
 
 ```
 MyPDK/
@@ -69,7 +69,7 @@ MyPDK/
 └─ test/
 ```
 
-MyPDK.jl would have DeviceLayout.jl as a dependency, and each component package would depend on MyPDK.jl (and possibly other components) for layer names and other information or functionality held in common.
+MyPDK.jl would have DeviceLayout.jl as a dependency, and each component package would depend on MyPDK.jl (and possibly other components) for layer names and other information or functionality held in common. The PDK and component packages will be independently versioned using [semantic versioning](https://semver.org/).
 
 Here, component packages have their own `Project.toml` file distinct from MyPDKPackage because they are separate packages despite living in the same repository. Like
 with all Julia packages it is not advised to actually commit `Manifest.toml` files, although it is useful to commit them to one-off "projects" like analyses and layout scripts to enable fully reproducible environments.
