@@ -27,7 +27,7 @@ export {{{compname}}}
 
 # Hooks
 
-  - `<hook1>`: Description
+  - `<hook1>`: <Description>
   - ...
 """
 @compdef struct {{{compname}}} <: Component

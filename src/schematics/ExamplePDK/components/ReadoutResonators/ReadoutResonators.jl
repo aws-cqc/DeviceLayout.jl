@@ -5,7 +5,7 @@ An `ExamplePDK` component module containing resonators for transmon readout.
 
 `ExamplePDK` is intended for demonstrations, tutorials, and tests. While we aim to
 demonstrate best practices for Julia code and DeviceLayout.jl usage, these components are not
-optimized for device performance. Most importantly: breaking changes to `ExamplePDK` may
+optimized for device performance. Most importantly: **Breaking changes to `ExamplePDK` may
 occur within major versions.** In other words, don't depend on `ExamplePDK` in your own PDK
 or for real devices!
 """

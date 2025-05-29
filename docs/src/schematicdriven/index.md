@@ -64,7 +64,7 @@ end
 
 # Draw an arrow from left to right
 function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, ac::ArrowComponent)
-    (; length, width) = parameters(ac)
+    (; length, width) = ac
     rect = centered(Rectangle(length, width))
     zer = zero(width)
     tip_edge = [Point(zer, zer), Point(3 * width, 3 * width), Point(zer, 6 * width)]

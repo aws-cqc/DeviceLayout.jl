@@ -6,7 +6,7 @@ waveguides in shunt and series configurations.
 
 `ExamplePDK` is intended for demonstrations, tutorials, and tests. While we aim to
 demonstrate best practices for Julia code and DeviceLayout.jl usage, these components are not
-optimized for device performance. Most importantly: breaking changes to `ExamplePDK` may
+optimized for device performance. Most importantly: **Breaking changes to `ExamplePDK` may
 occur within major versions.** In other words, don't depend on `ExamplePDK` in your own PDK
 or for real devices!
 """
@@ -101,7 +101,7 @@ function _path(cc::ExampleSeriesClawCapacitor)
         claw_width,
         claw_inner_gap,
         inner_cap_width
-    ) = parameters(cc)
+    ) = cc
     pa = Path(metadata=METAL_NEGATIVE, name=uniquename("$(cc.name)_in"))
     if (input_length - rounding) > zero(input_length)
         straight!(pa, input_length - rounding, input_style)
@@ -129,7 +129,7 @@ function _series_claw(cc)
         claw_outer_gap,
         output_style,
         rounding
-    ) = parameters(cc)
+    ) = cc
 
     ## Claw
     # Output positive metal
@@ -269,7 +269,7 @@ end
 # Helper function to generate paths, used in both `_geometry!` and `hooks`
 function _paths(cc::ExampleShuntClawCapacitor)
     (; feedline_style, feedline_length, input_style, input_length, rounding, bridge) =
-        parameters(cc)
+        cc
     pa = Path(metadata=METAL_NEGATIVE, name=uniquename("$(cc.name)feed"))
     straight!(pa, feedline_length / 2 - Paths.extent(input_style), feedline_style)
     !isnothing(bridge) && attach!(pa, sref(bridge), zero(feedline_length))
@@ -281,8 +281,7 @@ function _paths(cc::ExampleShuntClawCapacitor)
 end
 
 function SchematicDrivenLayout.hooks(cc::ExampleShuntClawCapacitor)
-    (; inner_cap_width, claw_inner_gap, claw_width, claw_outer_gap, rounding) =
-        parameters(cc)
+    (; inner_cap_width, claw_inner_gap, claw_width, claw_outer_gap, rounding) = cc
     pa, tap = _paths(cc) # Generate another copy of the paths so we can use their hooks
     straight!(
         tap, # Extend tap to get to the connection point on the other side

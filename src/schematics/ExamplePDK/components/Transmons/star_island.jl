@@ -52,7 +52,7 @@ function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, isl::ExampleStar
         star_tip_width,
         coupler_style,
         rounding
-    ) = parameters(isl)
+    ) = isl
     ground_radius = island_outer_radius + island_ground_gap
     θ_outer = range(π / 2, step=2π / 5, length=5)
     θ_inner = θ_outer .+ π / 5
@@ -140,7 +140,7 @@ function critical_dimension(isl::ExampleStarIsland)
 end
 
 function SchematicDrivenLayout.hooks(isl::ExampleStarIsland)
-    (; island_outer_radius, island_ground_gap) = parameters(isl)
+    (; island_outer_radius, island_ground_gap) = isl
     h = PointHook(island_outer_radius + island_ground_gap, 0μm, -180°)
     θ = (π / 2 - π / 5):(-2π / 5):(-3π / 2 + π / 5) # clockwise starting with 12 o'clock
     return (;

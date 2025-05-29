@@ -65,7 +65,7 @@ function SchematicDrivenLayout._geometry!(
         claw_gap,
         w_grasp,
         bridge
-    ) = parameters(rres)
+    ) = rres
     # Center vertical axis is midpoint of coupling section
     pres = Path(
         Point(-coupling_length / 2, -coupling_gap - style.gap - style.trace / 2),

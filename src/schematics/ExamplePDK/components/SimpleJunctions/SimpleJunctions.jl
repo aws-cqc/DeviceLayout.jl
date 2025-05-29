@@ -5,7 +5,7 @@ An `ExamplePDK` component module containing simple placeholder Josephson junctio
 
 `ExamplePDK` is intended for demonstrations, tutorials, and tests. While we aim to
 demonstrate best practices for Julia code and DeviceLayout.jl usage, these components are not
-optimized for device performance. Most importantly: breaking changes to `ExamplePDK` may
+optimized for device performance. Most importantly: **Breaking changes to `ExamplePDK` may
 occur within major versions.** In other words, don't depend on `ExamplePDK` in your own PDK
 or for real devices!
 """
@@ -67,7 +67,7 @@ connected by a LUMPED_ELEMENT rectangle.
 end
 
 function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, jj::ExampleSimpleJunction)
-    (; w_jj, h_jj, h_ground_island, h_excess) = parameters(jj)
+    (; w_jj, h_jj, h_ground_island, h_excess) = jj
     # simulation geometry
     jj_rect = centered(Rectangle(w_jj, h_jj))
     top_lead =

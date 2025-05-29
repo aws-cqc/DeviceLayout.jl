@@ -6,7 +6,7 @@ static couplers and control lines.
 
 `ExamplePDK` is intended for demonstrations, tutorials, and tests. While we aim to
 demonstrate best practices for Julia code and DeviceLayout.jl usage, these components are not
-optimized for device performance. Most importantly: breaking changes to `ExamplePDK` may
+optimized for device performance. Most importantly: **Breaking changes to `ExamplePDK` may
 occur within major versions.** In other words, don't depend on `ExamplePDK` in your own PDK
 or for real devices!
 """
@@ -76,6 +76,15 @@ This component is intended for use in demonstrations.
   - `coupler_{N,E,S,W}`: North/South/East/West (in transmon coordinate system)
   - `xy`: End of XY line to be connected to control feedline
   - `z`: End of Z line to be connected to control feedline
+
+# Subcomponents
+
+  1. `island::ExampleStarIsland`
+  2. `junction::typeof(jj_template)`
+  3. `readout_coupler::Path`
+  4-7. `coupler_1::Path` - `coupler_4::Path` (N, E, S, W)
+  8. `xy::ExampleXYTermination`
+  9. `z::ExampleZTermination`
 """
 @compdef struct ExampleStarTransmon <: CompositeComponent
     name = "transmon"
@@ -161,9 +170,7 @@ end
 ###
 
 function coupler_paths(tr::ExampleStarTransmon, isl::ExampleStarIsland)
-    (; island_outer_radius, island_ground_gap, coupler_style, lattice_spacing) =
-        parameters(tr)
-    ground_radius = island_outer_radius + island_ground_gap
+    (; coupler_style, lattice_spacing) = tr
     h0s = hooks(isl).coupler[1:4] # Starting hooks for paths (clockwise from 12 o'clock)
     h_N = PointHook(0μm, lattice_spacing / 2, -90°)
     h1s = [h_N, RotationPi(-1 // 2)(h_N), RotationPi()(h_N), RotationPi(1 // 2)(h_N)]
@@ -206,6 +213,17 @@ Transmon component with a rectangular island acting as a shunt capacitor across 
   - `junction_pos = :bottom`: Location to place junction/SQUID (options `:top` or `:bottom`)
   - `island_rounding = 0µm`: Optional rounding radius to apply to the island; if zero, no
     rounding is applied to the island
+
+# Hooks
+
+  - `readout`: The center edge of the ground plane on the opposite side of the island from the SQUID.
+  - `xy`: The left side of the capacitor gap.
+  - `z`: The center edge of the ground plane in the SQUID loop.
+
+# Subcomponents
+
+  1. `island::ExampleRectangleIsland`
+  2. `junction::typeof(jj_template)`
 """
 @compdef struct ExampleRectangleTransmon <: CompositeComponent
     name = "tr"
@@ -240,15 +258,7 @@ function SchematicDrivenLayout._graph!(
     return fuse!(g, island_node => :junction, subcomps.junction => :island)
 end
 
-@doc """
-    hooks(::ExampleRectangleTransmon)
-
-`Hook`s for attaching control lines and readout to the transmon.
-
-  - `readout`: The center edge of the ground plane on the opposite side of the island from the SQUID.
-  - `xy`: The left side of the capacitor gap.
-  - `z`: The center edge of the ground plane in the SQUID loop.
-""" SchematicDrivenLayout.hooks(::ExampleRectangleTransmon)
+SchematicDrivenLayout.hooks(::ExampleRectangleTransmon)
 
 function SchematicDrivenLayout.map_hooks(::Type{ExampleRectangleTransmon})
     return Dict((1 => :readout) => :readout, (1 => :xy) => :xy, (1 => :z) => :z)
@@ -296,7 +306,7 @@ overwritten.
 end
 
 function SchematicDrivenLayout.hooks(r::ExampleRectangleIsland)
-    (; junction_gap, junction_pos, cap_width, cap_length, cap_gap) = parameters(r)
+    (; junction_gap, junction_pos, cap_width, cap_length, cap_gap) = r
 
     cutout_height = junction_gap + cap_length + cap_gap
     sgn = junction_pos == :bottom ? 1 : -1
