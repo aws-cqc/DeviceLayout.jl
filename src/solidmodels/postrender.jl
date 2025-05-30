@@ -898,22 +898,6 @@ function get_boundary(
     end
 end
 
-function get_bounding_box(dim, tags)
-    xmin, ymin, zmin, xmax, ymax, zmax = gmsh.model.getBoundingBox(dim, tags[1])
-
-    for tag in tags[2:end]
-        x_min, y_min, z_min, x_max, y_max, z_max = gmsh.model.getBoundingBox(dim, tag)
-        xmin = min(xmin, x_min)
-        ymin = min(ymin, y_min)
-        zmin = min(zmin, z_min)
-        xmax = max(xmax, x_max)
-        ymax = max(ymax, y_max)
-        zmax = max(zmax, z_max)
-    end
-
-    return (xmin, ymin, zmin, xmax, ymax, zmax)
-end
-
 """
     set_periodic!(group1::AbstractPhysicalGroup, group2::AbstractPhysicalGroup; dim=2)
     set_periodic!(sm, group1, group2, d1=2, d2=2)
@@ -939,8 +923,8 @@ function set_periodic!(group1::AbstractPhysicalGroup, group2::AbstractPhysicalGr
     tags1 = [dt[2] for dt in dimtags(group1)]
     tags2 = [dt[2] for dt in dimtags(group2)]
 
-    bbox1 = get_bounding_box(dim, tags1)
-    bbox2 = get_bounding_box(dim, tags2)
+    bbox1 = SolidModels.bounds3d(group1)
+    bbox2 = SolidModels.bounds3d(group2)
 
     # Check if surfaces are aligned with x, y, or z axis
     plane1 = [isapprox(bbox1[i], bbox1[i + 3], atol=1e-6) for i = 1:3]
