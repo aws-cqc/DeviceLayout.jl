@@ -48,8 +48,7 @@ julia> 3 * Point(1, 1) + Point(1, 2)
 You can also do affine transformations by composing any number of `Translation`
 and `Rotation`s, which will return a callable object representing the
 transformation. You can type the following Unicode symbols with `\degree` and
-`\circ` tab-completions in the Julia REPL or using the Atom package
-`latex-completions`.
+`\circ` tab-completions in the Julia REPL or in VS Code with the [Julia extension](https://www.julia-vscode.org/docs/stable/).
 
 ```jldoctest
 julia> aff = Rotation(90°) ∘ Translation(Point(1, 2))

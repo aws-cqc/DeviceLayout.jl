@@ -510,7 +510,7 @@ Render `cs` to `sm`.
   - `meshing_parameters`: `MeshingParameters` allows customization of the top level meshing
     parameters when calling Gmsh.
 
-Available postrendering operations are [`translate!`](@ref), [`extrude_z!`](@ref), [`revolve!`](@ref),
+Available postrendering operations include [`translate!`](@ref), [`extrude_z!`](@ref), [`revolve!`](@ref),
 [`union_geom!`](@ref), [`intersect_geom!`](@ref), [`difference_geom!`](@ref), [`fragment_geom!`](@ref), and [`box_selection`](@ref).
 (The geometric Boolean operations are only available for models using the OpenCASCADE kernel.)
 

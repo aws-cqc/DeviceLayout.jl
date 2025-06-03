@@ -97,13 +97,13 @@ straight!(pa, 900μm)
 terminate!(pa)
 render!(cs, pa, SemanticMeta(:base_negative))
 
-render!(cs, centered(Rectangle(10mm, 10mm)), SemanticMeta(:chip_outline))
+render!(cs, centered(Rectangle(10mm, 10mm)), SemanticMeta(:chip_area))
 render!(cs, centered(Rectangle(9mm, 9mm)), SemanticMeta(:writeable_area))
 render!(cs, centered(Rectangle(2mm, 2mm)), SemanticMeta(:simulated_area))
 
 # Define z heights and thickness (where nonzero)
-layer_z = Dict(:chip_outline => -525μm, :simulated_area => -1mm)
-layer_thickness = Dict(:chip_outline => 525μm, :simulated_area => 2mm)
+layer_z = Dict(:chip_area => -525μm, :simulated_area => -1mm)
+layer_thickness = Dict(:chip_area => 525μm, :simulated_area => 2mm)
 
 # Define postrendering operations:
 # Extrusions, geometric Boolean operations, and other transformations
@@ -117,9 +117,9 @@ postrender_ops = vcat(
             "chip_sim", # New physical group name
             SolidModels.intersect_geom!, # Operation
             # Arguments: Object, tool, object dimension, tool dimension
-            ("simulated_area_extrusion", "chip_outline_extrusion", 3, 3), # Vol ∩ Vol
+            ("simulated_area_extrusion", "chip_area_extrusion", 3, 3), # Vol ∩ Vol
             # Keyword arguments
-            :remove_tool => true # Remove the "chip_outline_extrusion" group
+            :remove_tool => true # Remove the "chip_area_extrusion" group
         ),
         (   # Intersect writeable area with simulation volume
             "writeable_sim",

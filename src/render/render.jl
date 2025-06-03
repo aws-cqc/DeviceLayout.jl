@@ -174,7 +174,7 @@ end
 
 """
     render!(cell::Cell{S}, cs::GeometryStructure;
-        memoized_cells=Dict{CoordinateSystem, Cell}(),
+        memoized_cells=Dict{GeometryStructure, Cell}(),
         map_meta = identity,
         kwargs...) where {S}
 
@@ -182,16 +182,20 @@ Render a geometry structure (e.g., `CoordinateSystem`) to a cell.
 
 Passes each element and its metadata (mapped by `map_meta` if a method is supplied) to
 `render!(::Cell, element, ::Meta)`,
-traversing the references such that if a CoordinateSystem is referred to in multiple
+traversing the references such that if a structure is referred to in multiple
 places, it will become a single cell referred to in multiple places.
 
-Rendering a `GeometryEntity` to a `Cell` uses the optional keyword arguments
+Rendering a `GeometryStructure` to a `Cell` uses the optional keyword arguments
 
-  - `map_meta`, a function that takes a `Meta` object and returns another `Meta` object
+  - `map_meta`, a function that takes a `Meta` object and returns a `GDSMeta` object
     (or `nothing`, in which case rendering is skipped)
+  - `memoized_cells`, a dictionary used internally to make sure that if a structure is referred to in multiple
+    places, it will become a single cell referred to in multiple places. Calling this function with non-empty dictionary
+    `memoized_cells = Dict{GeometryStructure, Cell}(geom => prerendered_cell)`
+    is effectively a manual override that forces `geom` (which may be `cs` or any structure in
+    its reference hierarchy) to render as `prerendered_cell`.
 
-Usage note: calling this function with non-empty dictionary
-`memoized_cells = Dict{CoordinateSystem, Cell}(cs => cell)`
-is effectively a manual override that forces `cs` to render as `cell`.
+Additional keyword arguments are passed to [`to_polygons`](@ref) for each entity and may be used for
+certain entity types to control how they are converted to polygons.
 """
 render!(c::Cell, s::GeometryStructure; kwargs...) = _render!(c, s; kwargs...)

@@ -6,7 +6,7 @@ Within the DeviceLayout.jl type hierarchy, ["shapes" are `GeometryEntity` subtyp
 
 ["Structures" are `GeometryStructure` subtypes](./geometry.md#Structures) like `Cell`, `CoordinateSystem`, `Path`, and `Component`. A structure can contain many entities (its "elements"), and it associates each entity with its own piece of metadata (generally specifying the "layer" that entity belongs to).
 
-Structures may also contain [references to other structures](./geometry.md#References). The main type, `StructureReference`, wraps a structure together with a coordinate transformation that specifies its relative positioning and orientation within the containing structure.
+Structures may also contain [references to other structures](./geometry.md#References). The most common `GeometryReference` subtype, `StructureReference`, wraps a structure together with a coordinate transformation that specifies its relative positioning and orientation within the containing structure.
 
 To be more concrete, let's take a look at some examples that showcase different geometry-level workflows.
 

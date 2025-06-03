@@ -7,8 +7,9 @@ should be a subtype of [`DeviceLayout.AbstractPolygon`](@ref). Usually, when we 
     DeviceLayout.AbstractPolygon
 ```
 
-The most important polygon subtype is [`Polygon`](@ref), which is defined by a vector of points. `Polygon` is the primitive entity type for `Cell`—any shape being rendered to a `Cell` must end up represented as one or more `Polygon`. The `GeometryEntity` interface provides a `to_polygons` function that produces that representation. Most functions in the geometry interface (besides transformation, which must be implemented by subtypes) will fall back to calling `to_polygons` on entities first if there is no specialized method.
+The most important polygon subtype is [`Polygon`](@ref), which is defined by a vector of points. `Polygon` is the primitive entity type for `Cell`—any shape being rendered to a `Cell` must end up represented as one or more `Polygon`s. The `GeometryEntity` interface provides a `to_polygons` function that produces that representation.
 
+Most functions in the geometry interface (besides transformation, which must be implemented by subtypes) will fall back to calling `to_polygons` on entities first if there is no specialized method.
 For example, if you ask for the bounding box of a path node (which could define a shape like multiple parallel brushstrokes) `bounds(node)` will simply find the bounding box of the polygon(s) from `to_polygons(node)`, using the default tolerance for discretization of curves.
 
 ## Clipping
