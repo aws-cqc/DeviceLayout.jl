@@ -922,5 +922,7 @@ end
         # Halo uses original ClippedPolygon, hole in the center
         # Offset returns holes as reversed-orientation polygons [issue #11]
         @test Polygons.orientation(halo(dr1, 0.1μm)[2]) == -1 # still has a hole
+        @test footprint(union2d(r1, r1 + Point(40, 0)μm)) isa Rectangle # multipolygon => use bounds
+        @test halo(union2d(r3), 1μm, -0.5μm) == dr1 # ClippedPolygon halo with inner delta
     end
 end
