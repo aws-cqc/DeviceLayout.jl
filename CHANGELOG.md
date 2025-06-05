@@ -7,10 +7,13 @@ The format of this changelog is based on
 ## Upcoming
 
   - Added `set_periodic!` to `SolidModels` to enable periodic meshes.
+  - Minor documentation improvements
 
 ### Fixed
 
   - `DecoratedStyle` and `CompoundStyle` are no longer missing any of the methods `width`, `trace`, or `gap` (forwarded to the underlying style)
+  - `GeometryEntity` interface methods (`lowerleft/upperright/bounds`, `footprint`, `halo`) for `StyledEntity` now fall back to underlying entity as documented;
+    specialized behavior for `NoRender` and `OptionalStyle` is preserved but now documented
 
 ## 1.2.0 (2025-04-28)
 

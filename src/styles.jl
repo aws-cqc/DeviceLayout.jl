@@ -12,7 +12,11 @@ any entity type it can be applied to. As a fallback, it can implement
 polygons before applying the style.
 
 Unless implemented by the style, `lowerleft` and `upperright` (and hence `bounds`)
-of a styled entity will use the underlying entity's bounds.
+of a styled entity will use the underlying entity's bounds. Similarly, `footprint` and
+`halo` will fall back to using the underlying entity. Exceptions include the `NoRender`
+style, in which case the entity is treated as a zero-area `Rectangle`
+(ignored in collective `bounds` calculations), as well as `OptionalStyle`, in which
+case the default style is used (in case it has special behavior).
 """
 abstract type GeometryEntityStyle end
 
@@ -83,6 +87,12 @@ unstyled_type(::Type{StyledEntity{T, U, V}}) where {T, U, V} = unstyled_type(U)
 unstyled_type(::Type{T}) where {T <: GeometryEntity} = T
 unstyled_type(::T) where {T <: GeometryEntity} = unstyled_type(T)
 
+lowerleft(ent::StyledEntity{T, U, V}) where {T, U, V} = lowerleft(ent.ent)
+upperright(ent::StyledEntity{T, U, V}) where {T, U, V} = upperright(ent.ent)
+footprint(ent::StyledEntity{T, U, V}) where {T, U, V} = footprint(ent.ent)
+halo(ent::StyledEntity{T, U, V}, outer_delta, inner_delta=nothing) where {T, U, V} =
+    halo(ent.ent, outer_delta, inner_delta)
+
 """
     to_polygons(styled_ent::StyledEntity)
 
@@ -123,9 +133,16 @@ to_polygons(ent::GeometryEntity, ::Plain; kwargs...) = to_polygons(ent; kwargs..
     NoRender <: GeometryEntityStyle
 
 Style that marks an entity to be skipped when rendering.
+
+`NoRender`-styled entities have zero-area `bounds` and `footprint` and empty `halo`.
 """
 struct NoRender <: GeometryEntityStyle end
 to_polygons(::GeometryEntity{T}, ::NoRender; kwargs...) where {T} = Polygon{T}[]
+lowerleft(::StyledEntity{T, U, NoRender}) where {T, U} = zero(Point{T})
+upperright(::StyledEntity{T, U, NoRender}) where {T, U} = zero(Point{T})
+footprint(ent::StyledEntity{T, U, NoRender}) where {T, U} = bounds(ent)
+halo(::StyledEntity{T, U, NoRender}, outer_delta, inner_delta=nothing) where {T, U} =
+    Polygon{T}[]
 
 """
     struct MeshSized{T, S} <: GeometryEntityStyle where {T, S <: Real}
@@ -137,7 +154,7 @@ Style that annotates a GeometryEntity with a mesh size to use in SolidModel rend
 generated mesh will include a size field defined as:
 
 ```
-mesh size = `h` * max(`s_g`, (d/`h`)^`α`)
+mesh size = h * max(s_g, (d/h)^α)
 ```
 
 where d is the distance away from the styled entity, and `s_g` is the global mesh scale
@@ -162,7 +179,7 @@ Create a [`MeshSized`](@ref) entity, specifying a mesh size use in SolidModel re
 generated mesh will include a size field defined as:
 
 ```
-mesh size = `h` * max(`s_g`, (d/`h`)^`α`)
+mesh size = h * max(s_g, (d/h)^α)
 ```
 
 where d is the distance away from the styled entity, and `s_g` is the global mesh scale
@@ -187,6 +204,9 @@ to_polygons(ent::GeometryEntity, ::MeshSized; kwargs...) = to_polygons(ent; kwar
         false_style::GeometryEntityStyle=Plain(), default::Bool=true)
 
 Style that depends on a Boolean rendering option `flag` with default `default`.
+
+`lowerleft`, `upperright`, `bounds`, `footprint`, and `halo` are forwarded to the
+underlying entity styled with the default style.
 
 # Examples
 
@@ -225,6 +245,26 @@ function transform(sty::OptionalStyle, f::Transformation)
         false_style=transform(sty.false_style, f),
         default=sty.default
     )
+end
+
+default_style(sty::OptionalStyle) = sty.default ? sty.true_style : sty.false_style
+
+# Apply default style for interface functions
+function lowerleft(ent::StyledEntity{T, U, OptionalStyle}) where {T, U}
+    return lowerleft(default_style(ent.sty)(ent.ent))
+end
+function upperright(ent::StyledEntity{T, U, OptionalStyle}) where {T, U}
+    return upperright(default_style(ent.sty)(ent.ent))
+end
+function footprint(ent::StyledEntity{T, U, OptionalStyle}) where {T, U}
+    return footprint(default_style(ent.sty)(ent.ent))
+end
+function halo(
+    ent::StyledEntity{T, U, OptionalStyle},
+    outer_delta,
+    inner_delta=nothing
+) where {T, U}
+    return halo(default_style(ent.sty)(ent.ent), outer_delta, inner_delta)
 end
 
 """

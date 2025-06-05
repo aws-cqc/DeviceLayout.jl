@@ -87,6 +87,12 @@
         render!(c, ToTolerance(opt_round_plus, 0.01))
         @test length(points(last(elements(c)))) < length(points(to_polygons(pr)))
         @test length(points(last(elements(c)))) > length(points(to_polygons(plus)))
+        @test halo(opt_round_plus, 2) == halo(plus, 2) # forwarded to underlying ent
+        @test footprint(opt_round_plus) == footprint(plus)
+        # Other interface functions use default style; NoRender -> zero bounds
+        @test isempty(halo(opt_plus, 2))
+        @test !isproper(footprint(opt_plus))
+        @test !isproper(bounds(opt_plus))
     end
 
     @testset "Path Nodes" begin
