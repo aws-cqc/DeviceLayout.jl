@@ -418,6 +418,16 @@ DeviceLayout.lowerleft(x::Polygon) = lowerleft(x.p)
 DeviceLayout.upperright(x::Polygon) = upperright(x.p)
 DeviceLayout.footprint(x::Polygon) = x
 
+# ClippedPolygon footprint = outer contour if there's only one
+function DeviceLayout.footprint(x::ClippedPolygon{T}) where {T}
+    isempty(x.tree.children) && return Rectangle(zero(T), zero(T))
+    if length(x.tree.children) == 1
+        return Polygon(x.tree.children[1].contour)
+    else
+        return bounds(to_polygons(x))
+    end
+end
+
 function convert(::Type{Polygon{T}}, s::Rectangle) where {T}
     ll = convert(Point{T}, s.ll)
     ur = convert(Point{T}, s.ur)
@@ -803,6 +813,14 @@ function halo(
     outer_delta,
     inner_delta=nothing
 ) where {T, S <: AbstractPolygon{T}}
+    isnothing(inner_delta) && return offset(polys, convert(T, outer_delta))
+    return difference2d(
+        offset(polys, convert(T, outer_delta)),
+        offset(polys, convert(T, inner_delta))
+    )
+end
+
+function halo(polys::AbstractPolygon{T}, outer_delta, inner_delta=nothing) where {T}
     isnothing(inner_delta) && return offset(polys, convert(T, outer_delta))
     return difference2d(
         offset(polys, convert(T, outer_delta)),

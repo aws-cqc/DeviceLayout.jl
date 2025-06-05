@@ -912,5 +912,15 @@ end
         @test u[1] == u.tree.children[1]
         @test u[1, 1] == u.tree.children[1].children[1]
         @test u[1, 1, 1] == u.tree.children[1].children[1].children[1]
+        # Footprint uses outer contour when there's only one
+        dr1 = difference2d(r2, r4)
+        @test Polygons.circularapprox(
+            rotate(footprint(dr1), 45°).p,
+            rotate(r2, 45°).p,
+            atol=1e-9μm
+        )
+        # Halo uses original ClippedPolygon, hole in the center
+        # Offset returns holes as reversed-orientation polygons [issue #11]
+        @test Polygons.orientation(halo(dr1, 0.1μm)[2]) == -1 # still has a hole
     end
 end

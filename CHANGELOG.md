@@ -6,7 +6,7 @@ The format of this changelog is based on
 
 ## Upcoming
 
-  - Added `set_periodic!` to `SolidModels` to enable periodic meshes.
+  - Added `set_periodic!` to `SolidModels` to enable periodic meshes
   - Minor documentation improvements
 
 ### Fixed
@@ -14,6 +14,8 @@ The format of this changelog is based on
   - `DecoratedStyle` and `CompoundStyle` are no longer missing any of the methods `width`, `trace`, or `gap` (forwarded to the underlying style)
   - `GeometryEntity` interface methods (`lowerleft/upperright/bounds`, `footprint`, `halo`) for `StyledEntity` now fall back to underlying entity as documented;
     specialized behavior for `NoRender` and `OptionalStyle` is preserved but now documented
+  - `halo(c::ClippedPolygon)` is now consistent with the halo of an `AbstractPolygon` vector containing `c`, using the clipped polygon itself rather than its `bounds`
+  - `footprint(::ClippedPolygon)` now uses outer contour if there's only one (and `bounds` otherwise, as before)
 
 ## 1.2.0 (2025-04-28)
 
