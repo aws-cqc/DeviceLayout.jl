@@ -993,6 +993,34 @@ function remove_group!(group::PhysicalGroup; recursive=true, remove_entities=fal
 end
 
 """
+    check_overlap(sm::SolidModel; strict=:error)
+
+Check for overlap/intersections between SolidModel groups of the same dimension.
+Intersections (if any) for entities of dimension dim should have dim-1. Otherwise it means there is overlap.
+
+End in error if `strict` is `:error`, display a warning if `strict` is `:warn`, skip the check if `strict` is `:no`.
+"""
+function check_overlap(sm::SolidModel; strict=:error)
+    if strict ∉ [:error, :warn, :no]
+        @warn "Keyword `strict` in `check_overlap` should be `:error`, `:warn`, or `:no` (got `:$strict`). Proceeding as though `strict=:no` were used."
+    end
+    strict == :no && return
+    for dim in [1, 2, 3]
+        for (name1, _) in SolidModels.dimgroupdict(sm, dim)
+            for (name2, _) in SolidModels.dimgroupdict(sm, dim)
+                name1 == name2 && continue
+                intersections = intersect_geom!(sm, name1, name2, dim, dim)
+                error_msg = "Overlap of SolidModel groups $name1 and $name2."
+                for intersection in intersections
+                    intersection[1] > dim - 1 && strict == :warn && @warn error_msg
+                    intersection[1] > dim - 1 && strict == :error && @error error_msg
+                end
+            end
+        end
+    end
+end
+
+"""
     staple_bridge_postrendering(; levels=[], base, bridge, bridge_height=1μm, output="bridge_metal")
 
 Returns a vector of postrendering operations for creating air bridges from a `base` and
