@@ -1053,6 +1053,13 @@ import DeviceLayout.SolidModels.STP_UNIT
     render!(sm, cs)
     @test isnothing(SolidModels.check_overlap(sm; strict=:error))
 
+    @test isnothing(
+        @test_logs (
+            :warn,
+            "Keyword `strict` in `check_overlap` should be `:error`, `:warn`, or `:no` (got `:bla`). Proceeding as though `strict=:no` were used."
+        ) SolidModels.check_overlap(sm; strict=:bla)
+    )
+
     # TODO: Composing OptionalStyle
 
     # Explicitly MeshSized Path.
