@@ -7,6 +7,7 @@ The format of this changelog is based on
 ## Upcoming
 
   - Added `set_periodic!` to `SolidModels` to enable periodic meshes
+  - `CompositeComponent` geometry now preserves subcomponents instead of replacing them with `CoordinateSystem`s, unless `build!` is called explicitly on the composite component's schematic or the parent schematic
   - Minor documentation improvements
 
 ### Fixed

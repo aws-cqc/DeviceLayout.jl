@@ -95,7 +95,7 @@ function _graph! end
 """
     geometry(cc:AbstractCompositeComponent)
 
-Return the `CoordinateSystem` resulting from `build!(plan(graph(cc)))`.
+Return the `CoordinateSystem` resulting from `plan(graph(cc)).coordinate_system`.
 """
 function geometry(cc::AbstractCompositeComponent)
     return geometry_from_graph(cc)
@@ -112,18 +112,14 @@ function schematic(cc::AbstractCompositeComponent)
     for (k, v) in pairs(floorplan.ref_dict)
         cc._schematic.ref_dict[k] = v
     end
+    cc._schematic.checked[] = true # Skip check
     return cc._schematic
 end
 
 const COMPOSITE_NODE_ID_SEPARATOR = "__"
 
 function geometry_from_graph(cc::AbstractCompositeComponent)
-    floorplan = schematic(cc)
-    if !floorplan.checked[]
-        floorplan.checked[] = true # Skip check
-        build!(floorplan)
-    end
-    return floorplan.coordinate_system
+    return schematic(cc).coordinate_system
 end
 
 compose_hookname(cc::AbstractCompositeComponent, i::Int, h::Symbol) =

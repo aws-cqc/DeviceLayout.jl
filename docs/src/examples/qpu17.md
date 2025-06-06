@@ -20,7 +20,7 @@ nothing # hide
 <img src="../qpu17.png"/>
 ```
 
-Note that the timings above are around 90% compilation. If we wanted to tweak some parameters and then run the script again in the same Julia session, then it would take around 10% as long:
+Note that the timings above are around 95% compilation. If we wanted to tweak some parameters and then run the script again in the same Julia session, then it would take around 5% as long:
 
 ```@example 1
 @time "Total" schematic, artwork = DemoQPU17.qpu17_demo(savegds=false)
