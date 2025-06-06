@@ -1003,7 +1003,7 @@ import DeviceLayout.SolidModels.STP_UNIT
     cs = CoordinateSystem("test", nm)
     place!(cs, centered(Rectangle(500μm, 100μm)), :l1)
     postrender_ops = [("ext", SolidModels.extrude_z!, (:l1, 20μm))]
-    sm = SolidModel("test"; overwrite=true)
+    sm = test_sm()
     zmap = (m) -> (0μm)
     render!(sm, cs, zmap=zmap, postrender_ops=postrender_ops)
     sm["Xmin"] = SolidModels.get_boundary(sm["ext", 3]; direction="X", position="min")
@@ -1023,6 +1023,35 @@ import DeviceLayout.SolidModels.STP_UNIT
     )
     periodic_tags = SolidModels.set_periodic!(sm["Xmin", 2], sm["Xmax", 2])
     @test !isempty(periodic_tags)
+
+    # check_overlap
+    cs = CoordinateSystem("test", nm)
+    r1 = Rectangle(2μm, 2μm)
+    r2 = translate(r1, Point(1μm, 0μm))
+    r3 = translate(r1, Point(2μm, 0μm))
+    place!(cs, r1, SemanticMeta(Symbol("r1")))
+    place!(cs, r2, SemanticMeta(Symbol("r2")))
+    sm = test_sm()
+    render!(sm, cs)
+    @test isnothing(
+        @test_logs (:error, "Overlap of SolidModel groups r1 and r2.") (
+            :error,
+            "Overlap of SolidModel groups r2 and r1."
+        ) SolidModels.check_overlap(sm; strict=:error)
+    )
+    @test isnothing(
+        @test_logs (:warn, "Overlap of SolidModel groups r1 and r2.") (
+            :warn,
+            "Overlap of SolidModel groups r2 and r1."
+        ) SolidModels.check_overlap(sm; strict=:warn)
+    )
+
+    cs = CoordinateSystem("test", nm)
+    place!(cs, r1, SemanticMeta(Symbol("r1")))
+    place!(cs, r3, SemanticMeta(Symbol("r3")))
+    sm = test_sm()
+    render!(sm, cs)
+    @test isnothing(SolidModels.check_overlap(sm; strict=:error))
 
     # TODO: Composing OptionalStyle
 
