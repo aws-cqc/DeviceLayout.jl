@@ -472,6 +472,13 @@ fields throughout the domain.
     `gmsh.options.set_number(key, value)` for each `key => value` pair. Refer to the gmsh
     documentation for a list of available options. Will override any other options as is
     called last.
+  - `group_sizes` used to specify (PhysicalGroup => (mesh size in μm, mesh scaling)) pairs
+    as an alternative mechanism to `MeshSized`, used to specify the size on an
+    entire `PhysicalGroup`. This explicitly samples the entire surface, and is particularly to
+    be used with entities that cannot be labeled using `MeshSized` such as three dimensional
+    entities created during post rendering operations. Sizes specified in this way are
+    equivalent to having a `MeshSized` on the entire physical group, and additionally
+    setting `apply_size_to_surfaces` *for only this group*.
 """
 Base.@kwdef struct MeshingParameters
     mesh_scale::Float64 = 1.0
@@ -482,6 +489,7 @@ Base.@kwdef struct MeshingParameters
     surface_mesh_algorithm::Int = 6
     volume_mesh_algorithm::Int = 1
     options::Dict{String, Float64} = Dict{String, Float64}()
+    group_sizes::Dict{String, Tuple{Float64, Float64}} = Dict{String, Tuple{Float64, Float64}}()
 end
 
 """
@@ -589,7 +597,7 @@ function render!(
     end
 
     # Make agglomerated physical group for sizes
-    meshsize_dict = Dict{String, Tuple{Float64, Float64}}()
+    meshsize_dict = Dict{String, Tuple{Float64, Float64, Bool}}()
     for ((h, α), dts) in sizeandgrading_dimtags
         iszero(h) && continue
         h_name = uniquename("mesh_size")
@@ -599,7 +607,7 @@ function render!(
             sm[h_name] = union_geom!(sm[h_name, 2], sm[h_name, 2], remove_object=true)
         end
         # gmsh is always interpreting in mm units.
-        meshsize_dict[h_name] = (h, α < 0 ? meshing_parameters.α_default : α)
+        meshsize_dict[h_name] = (h, α < 0 ? meshing_parameters.α_default : α, meshing_parameters.apply_size_to_surfaces)
     end
 
     # Extrusions, Booleans, etc
@@ -609,8 +617,12 @@ function render!(
     _synchronize!(sm)
     _fragment_and_map!(sm)
 
+    # Add manually specified group sizes onto the sizing dict
+    for (k, v) in meshing_parameters.group_sizes
+        meshsize_dict[k] = (v..., true)
+    end
     # Set sizes
-    for (g, (h_name, (h, α))) in enumerate(pairs(meshsize_dict))
+    for (g, (h_name, (h, α))) in enumerate(meshsize_dict)
         if hasgroup(sm, h_name, 2)
             group = sm[h_name, 2]
             pts = gmsh.model.get_boundary(dimtags(group), false, true, true) # not combined
