@@ -35,7 +35,6 @@ copy(s::OffsetSegment) = OffsetSegment(copy(s.seg), s.offset)
 getoffset(s::ConstantOffset, l...) = s.offset
 getoffset(s::GeneralOffset{T}) where {T} = l -> uconvert(unit(T), s.offset(l))
 getoffset(s::GeneralOffset, l) = getoffset(s)(l)
-getoffset(s::Segment{T}, l...) where {T} = zero(T)
 offset_derivative(seg::ConstantOffset, s) = 0.0
 offset_derivative(seg::GeneralOffset, s) = ForwardDiff.derivative(seg.offset, s)
 
@@ -90,24 +89,32 @@ function curvatureradius(seg::ConstantOffset, s)
 end
 
 function curvatureradius(seg::GeneralOffset, s)
-    # This is not exactly right, particularly when the curvature is changing?
-    r = curvatureradius(seg.seg, s)
-    reparam = 1 / (sqrt(1 + offset_derivative(seg, s)^2) * (1 - getoffset(seg, s) / r))
-    base_dir = direction(seg.seg, s)
-    base_tangent = Point(cos(base_dir), sin(base_dir))
-    base_normal = Point(-base_tangent.y, base_tangent.x)
+    # This one is only approximate for BSpline offsets
+    # let s be seg.seg arclength, let t be seg arclength
+    # tangent(seg, s) defined above is dseg/ds
+    # ||d^2/dt^2 seg(s)|| = ||d/dt tangent(seg, s) ds/dt||
+    # ||d/ds tangent(seg, s)|| ||ds/dt||^2
+    # Where ||ds/dt|| = ||tangent(seg, s)|| = 1 for non-offset segments
+    # But needs a correction for offsets
+    # dt/ds = κ n # Sorry t is tangent for the rest of this comment
+    # dn/ds = -κ t
+    # || κ n + (d2_offset n - κ t d_offset) - d_offset κ t - offset κ^2 n - offset t dκ/ds ||
 
-    dn = -(1 / r) * base_tangent
-    ddn = -(1 / r)^2 * [base_normal.x, base_normal.y]
+    r = curvatureradius(seg.seg, s)
+    reparam = 1 / (sqrt((1 - getoffset(seg, s) / r)^2 + offset_derivative(seg, s)^2))
+    base_dir = direction(seg.seg, s)
+    base_tangent = Point(cos(base_dir), sin(base_dir)) # True for non-offset segments (arclength parameterized)
+    base_normal = Point(-base_tangent.y, base_tangent.x)
 
     d_offset = offset_derivative(seg, s)
     d2_offset = ForwardDiff.derivative(s_ -> offset_derivative(seg, s_), s)
     d2_seg =
         (
             (1 / r) * base_normal +
-            ddn * getoffset(seg, s) +
-            2 * dn * d_offset +
-            base_normal * d2_offset
+            d2_offset * base_normal +
+            -2 * (1 / r) * base_tangent * d_offset +
+            -((1 / r) * base_normal) * ((1 / r) * getoffset(seg, s))
+            # - getoffset(seg, s) * base_tangent * dκds # Nonzero for BSplines but basically fine to ignore
         ) * reparam^2
     return sign(r) / norm(d2_seg)
 end
