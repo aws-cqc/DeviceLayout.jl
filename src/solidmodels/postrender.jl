@@ -1001,25 +1001,22 @@ Intersections (if any) for entities of dimension dim should have dim-1. Otherwis
 Return the overlapping groups as a vector of `(group1, group2, dimension)` `Tuple`s.
 """
 function check_overlap(sm::SolidModel)
-    overlapping_groups = []
-    for dim in [1, 2, 3]
+    overlapping_groups = Tuple{String, String, Int}[]
+    for dim = 1:3
         for (name1, _) in SolidModels.dimgroupdict(sm, dim)
             for (name2, _) in SolidModels.dimgroupdict(sm, dim)
-                name1 == name2 && continue
+                name1 >= name2 && continue
                 intersections = intersect_geom!(sm, name1, name2, dim, dim)
                 for intersection in intersections
                     if intersection[1] > dim - 1
                         @warn "Overlap of SolidModel groups $name1 and $name2 of dimension $dim."
-                        push!(
-                            overlapping_groups,
-                            (min(name1, name2), max(name1, name2), dim)
-                        )
+                        push!(overlapping_groups, (name1, name2, dim))
                     end
                 end
             end
         end
     end
-    return unique(overlapping_groups)
+    return overlapping_groups
 end
 
 """

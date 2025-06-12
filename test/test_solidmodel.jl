@@ -1033,10 +1033,13 @@ import DeviceLayout.SolidModels.STP_UNIT
     place!(cs, r2, SemanticMeta(Symbol("r2")))
     sm = test_sm()
     render!(sm, cs)
-    @test @test_logs (:warn, "Overlap of SolidModel groups r1 and r2 of dimension 2.") (
-        :warn,
-        "Overlap of SolidModel groups r2 and r1 of dimension 2."
-    ) SolidModels.check_overlap(sm) == [("r1", "r2", 2)]
+    @test @test_logs (:warn, "Overlap of SolidModel groups r1 and r2 of dimension 2.") SolidModels.check_overlap(
+        sm
+    ) == [(
+        "r1",
+        "r2",
+        2
+    )]
 
     cs = CoordinateSystem("test", nm)
     place!(cs, r1, SemanticMeta(Symbol("r1")))
