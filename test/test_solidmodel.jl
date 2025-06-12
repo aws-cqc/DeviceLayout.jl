@@ -1033,32 +1033,17 @@ import DeviceLayout.SolidModels.STP_UNIT
     place!(cs, r2, SemanticMeta(Symbol("r2")))
     sm = test_sm()
     render!(sm, cs)
-    @test isnothing(
-        @test_logs (:error, "Overlap of SolidModel groups r1 and r2.") (
-            :error,
-            "Overlap of SolidModel groups r2 and r1."
-        ) SolidModels.check_overlap(sm; strict=:error)
-    )
-    @test isnothing(
-        @test_logs (:warn, "Overlap of SolidModel groups r1 and r2.") (
-            :warn,
-            "Overlap of SolidModel groups r2 and r1."
-        ) SolidModels.check_overlap(sm; strict=:warn)
-    )
+    @test @test_logs (:warn, "Overlap of SolidModel groups r1 and r2 of dimension 2.") (
+        :warn,
+        "Overlap of SolidModel groups r2 and r1 of dimension 2."
+    ) SolidModels.check_overlap(sm) == [("r1", "r2", 2)]
 
     cs = CoordinateSystem("test", nm)
     place!(cs, r1, SemanticMeta(Symbol("r1")))
     place!(cs, r3, SemanticMeta(Symbol("r3")))
     sm = test_sm()
     render!(sm, cs)
-    @test isnothing(SolidModels.check_overlap(sm; strict=:error))
-
-    @test isnothing(
-        @test_logs (
-            :warn,
-            "Keyword `strict` in `check_overlap` should be `:error`, `:warn`, or `:no` (got `:bla`). Proceeding as though `strict=:no` were used."
-        ) SolidModels.check_overlap(sm; strict=:bla)
-    )
+    @test isempty(SolidModels.check_overlap(sm))
 
     # TODO: Composing OptionalStyle
 
