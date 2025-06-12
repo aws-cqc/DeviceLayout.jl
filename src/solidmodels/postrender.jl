@@ -1002,7 +1002,7 @@ Return the overlapping groups as a vector of `(group1, group2, dimension)` `Tupl
 """
 function check_overlap(sm::SolidModel)
     overlapping_groups = Tuple{String, String, Int}[]
-    for dim = 1:3
+    for dim in 1:3
         for (name1, _) in SolidModels.dimgroupdict(sm, dim)
             for (name2, _) in SolidModels.dimgroupdict(sm, dim)
                 name1 >= name2 && continue
