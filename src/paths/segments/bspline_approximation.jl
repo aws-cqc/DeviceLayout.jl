@@ -1,4 +1,4 @@
-# Arbitrary segment: Discretize according to approximation's curvature
+# Sample points used to estimate approximation error
 function _testvals(f::Paths.Segment{T}, f_approx::Paths.BSpline) where {T}
     l = Paths.pathlength(f)
     tgrid = DeviceLayout.discretization_grid(f, _default_curve_atol(T))
@@ -10,6 +10,7 @@ function _testvals(f::Paths.Segment{T}, f_approx::Paths.BSpline) where {T}
     return tgrid, exact, normal, offsets
 end
 
+# For offset segments, sample non-offset curve, plus normals and offset values
 function _testvals(f::Paths.OffsetSegment{T}, f_approx::Paths.BSpline) where {T}
     l = Paths.pathlength(f)
     tgrid = DeviceLayout.discretization_grid(f, _default_curve_atol(T))
@@ -24,8 +25,7 @@ end
 
 # Offset bsplines use tgrid directly to calculate a bit faster
 function _testvals(f::Paths.GeneralOffset{T, BSpline{T}}, f_approx::Paths.BSpline) where {T}
-    h(t) = Paths.Interpolations.hessian(f.seg.r, t)[1]
-    tgrid = DeviceLayout.discretization_grid(h, _default_curve_atol(T))
+    tgrid = DeviceLayout.discretization_grid(f.seg, _default_curve_atol(T))
     sgrid = t_to_arclength.(Ref(f.seg), tgrid)
     offsets = abs.(getoffset.(Ref(f), sgrid))
     # Don't actually calculate the exact curve, we'll only check that the offsets are correct
@@ -40,8 +40,7 @@ function _testvals(
     f::Paths.ConstantOffset{T, BSpline{T}},
     f_approx::Paths.BSpline
 ) where {T}
-    h(t) = Paths.Interpolations.hessian(f.seg.r, t)[1]
-    tgrid = DeviceLayout.discretization_grid(h, _default_curve_atol(T))
+    tgrid = DeviceLayout.discretization_grid(f.seg, _default_curve_atol(T))
     off = abs(getoffset(f))
     # Don't actually calculate the exact curve, we'll only check that the offset is correct
     exact = f.seg.r.(tgrid)
@@ -58,8 +57,12 @@ function _split_testvals(testvals, seg::Segment{T}) where {T}
     tgrid, exact, normal, offset = testvals
     t_half = _t_halflength(seg)
     idx_h2 = findfirst(t -> t > t_half, tgrid)
-    isnothing(idx_h2) &&
-        error("B-spline approximation of $seg is not converging; try increasing `atol`.")
+    isnothing(idx_h2) && # segment is so short there are no points in test discretization
+        @error """
+        B-spline approximation of $seg failed to converge.
+        Check curve for cusps and self-intersections, which may cause approximation to fail.
+        Otherwise, increase `atol` to relax tolerance.
+        """
     t_h1 = tgrid[1:(idx_h2 - 1)]
     t_h2 = tgrid[idx_h2:end]
     new_tgrid_h1 = t_h1 / t_half
@@ -154,7 +157,11 @@ function bspline_approximation(
     split_tv = [testvals]
     while err > atol
         if refine > maxits
-            @warn "Maximum error $err > tolerance $atol with $(refine-1) refinement iterations. Increase `maxits` to refine further or increase `atol` to relax tolerance."
+            @warn """
+            Maximum error $err > tolerance $atol after $(refine-1) refinement iterations.
+            Check curve $f for cusps and self-intersections, which may cause approximation to fail.
+            Increase `maxits` or manually split path to refine further, or increase `atol` to relax tolerance.
+            """
             break
         end
         err = 0.0 * oneunit(T)
