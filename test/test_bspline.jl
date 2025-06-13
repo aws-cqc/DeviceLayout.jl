@@ -136,15 +136,15 @@ end
         g = g_fd(c, s, ds)
         h = h_fd(c, s, ds)
         ((g.x^2 + g.y^2)^(3 // 2)) / (g.x * h.y - g.y * h.x)
-    end
+    end # assumes constant d(arclength)/ds
     # For BSplines, curvature radius calculation is only approximate, but not bad
     c = curv[1].curves[1] # ConstantOffset BSpline
     @test abs(curvatureradius_fd(c, 10μm) - Paths.curvatureradius(c, 10μm)) < 1nm
     c = curv[3].curves[1] # GeneralOffset BSpline
     @test abs(curvatureradius_fd(c, 10μm) - Paths.curvatureradius(c, 10μm)) < 50nm
     c = curv[5].curves[1] # GeneralOffset Turn
-    # Paths.curvatureradius is exact for Turn offsets, the finite difference is wrong
-    @test abs(curvatureradius_fd(c, 10μm) - Paths.curvatureradius(c, 10μm)) < 600nm
+    # Paths.curvatureradius is exact for Turn offsets
+    @test abs(curvatureradius_fd(c, 10μm) - Paths.curvatureradius(c, 10μm)) < 1nm
     approx = Paths.bspline_approximation(c, atol=100.0nm)
     pts = DeviceLayout.discretize_curve(c, 100.0nm)
     pts_approx = DeviceLayout.discretize_curve(approx, 100.0nm)

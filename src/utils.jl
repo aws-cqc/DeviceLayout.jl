@@ -204,10 +204,12 @@ function discretization_grid(s::Paths.Segment, tolerance)
 end
 
 function discretization_grid(s::Paths.BSpline, tolerance)
+    # Assume ds/dt ≈ 1 to avoid converting between arclength and t
     h(t) = Paths.Interpolations.hessian(s.r, t)[1]
     return discretization_grid(h, tolerance)
 end
 
+# Discretize using marching algorithm based on Hessian or curvature
 function discretization_grid(
     ddf,
     tolerance,
@@ -219,20 +221,28 @@ function discretization_grid(
     ts[1] = bnds[1]
     t = bnds[1]
     i = 1
+    cc = norm(ddf(t))
     while t < bnds[2]
         i = i + 1
         i > length(ts) && error(
             "Too many points in curve for GDS. Increase discretization tolerance or split the curve."
         )
         t = ts[i - 1]
-        cc = norm(ddf(t))
-        if cc >= 1e-9 * oneunit(typeof(cc))
+        # Set dt based on distance from chord assuming constant curvature
+        if cc >= 1e-9 * oneunit(typeof(cc)) # Update dt if curvature is not near zero
             dt = uconvert(NoUnits, sqrt(8 * tolerance / cc) / t_scale)
-            # Also assumes third derivative is small
         end
         if t + dt >= bnds[2]
             dt = bnds[2] - t
         end
+        # Check that curvature didn't increase too much (decrease is fine)
+        # Rare but may happen near inflection points
+        cc_next = norm(ddf(t + dt))
+        if (t_scale * dt)^2 * (cc_next - cc) / 24 > tolerance
+            dt = uconvert(NoUnits, sqrt(8 * tolerance / cc_next) / t_scale)
+            cc_next = norm(ddf(t + dt))
+        end
+        cc = cc_next
         ts[i] = min(bnds[2], t + dt)
         t = ts[i]
     end
