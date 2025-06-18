@@ -101,3 +101,72 @@
     @test (pa2[1].seg)(Paths.t_to_arclength(pa2[1].seg, 0.2)) ≈
           splice_transform(b4.r(tsplit2 + (1 - tsplit2) * 0.2)) atol = 1e-9
 end
+
+@testset "BSpline approximation" begin
+    pa = Path(Point(0.0, 0.0)nm, α0=90°)
+    bspline!(
+        pa,
+        [Point(1000.0μm, 1000.0μm), Point(2500.0μm, 2500.0μm)],
+        -90°,
+        Paths.SimpleCPW(20μm, 10μm)
+    )
+    bspline!(pa, [Point(100.0μm, 100.0μm)], 270°, Paths.TaperCPW(20μm, 10μm, 2μm, 1μm))
+    turn!(pa, 90°, 100μm, Paths.TaperCPW(2μm, 1μm, 20μm, 10μm))
+    turn!(pa, -90°, 100μm, Paths.CPW(20μm, 10μm))
+    curv = vcat(pathtopolys(pa)...)
+    # First BSpline is hardest, maybe due to intermediate waypoint?
+    lims = [45, 45, 20, 20, 9, 9, 9, 9]
+    for (poly, lim) in zip(curv, lims)
+        for curve in poly.curves
+            approx = Paths.bspline_approximation(curve)
+            @test length(approx.segments) < lim
+            @test Paths.arclength(approx) ≈ Paths.arclength(curve) atol = 1nm
+        end
+    end
+    # Relaxed tolerance
+    approx = Paths.bspline_approximation(curv[1].curves[1], atol=100.0nm)
+    @test length(approx.segments) < 20
+    # Non-offset curve approximation
+    approx = Paths.bspline_approximation(pa[4].seg)
+    @test length(approx.segments) < 9
+    # Offset curvatureradius
+    g_fd(c, s, ds=10.0nm) = (c(s + ds / 2) - c(s - ds / 2)) / ds
+    h_fd(c, s, ds=10.0nm) = g_fd(s_ -> g_fd(c, s_, ds), s, ds)
+    curvatureradius_fd(c, s, ds=10.0nm) = begin
+        g = g_fd(c, s, ds)
+        h = h_fd(c, s, ds)
+        ((g.x^2 + g.y^2)^(3 // 2)) / (g.x * h.y - g.y * h.x)
+    end # assumes constant d(arclength)/ds
+    # For BSplines, curvature radius calculation is only approximate, but not bad
+    c = curv[1].curves[1] # ConstantOffset BSpline
+    @test abs(curvatureradius_fd(c, 10μm) - Paths.curvatureradius(c, 10μm)) < 1nm
+    c = curv[3].curves[1] # GeneralOffset BSpline
+    @test abs(curvatureradius_fd(c, 10μm) - Paths.curvatureradius(c, 10μm)) < 50nm
+    c = curv[5].curves[1] # GeneralOffset Turn
+    # Paths.curvatureradius is exact for Turn offsets
+    @test abs(curvatureradius_fd(c, 10μm) - Paths.curvatureradius(c, 10μm)) < 1nm
+    approx = Paths.bspline_approximation(c, atol=100.0nm)
+    pts = DeviceLayout.discretize_curve(c, 100.0nm)
+    pts_approx = vcat(DeviceLayout.discretize_curve.(approx.segments, 100.0nm)...)
+    area(p) =
+        sum(
+            (gety.(p.p) + gety.(circshift(p.p, -1))) .*
+            (getx.(p.p) - getx.(circshift(p.p, -1)))
+        ) / 2
+    p = Polygon([pts; reverse(pts_approx)])
+    @test abs(area(p) / perimeter(p)) < 100nm # It's actually ~25nm but the guarantee is ~< tolerance
+    c = curv[8].curves[1] # ConstantOffset Turn
+    @test Paths.curvatureradius(c, 10μm) == sign(c.seg.α) * c.seg.r - c.offset
+    @test curvatureradius_fd(c, 10μm) ≈ Paths.curvatureradius(c, 10μm) atol = 1nm
+
+    # Failure due to self-intersection
+    pa2 = Path(Point(0.0, 0.0)nm, α0=90°)
+    bspline!(
+        pa2,
+        [Point(-1000.0μm, 1000.0μm), Point(500.0μm, 500.0μm)],
+        0°,
+        Paths.SimpleCPW(20μm, 10μm)
+    )
+    cps = vcat(pathtopolys(pa2)...)
+    @test_logs (:warn, r"Maximum error") Paths.bspline_approximation(cps[1].curves[1])
+end
