@@ -147,7 +147,7 @@ end
     @test abs(curvatureradius_fd(c, 10μm) - Paths.curvatureradius(c, 10μm)) < 1nm
     approx = Paths.bspline_approximation(c, atol=100.0nm)
     pts = DeviceLayout.discretize_curve(c, 100.0nm)
-    pts_approx = DeviceLayout.discretize_curve(approx, 100.0nm)
+    pts_approx = vcat(DeviceLayout.discretize_curve.(approx.segments, 100.0nm)...)
     area(p) =
         sum(
             (gety.(p.p) + gety.(circshift(p.p, -1))) .*
