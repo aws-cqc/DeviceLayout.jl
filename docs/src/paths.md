@@ -46,8 +46,7 @@ The following example illustrates the use of automatic tapering. First, we
 construct a taper with two different traces surrounding it:
 
 ```@example 1
-using DeviceLayout, FileIO;
-import DeviceLayout: nm, μm; # hide
+using DeviceLayout, DeviceLayout.PreferredUnits, FileIO
 
 p = Path(μm)
 straight!(p, 10μm, Paths.Trace(2.0μm))

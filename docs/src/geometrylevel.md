@@ -15,8 +15,8 @@ To be more concrete, let's take a look at some examples that showcase different 
 Starting with a rectangle, let's demonstrate [transformations](./transformations.md), [polygon clipping](./polygons.md#Clipping), and a [style](./entitystyles.md).
 
 ```@example 1
-using DeviceLayout, FileIO
-import DeviceLayout: μm, nm
+using DeviceLayout, DeviceLayout.PreferredUnits
+using FileIO # You will have to add FileIO to the environment if you haven't already
 
 r = centered(Rectangle(20μm, 40μm))
 # Create a second rectangle rotated by 90 degrees, positioned below the first
@@ -100,7 +100,7 @@ nothing; # hide
     
     The SVG backend only draws the top-level `Cell`, so it's necessary to [`flatten`](./geometry.md#Flattening) the cell before saving. `flatten` traverses references to place all entities in a single `Cell`, applying transformations as necessary.
 
-(For further examples, we'll hide the line that saves to SVG just to display a cell.)
+(For further examples, we'll hide the line that flattens and saves to SVG just to display a cell.)
 
 Of course, we can also add `Cell` references directly to a `Cell`, for example to apply a global rotation:
 
@@ -161,10 +161,10 @@ Of course, eventually we'll want to turn this into a `Cell`. Since we were using
 layer_record = Dict(:bridge => GDSMeta(1), :metal_negative => GDSMeta())
 cell = Cell(cs; map_meta=m -> layer_record[layer(m)])
 # Could also say cell = render!(Cell("newcell", nm), cs; map_meta=...)
-save(
-    "cs_dogbone_path.svg",
-    flatten(cell);
-    layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1))
+save( # hide
+    "cs_dogbone_path.svg", # hide
+    flatten(cell); # hide
+    layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)) # hide
 ); # hide
 nothing; # hide
 ```

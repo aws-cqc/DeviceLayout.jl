@@ -39,13 +39,22 @@ pkg> add DeviceLayout # Adds DeviceLayout.jl to the environment
 
 We recommend [using an environment for each project](https://julialang.github.io/Pkg.jl/v1/environments/) rather than installing packages in the default environment.
 
+You will likely also want to add FileIO.jl to your environment:
+
+```r
+pkg> add FileIO
+```
+
+Then, after running `using FileIO`, you can use the `save` function to write output to a file with your chosen format, as in examples throughout the documentation.
+
 ## Quick start
 
 Let's mock up a transmission line with two launchers and some bridges across the
 transmission line. We begin by making a cell with a rectangle in it:
 
 ```@example 1
-using DeviceLayout, DeviceLayout.PreferredUnits, FileIO
+using DeviceLayout, DeviceLayout.PreferredUnits
+using FileIO # You will have to add FileIO to the environment if you haven't already
 
 cr = Cell("rect", nm)
 r = centered(Rectangle(20μm, 40μm))

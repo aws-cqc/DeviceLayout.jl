@@ -36,7 +36,7 @@ pkg> add DeviceLayout # Adds DeviceLayout.jl to the environment
 
 We recommend [using an environment for each project](https://julialang.github.io/Pkg.jl/v1/environments/) rather than installing packages in the default environment.
 
-The [DeviceLayout.jl documentation](https://aws-cqc.github.io/DeviceLayout.jl/) will help you get started. Examples can be found in the `examples` directory, with full walkthroughs in the docs, including a [17-qubit quantum processor](https://aws-cqc.github.io/DeviceLayout.jl/dev/examples/qpu17/) and [simulation of a transmon and resonator with Palace](https://aws-cqc.github.io/DeviceLayout.jl/dev/examples/singletransmon/).
+The [DeviceLayout.jl documentation](https://aws-cqc.github.io/DeviceLayout.jl/) will help you get started with a [quick-start tutorial](https://aws-cqc.github.io/DeviceLayout.jl/stable/#Quick-start). Examples can be found in the `examples` directory, with full walkthroughs in the docs, including a [17-qubit quantum processor](https://aws-cqc.github.io/DeviceLayout.jl/stable/examples/qpu17/) and [simulation of a transmon and resonator with Palace](https://aws-cqc.github.io/DeviceLayout.jl/stable/examples/singletransmon/).
 
 ## Performance and workflow tips
 
