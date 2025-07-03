@@ -1048,6 +1048,20 @@ import DeviceLayout.SolidModels.STP_UNIT
     render!(sm, cs)
     @test isempty(SolidModels.check_overlap(sm))
 
+    cs = CoordinateSystem("test", nm)
+    place!(cs, r1, SemanticMeta(Symbol("r1")))
+    place!(cs, r2, SemanticMeta(Symbol("r2")))
+    postrender_ops = [(
+        "r2",
+        SolidModels.difference_geom!,
+        ("r2", "r2", 2, 2),
+        :remove_object => true,
+        :remove_tool => true
+    )]
+    sm = test_sm()
+    render!(sm, cs; postrender_ops=postrender_ops)
+    @test isempty(SolidModels.check_overlap(sm))
+
     # TODO: Composing OptionalStyle
 
     # Explicitly MeshSized Path.

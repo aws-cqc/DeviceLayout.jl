@@ -1003,9 +1003,13 @@ Return the overlapping groups as a vector of `(group1, group2, dimension)` `Tupl
 function check_overlap(sm::SolidModel)
     overlapping_groups = Tuple{String, String, Int}[]
     for dim = 1:3
-        for (name1, _) in SolidModels.dimgroupdict(sm, dim)
-            for (name2, _) in SolidModels.dimgroupdict(sm, dim)
+        for (name1, pg1) in SolidModels.dimgroupdict(sm, dim)
+            for (name2, pg2) in SolidModels.dimgroupdict(sm, dim)
                 name1 >= name2 && continue
+                (
+                    isempty(SolidModels.entitytags(pg1)) ||
+                    isempty(SolidModels.entitytags(pg2))
+                ) && continue
                 intersections = intersect_geom!(sm, name1, name2, dim, dim)
                 for intersection in intersections
                     if intersection[1] > dim - 1
