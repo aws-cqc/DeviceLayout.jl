@@ -35,6 +35,20 @@ convert(::Type{CompoundSegment{T}}, x::CompoundSegment) where {T} =
     CompoundSegment{T}(convert.(Segment{T}, x.segments), x.tag)
 convert(::Type{Segment{T}}, x::CompoundSegment) where {T} = convert(CompoundSegment{T}, x)
 
+function subsegment(s::CompoundSegment{T}, t) where {T}
+    l0 = zero(T)
+    for seg in s.segments
+        l1 = l0 + pathlength(seg)
+        t < l1 && return seg, t - l0
+        l0 = l1
+    end
+    return last(s.segments), t - l0 + pathlength(last(s.segments))
+end
+
+function curvatureradius(s::CompoundSegment, t)
+    return curvatureradius(subsegment(s, t)...)
+end
+
 # Parametric function over the domain [zero(T),pathlength(c)] that represents the
 # compound segments.
 function (s::CompoundSegment{T})(t) where {T}
@@ -52,24 +66,17 @@ function (s::CompoundSegment{T})(t) where {T}
         a0 = p0(c[1])
         x = a0 + Point(D0x * t, D0y * t)
         return x::Point{R}
+    elseif t > L
+        h = c[end]
+        h′ = ForwardDiff.derivative(h, pathlength(h))::Point{Float64}
+        D1x, D1y = getx(h′), gety(h′)
+        a = p1(c[end])
+        x = a + Point(D1x * (t - L), D1y * (t - L))
+        return x::Point{R}
     end
 
-    for i = 1:length(c)
-        seg = c[i]
-        l1 = l0 + pathlength(seg)
-        if t < l1
-            x = (seg)(t - l0)
-            return x::Point{R}
-        end
-        l0 = l1
-    end
-
-    h = c[end]
-    h′ = ForwardDiff.derivative(h, pathlength(h))::Point{Float64}
-    D1x, D1y = getx(h′), gety(h′)
-    a = p1(c[end])
-    x = a + Point(D1x * (t - L), D1y * (t - L))
-    return x::Point{R}
+    seg, dt = subsegment(s, t)
+    return seg(dt)::Point{R}
 end
 
 function _split(seg::CompoundSegment{T}, x, tag1=gensym(), tag2=gensym()) where {T}
@@ -121,10 +128,7 @@ end
 function direction(seg::CompoundSegment{T}, t) where {T}
     l0 = zero(T)
     t < l0 && return α0(seg.segments[1])
-    for se in seg.segments
-        l = l0 + pathlength(se)
-        t < l && return direction(se, t - l0)
-        l0 = l
-    end
-    return α1(seg.segments[end])
+    s, dt = subsegment(seg, t)
+    dt > pathlength(s) && return α1(s)
+    return direction(s, dt)
 end

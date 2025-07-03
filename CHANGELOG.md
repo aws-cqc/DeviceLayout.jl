@@ -4,6 +4,12 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## 1.4.0 (2025-07-01)
+
+  - Added `SolidModels.check_overlap(::SolidModel)` for checking overlap of physical groups in a `SolidModel`
+  - `Path`s containing offset B-splines and other arbitrary curves are rendered to `SolidModel` more quickly and using fewer entities for B-spline approximation
+  - Rendering keyword `atol` now controls tolerance of B-spline approximation of offset B-splines and other arbitrary curves when rendering to a `SolidModel` (default tolerance remains `1.0nm`)
+
 ## 1.3.0 (2025-06-06)
 
   - Added `set_periodic!` to `SolidModels` to enable periodic meshes

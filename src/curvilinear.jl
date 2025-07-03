@@ -89,7 +89,11 @@ end
 CurvilinearPolygon(p::Polygon{T}) where {T} = CurvilinearPolygon{T}(points(p))
 
 ### Conversion methods
-function to_polygons(e::CurvilinearPolygon{T}; kwargs...) where {T}
+function to_polygons(
+    e::CurvilinearPolygon{T};
+    atol=DeviceLayout.onenanometer(T),
+    kwargs...
+) where {T}
     i = 1
     p = Point{T}[]
 
