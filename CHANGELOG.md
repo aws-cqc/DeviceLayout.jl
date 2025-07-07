@@ -4,6 +4,12 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Upcoming
+
+  - `SolidModels.check_overlap` now skips empty groups
+  - Built-in components `Spacer`, `ArrowAnnotation`, and `WeatherVane` now default to coordinate type `typeof(1.0UPREFERRED)` if no coordinate type is specified in the constructor
+  - Minor documentation improvements
+
 ## 1.4.0 (2025-07-01)
 
   - Added `SolidModels.check_overlap(::SolidModel)` for checking overlap of physical groups in a `SolidModel`

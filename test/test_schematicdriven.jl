@@ -24,7 +24,7 @@ allowed_rotation_angles(::TestDirectionalComponent) = [0, pi / 2]
 
 @testset "Built-in components" begin
     # Component works like any GeometryStructure
-    ar = SchematicDrivenLayout.ArrowAnnotation{typeof(1.0nm)}(width=1μm)
+    ar = SchematicDrivenLayout.ArrowAnnotation(width=1μm)
     cs = CoordinateSystem("test", nm)
     place!(cs, ar)
     cs2 = CoordinateSystem("test2", nm)
@@ -34,7 +34,7 @@ allowed_rotation_angles(::TestDirectionalComponent) = [0, pi / 2]
     @test ar2.width == ar.width
     @test ar2.length == 1000.0nm
     @test keys(SchematicDrivenLayout.non_default_parameters(ar2)) ==
-          (:name, :length, :width, :textsize) # textsize default is 25.0μm != 25000.0nm...
+          (:name, :length, :width)
 
     # Can find references within component
     c = Cell("test", nm)
@@ -47,7 +47,7 @@ allowed_rotation_angles(::TestDirectionalComponent) = [0, pi / 2]
     addref!(cs2, ref2)
     @test transformation(cs2, ref) ≈ transformation(ref2) ∘ transformation(ref)
 
-    sp = Spacer{typeof(1.0nm)}(; p1=Point(1mm, 1mm))
+    sp = Spacer(; p1=Point(1mm, 1mm))
     tr = transformation(hooks(sp).p1_south, hooks(ar).nock)
     @test isapprox_angle(rotation(tr), -π / 2)
 
@@ -59,6 +59,9 @@ allowed_rotation_angles(::TestDirectionalComponent) = [0, pi / 2]
 
     # Default preference NoUnits
     @test coordinatetype(Component) == typeof(1.0nm2nm)
+
+    wv = WeatherVane()
+    @test in_direction(hooks(wv, :east)) == 0°
 end
 
 @variant CutoutFlipchipArrow SchematicDrivenLayout.ArrowAnnotation{typeof(1.0nm)} map_meta =
@@ -81,7 +84,7 @@ end
     @test level(cs.element_metadata[1]) == 2
     @test level(cs.element_metadata[2]) == 1
     manually_flipped = map_metadata(
-        SchematicDrivenLayout.ArrowAnnotation{typeof(1.0nm)}(; name=uniquename("arrow")),
+        SchematicDrivenLayout.ArrowAnnotation(; name=uniquename("arrow")),
         facing
     )
     cs2 = geometry(manually_flipped)
@@ -719,20 +722,12 @@ end
 
     ### No reordering of nodes or changing root of rendering tree
     g = SchematicGraph("spacers")
-    n1 = add_node!(g, Spacer{typeof(1.0nm)}(name="first", p1=Point(10μm, 0μm)))
-    n2 = fuse!(
-        g,
-        n1 => :p1_east,
-        Spacer{typeof(1.0nm)}(name="second", p1=Point(10μm, 0μm)) => :p1_south
-    )
+    n1 = add_node!(g, Spacer(name="first", p1=Point(10μm, 0μm)))
+    n2 = fuse!(g, n1 => :p1_east, Spacer(name="second", p1=Point(10μm, 0μm)) => :p1_south)
     bcc = BasicCompositeComponent(g)
     g2 = SchematicGraph("test")
     bccn = add_node!(g2, bcc)
-    fuse!(
-        g2,
-        bccn => :_2_p0_north,
-        Spacer{typeof(1.0nm)}(name="third", p1=Point(10μm, 0μm)) => :p1_south
-    )
+    fuse!(g2, bccn => :_2_p0_north, Spacer(name="third", p1=Point(10μm, 0μm)) => :p1_south)
     g3 = flatten(g2)
     floorplan3 = plan(g3; log_dir=nothing)
     @test name.(components(g3)) == ["first", "second", "third"]
