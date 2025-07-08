@@ -83,20 +83,17 @@ macro compdef(expr)
                 )
             )
         elseif Base.Meta.isexpr(T, :curly)
-            # if T == S{A<:AA,B<:BB}, define two methods
-            #   S(...) = ...
+            # if T == S{A<:AA,B<:BB}, define one method
+            #   S(...) undefined, unlike with Base.@kwdef
             #   S{A,B}(...) where {A<:AA,B<:BB} = ...
             S = T.args[1]
             P = T.args[2:end]
             Q = Any[Base.Meta.isexpr(U, :<:) ? U.args[1] : U for U in P]
             SQ = :($S{$(Q...)})
-            body1 = Expr(:block, __source__, :(($(esc(S)))($(call_args...))))
-            sig1 = :(($(esc(S)))($params_ex))
-            def1 = Expr(:function, sig1, body1)
             body2 = Expr(:block, __source__, :(($(esc(SQ)))($(call_args...))))
             sig2 = :(($(esc(SQ)))($params_ex) where {$(esc.(P)...)})
             def2 = Expr(:function, sig2, body2)
-            kwdefs = Expr(:block, def1, def2)
+            kwdefs = def2
 
             # Define default_parameters method to return NamedTuple of keywords with defaults
             defbody = Expr(

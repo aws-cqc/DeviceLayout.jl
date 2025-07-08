@@ -4,6 +4,10 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Upcoming
+
+  - Remove invalid keyword constructor without type parameters for `@compdef`-ed components with type parameters, so it can be overridden without warnings
+
 ## 1.4.1 (2025-07-08)
 
   - `SolidModels.check_overlap` now skips empty groups
