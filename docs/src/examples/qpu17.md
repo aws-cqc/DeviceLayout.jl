@@ -317,10 +317,8 @@ fuse!(g, chip => :origin, q_nodes[3, 3] => :origin) # Center the lattice at chip
 
 ### Readout resonators
 readout_nodes = similar(q_nodes) # Array to hold readout nodes
-for (I, site_active) in pairs(IndexCartesian(), ACTIVE_SITES)
-    !site_active && continue
-    readout_nodes[I] = fuse!(g, q_nodes[I] => :readout, readout[I] => :qubit)
-end
+@. readout_nodes[ACTIVE_SITES] =
+    fuse!(g, q_nodes[ACTIVE_SITES] => :readout, readout[ACTIVE_SITES] => :qubit)
 ```
 
 ### Defining routes
@@ -706,7 +704,7 @@ Many quantum devices fill the ground plane with small holes to reduce loss assoc
 hole_cs = CoordinateSystem("gnd_hole") # Coordinate system for a single hole
 place!(hole_cs, not_simulated(Circle(GROUND_HOLE_RADIUS)), METAL_NEGATIVE)
 bnds = bounds(schematic, find_components(ExampleChip, schematic)...) # bounds of the chip node
-exclusion = make_halo(50μm; ignore_layers=[CHIP_AREA]) # function to create exclusion area
+exclusion = make_halo(50μm; ignore_layers=[CHIP_AREA, WRITEABLE_AREA]) # function to create exclusion area
 x_grid = (lowerleft(bnds).x + 600μm):GROUND_HOLE_SPACING:(upperright(bnds).x - 600μm) # raster x-coordinates
 y_grid = (lowerleft(bnds).y + 600μm):GROUND_HOLE_SPACING:(upperright(bnds).y - 600μm) # raster y-coordinates
 @time "Ground-plane hole fill" autofill!(schematic, hole_cs, x_grid, y_grid, exclusion)
