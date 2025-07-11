@@ -6,8 +6,9 @@ The format of this changelog is based on
 
 ## Upcoming
 
-  - Remove invalid keyword constructor without type parameters for `@compdef`-ed components with type parameters, so it can be overridden without warnings
+  - Removed invalid keyword constructor without type parameters for `@compdef`-ed components with type parameters, so it can be overridden without warnings
   - Fixed `1` character in PolyTextSansMono
+  - Fixed autofill exclusion in DemoQPU17
 
 ## 1.4.1 (2025-07-08)
 
