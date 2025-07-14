@@ -33,7 +33,6 @@ import Base.Iterators
 using ForwardDiff
 using Optim
 import IntervalSets.(..)
-import Memoize: @memoize
 import DeviceLayout
 import DeviceLayout:
     AbstractComponent,

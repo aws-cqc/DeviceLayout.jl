@@ -2,7 +2,6 @@ module SchematicDrivenLayout
 
 using DeviceLayout
 using FileIO
-using Memoize
 using NamedTupleTools
 using Unitful
 import DeviceLayout: nm, μm, mm
