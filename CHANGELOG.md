@@ -4,12 +4,13 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Upcoming
+## 1.4.2 (2025-07-16)
 
   - Removed invalid keyword constructor without type parameters for `@compdef`-ed components with type parameters, so it can be overridden without warnings
   - Fixed `1` character in PolyTextSansMono
   - Fixed autofill exclusion in DemoQPU17
   - Removed stale Memoize.jl dependency
+  - Minor documentation improvements
 
 ## 1.4.1 (2025-07-08)
 

@@ -98,11 +98,9 @@ nothing; # hide
 
 !!! info
     
-    The SVG backend only draws the top-level `Cell`, so it's necessary to [`flatten`](./geometry.md#Flattening) the cell before saving. `flatten` traverses references to place all entities in a single `Cell`, applying transformations as necessary.
+    The SVG backend only draws the top-level `Cell`, so it's necessary to [`flatten`](./geometry.md#Flattening) the cell before saving. `flatten` traverses references to place all entities in a single `Cell`, applying transformations as necessary. For further examples, we'll hide the line that flattens and saves to SVG just to display a cell.
 
-(For further examples, we'll hide the line that flattens and saves to SVG just to display a cell.)
-
-Of course, we can also add `Cell` references directly to a `Cell`, for example to apply a global rotation:
+We can also add `Cell` references directly to a `Cell`, for example to apply a global rotation:
 
 ```@example 1
 c_wrapper = Cell("wrapper", nm)
@@ -155,7 +153,7 @@ addref!(cs, p) # either render! or place! would do the same thing here
 refs(cs)
 ```
 
-Of course, eventually we'll want to turn this into a `Cell`. Since we were using named `SemanticMeta` layers, we just need to specify how to convert them to `GDSMeta`:
+Eventually, we'll still want to turn this into a `Cell`. Since we were using named `SemanticMeta` layers, we just need to specify how to convert them to `GDSMeta`:
 
 ```@example 1
 layer_record = Dict(:bridge => GDSMeta(1), :metal_negative => GDSMeta())

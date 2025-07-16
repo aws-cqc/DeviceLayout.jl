@@ -70,9 +70,9 @@ If you want different behavior, then the recommended practice is to specify a un
 units = "PreferMicrons"
 ```
 
-then DeviceLayout will be compiled with `using .PreferMicrons` internally. (This is accomplished using [Preferences.jl](https://juliapackaging.github.io/Preferences.jl/stable/).) That means that `DeviceLayout.nm` and so on will prefer to be converted to microns, and `const UPREFERRED = DeviceLayout.μm`.
+then DeviceLayout will be compiled with `using .PreferMicrons` internally. (This is accomplished using [Preferences.jl](https://juliapackaging.github.io/Preferences.jl/stable/).) That means that `DeviceLayout.nm` and so on will prefer to be converted to microns, and `const UPREFERRED = DeviceLayout.μm; const PreferredUnits = PreferMicrons`.
 
-Similarly, if we have the preference `units = "NoUnits"`, then DeviceLayout uses `import Unitful: nm, ...` and `const UPREFERRED = Unitful.NoUnits; const PreferredUnits = PreferMicrons` internally.
+Similarly, if we have the preference `units = "NoUnits"`, then DeviceLayout uses `import Unitful: nm, ...` and `const UPREFERRED = Unitful.NoUnits; const PreferredUnits = PreferNoUnits` internally.
 
 ```@docs
     DeviceLayout.UPREFERRED
