@@ -78,6 +78,7 @@ export circle,
     radius,
     rounded_corner,
     sweep_poly,
+    unfold,
     union2d
 
 const USCALE = 1.0 * Unitful.fm
@@ -1525,6 +1526,28 @@ function uniqueray(v::Vector{Point{T}}) where {T <: Real}
     minx, indx = findmin(xarr)
     indv = findall(x -> x == Point(minx, miny), v)[1]
     return Ray(Point(minx, miny), Point(minx, miny - 1)), indv
+end
+
+"""
+    unfold(v::Vector{Point{T}}, dir::Point{U}) where {T, U}
+
+Return a vector of twice the length of `v`, where the first half is `v` and the second half
+is `v` in reverse order and reflected about `dir`.
+
+This can be used to construct polygons that have a mirror symmetry about the axis defined
+by `dir`. As a trivial example, to draw a centered square:
+
+```julia
+uy = Point(0μm, 1μm)
+pts = [Point(-1μm, -1μm), Point(-1μm, 1μm)]
+square = Polygon(unfold(pts, uy))
+```
+"""
+function unfold(v::Vector{Point{T}}, dir::Point{U}) where {T, U}
+    N = length(v)
+    _reflect = Reflection(dir)
+    v_ref = [_reflect(v[N - i + 1]) for i in eachindex(v)]
+    return vcat(v, v_ref)
 end
 
 """

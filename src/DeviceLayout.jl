@@ -383,6 +383,7 @@ import .Polygons:
     radius,
     rounded_corner,
     sweep_poly,
+    unfold,
     union2d
 export Polygons,
     Polygon,
@@ -405,6 +406,7 @@ export Polygons,
     radius,
     rounded_corner,
     sweep_poly,
+    unfold,
     union2d
 
 include("align.jl")
