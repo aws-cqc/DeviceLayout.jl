@@ -263,6 +263,30 @@ end
     @test iszero(@allocated tr2 = convert(ScaledIsometry{Nothing}, tr))
     @test convert(ScaledIsometry{Point{Int}}, tr).origin isa Point{Int}
     @test hash(ScaledIsometry()) == hash(ScaledIsometry(Point(0, 0)))
+
+    # Point vector unfolding
+    ux = Point(1, 0)
+    uy = Point(0, 1)
+    # Ints
+    pts = [Point(-1, 0), Point(-1, 1)]
+    @test unfold(pts, uy) ≈ [Point(-1, 0), Point(-1, 1), Point(1, 1), Point(1, 0)]
+    # Floats
+    pts = [Point(-1.0, 0.0), Point(-1.0, 1.0)]
+    @test unfold(pts, uy) ≈
+          [Point(-1.0, 0.0), Point(-1.0, 1.0), Point(1.0, 1.0), Point(1.0, 0.0)]
+    # Mixed Ints/Floats
+    pts = [Point(-1, 0), Point(-1, 1)]
+    @test unfold(pts, Point(0.0, 1.0)) ≈
+          [Point(-1.0, 0.0), Point(-1.0, 1.0), Point(1.0, 1.0), Point(1.0, 0.0)]
+    # x-axis reflection
+    pts = [Point(-1, -1), Point(1, -1)]
+    @test unfold(pts, ux) ≈ [Point(-1, -1), Point(1, -1), Point(1, 1), Point(-1, 1)]
+    # With units
+    pts = [Point(-1μm, 0μm), Point(-1μm, 1μm)]
+    @test unfold(pts, uy) ≈
+          [Point(-1μm, 0μm), Point(-1μm, 1μm), Point(1μm, 1μm), Point(1μm, 0μm)]
+    @test unfold(pts, uy * μm) ≈
+          [Point(-1μm, 0μm), Point(-1μm, 1μm), Point(1μm, 1μm), Point(1μm, 0μm)]
 end
 
 @testset "Polygon rendering" begin
