@@ -216,5 +216,7 @@ function flatten end
 
 # type of coordinate system created by flatten
 function coordsys_type end # defined elsewhere, once CoordinateSystem is defined
+# name used by CoordinateSystem representation
+coordsys_name(geom::GeometryStructure) = name(geom)
 
 Base.isempty(geom::GeometryStructure) = isempty(elements(geom)) && isempty(refs(geom))
