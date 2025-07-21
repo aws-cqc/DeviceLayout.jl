@@ -1529,25 +1529,33 @@ function uniqueray(v::Vector{Point{T}}) where {T <: Real}
 end
 
 """
-    unfold(v::Vector{Point{T}}, dir::Point{U}) where {T, U}
+    unfold(v::Vector{Point{T}}, direction; through_pt=nothing) where {T}
+    unfold(v::Vector{Point{T}}, p0, p1) where {T}
 
 Return a vector of twice the length of `v`, where the first half is `v` and the second half
-is `v` in reverse order and reflected about `dir`.
+is `v` in reverse order and reflected about an axis.
 
-This can be used to construct polygons that have a mirror symmetry about the axis defined
-by `dir`. As a trivial example, to draw a centered square:
+This can be used to construct polygons that have a mirror symmetry. The symmetry axis
+can be defined in either of two ways: as a line with a given `direction` passing through
+point `through_pt` (defaults to origin), or by two points `p0`, `p1`. `direction` can
+be passed either as an angle or as a `Point` representing a vector.
+
+As a trivial example, to draw a centered square:
 
 ```julia
-uy = Point(0μm, 1μm)
+uy = Point(0μm, 1μm) # could also be passed as 90°
 pts = [Point(-1μm, -1μm), Point(-1μm, 1μm)]
 square = Polygon(unfold(pts, uy))
 ```
 """
-function unfold(v::Vector{Point{T}}, dir::Point{U}) where {T, U}
+function unfold(v::Vector{Point{T}}, direction; through_pt=nothing) where {T}
     N = length(v)
-    _reflect = Reflection(dir)
+    _reflect = Reflection(direction; through_pt=through_pt)
     v_ref = [_reflect(v[N - i + 1]) for i in eachindex(v)]
     return vcat(v, v_ref)
+end
+function unfold(v::Vector{Point{T}}, p0, p1) where {T}
+    return unfold(v, p1 - p0; through_pt=p0)
 end
 
 """

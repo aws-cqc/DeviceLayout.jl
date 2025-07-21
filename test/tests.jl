@@ -287,6 +287,15 @@ end
           [Point(-1μm, 0μm), Point(-1μm, 1μm), Point(1μm, 1μm), Point(1μm, 0μm)]
     @test unfold(pts, uy * μm) ≈
           [Point(-1μm, 0μm), Point(-1μm, 1μm), Point(1μm, 1μm), Point(1μm, 0μm)]
+    # With angle instead of vector
+    @test unfold(pts, 90°) ≈
+          [Point(-1μm, 0μm), Point(-1μm, 1μm), Point(1μm, 1μm), Point(1μm, 0μm)]
+    # Axis by two points
+    @test unfold(pts, Point(0μm, 0μm), Point(0μm, 1μm)) ≈
+          [Point(-1μm, 0μm), Point(-1μm, 1μm), Point(1μm, 1μm), Point(1μm, 0μm)]
+    # Less trivial case (off-center axis)
+    @test unfold(pts, Point(1μm, 0μm), Point(1μm, 1μm)) ≈
+          [Point(-1μm, 0μm), Point(-1μm, 1μm), Point(3μm, 1μm), Point(3μm, 0μm)]
 end
 
 @testset "Polygon rendering" begin
