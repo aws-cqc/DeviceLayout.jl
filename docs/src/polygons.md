@@ -77,4 +77,5 @@ In addition to other generic [entity styles](entitystyles.md) like `NoRender`, `
     points
     sweep_poly
     gridpoints_in_polygon
+    unfold
 ```
