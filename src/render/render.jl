@@ -96,7 +96,10 @@ function _render!(
         cur_cell = if already_seen
             memoized_cells[cur_cs]
         else
-            Cell{S}(name(cur_cs))
+            Cell{S}(coordsys_name(cur_cs))
+        end
+        if name(cur_cell) == "cs_pz"
+            @show cur_cs
         end
 
         # If it's a new CS, render the contents, push refs to the stack, and add to memoized_cells
