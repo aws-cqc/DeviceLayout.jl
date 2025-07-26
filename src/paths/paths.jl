@@ -690,6 +690,7 @@ include("segments/offset.jl")
 include("segments/bspline_approximation.jl")
 
 include("routes.jl")
+include("pathfinding.jl")
 
 function change_handedness!(seg::Union{Turn, Corner})
     return seg.α = -seg.α
