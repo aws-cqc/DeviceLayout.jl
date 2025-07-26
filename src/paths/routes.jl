@@ -8,7 +8,7 @@ of the following two methods:
 
 ```
 _route!(p::Path, p1::Point, α1, rule::MyRouteRule, sty, waypoints, waydirs)
-_route_leg!(p::Path, next::Point, rule::MyRouteRule,
+_route_leg!(p::Path, next::Point, nextdir, rule::MyRouteRule,
     sty::Paths.Style=Paths.contstyle1(p))
 ```
 
@@ -427,15 +427,15 @@ function route!(
         initialize_waydirs=initialize_waydirs
     )
     _route!(path, p_end, α_end, rule, sty, waypoints, waydirs)
-    isapprox(rem(α1(path) - α_end, 360°, RoundNearest), 0, atol=1e-9) || error("""
+    isapprox(rem(α1(path) - α_end, 360°, RoundNearest), 0, atol=1e-9) || @error """
                                                           Could not automatically route to destination with the correct arrival angle \
                                                           (got $(α1(path)) instead of $α_end). Try adding or adjusting waypoints.\
-                                                          """)
+                                                          """
     pts = promote(p1(path), p_end)
-    return isapprox(pts...; atol=atol) || error("""
+    return isapprox(pts...; atol=atol) || @error """
                  Could not automatically route to destination with the correct arrival point \
                  (got $(p1(path)) instead of $p_end). Try adding or adjusting waypoints.\
-                 """)
+                 """
 end
 
 """
