@@ -209,7 +209,7 @@ function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0)
         "Domains" => Dict(
             "Materials" => [
                 Dict(
-                    # Vaccuum
+                    # Vacuum
                     "Attributes" => [attributes["vacuum"]],
                     "Permeability" => 1.0,
                     "Permittivity" => 1.0

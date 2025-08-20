@@ -96,7 +96,7 @@ function save(file::File{format"DXF"}, c::Cell, python::String)
         println(f, "msp = doc.modelspace()")
         for (poly, meta) in zip(cflat.elements, cflat.element_metadata)
             pts = [ustrip.(μm, (point.x, point.y)) for point in points(poly)]
-            #TODO work with units propertly. Just strips µm right now.
+            #TODO work with units properly. Just strips µm right now.
             println(
                 f,
                 "polyline = msp.add_lwpolyline($(pts),

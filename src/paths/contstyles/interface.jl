@@ -11,7 +11,7 @@ function extent end
 """
     width(s::Style, t)
 
-For a style `s` and parameteric argument `t`, returns the width of paths rendered.
+For a style `s` and parametric argument `t`, returns the width of paths rendered.
 """
 function width end
 

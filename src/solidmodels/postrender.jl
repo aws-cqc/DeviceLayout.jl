@@ -1035,7 +1035,7 @@ end
 Returns a vector of postrendering operations for creating air bridges from a `base` and
 `bridge` group. `levels` specifies the indices of levelwise layers to build bridges upon,
 for examples `levels = [1,2]` will attempt to form airbridges on the L1 and L2 layers.
-Representing air bridges as a metalic staple is a basic modeling simplification made for
+Representing air bridges as a metallic staple is a basic modeling simplification made for
 purposes of simulation. The support and bridge shapes are intersected to form a bridge
 platform which is then connected to the underlying surface with legs which run parallel to
 the path.

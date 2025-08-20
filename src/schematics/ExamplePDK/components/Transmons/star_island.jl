@@ -71,7 +71,7 @@ function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, isl::ExampleStar
         ]...
     )
     island = Polygon(island_pts)
-    positive_polys = [island] # We'll accumlate all the positive metal shapes here
+    positive_polys = [island] # We'll accumulate all the positive metal shapes here
     ## Draw the outer triangular coupling pads
     dθ_coupler_pad =
         π / 5 - asin((star_tip_width / 2 + island_coupler_gap) / (island_outer_radius))

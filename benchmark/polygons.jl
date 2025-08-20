@@ -23,7 +23,7 @@ function rectangles_units(n, unit; output_dir=nothing)
 end
 
 # Render circles using `circle_polygon` to calculate polygon points directly
-# (use ~maxiumum number of points for single GDSII polygon -- other extreme from rectangles)
+# (use ~maximum number of points for single GDSII polygon -- other extreme from rectangles)
 function circles_direct(n; output_dir=nothing)
     c = Cell{Float64}("circles")
     for i = 1:n

@@ -42,7 +42,7 @@ The default is a global counter that persists until the end of the Julia session
 [`reset_uniquename!`](@ref) is called.
 """
 function uniquename(str, dlm='\$'; modify_first=false, counter=GLOBAL_NAME_COUNTER)
-    # if format is already str0 * dlm * n, count it like the (>=n)th occurence of str0  
+    # if format is already str0 * dlm * n, count it like the (>=n)th occurrence of str0  
     substrings = split(str, dlm)
     if !isnothing(tryparse(Int, last(substrings)))
         n0 = parse(Int, last(substrings))

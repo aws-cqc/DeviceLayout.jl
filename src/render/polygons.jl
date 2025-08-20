@@ -9,7 +9,7 @@ then it is partitioned into smaller polygons which are then rendered.
 Environment variable `ENV["GDS_POLYGON_MAX"]` will override this constant.
 The partitioning algorithm implements guillotine cutting, that goes through
 at least one existing vertex and in manhattan directions.
-Cuts are selected by ad hoc optimzation for "nice" partitions.
+Cuts are selected by ad hoc optimization for "nice" partitions.
 """
 function render!(c::Cell{S}, p::Polygon, meta::GDSMeta=GDSMeta(); kwargs...) where {S}
     if length(points(p)) <= (

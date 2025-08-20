@@ -239,7 +239,7 @@ reflect_across_line(geom, p0, p1) = Reflection(p0, p1)(geom)
 Return the lower-left-most corner of a rectangle bounding `ent` or `ents`.
 Note that this point doesn't have to be in `ent`.
 
-For iterable `ents`, entities with bounding rectanges of zero width and height
+For iterable `ents`, entities with bounding rectangles of zero width and height
 will be excluded.
 """
 lowerleft(ent::GeometryEntity) = lowerleft(to_polygons(ent))
@@ -260,7 +260,7 @@ end
 Return the upper-right-most corner of a rectangle bounding `ent` or `ents`.
 Note that this point doesn't have to be in `ent`.
 
-For iterable `ents`, entities with bounding rectanges of zero width and height
+For iterable `ents`, entities with bounding rectangles of zero width and height
 will be excluded.
 """
 upperright(ent::GeometryEntity) = upperright(to_polygons(ent))

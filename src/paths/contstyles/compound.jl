@@ -8,7 +8,7 @@ Combines styles together, typically for use with a [`CompoundSegment`](@ref).
 
   - `styles`: Array of styles making up the object. This is deep-copied by the outer
     constructor.
-  - `grid`: An array of `t` values needed for rendering the parameteric path.
+  - `grid`: An array of `t` values needed for rendering the parametric path.
 """
 struct CompoundStyle{T <: FloatCoordinate} <: ContinuousStyle{false}
     styles::Vector{Style}
