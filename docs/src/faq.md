@@ -7,6 +7,26 @@ You can use the [`simplify!`](@ref) function to combine some range of segments i
 A caveat: Decorated styles should not become part of compound styles, for now. Avoid this by
 decorating / attaching references at the end.
 
+##### I want to apply MeshSized or OptionalStyle to a path. How do I do that?
+
+Short answer: `my_style(simplify(my_path))`.
+
+Longer answer: A `GeometryEntityStyle` can only be applied to a `GeometryEntity`, but a `Path` is a `GeometryStructure`. However, `simplify(my_path)` returns a single `GeometryEntity` describing the entire path. ([`simplify`](@ref) is not to be confused with `simplify!`, which modifies the path to contain only that entity, as in the previous question.) That entity can then be styled and placed in a coordinate system as usual: `place!(cs, my_style(simplify(my_path)), metadata)`.
+
+Caveat: Any attachments to the path are discarded when that entity is used outside a path. (See the following question.)
+
+Note that this will still not work for `Rounded`, which can be applied only to `AbstractPolygon`. To round the ends of a path, you can use [`terminate!`](@ref).
+
+##### Why is `Path` a `GeometryStructure` rather than a `GeometryEntity`?
+
+`Path` is a `GeometryStructure` because it can contain references to other structures (added using `attach!` or `overlay!`).
+
+Meanwhile, a `GeometryEntity` can only be associated with a single piece of metadata. The metadata applied to a `Path` is not shared by those references, so `Path` can't be a `GeometryEntity`.
+
+Note that it is possible for a `GeometryEntity` to define disjoint shapes. They just have to share metadata when placed in a coordinate system. For example, a straight CPW segment can be represented as a single entity, even though it defines two disjoint rectangles, since they must have the same metadata. Specifically, a CPW-styled segment is represented as a `Paths.Node <: GeometryEntity`, which combines a `Paths.Straight` segment and a `Paths.CPW` style. (Path styles are unrelated to `GeometryEntityStyle`.)
+
+A `Path` then contains a vector of `Paths.Node`. While these nodes do all share metadata, they can also have styles that attach references along the segment. If a node is used as its own entity outside the context of a `Path`, however, those references are ignored.
+
 ## GDS output
 
 ##### I can't save my GDS file.
