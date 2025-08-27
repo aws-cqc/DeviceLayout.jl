@@ -4,6 +4,11 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Upcoming
+
+  - Fixed incorrect conversion and reflection of split BSplines
+  - Added FAQ entry about MeshSized/OptionalEntity styling on Paths
+
 ## 1.4.2 (2025-07-16)
 
   - Removed invalid keyword constructor without type parameters for `@compdef`-ed components with type parameters, so it can be overridden without warnings

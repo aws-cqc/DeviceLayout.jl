@@ -121,19 +121,16 @@ Change the "handedness" of `b` by reflecting across the tangent at the start poi
 """
 function change_handedness!(b::BSpline)
     # Perform reflection of points across line
-    axis_dir = b.t0 / norm(b.t0)
-    dx = axis_dir.x
-    dy = axis_dir.y
-    reflection = LinearMap(StaticArrays.@SMatrix [(dx^2-dy^2) 2dx*dy; 2dx*dy (dy^2-dx^2)])
-    reflect_interp = Translation(p0(b)) ∘ reflection ∘ Translation(-p0(b))
-    map!(reflect_interp, b.p, b.p)
-
+    axis_dir = Point(cos(α0(b)), sin(α0(b)))
+    refl = Reflection(axis_dir)
     # Adjust tangents
-    t1_reflected = Rotation(-(α1(b) - α0(b)))(axis_dir) * norm(b.t1)
-    b.t1 = t1_reflected
+    b.t0 = refl(b.t0)
+    b.t1 = refl(b.t1)
+    map!(Reflection(axis_dir; through_pt=p0(b)), b.p, b.p)
 
     # Effective final angle at 0 and 1
-    b.α1 = α0(b) - (α1(b) - α0(b))
+    b.α0 = rotated_direction(b.α0, refl)
+    b.α1 = rotated_direction(b.α1, refl)
 
     return _update_interpolation!(b)
 end
@@ -163,8 +160,21 @@ function _update_interpolation!(b::BSpline)
 end
 
 convert(::Type{BSpline{T}}, x::BSpline{T}) where {T} = x
-convert(::Type{BSpline{T}}, x::BSpline{S}) where {T, S} =
-    BSpline(convert.(Point{T}, x.p), convert(Point{T}, x.t0), convert(Point{T}, x.t1))
+function convert(::Type{BSpline{T}}, b::BSpline{S}) where {T, S}
+    # Use true t range for interpolations defined by points that have been scaled out of [0,1]
+    tmin = b.r.ranges[1][1]
+    tmax = b.r.ranges[1][end]
+    p = convert.(Point{T}, b.p)
+    t0 = convert(Point{T}, b.t0)
+    t1 = convert(Point{T}, b.t1)
+    p0 = convert(Point{T}, b.p0)
+    p1 = convert(Point{T}, b.p1)
+    r = Interpolations.scale(
+        interpolate(p, Interpolations.BSpline(Cubic(NeumannBC(t0, t1)))),
+        range(tmin, stop=tmax, length=length(p))
+    )
+    return BSpline(p, t0, t1, r, p0, p1, b.α0, b.α1)
+end
 convert(::Type{Segment{T}}, x::BSpline) where {T} = convert(BSpline{T}, x)
 copy(b::BSpline) = BSpline(copy(b.p), b.t0, b.t1, b.r, b.p0, b.p1, b.α0, b.α1)
 

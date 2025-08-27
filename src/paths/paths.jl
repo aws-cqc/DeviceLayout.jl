@@ -49,6 +49,7 @@ import DeviceLayout:
     Meta,
     PointHook,
     Polygons,
+    Reflection,
     Rotation,
     ScaledIsometry,
     StructureReference,

@@ -76,6 +76,11 @@
     @test pathlength(a1) ≈ 500μm rtol = 1e-9
     @test pathlength(a2) ≈ pathlength(b) - 500μm rtol = 1e-9
 
+    # Convert after split
+    a2_conv = convert(Paths.BSpline{typeof(1.0mm)}, a2)
+    @test p0(a2_conv) ≈ p0(a2)
+    @test p1(a2_conv) ≈ p1(a2)
+
     # Splice
     b4 = Paths.BSpline(
         [Point(-100, -200), Point(200, 200), Point(100, -300), Point(500, 0)],
@@ -100,6 +105,33 @@
     # Check an arbitrary point to make sure we have just rotated and translated a curve segment
     @test (pa2[1].seg)(Paths.t_to_arclength(pa2[1].seg, 0.2)) ≈
           splice_transform(b4.r(tsplit2 + (1 - tsplit2) * 0.2)) atol = 1e-9
+
+    # Also check reflection after splitting
+    # And splitting with non-preferred unit
+    pa3 = Path(10.0μm, 12.0μm; metadata=GDSMeta())
+    turn!(pa3, 60°, 100μm, Paths.Trace(10μm))
+    bspline!(pa3, [Point(200μm, 200μm)], 30°; endpoints_speed=200μm)
+    splice!(pa3, 2, split(pa3[2], 100μm))
+    cs = CoordinateSystem("test")
+    addref!(cs, pa3, Point(-20, -20)μm, rot=45°, xrefl=true)
+    tr = transformation(refs(cs)[1])
+    csflat = flatten(cs)
+    # Endpoints
+    @test p0(elements(csflat)[2].seg) ≈ tr(p0(pa3[2].seg))
+    @test p1(elements(csflat)[2].seg) ≈ tr(p1(pa3[2].seg))
+    @test p0(elements(csflat)[3].seg) ≈ tr(p1(pa3[2].seg))
+    @test p1(elements(csflat)[3].seg) ≈ tr(p1(pa3[3].seg))
+    @test α0(elements(csflat)[2].seg) ≈ rotated_direction(α0(pa3[2].seg), tr)
+    @test α1(elements(csflat)[2].seg) ≈ rotated_direction(α1(pa3[2].seg), tr)
+    @test α0(elements(csflat)[3].seg) ≈ rotated_direction(α1(pa3[2].seg), tr)
+    @test α1(elements(csflat)[3].seg) ≈ rotated_direction(α1(pa3[3].seg), tr)
+    # Arbitrary points
+    @test elements(csflat)[2].seg(50μm) ≈ tr(pa3[2].seg(50μm))
+    @test elements(csflat)[3].seg(50μm) ≈ tr(pa3[3].seg(50μm))
+    @test direction(elements(csflat)[2].seg, 50μm) ≈
+          rotated_direction(direction(pa3[2].seg, 50μm), tr)
+    @test direction(elements(csflat)[3].seg, 50μm) ≈
+          rotated_direction(direction(pa3[3].seg, 50μm), tr)
 end
 
 @testset "BSpline approximation" begin
