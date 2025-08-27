@@ -87,7 +87,7 @@ Translate the interpolated segment so its initial point is `p`.
 function setp0!(b::BSpline, p::Point)
     # Adjust interpolation points
     translate = Translation(p - p0(b))
-    map!(translate, b.p, b.p)
+    b.p .= translate.(b.p)
 
     return _update_interpolation!(b)
 end
@@ -101,7 +101,7 @@ setα0!(b::BSpline, α0′) = begin
     # Adjust interpolation points
     rotate = Rotation(α0′ - α0(b))
     rotate_interp = Translation(p0(b)) ∘ rotate ∘ Translation(-p0(b))
-    map!(rotate_interp, b.p, b.p)
+    b.p .= rotate_interp.(b.p)
 
     # Adjust tangents
     b.t0 = rotate(b.t0)
@@ -126,7 +126,7 @@ function change_handedness!(b::BSpline)
     # Adjust tangents
     b.t0 = refl(b.t0)
     b.t1 = refl(b.t1)
-    map!(Reflection(axis_dir; through_pt=p0(b)), b.p, b.p)
+    b.p = Reflection(axis_dir; through_pt=p0(b)).(b.p)
 
     # Effective final angle at 0 and 1
     b.α0 = rotated_direction(b.α0, refl)
