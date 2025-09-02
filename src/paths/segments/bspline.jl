@@ -145,7 +145,7 @@ Reconcile the interpolation `b.r` with possible changes to `b.p`, `b.t0`, `b.t1`
 
 Also updates `b.p0`, `b.p1`.
 """
-function _update_interpolation!(b::BSpline)
+function _update_interpolation!(b::BSpline{T}) where {T}
     # Use true t range for interpolations defined by points that have been scaled out of [0,1]
     tmin = b.r.ranges[1][1]
     tmax = b.r.ranges[1][end]
@@ -306,7 +306,9 @@ function curvatureradius(b::BSpline{T}, s) where {T}
 end
 
 """
-    bspline!(p::Path{T}, nextpoints, α_end, sty::Style=contstyle1(p), endpoints_speed=2500μm)
+    bspline!(p::Path{T}, nextpoints, α_end, sty::Style=contstyle1(p);
+        endpoints_speed=2500μm,
+        auto_speed=false)
 
 Add a BSpline interpolation from the current endpoint of `p` through `nextpoints`.
 
@@ -314,6 +316,13 @@ The interpolation reaches `nextpoints[end]` making the angle `α_end` with the p
 The `endpoints_speed` is "how fast" the interpolation leaves and enters its endpoints. Higher
 speed means that the start and end angles are approximately α1(p) and α_end over a longer
 distance.
+
+If `auto_speed` is `true`, then `endpoints_speed` is ignored. Instead, the
+endpoint speeds are optimized to make curvature changes gradual as possible
+(minimizing the integrated square of the derivative of curvature with respect
+to arclength). Because this can be a a relatively expensive operation when there
+are many waypoints, the optimized speeds are reported as `@debug` log messages,
+so that the results can be copied and pasted.
 """
 function bspline!(
     p::Path{T},
@@ -321,6 +330,7 @@ function bspline!(
     α_end,
     sty::Style=contstyle1(p);
     endpoints_speed=2500.0 * DeviceLayout.onemicron(T),
+    auto_speed=false,
     kwargs...
 ) where {T}
     !isempty(p) &&
@@ -332,6 +342,9 @@ function bspline!(
     t0 = endpoints_speed * Point(cos(α1(p)), sin(α1(p)))
     t1 = endpoints_speed * Point(cos(α_end), sin(α_end))
     seg = BSpline(ps, t0, t1)
+    if auto_speed
+        _optimize_bspline!(seg)
+    end
     push!(p, Node(seg, convert(ContinuousStyle, sty)))
     return nothing
 end
