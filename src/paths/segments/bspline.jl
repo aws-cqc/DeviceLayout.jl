@@ -319,10 +319,8 @@ distance.
 
 If `auto_speed` is `true`, then `endpoints_speed` is ignored. Instead, the
 endpoint speeds are optimized to make curvature changes gradual as possible
-(minimizing the integrated square of the derivative of curvature with respect
-to arclength). Because this can be a a relatively expensive operation when there
-are many waypoints, the optimized speeds are reported as `@debug` log messages,
-so that the results can be copied and pasted.
+(minimizing the integrated square of the curvature with respect
+to arclength).
 """
 function bspline!(
     p::Path{T},
