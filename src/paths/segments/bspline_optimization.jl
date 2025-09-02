@@ -1,17 +1,17 @@
 
 function _optimize_bspline!(b::BSpline)
-    scale0 = norm(b.p[2] - b.p[1])
-    scale1 = norm(b.p[end] - b.p[end - 1])
+    scale0 = Point(cos(α0(b)), sin(α0(b))) * norm(b.p[2] - b.p[1])
+    scale1 = Point(cos(α1(b)), sin(α1(b))) * norm(b.p[end] - b.p[end - 1])
     if _symmetric_optimization(b)
-        errfunc_sym(p) = _int_dκdt_2(b, p[1], scale0)
+        errfunc_sym(p) = _int_κ2(b, p[1], scale0, scale1)
         p = Optim.minimizer(optimize(errfunc_sym, [1.0]))
-        b.t0 = p[1] * (b.t0 / norm(b.t0)) * scale0
-        b.t1 = p[1] * (b.t1 / norm(b.t1)) * scale0
+        b.t0 = p[1] * scale0
+        b.t1 = p[1] * scale1
     else
-        errfunc_asym(p) = _int_dκdt_2(b, p[1], p[2], scale0, scale1)
+        errfunc_asym(p) = _int_κ2(b, p[1], p[2], scale0, scale1)
         p = Optim.minimizer(optimize(errfunc_asym, [1.0, 1.0]))
-        b.t0 = p[1] * (b.t0 / norm(b.t0)) * scale0
-        b.t1 = p[2] * (b.t1 / norm(b.t1)) * scale1
+        b.t0 = p[1] * scale0
+        b.t1 = p[2] * scale1
     end
     return _update_interpolation!(b)
 end
@@ -36,67 +36,29 @@ function _symmetric_optimization(b::BSpline{T}) where {T}
            isapprox(reverse(refl.(b.p)), b.p, atol=1e-3 * DeviceLayout.onenanometer(T))
 end
 
-# Third derivative of Cubic BSpline (piecewise constant)
-d3_weights(::Interpolations.Cubic, _) = (-1, 3, -3, 1)
-function d3r_dt3!(J, r, t)
-    n_rescale = (length(r.itp.coefs) - 2) - 1
-    wis = Interpolations.weightedindexes(
-        (d3_weights,),
-        Interpolations.itpinfo(r)...,
-        (t * n_rescale + 1,)
-    )
-    return J[1] = Interpolations.symmatrix(
-        map(inds -> Interpolations.InterpGetindex(r)[inds...], wis)
-    )[1]
-end
-
-# Derivative of curvature with respect to pathlength
-# As a function of BSpline parameter
-function dκdt_scaled!(
-    b::BSpline{T},
-    t::Float64,
-    G::AbstractArray{Point{T}},
-    H::AbstractArray{Point{T}},
-    J::AbstractArray{Point{T}}
-) where {T}
-    Paths.Interpolations.gradient!(G, b.r, t)
-    Paths.Interpolations.hessian!(H, b.r, t)
-    d3r_dt3!(J, b.r, t)
-    g = G[1]
-    h = H[1]
-    j = J[1]
-
-    dκdt = ( # d/dt ((g.x*h.y - g.y*h.x) / ||g||^3)
-        (g.x * j.y - g.y * j.x) / norm(g)^3 +
-        -3 * (g.x * h.y - g.y * h.x) * (g.x * h.x + g.y * h.y) / norm(g)^5
-    )
-    # Return so that (dκ/dt)^2 will be normalized by speed
-    # So we can integrate over t and retain scale independence
-    return dκdt / sqrt(norm(g))
-end
-
 # Integrated square of curvature derivative (scale free)
-function _int_dκdt_2(b::BSpline{T}, t0, t1, scale0::T, scale1::T) where {T}
-    b.t0 = t0 * (b.t0 / norm(b.t0)) * scale0
-    b.t1 = t1 * (b.t1 / norm(b.t1)) * scale1
+function _int_κ2(b::BSpline{T}, t0, t1, scale0::Point{T}, scale1::Point{T}) where {T}
+    t0 <= zero(t0) || t1 <= zero(t1) && return Inf
+    b.t0 = t0 * scale0
+    b.t1 = t1 * scale1
     _update_interpolation!(b)
-    return _int_dκdt_2(b, sqrt(scale0 * scale1))
-end
-# Symmetric version
-function _int_dκdt_2(b::BSpline{T}, t0, scale0::T) where {T}
-    b.t0 = t0 * (b.t0 / norm(b.t0)) * scale0
-    b.t1 = t0 * (b.t1 / norm(b.t1)) * scale0
-    _update_interpolation!(b)
-    return _int_dκdt_2(b, scale0)
+    return _int_κ2(b)
 end
 
-function _int_dκdt_2(b::BSpline{T}, scale::T) where {T}
+# Symmetric version
+function _int_κ2(b::BSpline{T}, t0, scale0::Point{T}, scale1::Point{T}) where {T}
+    t0 <= zero(t0) && return Inf
+    b.t0 = t0 * scale0
+    b.t1 = t0 * scale1
+    _update_interpolation!(b)
+    return _int_κ2(b)
+end
+
+function _int_κ2(b::BSpline{T}) where {T}
     G = StaticArrays.@MVector [zero(Point{T})]
     H = StaticArrays.@MVector [zero(Point{T})]
-    J = StaticArrays.@MVector [zero(Point{T})]
-
     return uconvert(
         NoUnits,
-        quadgk(t -> scale^3 * (dκdt_scaled!(b, t, G, H, J))^2, 0.0, 1.0, rtol=1e-3)[1]
+        quadgk(t -> _curvature_arclength!(b, G, H, t)^2, 0.0, 1.0, rtol=1e-3)[1]
     )
 end
