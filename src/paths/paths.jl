@@ -51,6 +51,7 @@ import DeviceLayout:
     Polygons,
     Reflection,
     Rotation,
+    RotationPi,
     ScaledIsometry,
     StructureReference,
     XReflection,
@@ -697,6 +698,7 @@ include("segments/compound.jl")
 include("segments/bspline.jl")
 include("segments/offset.jl")
 include("segments/bspline_approximation.jl")
+include("segments/bspline_optimization.jl")
 
 include("routes.jl")
 

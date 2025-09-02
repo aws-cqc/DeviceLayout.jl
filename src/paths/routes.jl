@@ -69,6 +69,7 @@ end
 """
     Base.@kwdef struct BSplineRouting <: RouteRule
         endpoints_speed = 2500μm
+        auto_speed = false
     end
 
 Specifies rules for routing from one point to another using BSplines.
@@ -77,6 +78,7 @@ Ignores `waydirs`.
 """
 Base.@kwdef struct BSplineRouting <: RouteRule
     endpoints_speed = 2500μm
+    auto_speed = false
 end
 
 """
@@ -469,7 +471,8 @@ function _route!(
         vcat(waypoints, [p_end]),
         α_end,
         sty,
-        endpoints_speed=rule.endpoints_speed
+        endpoints_speed=rule.endpoints_speed,
+        auto_speed=rule.auto_speed
     )
 end
 
