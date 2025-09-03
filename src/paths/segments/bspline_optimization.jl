@@ -13,6 +13,7 @@ function _optimize_bspline!(b::BSpline; endpoints_curvature=nothing)
         b.t0 = p[1] * scale0
         b.t1 = p[2] * scale1
     end
+    _set_endpoints_curvature!(b, endpoints_curvature)
     return _update_interpolation!(b)
 end
 
@@ -44,7 +45,7 @@ function _set_endpoints_curvature!(
         b.t1 = b.t1 * (length(b.p) - 3) / (length(b.p) - 1)
     end
     # If there are only 4 points the formula is simple to write out
-    if length(b.p) == 4
+    if length(b.p) == 4 && iszero(κ0) && iszero(κ1)
         b.p .= [
             b.p[1],
             5 / 6 * b.p[1] + 2 / 3 * b.t0 + 1 / 6 * b.p[end] - b.t1 / 6,
@@ -80,7 +81,7 @@ function _set_endpoints_curvature!(
     b.p[2] = oneunit(T) * Point(cx[n - 1], cy[n - 1])
     b.p[end - 1] = oneunit(T) * Point(cx[n], cy[n])
     # The rest of c already defines the interpolation
-    # But we'll just use the usual constructor from here
+    # But we'll just use the usual constructor after this
     # when _update_interpolation! is called
     return
 end

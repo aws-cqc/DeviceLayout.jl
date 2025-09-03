@@ -323,6 +323,14 @@ If `auto_speed` is `true`, then `endpoints_speed` is ignored. Instead, the
 endpoint speeds are optimized to make curvature changes gradual as possible
 (minimizing the integrated square of the curvature with respect
 to arclength).
+
+If `endpoints_curvature` (dimensions of `oneunit(T)^-1`) is specified, then
+additional waypoints are placed so that the curvature at the endpoints is equal to
+`endpoints_curvature`.
+
+If `auto_curvature` is specified, then `endpoints_curvature` is ignored.
+Instead, the curvature at the end of the previous segment of the path is used, or
+zero curvature if the path was empty.
 """
 function bspline!(
     p::Path{T},
