@@ -202,3 +202,120 @@ end
     cps = vcat(pathtopolys(pa2)...)
     @test_logs (:warn, r"Maximum error") Paths.bspline_approximation(cps[1].curves[1])
 end
+
+@testset "BSpline optimization" begin
+    ## 90 degree turn
+    pa = Path() # auto_speed
+    bspline!(pa, [Point(100μm, 100μm)], 90°, Paths.Trace(1μm); auto_speed=true)
+    pa2 = Path() # auto_curvature, fixed speed
+    bspline!(
+        pa2,
+        [Point(100μm, 100μm)],
+        90°,
+        Paths.Trace(1μm);
+        endpoints_speed=180μm,
+        auto_curvature=true
+    ) # Close to but not optimal
+    pa3 = Path() # auto_speed, auto_curvature
+    bspline!(
+        pa3,
+        [Point(100μm, 100μm)],
+        90°,
+        Paths.Trace(1μm);
+        auto_speed=true,
+        auto_curvature=true
+    )
+    pa_turn = Path() # For comparison
+    turn!(pa_turn, 90°, 100μm, Paths.Trace(1μm))
+    # auto_speed is close to a circle (about 140nm max distance)
+    @test Paths.norm(pa_turn[1].seg(π / 4 * 100μm) - pa[1].seg.r(0.5)) < 0.141μm
+    @test abs(pathlength(pa) - 100μm * pi / 2) < 100nm # |-92.695nm| < 100nm
+    # Equal tangents -- symmetric optimization was used
+    @test Paths._symmetric_optimization(pa[1].seg)
+    @test Paths.norm(pa[1].seg.t0) == Paths.norm(pa[1].seg.t1)
+    # Less penalty when auto_speed is used
+    @test Paths._int_dκ2(pa2[1].seg, 100μm) > Paths._int_dκ2(pa3[1].seg, 100μm)
+    # Curvature is zero at endpoints
+    @test Paths.signed_curvature(pa2[1].seg, 0nm) ≈ 0 / nm atol = 1e-9 / nm
+    @test Paths.signed_curvature(pa2[1].seg, pathlength(pa2)) ≈ 0 / nm atol = 1e-9 / nm
+    @test Paths.signed_curvature(pa3[1].seg, 0nm) ≈ 0 / nm atol = 1e-9 / nm
+    @test Paths.signed_curvature(pa3[1].seg, pathlength(pa2)) ≈ 0 / nm atol = 1e-9 / nm
+    # Speed is preserved when only curvature is optimized
+    @test Paths.norm(Paths.Interpolations.gradient(pa2[1].seg.r, 0)[1]) == 180μm
+    @test Paths.norm(Paths.Interpolations.gradient(pa2[1].seg.r, 1)[1]) == 180μm
+
+    ## Scale independence
+    pa_small = Path()
+    bspline!(pa_small, [Point(1μm, 1μm)], 90°, Paths.Trace(1μm); auto_speed=true)
+    @test pa_small[1].seg.t0 ≈ pa[1].seg.t0 / 100
+
+    pa3_small = Path()
+    bspline!(
+        pa3_small,
+        [Point(1μm, 1μm)],
+        90°,
+        Paths.Trace(1μm);
+        auto_speed=true,
+        auto_curvature=true
+    )
+    @test pa3_small[1].seg.t0 ≈ pa3[1].seg.t0 / 100
+
+    ## 180 degree symmetry
+    pa_snake = Path()
+    bspline!(
+        pa_snake,
+        [Point(100μm, 20μm), Point(200μm, 80μm), Point(300μm, 100μm)],
+        0°,
+        Paths.Trace(1μm);
+        auto_speed=true
+    )
+    @test Paths._symmetric_optimization(pa_snake[1].seg)
+
+    ## Nonzero curvature
+    @test Paths._last_curvature(pa_turn) == 1 / (100μm)
+    bspline!(pa_turn, [Point(0μm, 200μm)], 180°; auto_speed=true, auto_curvature=true)
+    @test Paths.signed_curvature(pa_turn[2].seg, 0nm) ≈ 1 / (100μm)
+    @test Paths.signed_curvature(pa_turn[2].seg, pathlength(pa_turn[2])) ≈ 1 / (100μm)
+
+    ## Manual curvature
+    pa4 = Path()
+    bspline!(
+        pa4,
+        [Point(0μm, 200μm)],
+        -90°,
+        Paths.Trace(1μm);
+        auto_speed=true,
+        endpoints_curvature=1 / (50μm)
+    )
+    @test Paths.signed_curvature(pa4[1].seg, 0nm) ≈ 1 / (50μm)
+    @test Paths.signed_curvature(pa4[1].seg, pathlength(pa4[1])) ≈ 1 / (50μm)
+
+    ## Multiple waypoints
+    bspline!(
+        pa4,
+        [Point(100μm, 100μm), Point(200μm, 200μm), Point(0μm, 0μm)],
+        -90°,
+        Paths.Trace(1μm);
+        endpoints_speed=160μm,
+        auto_curvature=true
+    )
+    @test Paths.signed_curvature(pa4[2].seg, 0nm) ≈ 1 / (50μm)
+    @test Paths.signed_curvature(pa4[2].seg, pathlength(pa4[2])) ≈ 1 / (50μm)
+    @test Paths.norm(Paths.Interpolations.gradient(pa4[2].seg.r, 0)[1]) ≈ 160μm
+    @test Paths.norm(Paths.Interpolations.gradient(pa4[2].seg.r, 1)[1]) ≈ 160μm
+
+    ## Renders successfully
+    # (discretization doesn't see zero curvature and think it can just skip the whole thing)
+    pa5 = Path()
+    bspline!(
+        pa5,
+        [Point(0μm, 200μm)],
+        180°,
+        Paths.Trace(1μm);
+        auto_speed=true,
+        auto_curvature=true
+    )
+    c = Cell("test")
+    render!(c, pa5, GDSMeta())
+    @test length(elements(c)[1].p) > 500 # 856, but discretization is subject to change
+end
