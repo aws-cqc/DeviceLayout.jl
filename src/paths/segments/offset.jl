@@ -83,6 +83,11 @@ function signed_curvature(seg::Segment, s)
     return 1 / curvatureradius(seg, s)
 end
 
+function _last_curvature(pa::Path{T}) where {T}
+    isempty(pa) && return 0.0 / oneunit(T)
+    return signed_curvature(pa[end].seg, pathlength(pa[end].seg))
+end
+
 function curvatureradius(seg::ConstantOffset, s)
     r = curvatureradius(seg.seg, s) # Ignore offset * dκds term
     return r - getoffset(seg, s)

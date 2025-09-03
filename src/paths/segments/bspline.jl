@@ -318,7 +318,9 @@ end
 """
     bspline!(p::Path{T}, nextpoints, α_end, sty::Style=contstyle1(p);
         endpoints_speed=2500μm,
-        auto_speed=false)
+        endpoints_curvature=nothing,
+        auto_speed=false,
+        auto_curvature=false)
 
 Add a BSpline interpolation from the current endpoint of `p` through `nextpoints`.
 
@@ -338,7 +340,9 @@ function bspline!(
     α_end,
     sty::Style=contstyle1(p);
     endpoints_speed=2500.0 * DeviceLayout.onemicron(T),
+    endpoints_curvature=nothing,
     auto_speed=false,
+    auto_curvature=false,
     kwargs...
 ) where {T}
     !isempty(p) &&
@@ -350,8 +354,15 @@ function bspline!(
     t0 = endpoints_speed * Point(cos(α1(p)), sin(α1(p)))
     t1 = endpoints_speed * Point(cos(α_end), sin(α_end))
     seg = BSpline(ps, t0, t1)
+    auto_curvature && (endpoints_curvature = _last_curvature(p))
     if auto_speed
-        _optimize_bspline!(seg)
+        seg.t0 = Point(cos(α0(seg)), sin(α0(seg))) * norm(seg.p[2] - seg.p[1])
+        seg.t1 = Point(cos(α1(seg)), sin(α1(seg))) * norm(seg.p[end] - seg.p[end - 1])
+        _set_endpoints_curvature!(seg, endpoints_curvature, add_points=true)
+        _optimize_bspline!(seg; endpoints_curvature)
+    elseif !isnothing(endpoints_curvature)
+        _set_endpoints_curvature!(seg, endpoints_curvature, add_points=true)
+        _update_interpolation!(seg)
     end
     push!(p, Node(seg, convert(ContinuousStyle, sty)))
     return nothing
