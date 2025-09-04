@@ -758,6 +758,24 @@ end
     c = Cell("test_no_duplicate_names", nm)
     render!(c, floorplan.coordinate_system; map_meta=m -> GDSMeta())
     @test_nowarn save(joinpath(tdir, "test_duplicates.gds"), c)
+
+    ## Composite component having multiple instances of a subcomponent
+    ## that is also a composite component with a named component in it
+    pa = Path(; name="path")
+    g = SchematicGraph("pathgraph")
+    add_node!(g, pa)
+    sub_cc = BasicCompositeComponent(g)
+    pa = Path(; name="path")
+    g = SchematicGraph("pathgraph")
+    add_node!(g, pa)
+    sub_cc2 = BasicCompositeComponent(g)
+    g2 = SchematicGraph("supergraph")
+    add_node!(g2, sub_cc)
+    add_node!(g2, sub_cc2)
+    super_cc = BasicCompositeComponent(g2)
+    c = Cell("test_no_duplicate_names", nm)
+    render!(c, super_cc; map_meta=m -> GDSMeta())
+    @test_nowarn save(joinpath(tdir, "test_duplicates.gds"), c)
 end
 
 @testset "GDSComponent" begin
