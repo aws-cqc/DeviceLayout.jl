@@ -173,8 +173,11 @@ struct BasicComponent{T} <: AbstractComponent{T}
     name::String
     geometry::CoordinateSystem{T}
     hooks
-    BasicComponent(cs::CoordinateSystem{T}, hooks=compass()) where {T} =
-        new{T}(name(cs), cs, hooks)
+    function BasicComponent(cs::CoordinateSystem{T}, hooks=compass()) where {T}
+        newcs = copy(cs)
+        newcs.name = uniquename(name(cs))
+        return new{T}(name(cs), newcs, hooks)
+    end
 end
 hooks(c::BasicComponent) = c.hooks
 geometry(c::BasicComponent) = c.geometry
@@ -220,14 +223,13 @@ struct BasicCompositeComponent{T} <: AbstractCompositeComponent{T}
     function BasicCompositeComponent(g::SchematicGraph; coordtype=typeof(1.0UPREFERRED))
         newg = SchematicGraph(name(g))
         add_graph!(newg, g; id_prefix="")
-        return new{coordtype}(
-            newg,
-            Schematic{coordtype}(newg; log_dir=nothing),
-            Dict{Symbol, Union{Hook, Vector{<:Hook}}}()
-        )
+        sch = Schematic{coordtype}(newg; log_dir=nothing)
+        sch.coordinate_system.name = uniquename(name(g))
+        return new{coordtype}(newg, sch, Dict{Symbol, Union{Hook, Vector{<:Hook}}}())
     end
 end
 name(c::BasicCompositeComponent) = c.graph.name
+coordsys_name(c::BasicCompositeComponent) = c._schematic.coordinate_system.name
 
 function (cc::BasicCompositeComponent)(
     compname::String=name(cc),

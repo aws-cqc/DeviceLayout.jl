@@ -414,3 +414,5 @@ function single_component_expr(compname, comptype; params...)
         $escname
     end
 end
+
+DeviceLayout.coordsys_name(comp::AbstractComponent) = name(geometry(comp))

@@ -617,10 +617,12 @@ end
     g3 = copy(g)
     @test length(find_components(TestCompVariant, g3)) == 18
     @test length(find_components(TestCompVariant, g3, depth=2)) == 12
-    @test length(find_components(c -> name(c)[1:1] == "z", g3, depth=2)) == 4
+    # There are two unique components named "z" appearing a combined 4 times up to depth 2
+    @test length(find_components(c -> name(c) == "z", g3, depth=2)) == 4
     @test length(
-        unique(component.(g3[find_components(c -> name(c)[1:1] == "z", g3, depth=2)]))
+        unique(component.(g3[find_components(c -> name(c) == "z", g3, depth=2)]))
     ) == 2
+
     g3_flat = SchematicDrivenLayout.flatten(g3)
     g3 = SchematicDrivenLayout.flatten(g3, depth=1)
     @test length(components(g3)) == 14
@@ -633,6 +635,11 @@ end
 
     @test origin(floorplan3, find_components(c -> name(c)[1:1] == "z", g3)[end]) ≈
           Point(200.2μm, 0.1μm)
+    # Make sure that cells for unique "z" have unique names when rendering
+    c = Cell(floorplan3.coordinate_system)
+    a = []
+    traverse!(a, c)
+    @test length(findall(x -> name(last(x)) == DeviceLayout.coordsys_name(zline), a)) == 2
 
     ### Full composite component
     p = Path(Point(0μm, 0μm), name="pz")
@@ -691,6 +698,12 @@ end
 
     @test hooks(bq2, "bq1", :xy) == hooks(bq2, 1 => :xy) # using subcomp name or index=>hsym
     @test keys(SchematicDrivenLayout.subcomponents(bq2)) == (:bq1, :bq2, :pz)
+    # test creating Cell without build uses path's coordsys_name
+    c = Cell(geometry(bq2); map_meta=_ -> GDSMeta())
+    a = []
+    traverse!(a, c)
+    @test DeviceLayout.coordsys_name(p) != name(p)
+    @test isempty(findall(x -> name(last(x)) == name(p), a))
 
     g = SchematicGraph("comp")
     bq2_node = add_node!(g, bq2)
@@ -744,6 +757,24 @@ end
     # Subnode coordinate systems of composite component should also have unique names
     c = Cell("test_no_duplicate_names", nm)
     render!(c, floorplan.coordinate_system; map_meta=m -> GDSMeta())
+    @test_nowarn save(joinpath(tdir, "test_duplicates.gds"), c)
+
+    ## Composite component having multiple instances of a subcomponent
+    ## that is also a composite component with a named component in it
+    pa = Path(; name="path")
+    g = SchematicGraph("pathgraph")
+    add_node!(g, pa)
+    sub_cc = BasicCompositeComponent(g)
+    pa = Path(; name="path")
+    g = SchematicGraph("pathgraph")
+    add_node!(g, pa)
+    sub_cc2 = BasicCompositeComponent(g)
+    g2 = SchematicGraph("supergraph")
+    add_node!(g2, sub_cc)
+    add_node!(g2, sub_cc2)
+    super_cc = BasicCompositeComponent(g2)
+    c = Cell("test_no_duplicate_names", nm)
+    render!(c, super_cc; map_meta=m -> GDSMeta())
     @test_nowarn save(joinpath(tdir, "test_duplicates.gds"), c)
 end
 
