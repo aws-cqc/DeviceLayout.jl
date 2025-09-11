@@ -83,18 +83,26 @@ SolidModelTarget(
 
 function extrusion_ops(t::SolidModelTarget)
     return [
-        (string(layer) * "_extrusion", SolidModels.extrude_z!, (layer, thickness)) for
-        (layer, thickness) in pairs(layer_extrusions_dz(t))
+        (string(layer) * "_extrusion", SolidModels.extrude_z!, (layer, thickness, dim)) for
+        (layer, (thickness, dim)) in pairs(layer_extrusions_dz(t))
     ]
 end
 
 function intersection_ops(t::SolidModelTarget)
     bv = string.(bounding_layers(t)) .* "_extrusion"
+    print("intersection ops: $bv \n")
     isempty(bv) && return []
     if length(bv) == 1
         return [
             ("rendered_volume", SolidModels.restrict_to_volume!, (bv[1],)),
-            ("exterior_boundary", SolidModels.get_boundary, ("rendered_volume", 3))
+            ("exterior_boundary", SolidModels.get_boundary, ("rendered_volume", 3)),
+            #("exterior_boundary_Xmin", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "X", :position => "min"),
+            #("exterior_boundary_Xmax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "X", :position => "max"),
+            #("exterior_boundary_Ymin", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Y", :position => "min"),
+            #("exterior_boundary_Ymax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Y", :position => "max"),
+            #("exterior_boundary_Zmin", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Z", :position => "min"),
+            #("exterior_boundary_Zmax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Z", :position => "max")
+            ("exterior_boundary", SolidModels.difference_geom!, ("exterior_boundary", "wave_port_1_extrusion", 2, 2), :remove_object => true)
         ]
     end
     return [
@@ -104,7 +112,14 @@ function intersection_ops(t::SolidModelTarget)
             for i = 3:length(bv)
         ]...,
         ("rendered_volume", SolidModels.restrict_to_volume!, ("rendered_volume",)),
-        ("exterior_boundary", SolidModels.get_boundary, ("rendered_volume", 3))
+        ("exterior_boundary", SolidModels.get_boundary, ("rendered_volume", 3)),
+        #("exterior_boundary_Xmin", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "X", :position => "min"),
+        #("exterior_boundary_Xmax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "X", :position => "max"),
+        #("exterior_boundary_Ymin", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Y", :position => "min"),
+        #("exterior_boundary_Ymax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Y", :position => "max"),
+        #("exterior_boundary_Zmin", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Z", :position => "min"),
+        #("exterior_boundary_Zmax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Z", :position => "max")
+        ("exterior_boundary", SolidModels.difference_geom!, ("exterior_boundary", "wave_port_1_extrusion", 2, 2), :remove_object => true)
     ]
 end
 
@@ -116,20 +131,32 @@ function issublayer(t::SolidModelTarget, ly::Symbol)
     return ly in sublayers
 end
 
+function isindexedlayer(t::SolidModelTarget, ly::Symbol)
+    indexedlayers = t.indexed_layers
+    isempty(indexedlayers) && return false
+    return ly in indexedlayers
+end
+
 function layer_extrusions_dz(target)
     thickness = get(target.technology.parameters, :thickness, (;))
+    print("layer_extrusions_dz thickness: $thickness \n")
     t_dict = Dict{String, Any}()
     for (layer, t) in pairs(thickness)
+        dim = string(layer) == "wave_port" ? 1 : 2
+        print("layer: $layer, dim: $dim, thickness: $t , indexed: $(isindexedlayer(target, layer))\n")
         sgn = issublayer(target, layer) ? -1 : 1
         if isempty(size(t))
-            t_dict[string(layer)] = sgn * t
+            # need some loop over indexed layers?
+            layer_name = isindexedlayer(target, layer) ? string(layer) * "_$(layerindex(SemanticMeta(layer)))" : string(layer)
+            t_dict[layer_name] = (sgn * t, dim)
         else
             for (level, t_level) in pairs(t)
                 sgn = isodd(level) ? sgn : -sgn
-                t_dict[string(layer) * "_L$level"] = sgn * t_level
+                t_dict[string(layer) * "_L$level"] = (sgn * t_level, dim)
             end
         end
     end
+    print("layer_extrusions_dz t_dict: $t_dict \n")
     return t_dict
 end
 layer_height(t::Target, m::DeviceLayout.Meta) = layer_height(t.technology, m)
