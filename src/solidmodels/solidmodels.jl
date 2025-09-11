@@ -15,6 +15,7 @@ import DeviceLayout:
     GeometryEntity,
     GeometryEntityStyle,
     Ellipse,
+    LineSegment,
     Meta,
     MeshSized,
     NoRender,

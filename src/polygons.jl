@@ -63,7 +63,7 @@ import IntervalTrees: IntervalTree, IntervalValue
 import IntervalSets.(..)
 import IntervalSets.endpoints
 
-export Polygon, ClippedPolygon, Ellipse, Circle
+export Polygon, ClippedPolygon, Ellipse, Circle, LineSegment
 export circle,
     circle_polygon,
     clip,
@@ -1488,7 +1488,7 @@ end
 
 ### cutting algorithm
 
-abstract type D1{T} end
+abstract type D1{T} <: GeometryEntity{T} end
 Δy(d1::D1) = d1.p1.y - d1.p0.y
 Δx(d1::D1) = d1.p1.x - d1.p0.x
 
