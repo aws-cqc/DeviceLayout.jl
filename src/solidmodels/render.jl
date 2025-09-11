@@ -121,6 +121,9 @@ end
 to_primitives(::SolidModel, ent::CurvilinearPolygon; kwargs...) = CurvilinearRegion(ent)
 to_primitives(::SolidModel, ent::CurvilinearRegion; kwargs...) = ent
 
+# LineSegment is a primitive
+to_primitives(::SolidModel, ent::LineSegment; kwards...) = ent
+
 ######## Optional Render
 function to_primitives(
     sm::SolidModel,
@@ -945,6 +948,22 @@ function _add_to_current_solidmodel!(
         surftag = out_dim_tags[1][2]
     end
     return (Int32(2), surftag)
+end
+
+function _add_to_current_solidmodel!(
+    line::LineSegment{T},
+    m::Meta,
+    k;
+    zmap=(_) -> zero(T),
+    points_tree=nothing,
+    atol=DeviceLayout.onenanometer(T),
+    kwargs...
+) where {T}
+    z = zmap(m)
+    p0 = _get_or_add_point!(k, getx(line.p0), gety(line.p0), z, points_tree)
+    p1 = _get_or_add_point!(k, getx(line.p1), gety(line.p1), z, points_tree)
+    linetag = k.add_line(p0, p1)
+    return (Int32(1), linetag)
 end
 
 # Sub-primitive methods for loops and curves
