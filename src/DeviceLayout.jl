@@ -365,6 +365,7 @@ include("polygons.jl")
 import .Polygons:
     Polygon,
     Ellipse,
+    LineSegment,
     Circle,
     ClippedPolygon,
     RelativeRounded,
@@ -389,6 +390,7 @@ import .Polygons:
 export Polygons,
     Polygon,
     Ellipse,
+    LineSegment,
     Circle,
     ClippedPolygon,
     RelativeRounded,
