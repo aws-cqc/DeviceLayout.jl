@@ -130,7 +130,7 @@ function single_transmon(;
 
     #### Prepare solid model
     # Specify the extent of the simulation domain.
-    substrate_x = 4mm
+    substrate_x = 2.5mm #4mm
     substrate_y = 3.7mm
 
     center_xyz = DeviceLayout.center(floorplan)
@@ -144,10 +144,20 @@ function single_transmon(;
     # Define rectangle that gets extruded to generate substrate volume
     render!(floorplan.coordinate_system, chip, LayerVocabulary.CHIP_AREA)
 
+    # Define line that gets extruded to generate wave port surface
+    x1 = center_xyz.x - substrate_x / 2
+    x2 = center_xyz.x + substrate_x / 2
+    ymin = center_xyz.y + 0.8mm
+    ymax = center_xyz.y + 1.4mm
+    line1 = LineSegment(Point(x1, ymin), Point(x1, ymax))
+    line2 = LineSegment(Point(x2, ymin), Point(x2, ymax))
+    render!(floorplan.coordinate_system, line1, LayerVocabulary.WAVE_PORT)
+    render!(floorplan.coordinate_system, line2, LayerVocabulary.WAVE_PORT)
+
     check!(floorplan)
 
     # Need to pass generated physical group names so they can be retained
-    tech = ExamplePDK.singlechip_solidmodel_target("port_1", "port_2", "lumped_element")
+    tech = ExamplePDK.singlechip_solidmodel_target("lumped_element")
     sm = SolidModel("test", overwrite=true)
 
     # Adjust mesh_scale to increase the resolution of the mesh, < 1 will result in greater
@@ -231,22 +241,38 @@ function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0)
         "Boundaries" => Dict(
             "PEC" => Dict("Attributes" => [attributes["metal"]]),
             "Absorbing" => Dict(
-                "Attributes" => [attributes["exterior_boundary"]],
+                #"Attributes" => [attributes["exterior_boundary"]],
+                "Attributes" => [
+                    attributes["exterior_boundary_Ymin"],
+                    attributes["exterior_boundary_Ymax"],
+                    attributes["exterior_boundary_Zmin"],
+                    attributes["exterior_boundary_Zmax"]
+                ],
                 "Order" => 1
             ),
-            "LumpedPort" => [
+            "WavePort" => [
                 Dict(
                     "Index" => 1,
-                    "Attributes" => [attributes["port_1"]],
-                    "R" => 50,
-                    "Direction" => "+X"
+                    "Attributes" => [attributes["exterior_boundary_Xmin"]]
                 ),
                 Dict(
                     "Index" => 2,
-                    "Attributes" => [attributes["port_2"]],
-                    "R" => 50,
-                    "Direction" => "+X"
+                    "Attributes" => [attributes["exterior_boundary_Xmax"]]
                 ),
+            ],
+            "LumpedPort" => [
+                #Dict(
+                #    "Index" => 1,
+                #    "Attributes" => [attributes["port_1"]],
+                #    "R" => 50,
+                #    "Direction" => "+X"
+                #),
+                #Dict(
+                #    "Index" => 2,
+                #    "Attributes" => [attributes["port_2"]],
+                #    "R" => 50,
+                #    "Direction" => "+X"
+                #),
                 Dict(
                     "Index" => 3,
                     "Attributes" => [attributes["lumped_element"]],
@@ -258,7 +284,7 @@ function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0)
         ),
         "Solver" => Dict(
             "Order" => solver_order,
-            "Eigenmode" => Dict("N" => 2, "Tol" => 1.0e-6, "Target" => 1, "Save" => 2),
+            "Eigenmode" => Dict("N" => 2, "Tol" => 1.0e-6, "Target" => 3, "Save" => 2),
             "Linear" => Dict("Type" => "Default", "Tol" => 1.0e-7, "MaxIts" => 500)
         )
     )
