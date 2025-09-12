@@ -144,20 +144,22 @@ function single_transmon(;
     # Define rectangle that gets extruded to generate substrate volume
     render!(floorplan.coordinate_system, chip, LayerVocabulary.CHIP_AREA)
 
-    # Define line that gets extruded to generate wave port surface
+    # Define lines that get extruded to generate wave port surface
+    # The lines NEED to be on outline of sim_area since wave ports
+    # NEED to be on the exterior boundary of the domain
     x1 = center_xyz.x - substrate_x / 2
     x2 = center_xyz.x + substrate_x / 2
     ymin = center_xyz.y + 0.8mm
     ymax = center_xyz.y + 1.4mm
     line1 = LineSegment(Point(x1, ymin), Point(x1, ymax))
     line2 = LineSegment(Point(x2, ymin), Point(x2, ymax))
-    render!(floorplan.coordinate_system, line1, LayerVocabulary.WAVE_PORT)
-    render!(floorplan.coordinate_system, line2, LayerVocabulary.WAVE_PORT)
+    render!(floorplan.coordinate_system, only_simulated(line1), LayerVocabulary.WAVE_PORT_1)
+    render!(floorplan.coordinate_system, only_simulated(line2), LayerVocabulary.WAVE_PORT_2)
 
     check!(floorplan)
 
     # Need to pass generated physical group names so they can be retained
-    tech = ExamplePDK.singlechip_solidmodel_target("lumped_element")
+    tech = ExamplePDK.singlechip_solidmodel_target("lumped_element", "wave_port_1_extrusion", "wave_port_2_extrusion")
     sm = SolidModel("test", overwrite=true)
 
     # Adjust mesh_scale to increase the resolution of the mesh, < 1 will result in greater
@@ -241,23 +243,25 @@ function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0)
         "Boundaries" => Dict(
             "PEC" => Dict("Attributes" => [attributes["metal"]]),
             "Absorbing" => Dict(
-                #"Attributes" => [attributes["exterior_boundary"]],
-                "Attributes" => [
-                    attributes["exterior_boundary_Ymin"],
-                    attributes["exterior_boundary_Ymax"],
-                    attributes["exterior_boundary_Zmin"],
-                    attributes["exterior_boundary_Zmax"]
-                ],
+                "Attributes" => [attributes["exterior_boundary"]],
+                #"Attributes" => [
+                #    attributes["exterior_boundary_Ymin"],
+                #    attributes["exterior_boundary_Ymax"],
+                #    attributes["exterior_boundary_Zmin"],
+                #    attributes["exterior_boundary_Zmax"]
+                #],
                 "Order" => 1
             ),
             "WavePort" => [
                 Dict(
                     "Index" => 1,
-                    "Attributes" => [attributes["exterior_boundary_Xmin"]]
+                    #"Attributes" => [attributes["exterior_boundary_Xmin"]]
+                    "Attributes" => [attributes["wave_port_1_extrusion"]]
                 ),
                 Dict(
                     "Index" => 2,
-                    "Attributes" => [attributes["exterior_boundary_Xmax"]]
+                    #"Attributes" => [attributes["exterior_boundary_Xmax"]]
+                    "Attributes" => [attributes["wave_port_2_extrusion"]]
                 ),
             ],
             "LumpedPort" => [
