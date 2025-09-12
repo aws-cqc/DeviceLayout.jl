@@ -53,6 +53,7 @@ struct SolidModelTarget <: Target
     levelwise_layers::Vector{Symbol}
     indexed_layers::Vector{Symbol}
     substrate_layers::Vector{Symbol}
+    wave_port_layers::Vector{Symbol}
     ignored_layers::Vector{Symbol}
     preserved_groups::Vector{Tuple{String, Int}}
     rendering_options
@@ -65,6 +66,7 @@ SolidModelTarget(
     levelwise_layers=[],
     indexed_layers=[],
     substrate_layers=[],
+    wave_port_layers=[],
     ignored_layers=[],
     postrender_ops=[],
     preserved_groups=[],
@@ -75,6 +77,7 @@ SolidModelTarget(
     levelwise_layers,
     indexed_layers,
     substrate_layers,
+    wave_port_layers,
     ignored_layers,
     preserved_groups,
     (; solidmodel=true, kwargs...),
@@ -90,7 +93,7 @@ end
 
 function intersection_ops(t::SolidModelTarget)
     bv = string.(bounding_layers(t)) .* "_extrusion"
-    print("intersection ops: $bv \n")
+    wave_ports = string.(wave_port_layers(t)) .* "_extrusion"
     isempty(bv) && return []
     if length(bv) == 1
         return [
@@ -102,7 +105,11 @@ function intersection_ops(t::SolidModelTarget)
             #("exterior_boundary_Ymax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Y", :position => "max"),
             #("exterior_boundary_Zmin", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Z", :position => "min"),
             #("exterior_boundary_Zmax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Z", :position => "max")
-            ("exterior_boundary", SolidModels.difference_geom!, ("exterior_boundary", "wave_port_1_extrusion", 2, 2), :remove_object => true)
+            # need a check that the wave ports DO INTERSECT the exterior boundary
+            [
+                ("exterior_boundary", SolidModels.difference_geom!, ("exterior_boundary", wave_ports[i], 2, 2), :remove_object => true)
+                for i = 1:length(wave_ports)
+            ]...
         ]
     end
     return [
@@ -119,11 +126,17 @@ function intersection_ops(t::SolidModelTarget)
         #("exterior_boundary_Ymax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Y", :position => "max"),
         #("exterior_boundary_Zmin", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Z", :position => "min"),
         #("exterior_boundary_Zmax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Z", :position => "max")
-        ("exterior_boundary", SolidModels.difference_geom!, ("exterior_boundary", "wave_port_1_extrusion", 2, 2), :remove_object => true)
+        # need a check that the wave ports DO INTERSECT the exterior boundary
+        [
+            ("exterior_boundary", SolidModels.difference_geom!, ("exterior_boundary", wave_ports[i], 2, 2), :remove_object => true)
+            for i = 1:length(wave_ports)
+        ]...
     ]
 end
 
 bounding_layers(t::SolidModelTarget) = t.bounding_layers
+
+wave_port_layers(t::SolidModelTarget) = t.wave_port_layers
 
 function issublayer(t::SolidModelTarget, ly::Symbol)
     sublayers = t.substrate_layers
@@ -131,24 +144,20 @@ function issublayer(t::SolidModelTarget, ly::Symbol)
     return ly in sublayers
 end
 
-function isindexedlayer(t::SolidModelTarget, ly::Symbol)
-    indexedlayers = t.indexed_layers
-    isempty(indexedlayers) && return false
-    return ly in indexedlayers
+function iswaveportlayer(t::SolidModelTarget, ly::Symbol)
+    wavelayers = wave_port_layers(t)
+    isempty(wavelayers) && return false
+    return ly in wavelayers
 end
 
 function layer_extrusions_dz(target)
     thickness = get(target.technology.parameters, :thickness, (;))
-    print("layer_extrusions_dz thickness: $thickness \n")
     t_dict = Dict{String, Any}()
     for (layer, t) in pairs(thickness)
-        dim = string(layer) == "wave_port" ? 1 : 2
-        print("layer: $layer, dim: $dim, thickness: $t , indexed: $(isindexedlayer(target, layer))\n")
+        dim = iswaveportlayer(target, layer) ? 1 : 2
         sgn = issublayer(target, layer) ? -1 : 1
         if isempty(size(t))
-            # need some loop over indexed layers?
-            layer_name = isindexedlayer(target, layer) ? string(layer) * "_$(layerindex(SemanticMeta(layer)))" : string(layer)
-            t_dict[layer_name] = (sgn * t, dim)
+            t_dict[string(layer)] = (sgn * t, dim)
         else
             for (level, t_level) in pairs(t)
                 sgn = isodd(level) ? sgn : -sgn
