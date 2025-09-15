@@ -610,3 +610,6 @@ function _route_leg!(
     turn!(p, 45° * sign(perp), bend_r, seg_sty[2])
     return d_diag > zero(dx) && straight!(p, d_diag, seg_sty[3])
 end
+
+function _update_with_plan!(rule::RouteRule, route_node, schematic) end
+function _update_with_graph!(rule::RouteRule, route_node, graph; kwargs...) end
