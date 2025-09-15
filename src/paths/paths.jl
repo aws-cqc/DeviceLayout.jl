@@ -26,7 +26,8 @@ import Base:
     intersect!,
     show,
     summary,
-    dims2string
+    dims2string,
+    reverse
 
 import Base.Iterators
 
@@ -48,6 +49,7 @@ import DeviceLayout:
     Hook,
     Meta,
     PointHook,
+    Polygon,
     Polygons,
     Reflection,
     Rotation,
@@ -350,7 +352,7 @@ Return `s` on `seg` that minimizes `norm(seg(s) - pt)`.
 """
 function pathlength_nearest(seg::Paths.Segment{T}, pt::Point) where {T}
     errfunc(s) = ustrip(unit(T), norm(seg(s * pathlength(seg)) - pt))
-    return Optim.minimizer(optimize(errfunc, 0.0, 1.0))[1] * oneunit(T)
+    return Optim.minimizer(optimize(errfunc, 0.0, 1.0))[1] * pathlength(seg)
 end
 
 """
@@ -693,6 +695,9 @@ include("segments/bspline_approximation.jl")
 include("segments/bspline_optimization.jl")
 
 include("routes.jl")
+
+include("channels.jl")
+include("channel_routers.jl")
 
 function change_handedness!(seg::Union{Turn, Corner})
     return seg.α = -seg.α
