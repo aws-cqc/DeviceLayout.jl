@@ -32,7 +32,7 @@ extent(s::GeneralStrands, t) =
 offset(s::GeneralStrands, t) = s.offset(t)
 width(s::GeneralStrands, t) = s.width(t)
 spacing(s::GeneralStrands, t) = s.spacing(t)
-num(s::GeneralStrands, t) = s.num
+num(s::GeneralStrands, t...) = s.num
 translate(s::GeneralStrands, t) =
     GeneralStrands(x -> s.offset(x + t), x -> s.width(x + t), x -> s.spacing(x + t), s.num)
 

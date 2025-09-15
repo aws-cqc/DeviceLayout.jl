@@ -28,7 +28,7 @@ end
 copy(s::CompoundSegment) = (typeof(s))(s.segments, s.tag)
 CompoundSegment(nodes::AbstractVector{Node{T}}, tag=gensym()) where {T} =
     CompoundSegment{T}(map(segment, nodes), tag)
-CompoundSegment(segments::AbstractVector{Segment{T}}, tag=gensym()) where {T} =
+CompoundSegment(segments::AbstractVector{<:Segment{T}}, tag=gensym()) where {T} =
     CompoundSegment{T}(segments, tag)
 
 convert(::Type{CompoundSegment{T}}, x::CompoundSegment) where {T} =

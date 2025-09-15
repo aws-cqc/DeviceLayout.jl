@@ -13,6 +13,11 @@ function to_polygons(f, len, s::Paths.Trace; kwargs...)
     return Polygon(uniquepoints(pts))
 end
 
+function to_polygons(seg::Paths.OffsetSegment{T}, s::Paths.Trace; atol=DeviceLayout.onenanometer(T), kwargs...) where {T}
+    bsp = Paths.bspline_approximation(seg; atol)
+    return to_polygons(bsp, s; atol, kwargs...)
+end
+
 function to_polygons(segment::Paths.Straight{T}, s::Paths.SimpleTrace; kwargs...) where {T}
     dir = direction(segment, zero(T))
     dp, dm = dir + 90.0°, dir - 90.0°

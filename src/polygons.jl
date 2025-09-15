@@ -1595,6 +1595,8 @@ struct Ray{T} <: D1{T}
     p1::Point{T}
 end
 Ray(p0::Point{S}, p1::Point{T}) where {S, T} = Ray(promote(p0, p1)...)
+Ray(p0::Point{S}, dir) where {S} =
+    Ray(promote(p0, p0 + Point(cos(dir), sin(dir))*oneunit(S))...)
 
 struct Line{T} <: D1{T}
     p0::Point{T}

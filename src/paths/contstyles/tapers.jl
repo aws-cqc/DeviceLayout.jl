@@ -17,6 +17,8 @@ copy(x::TaperTrace{T}) where {T} = TaperTrace{T}(x.width_start, x.width_end, x.l
 extent(s::TaperTrace, t) = 0.5 * width(s, t)
 width(s::TaperTrace, t) =
     (1 - uconvert(NoUnits, t / s.length)) * s.width_start + t / s.length * s.width_end
+width(s::TaperTrace) = t -> width(s, t)
+trace(s::TaperTrace, t) = width(s, t)
 
 function pin(s::TaperTrace{T}; start=nothing, stop=nothing) where {T}
     iszero(s.length) && error("cannot `pin`; length of $s not yet determined.")
