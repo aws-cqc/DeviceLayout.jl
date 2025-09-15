@@ -192,6 +192,7 @@ function route!(
     fuse!(g, nodehook1, rn => :p0)
     # fuse to nodehook2
     fuse!(g, nodehook2, rn => :p1)
+    _update_with_graph!(rule, rn, g; kwargs...)
     return rn
 end
 
