@@ -12,7 +12,9 @@ struct GeneralTrace{T} <: Trace{false}
 end
 copy(x::GeneralTrace) = GeneralTrace(x.width)
 extent(s::GeneralTrace, t) = 0.5 * s.width(t)
+extent(s::GeneralTrace) = t -> 0.5 * s.width(t)
 width(s::GeneralTrace, t) = s.width(t)
+width(s::GeneralTrace) = s.width
 trace(s::GeneralTrace, t) = s.width(t)
 translate(s::GeneralTrace, t) = GeneralTrace(x -> s.width(x + t))
 

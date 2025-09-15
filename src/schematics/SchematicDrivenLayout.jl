@@ -58,7 +58,7 @@ import DeviceLayout:
     transform,
     transformation,
     _geometry!
-import ..Paths: setα0p0!, setp0!, Route, RouteRule, route!
+import ..Paths: setα0p0!, setp0!, Route, RouteRule, route!, _update_with_plan!, _update_with_graph!
 import ..CoordinateSystems: append_coordsys!
 
 export Component,
