@@ -70,8 +70,8 @@ function test_simple(; split=false)
     # rem_edge!(ar.space_graph, 4, 5)
     # rem_edge!(ar.space_graph, 4, 8)
 
-    assign_spaces!(ar) #, fixed_paths=Dict(2=>[2, 8, 4, 6]))
-    assign_channels!(ar)
+    assign_channels!(ar) #, fixed_paths=Dict(2=>[2, 8, 4, 6]))
+    assign_tracks!(ar)
 
     rule = Paths.StraightAnd90(min_bend_radius=0.1, max_bend_radius=0.1)
     # rule = Paths.StraightAnd45(min_bend_radius=0.1, max_bend_radius=0.1)
@@ -104,8 +104,8 @@ function test_fanout()
         [fanout_space_bottom]
     )
 
-    assign_spaces!(ar)
     assign_channels!(ar)
+    assign_tracks!(ar)
 
     c = visualize_router_state(ar);
 
