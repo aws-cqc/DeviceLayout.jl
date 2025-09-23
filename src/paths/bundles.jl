@@ -1,9 +1,71 @@
-# abstract type AbstractBundle{T} <: AbstractComponent{T} end
+struct RouteChannel{T} <: AbstractComponent{T}
+    channel_path::Path{T}
+    capacity::Int
+end
 
-# struct Bundle{T} <: AbstractBundle{T}
-#     spine::Path{T}
-#     paths::Vector{Path{T}}
-# end
+abstract type AbstractBundleRouting{T} <: RouteRule{T} end
+
+abstract type AbstractChannelRouting{T} <: AbstractBundleRouting{T} end
+struct SingleChannelRouting{T} <: AbstractChannelRouting{T}
+    channel::RouteChannel{T}
+    transition_rules::Tuple{<:RouteRule,<:RouteRule}
+    transition_margins::Tuple{T,T}
+    router::ChannelRouter{T}
+end
+function SingleChannelRouting(ch::Channel{T}, rule::RouteRule, margin::T) where {T}
+    return SingleChannelRouting{T}(ch, (rule, rule), (margin, margin))
+end
+entry_rule(scr::SingleChannelRouting) = first(scr.transition_rules)
+exit_rule(scr::SingleChannelRouting) = last(scr.transition_rules)
+entry_margin(scr::SingleChannelRouting) = first(scr.transition_margins)
+exit_margin(scr::SingleChannelRouting) = last(scr.transition_margins)
+
+function _route!(p::Path, p1::Point, α1, rule::SingleChannelRouting, 
+                    sty, waypoints, waydirs)
+    # Track assignment should already have been performed in `plan`
+    r = rule.router
+    ch = rule.channel
+    # Entry
+    route!(p, entry_point(r, ch, p), entry_α(r, ch, p), entry_rule(rule), sty)
+    # Channel track
+    track_path_seg = track_path_segment(r, ch, p)
+    push!(p, Node(track_path_seg, sty))
+    # Exit
+    route!(p, p1, α1, exit_rule(rule), sty)
+    return
+end
+
+# Can specify channels; if none are specified, will use all channels in schematic
+struct MultiChannelRouting{T} <: AbstractBundleRouting{T}
+    channels::Vector{RouteChannel{T}}
+    transition_rule::RouteRule
+    transition_margin::T
+    router::ChannelRouter{T}
+end
+
+function _route!(p::Path, p1::Point, α1, rule::MultiChannelRouting, 
+                    sty, waypoints, waydirs)
+    # Channel and track assignment should already have been performed in `plan`
+    r = rule.router
+    channel_wire_segs = net_wire(r, p)
+    next_p1, next_α1 = next_waypoint(r, channel_wire_segs[1])
+    route!(p, next_p1, next_α1, rule.transition_rule, sty)
+    for wire_seg in channel_wire_segs[2:end-1]
+        # Add segment along channel track
+        track_path_seg = track_path_segment(r, wire_seg)
+        push!(p, Node(track_path_seg, sty))
+        # Add transition to next channel
+        next_p1, next_α1 = next_waypoint(r, wire_seg)
+        route!(p, next_p1, next_α1, rule.transition_rule, sty)
+    end
+    return
+end
+struct SemiConformalBundleRouting{T} <: AbstractBundleRouting{T}
+    # conformal mapping function / type, mapping parameters
+    # range to use
+    # placement in domain
+    # completion rule
+end
 
 # paths(b::Bundle) = b.paths
 # hooks(b::Bundle) = (;

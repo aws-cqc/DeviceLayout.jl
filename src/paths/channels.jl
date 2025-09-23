@@ -1,6 +1,8 @@
-# Channel intersection graph
-using Graphs
+# Original: Hashimoto and Stevens https://cs.baylor.edu/~maurer/CSI5346/originalCR.pdf
+# VCG, HCG/Zone representation, Doglegs, merging: Yoshimura and Kuh https://my.ece.utah.edu/~kalla/phy_des/yk.pdf
+# Crossing-aware: Condrat, Kalla, Blair https://my.ece.utah.edu/~kalla/papers/condrat_crossing-aware_channel_routing_for_photonic_waveguides.pdf
 
+using Graphs
 import DeviceLayout
 import DeviceLayout: °, Align, Cell, Coordinate, GDSMeta, Hook, NoUnits, Path, Paths, Point, PointHook, Polygon, Rectangle, circle, render!, text!, uconvert, width, height
 import DeviceLayout.Paths: StraightAnd90, Route, Trace
@@ -206,6 +208,8 @@ function build_channel_graph(pins, channels, T)
                 pin_ixns[v2_idx] = (v1_idx, ixn_info)
             end
         else # record intersection as edge in channel graph, with info in dict
+            haskey(intersection_dict, (v1_idx, v2_idx)) && 
+                error("Spaces $v1_idx and $v2_idx have multiple intersections")
             s1 = pathlength_from_start(channels[v1_idx], node1_idx, s1)
             s2 = pathlength_from_start(channels[v2_idx], node2_idx, s2)
 
@@ -442,52 +446,218 @@ This version uses a greedy heuristic for minimizing channel height.
 """
 function assign_tracks!(ar::ChannelRouter{T}) where {T}
     for channel = 1:num_channels(ar)
-        tracks = channel_tracks(ar, channel)
-        ws_ascending = sort(channel_segments(ar, channel), by=(ws) -> interval(ar, ws))
-        for ws in ws_ascending
-            low, high = interval(ar, ws)
-            options = Int[] # Vector of track index
-            # Track is an option whenever low > highest upper bound of segments in track
-            for ic in eachindex(tracks)
-                # Last segment always has highest upper bound by construction
-                top = interval(ar, tracks[ic][end])
-                if low > last(top)
-                    push!(options, ic)
-                elseif low == last(top) # If bounds coincide, might still share track
-                    # What does this wire connect to at the endpoint?
-                    s0, s1 = bounding_channels(ws)
-                    # What does the other wire connect to at the endpoint?
-                    s2, s3 = bounding_channels(tracks[ic][end])
-                    intersecting_channel = (s0 == s2 || s0 == s3) ? s0 : s1
-                    if intersecting_channel < channel # If the intersecting channel is scheduled
-                        push!(options, ic) # Then that schedule separated them already
-                    end
-                end
-            end
-
-            # Simple scoring rule: go in track with most similar "tendency"
-            # Sum +/- 1 for each adjacent segment where this segment is an upper/lower bound
-            # for each segment
-            best_score = (1, zero(T))
-            best_track = 0
-            for ic in options
-                score = score_track(ar, tracks[ic], ws)
-                if score > best_score || best_track == 0
-                    best_score = score
-                    best_track = ic
-                end
-            end
-
-            if isempty(options) # no valid options
-                push!(tracks, TrackWireSegment[]) # new track
-                best_track = length(tracks)
-            end
-
-            push!(tracks[best_track], ws)
-        end
-        # If a track tends to turn CCW, give it a high index
-        sort!(tracks, by=ch -> tendency(ar, ch))
+        assign_tracks!(ar, channel)
     end
+end
+
+function assign_tracks_greedy!(ar, channel)    tracks = channel_tracks(ar, channel)
+    ws_ascending = sort(channel_segments(ar, channel), by=(ws) -> interval(ar, ws))
+    for ws in ws_ascending
+        low, high = interval(ar, ws)
+        options = Int[] # Vector of track index
+        # Track is an option whenever low > highest upper bound of segments in track
+        for ic in eachindex(tracks)
+            # Last segment always has highest upper bound by construction
+            top = interval(ar, tracks[ic][end])
+            if low > last(top)
+                push!(options, ic)
+            elseif low == last(top) # If bounds coincide, might still share track
+                # What does this wire connect to at the endpoint?
+                s0, s1 = bounding_channels(ws)
+                # What does the other wire connect to at the endpoint?
+                s2, s3 = bounding_channels(tracks[ic][end])
+                intersecting_channel = (s0 == s2 || s0 == s3) ? s0 : s1
+                if intersecting_channel < channel # If the intersecting channel is scheduled
+                    push!(options, ic) # Then that schedule separated them already
+                end
+            end
+        end
+
+        # Simple scoring rule: go in track with most similar "tendency"
+        # Sum +/- 1 for each adjacent segment where this segment is an upper/lower bound
+        # for each segment
+        best_score = (1, zero(T))
+        best_track = 0
+        for ic in options
+            score = score_track(ar, tracks[ic], ws)
+            if score > best_score || best_track == 0
+                best_score = score
+                best_track = ic
+            end
+        end
+
+        if isempty(options) # no valid options
+            push!(tracks, TrackWireSegment[]) # new track
+            best_track = length(tracks)
+        end
+
+        push!(tracks[best_track], ws)
+    end
+    # If a track tends to turn CCW, give it a high index
+    sort!(tracks, by=ch -> tendency(ar, ch))
+end
+
+
+
+function assign_tracks_merging!(ar, channel)
+    # Yoshimura and Kuh Algorithm #1
+    zone_ig, vcg = channel_problem_graphs(ar, channel)
+    zones = maximal_cliques(zone_ig)
+    # Need to sort zones left to right (by their minimal element)
+    ws_ascending = sort(channel_segments(ar, channel), by=(ws) -> interval(ar, ws))
+    L = Set{Int}()
+    seen = Set{Int}()
+    merged_into = Dict{Int, Int}()
+    for (zone, nextzone) in zip(zones[1:end-1], zones[2:end])
+        for ws_idx in zone
+            if !(ws_idx in nextzone) # ends in this zone
+                push!(L, ws_idx)
+            end
+        end
+        R = Set{Int}()
+        for ws_idx in nextzone
+            if !(ws_idx in seen) # starts in next zone
+                push!(R, ws_idx)
+            end
+        end
+        merged = merge_best!(zone_ig, vcg, L, R)
+        into_idx = minimum(merged)
+        for ws_idx in merged
+            ws_idx > into_idx && merged_into[ws_idx] = into_idx
+            pop!(L, ws_idx)
+        end
+    end
+    # Now do actual track assignment based on modified VCG
+
+    # Or do matching version with BipartiteMatching.jl
+    # findmaxcardinalitybipartitematching 
+    # BitMatrix(adjacency_matrix(temp_bipartite))
+
+    for (zone, nextzone) in zip(zones[1:end-1], zones[2:end])
+        # Initialize: Add nets terminating in first zone to left side
+        # Add nets starting in second zone to right side
+        # Add edges between left and right when they can be merged
+        # Find max cardinality matching
+        # Check if matching satisfies VCG
+        # If not, modify by collecting edges to remove
+        #   In a copy, find nodes with no VCG ancestors, remove edges touching them
+        #   If any nodes have no edges, remove them and go back
+        #   Otherwise, remove a node with fewest edges, remove and collect those edges,
+        # Advance to next zone:
+        #   merge any matched nodes from right to left
+        #   move unmatched nodes from right to left
+        #   add new zone to right side
+    end
+end
+
+function merge_best!(zone_ig, vcg, L, R)
+    # Minimize longest path length in VCG (lower bound on necessary # of tracks)
+    # Seems annoying, matching version shouldn't be any worse
+    merged = Set{Int}()
+    while !isempty(R)
+        ws1, ws2 = find_best()
+        vcg = merge_segments!(zone_ig, vcg, ws1, ws2)
+    end
+end
+
+function merge_segments!(zone_ig, vcg, ws1, ws2)
+    merge_vertices!(zone_ig, [ws1, ws2])
+    return merge_vertices(vcg, [ws1, ws2]) # No in-place for directed graph
+end
+
+function channel_problem_graphs(ar::ChannelRouter, channel)
+    ws_ascending = sort(channel_segments(ar, channel), by=(ws) -> interval(ar, ws))
+    # Y&K zone representation as interval graph
+    # Edge between each pair of segments that overlap
+    zone_ig = SimpleGraph(length(ws_ascending))
+    # Condrat et al. VCG with avoidable crossings as constraints
+    # Not handled: constraints from vertically aligned pin positions
+    vcg = SimpleDiGraph(length(ws_ascending)) # just a fresh graph
+    for (idx1, seg1) in pairs(ws_ascending)
+        low1, high1 = interval(ar, seg1)
+        for (idx2, seg2) in pairs(ws_ascending)[idx1+1:end]
+            low2, high2 = interval(ar, seg2)
+            # If there is no overlap, break and move on to next seg1
+            # Use >= instead of > to allow knock-knees
+            low2 >= high1 && break # All subsequent seg2 have low2 >= high1
+            # There is overlap, so add an edge to the interval graph
+            add_edge!(zone_ig, idx1, idx2)
+            # Now check if crossing is unavoidable
+            # If seg1 and seg2 enter and exit at the same place, then crossing
+            # may be avoidable, but this channel can't say which goes on top yet
+            (low1 == high1 && low2 == high2) && break
+
+            # low1 < low2 < [high1 < high2 or high2 <= high1]
+            pt1, nt1 = prev_next_tendency(ar, seg1)
+            pt2, nt2 = prev_next_tendency(ar, seg2)
+            avoidable = is_avoidable(low1, high1, low2, high2, pt1, nt1, pt2, nt2)
+            !avoidable && continue
+            # Crossing is avoidable, so add a constraint
+            # Determine which goes on top based on the lower bound tendency of seg2
+            top = (idx1, idx2)[1 + (pt2 == 1)]
+            bottom = (idx1, idx2)[2 - (pt2 == 1)]
+            add_edge!(vcg, top, bottom)
+        end
+    end
+    return vcg, zone_ig
+end
+
+function is_avoidable(low1, high1, low2, high2, pt1, nt1, pt2, nt2)
+    if high1 < high2
+        # 1 ____
+        # 2   ____
+        order = [1, 2, 1, 2] # low1 < low2 < high1 < high2
+        ordered_tendency = [pt1, pt2, nt1, nt2]
+        top = (idx1, idx2)[1]
+        bottom = (idx1, idx2)[2]
+    else
+        # 1 _____
+        # 2   __
+        order = [1, 2, 2, 1] # low1 < low2 < high2 <= high1
+        ordered_tendency = [pt1, pt2, nt2, nt1]
+        top = (idx1, idx2)[1]
+        bottom = (idx1, idx2)[2]
+    end
+    up = (ordered_tendency .== 1)
+    down = (!).(up)
+    ccw_order = [reverse(order[up]); order[down]]
+    # Crossing is avoidable if same net has both endpoints adjacent
+    # on the clock
+    avoidable = (ccw_order[1] == ccw_order[2] ||
+        ccw_order[2] == ccw_order[3])
+    # Also, if seg1 and seg2 have only one endpoint at the same place,
+    # then crossing in this channel is avoidable but depends on
+    # other channel; assume other channel will agree
+    avoidable = (avoidable || (low1 == high1 || low2 == high2))
+end
+
+# +1 if prev segment crosses over high track index in ws's channel
+function prev_next_tendency(ar, ws)
+    start_channel, stop_channel = bounding_channels(ws)
+    # Distances along bounding and running channels
+    s_along_start = pathlength_at_intersection(ar, start_channel, channel_idx)
+    s1 = pathlength_at_intersection(ar, channel_idx, start_channel)
+    s2 = pathlength_at_intersection(ar, channel_idx, stop_channel)
+    s_along_stop = pathlength_at_intersection(ar, stop_channel,  channel_idx)
+    # Directions of bounding and running channels
+    start_dir = channel_direction(ar, start_channel, s_along_start)
+    dir1 = channel_direction(ar, channel_idx, s1)
+    dir2 = channel_direction(ar, channel_idx, s2)
+    stop_dir = channel_direction(ar, stop_channel, s_along_stop)
+    # Tendencies
+    ## +ve = wire makes CCW turns
+    ## But actual bends depend on direction of wires vs channels
+    ### Signs of angles made by channel intersections
+    sgn_bend1 = sign(rem2pi(uconvert(NoUnits, dir1 - start_dir), RoundNearest))
+    sgn_bend2 = sign(rem2pi(uconvert(NoUnits, stop_dir - dir2), RoundNearest))
+    ### Need to multiply according to direction in channel
+    ### Is prev upper-bounded by ws? Then it goes along with channel
+    sgn_start = s_along_start >= last(interval(ar, prev(ar, ws))) ? 1 : -1
+    ### Is next upper-bounded by ws? Then it goes against channel
+    sgn_stop = s_along_stop >= last(interval(ar, next(ar, ws))) ? -1 : 1
+    ### Bend signs get another -1 if ws runs opposite to its channel direction
+    ### But then tendency definition is reversed also
+    return (sgn_start * sgn_bend1, sgn_stop * sgn_bend2)
 end
 
 """
