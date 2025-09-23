@@ -292,15 +292,16 @@ function gdsbegin(
 end
 
 """
-    gdswrite(io::IO, cell::Cell, dbs::Length)
+    gdswrite(io::IO, cell::Cell, dbs::Length, spec_warnings::Bool=true)
 
 Write a `Cell` to an IO buffer. The creation and modification date of the cell
 are written first, followed by the cell name, the polygons in the cell,
-and finally any references or arrays.
+and finally any references or arrays. If `spec_warnings`,
+warnings will be emitted on GDSII format violations.
 """
-function gdswrite(io::IO, cell::Cell, dbs::Length)
+function gdswrite(io::IO, cell::Cell, dbs::Length, spec_warnings::Bool=true)
     name = even(cell.name)
-    namecheck(name)
+    spec_warnings && namecheck(name)
 
     y   = UInt16(Dates.value(Dates.Year(cell.create)))
     mo  = UInt16(Dates.value(Dates.Month(cell.create)))
@@ -320,13 +321,13 @@ function gdswrite(io::IO, cell::Cell, dbs::Length)
     bytes = gdswrite(io, BGNSTR, y, mo, d, h, min, s, y1, mo1, d1, h1, min1, s1)
     bytes += gdswrite(io, STRNAME, name)
     for (x, m) in zip(cell.elements, cell.element_metadata)
-        bytes += gdswrite(io, x, m, dbs)
+        bytes += gdswrite(io, x, m, dbs, spec_warnings)
     end
     for x in cell.refs
         bytes += gdswrite(io, x, dbs)
     end
     for (x, m) in zip(cell.texts, cell.text_metadata)
-        bytes += gdswrite(io, x, m, dbs)
+        bytes += gdswrite(io, x, m, dbs, spec_warnings)
     end
     return bytes += gdswrite(io, ENDSTR)
 end
@@ -335,17 +336,19 @@ p2p(x::Length, dbs) = convert(Int, round(convert(Float64, x / dbs)))
 p2p(x::Real, dbs) = p2p(x * 1μm, dbs)
 
 """
-    gdswrite(io::IO, poly::Polygon{T}, meta, dbs) where {T}
+    gdswrite(io::IO, poly::Polygon{T}, meta, dbs, spec_warnings::Bool=true) where {T}
 
 Write a polygon to an IO buffer. The layer and datatype are written first,
 then the boundary of the polygon is written in a 32-bit integer format with
 specified database scale.
 
-Note that polygons without units are presumed to be in microns.
+Note that polygons without units are presumed to be in microns. If `spec_warnings`,
+warnings will be emitted on GDSII format violations.
 """
-function gdswrite(io::IO, poly::Polygon{T}, meta, dbs) where {T}
+function gdswrite(io::IO, poly::Polygon{T}, meta, dbs, spec_warnings::Bool=true) where {T}
     bytes = gdswrite(io, BOUNDARY)
     lyr = gdslayer(meta)
+    spec_warnings && layercheck(lyr)
     dt = datatype(meta)
     bytes += gdswrite(io, LAYER, lyr)
     bytes += gdswrite(io, DATATYPE, dt)
@@ -360,13 +363,15 @@ function gdswrite(io::IO, poly::Polygon{T}, meta, dbs) where {T}
 end
 
 """
-    gdswrite(io::IO, t::Texts.Text, dbs)
+    gdswrite(io::IO, t::Texts.Text, dbs, spec_warnings::Bool=true)
 
-Write text to an IO buffer. Width without units presumed to be in microns.
+Write text to an IO buffer. Width without units presumed to be in microns. If `spec_warnings`,
+warnings will be emitted on GDSII format violations.
 """
-function gdswrite(io::IO, t::Texts.Text, meta, dbs)
+function gdswrite(io::IO, t::Texts.Text, meta, dbs, spec_warnings::Bool=true)
     bytes = gdswrite(io, TEXT)
     lyr = gdslayer(meta)
+    spec_warnings && layercheck(lyr)
     dt = datatype(meta)
     bytes += gdswrite(io, LAYER, lyr)
     bytes += gdswrite(io, TEXTTYPE, dt)
@@ -386,7 +391,7 @@ function gdswrite(io::IO, t::Texts.Text, meta, dbs)
     bytes += gdswrite(io, XY, x, y)
 
     str = even(t.text)
-    namecheck(str)
+    spec_warnings && namecheck(str)
     bytes += gdswrite(io, STRING, str)
 
     return bytes += gdswrite(io, ENDEL)
@@ -426,9 +431,6 @@ Note that cell references without units on their `origin` are presumed to
 be in microns.
 """
 function gdswrite(io::IO, a::CellArray, dbs)
-    colrowcheck(a.col)
-    colrowcheck(a.row)
-
     bytes = gdswrite(io, AREF)
     bytes += gdswrite(io, SNAME, even(a.structure.name))
 
@@ -510,7 +512,7 @@ gdsend(io::IO) = gdswrite(io, ENDLIB)
     save(::Union{AbstractString,IO}, cell0::Cell{T}, cell::Cell...)
     save(f::File{format"GDS"}, cell0::Cell, cell::Cell...;
         name="GDSIILIB", userunit=1μm, modify=now(), acc=now(),
-        verbose=false)
+        spec_warnings=true, verbose=false)
 
 This bottom method is implicitly called when you use the convenient syntax of
 the top method: `save("/path/to/my.gds", cells_i_want_to_save...)`
@@ -523,6 +525,7 @@ Keyword arguments include:
     with inferior unit support.
   - `modify`: date of last modification.
   - `acc`: date of last accession. It would be unusual to have this differ from `now()`.
+  - `spec_warnings`: whether to emit warnings due to GDSII format violations (default: `true`)
   - `verbose`: monitor the output of [`traverse!`](@ref) and [`order!`](@ref) to see if
     something funny is happening while saving.
 """
@@ -534,6 +537,7 @@ function save(
     userunit=1μm,
     modify=now(),
     acc=now(),
+    spec_warnings=true,
     verbose=false
 )
     dbs = dbscale(cell0, cell...)
@@ -572,7 +576,7 @@ function save(
                 )
             end
             names[c.name] = c
-            bytes += gdswrite(io, c, dbs)
+            bytes += gdswrite(io, c, dbs, spec_warnings)
         end
         return bytes += gdsend(io)
     end

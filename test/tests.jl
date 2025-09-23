@@ -793,6 +793,26 @@ include("test_render.jl")
         push!(dup.refs, sref(Cell("Main", nm)))
         @test_logs (:warn, r"Duplicate cell name") save(joinpath(tdir, "dup.gds"), dup)
 
+        # Warns against invalid characters according to GDS spec
+        bad_names = ["bad.name", "badname!", "bad-name", repeat("b", 33)]
+        for n in bad_names
+            main = Cell(n, nm)
+            render!(main, Rectangle(10μm, 10μm), GDSMeta(0, 0))
+            path = joinpath(tdir, "bad_name.gds")
+            @test_logs (:warn, r"cell names must only have characters") save(path, main)
+            @test_nowarn save(path, main; spec_warnings=false) # w/ GDS spec warnings disabled
+        end
+
+        # Warns against layers not in [0, 63]
+        bad_layers = [GDSMeta(-1, 0), GDSMeta(64, 0)]
+        for l in bad_layers
+            main = Cell("main", nm)
+            render!(main, Rectangle(10μm, 10μm), l)
+            path = joinpath(tdir, "bad_layer.gds")
+            @test_logs (:warn, r"spec only permits layers from 0 to 63") save(path, main)
+            @test_nowarn save(path, main; spec_warnings=false) # w/ GDS spec warnings disabled
+        end
+
         # Corrupt file tests: records
         @test_logs (:warn, r"unknown record type 0xffff") load(
             joinpath(dirname(@__FILE__), "unknown_record.gds")
