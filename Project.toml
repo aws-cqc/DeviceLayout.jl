@@ -4,7 +4,6 @@ version = "1.8.0"
 
 [deps]
 Accessors = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
-BipartiteMatching = "79040ab4-24c8-4c92-950c-d48b5991a0f6"
 Cairo = "159f3aea-2a34-519c-b102-8c37f9878175"
 Clipper = "c8f6d549-b3ab-5508-a0d1-48fe138e8cc1"
 ColorSchemes = "35d6a980-a343-548e-a6ea-1d62b119f2f4"
@@ -46,7 +45,6 @@ SchematicGraphMakieExt = "GraphMakie"
 [compat]
 Accessors = "0.1"
 Aqua = "0.8"
-BipartiteMatching = "0.1.1"
 Cairo = "1.0"
 Clipper = "0.6"
 ColorSchemes = "3"
