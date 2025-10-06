@@ -106,13 +106,41 @@ function _route!(p::Path{T}, p1::Point, α1, rule::AbstractChannelRouting,
             push!(waypoints, p0(track_path_seg))
         else
             route!(p, p0(track_path_seg), α0(track_path_seg), next_entry_rule, sty; waypoints)
-            push!(p, Node(track_path_seg, sty), reconcile=false) # already reconciled by construction
+            push!(p, Node(track_path_seg, sty), reconcile=false) # p0, α0 reconciled by construction
+            p[end-1].next = p[end]
+            p[end].prev = p[end-1]
+            # Note `auto_curvature` BSpline uses curvature from end of previous segment
+            # and is not reconciled with the new node
+            # But we can do this ourselves
+            _reconcile_curvature!(p[end-1], next_entry_rule)
             empty!(waypoints)
         end
     end
     # Exit
     route!(p, p1, α1, exit_rule(rule), sty; waypoints)
+    _reconcile_curvature!(p[end], exit_rule(rule))
     return
+end
+
+function _reconcile_curvature!(n::Node{T}, rule::RouteRule) where {T} end
+function _reconcile_curvature!(n::Node{T}, rule::BSplineRouting) where {T}
+    !rule.auto_curvature && return
+    κ0 = if n.prev === n
+        0.0 / oneunit(T)
+    else
+        signed_curvature(segment(n.prev), pathlength(segment(n.prev)))
+    end
+    κ1 = if n.next === n
+        0.0 / oneunit(T)
+    else 
+        signed_curvature(segment(n.next), zero(coordinatetype(n)))
+    end
+    _set_endpoints_curvature!(segment(n), κ0, κ1)
+    if rule.auto_speed
+        _optimize_bspline!(segment(n); endpoints_curvature=(κ0, κ1))
+    else
+        _update_interpolation!(segment(n))
+    end
 end
 
 struct SingleChannelRouting{T} <: AbstractChannelRouting
