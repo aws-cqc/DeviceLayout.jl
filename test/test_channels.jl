@@ -1,4 +1,5 @@
 import DeviceLayout.Paths: RouteChannel
+using .SchematicDrivenLayout
 
 function test_single_channel_reversals(r, seg, sty)
     paths = test_single_channel(r, seg, sty; reverse_channel=false, reverse_paths=false)
@@ -75,14 +76,15 @@ function test_single_channel(
 
     reverse_channel && (channel = Path([reverse(channel[1])]))
 
+    # Variety of cases
     p0s = [
-        Point(100.0, -200.0)μm,
-        Point(50.0, -150)μm,
-        Point(-100.0, -100.0)μm,
-        Point(-100.0, 0.0)μm,
-        Point(-100.0, 100.0)μm,
-        Point(50.0, 150)μm,
-        Point(100.0, 200.0)μm
+        Point(100.0, -200.0)μm,  # Enter and exit from bottom
+        Point(50.0, -150)μm,     # Enter from bottom, exit from right
+        Point(-100.0, -100.0)μm, # Enter from lower left, exit from right
+        Point(-100.0, 0.0)μm,    # Centered
+        Point(-100.0, 100.0)μm,  # Enter from upper left, exit from right
+        Point(50.0, 150)μm,      # Enter from top, exit from right
+        Point(100.0, 200.0)μm    # Enter and exit from top
     ]
 
     p1s = [
@@ -101,26 +103,59 @@ function test_single_channel(
 
     paths = [Path(p, α0=α0) for (p, α0) in zip(p0s, α0s)]
     tracks = reverse_channel ? reverse(eachindex(paths)) : eachindex(paths)
-    styles = [Paths.Trace(2μm); fill(Paths.CPW(2μm, 2μm), length(paths))]
 
     rule = Paths.SingleChannelRouting(Paths.RouteChannel(channel), transition_rule, 50.0μm)
     setindex!.(Ref(rule.segment_tracks), tracks, paths)
-    for (pa, p1, α1, sty) in zip(paths, p1s, α1s, styles)
-        route!(pa, p1, α1, rule, Paths.CPW(2μm, 2μm))
+    for (pa, p1, α1) in zip(paths, p1s, α1s)
+        route!(pa, p1, α1, rule, Paths.Trace(2μm))
     end
     return paths
+end
+
+function test_schematic_single_channel()
+    g = SchematicGraph("test")
+    pa = Path(0.0nm, 0.0nm)
+    straight!(pa, 1mm, Paths.Trace(300μm))
+    ch = Paths.RouteChannel(pa)
+    spacer1 = add_node!(g, Spacer(-1mm, 1mm, name="s1"))
+    spacer2 = add_node!(g, Spacer(1mm, 1mm, name="s2"))
+    spacer3 = add_node!(g, Spacer(-500μm, 500μm, name="s3"))
+    fuse!(g, spacer3 => :p1_west, ch => :p0)
+    rule = Paths.SingleChannelRouting(ch, Paths.StraightAnd90(50μm), 0μm)
+    r1 = route!(
+        g,
+        rule,
+        spacer1 => :p1_west,
+        spacer2 => :p1_east,
+        Paths.SimpleTrace(1μm),
+        GDSMeta()
+    )
+    r2 = route!(
+        g,
+        rule,
+        spacer1 => :p1_west,
+        spacer2 => :p1_east,
+        Paths.SimpleTrace(1μm),
+        GDSMeta()
+    )
+    sch = plan(g; log_dir=nothing) # channel global coordinate update happens in plan
+    pa1 = SchematicDrivenLayout.path(r1.component)
+    pa2 = SchematicDrivenLayout.path(r2.component)
+    # Track assignment means pa1 track is 100um below pa2 track
+    @test pathlength(pa1) ≈ 2 * (450μm + pi * 50μm + 0.4mm) + 1mm atol = 1nm
+    @test pathlength(pa2) ≈ 2 * (350μm + pi * 50μm + 0.4mm) + 1mm atol = 1nm
 end
 
 @testset "Channels" begin
     ### Single-channel integration tests
     ## Geometry-level routing
-    # StraightAnd90 only works with straight channel
     transition_rules = [
-        Paths.StraightAnd90(min_bend_radius=25μm) # Can only be used with straight and trace if any paths enter from the sides, no curves or tapers
+        Paths.StraightAnd90(min_bend_radius=25μm)
         Paths.BSplineRouting(endpoints_speed=150μm, auto_curvature=true)
     ]
     channel_segments = [Paths.Straight, Paths.Turn, Paths.BSpline, Paths.CompoundSegment]
     channel_styles = [Paths.Trace(100μm), Paths.TaperTrace(100μm, 50μm)]
+    # StraightAnd90 only works with straight channel and simple trace
     @testset "Straight" begin
         rule = transition_rules[1]
         paths = test_single_channel_reversals(rule, channel_segments[1], channel_styles[1])
@@ -134,4 +169,6 @@ end
             end
         end
     end
+    ## Schematic-level routing
+    test_schematic_single_channel()
 end

@@ -1324,7 +1324,7 @@ function split(seg::Segment, sty::Style, x)
 end
 
 function split(seg::ContinuousSegment, x)
-    if !(zero(x) < x < pathlength(seg))
+    if !(zero(x) <= x <= pathlength(seg))
         throw(ArgumentError("x must be between 0 and pathlength(seg)"))
     end
     return _split(seg, x)

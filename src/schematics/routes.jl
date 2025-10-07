@@ -56,19 +56,35 @@ _undec(sty::Paths.Style) = sty
 _undec(sty::Paths.DecoratedStyle) = sty.s # just remove attachments, not overlays
 function path(rc::RouteComponent)
     !isempty(rc._path) && return rc._path
-
+    path = rc._path
+    r = rc.r
+    path.p0 = r.p0
+    path.α0 = r.α0
+    path.name = rc.name
+    path.metadata = rc.meta
     if length(rc.sty) == 1
-        path = Path(rc.r, _undec(rc.sty[1])) # draw path with underlying style
+        route!(
+            path,
+            r.p1,
+            r.α1,
+            r.rule,
+            _undec(rc.sty[1]);
+            waypoints=r.waypoints,
+            waydirs=r.waydirs
+        )
         redecorate!(path, rc.sty[1]) # apply decorations
     else # Vector of styles for each segment
-        path = Path(rc.r, _undec.(rc.sty))
+        route!(
+            path,
+            r.p1,
+            r.α1,
+            r.rule,
+            _undec.(rc.sty);
+            waypoints=r.waypoints,
+            waydirs=r.waydirs
+        )
         redecorate!.(Ref(path), rc.sty)
     end
-    rc._path.name = rc.name
-    rc._path.p0 = path.p0
-    rc._path.α0 = path.α0
-    rc._path.metadata = rc.meta
-    rc._path.nodes = path.nodes
 
     return rc._path
 end
@@ -218,4 +234,36 @@ function attach!(
     for (ti, li) in zip(t, Iterators.cycle(location))
         attach!(r, c, ti, location=li, mark_dirty=false)
     end
+end
+
+# Update rules with information from schematic or graph
+# Called from `route!(g::SchematicGraph, rule, ...)` and `plan`, respectively
+function _update_with_graph!(rule::RouteRule, route_node, graph; kwargs...) end
+function _update_with_plan!(rule::RouteRule, route_node, schematic) end
+
+# SingleChannelRouting
+# Set tracks when adding with `route!`
+function _update_with_graph!(
+    rule::Paths.SingleChannelRouting,
+    route_node,
+    graph;
+    track=Paths.num_tracks(rule) + 1,
+    kwargs...
+)
+    return Paths.set_track!(rule, route_node.component._path, track)
+end
+
+# Use global position of channel if it is a component in sch
+function _update_with_plan!(rule::Paths.SingleChannelRouting, route_node, sch)
+    isdefined(rule, :global_channel) && return
+    idx = find_nodes(n -> component(n) === rule.channel, sch.graph)
+    isempty(idx) && return # channel is not a component
+    length(idx) > 1 && @error """
+        Channel $(name(rule.channel)) appears multiple times in schematic. \
+        To transform the channel to global coordinates for routing, it must \
+        appear exactly once.
+        """
+    trans = transformation(sch, only(idx))
+    global_node = trans(rule.channel.node)
+    return rule.global_channel = Paths.RouteChannel(Path([global_node]))
 end

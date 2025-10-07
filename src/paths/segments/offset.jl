@@ -31,6 +31,16 @@ struct GeneralOffset{T, S} <: OffsetSegment{T, S}
     offset
 end
 
+convert(::Type{ConstantOffset{T}}, x::ConstantOffset) where {T} =
+    ConstantOffset(convert(Segment{T}, x.seg), convert(T, x.offset))
+convert(::Type{ConstantOffset{T}}, x::ConstantOffset{T}) where {T} = x
+convert(::Type{Segment{T}}, x::ConstantOffset) where {T} = convert(ConstantOffset{T}, x)
+
+convert(::Type{GeneralOffset{T}}, x::GeneralOffset) where {T} =
+    OffsetSegment(convert(Segment{T}, x.seg), x.offset)
+convert(::Type{GeneralOffset{T}}, x::GeneralOffset{T}) where {T} = x
+convert(::Type{Segment{T}}, x::GeneralOffset) where {T} = convert(GeneralOffset{T}, x)
+
 copy(s::OffsetSegment) = OffsetSegment(copy(s.seg), s.offset)
 getoffset(s::ConstantOffset, l...) = s.offset
 getoffset(s::GeneralOffset{T}) where {T} = l -> uconvert(unit(T), s.offset(l))
