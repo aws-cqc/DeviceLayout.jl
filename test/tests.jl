@@ -116,6 +116,12 @@ end
     @test DeviceLayout.load_preference(DeviceLayout, "units") == "PreferMicrons"
     DeviceLayout.set_unit_preference!("PreferNanometers") # local_only => will override
     @test DeviceLayout.load_preference(DeviceLayout, "units") == "PreferNanometers"
+    # Delete units preference in generated LocalPreferences.toml; this ensures that
+    # a second execution of this test block will pass when running locally.
+    # Specifically, ensures that the line above 
+    #   DeviceLayout.set_unit_preference!("PreferMicrons"; local_only=false)
+    # is not ignored.
+    Preferences.delete_preferences!("DeviceLayout", "units"; force=true)
 end
 
 @testset "Polygon basics" begin
@@ -896,7 +902,8 @@ include("test_render.jl")
             (10.0, 10.0, 0.0, 0.0, 0.0),
             (0.0, 10.0, 0.0, 0.0, 0.0)
         ]
-        @test eval(Meta.parse(read(`$py3 test_ezdxf.py $path`, String))) == rect
+        pyscript = joinpath(@__DIR__, "test_ezdxf.py")
+        @test eval(Meta.parse(read(`$py3 $pyscript $path`, String))) == rect
     end
 
     @testset "Graphics formats" begin
