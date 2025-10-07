@@ -45,11 +45,15 @@ function to_polygons(f, len, s::Paths.CPW; kwargs...)
     return [Polygon(uniquepoints(ppts)), Polygon(uniquepoints(mpts))]
 end
 
-function to_polygons(seg::Paths.OffsetSegment{T}, s::Paths.CPW; atol=DeviceLayout.onenanometer(T), kwargs...) where {T}
+function to_polygons(
+    seg::Paths.OffsetSegment{T},
+    s::Paths.CPW;
+    atol=DeviceLayout.onenanometer(T),
+    kwargs...
+) where {T}
     bsp = Paths.bspline_approximation(seg; atol)
     return to_polygons(bsp, s; atol, kwargs...)
 end
-
 
 function to_polygons(f::Paths.Straight{T}, s::Paths.SimpleCPW; kwargs...) where {T}
     g = cpw_points(f, s)
