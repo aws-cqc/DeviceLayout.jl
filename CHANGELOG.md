@@ -4,8 +4,10 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## Upcoming
 
+  - Fixed incorrect conversion and reflection of split BSplines
+  - Added FAQ entry about MeshSized/OptionalEntity styling on Paths
   - Fixed issue causing duplicate `Cell` names with paths and composite components, where rendering would use the component's name rather than a unique name
 
 ## 1.4.2 (2025-07-16)
