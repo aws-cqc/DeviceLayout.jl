@@ -36,6 +36,7 @@ A component with empty geometry and an 8-point [compass](@ref SchematicDrivenLay
     p1::Point{T} = zero(Point{T})
 end
 Spacer(; kwargs...) = Spacer{typeof(1.0UPREFERRED)}(; kwargs...)
+Spacer(dx, dy; kwargs...) = Spacer(; p1=Point(dx, dy), kwargs...)
 function hooks(s::Spacer{T}) where {T}
     return merge(compass("p0_", p0=zero(Point{T})), compass("p1_", p0=s.p1))
 end

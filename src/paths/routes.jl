@@ -33,6 +33,7 @@ abstract type RouteRule end
         min_bend_radius = 200μm
         max_bend_radius = Inf*μm
     end
+    StraightAnd90(r) = StraightAnd90(min_bend_radius=r, max_bend_radius=r)
 
 Specifies rules for routing from one point to another using straight segments and 90° bends.
 
@@ -46,12 +47,14 @@ Base.@kwdef struct StraightAnd90 <: RouteRule
     min_bend_radius = 200μm
     max_bend_radius = Inf * μm
 end
+StraightAnd90(r) = StraightAnd90(min_bend_radius=r, max_bend_radius=r)
 
 """
     Base.@kwdef struct StraightAnd45 <: RouteRule
         min_bend_radius = 200μm
         max_bend_radius = Inf*μm
     end
+    StraightAnd45(r) = StraightAnd45(min_bend_radius=r, max_bend_radius=r)
 
 Specifies rules for routing from one point to another using using straight segments and 45° bends.
 
@@ -65,6 +68,7 @@ Base.@kwdef struct StraightAnd45 <: RouteRule
     min_bend_radius = 200μm
     max_bend_radius = Inf * μm
 end
+StraightAnd45(r) = StraightAnd45(min_bend_radius=r, max_bend_radius=r)
 
 """
     Base.@kwdef struct BSplineRouting <: RouteRule
@@ -610,6 +614,3 @@ function _route_leg!(
     turn!(p, 45° * sign(perp), bend_r, seg_sty[2])
     return d_diag > zero(dx) && straight!(p, d_diag, seg_sty[3])
 end
-
-function _update_with_plan!(rule::RouteRule, route_node, schematic) end
-function _update_with_graph!(rule::RouteRule, route_node, graph; kwargs...) end
