@@ -394,6 +394,14 @@ function DeviceLayout._geometry!(cs::CoordinateSystem, p::Path)
     return addref!(cs, p)
 end
 
+function DeviceLayout.coordsys_name(p::Path)
+    # If empty, rendering path directly
+    isempty(p._geometry) && return name(p._geometry)
+    # If not empty, p._geometry holds `p` (e.g. `build!` was called)
+    # and the path coordsys needs its own uniquename
+    return uniquename(name(p))
+end
+
 """
     path_in(h::PointHook)
 
