@@ -160,6 +160,8 @@ end
         rule = transition_rules[1]
         paths = test_single_channel_reversals(rule, channel_segments[1], channel_styles[1])
         @test isempty(Intersect.intersections(paths...))
+        c = Cell("test", nm)
+        render!(c, paths[1], GDSMeta()) # No error
     end
     rule = transition_rules[2] # BSpline rule for all-angle transitions
     for segtype in channel_segments[2:end]
@@ -169,6 +171,22 @@ end
             end
         end
     end
+    # Channel too short
+    pa = Path(0.0nm, 0.0nm)
+    straight!(pa, 100nm, Paths.Trace(0.1mm))
+    ch = RouteChannel(pa)
+    pa2 = Path(-0.1mm, 0mm)
+    rule = Paths.SingleChannelRouting(
+        ch,
+        Paths.BSplineRouting(auto_curvature=true, auto_speed=true),
+        50μm
+    )
+    Paths.set_track!(rule, pa2, 1)
+    route!(pa2, Point(0.1mm, 0.1mm), 0, rule, Paths.CPW(2nm, 2nm))
+    c = Cell("test", nm)
+    render!(c, pa2, GDSMeta()) # No error
+    @test length(pa2) == 1 # Channel segment turned into waypoint
+
     ## Schematic-level routing
     test_schematic_single_channel()
 end
