@@ -208,6 +208,9 @@ end
         pa = Path{Float64}()
         straight!(pa, 20.0, Paths.Trace(x -> 2.0 * x))
         render!(c, pa)
+        revsty = reverse(pa[1]).sty
+        @test Paths.width(revsty, 0) == Paths.trace(pa[1].sty, 20)
+        @test Paths.extent(revsty)(20) == 0.5 * Paths.width(pa[1].sty)(0)
     end
 
     @testset "Straight, SimpleCPW" begin
@@ -227,6 +230,9 @@ end
             p(20.082731241720513, 1.7128648145206729),
             p(0.5197792270443984, -2.4453690018345142)
         ]
+        revsty = reverse(pa[1]).sty
+        @test Paths.trace(revsty, 0) == Paths.trace(pa[1].sty, 20)
+        @test Paths.trace(revsty, 20) == Paths.trace(pa[1].sty, 0)
 
         c = Cell("main", pm2μm)
         pa = Path(μm2μm, α0=12°)
@@ -248,9 +254,14 @@ end
         ] * 10^6
     end
 
-    # @testset "Straight, GeneralCPW" begin
-    #
-    # end
+    @testset "Straight, GeneralCPW" begin
+        c = Cell{Float64}("main")
+        pa = Path(NoUnits, α0=12°)
+        straight!(pa, 20.0, Paths.CPW(x -> 2 * x, x -> 3 * x))
+        revsty = reverse(pa[1]).sty
+        @test Paths.trace(revsty, 0) == Paths.trace(pa[1].sty, 20)
+        @test Paths.trace(revsty, 20) == Paths.trace(pa[1].sty, 0)
+    end
 
     @testset "Turn, SimpleTrace" begin
         c = Cell{Float64}("main")
@@ -423,6 +434,9 @@ end
             p(50000.0nm, -4000.0nm),
             p(0.0nm, -5000.0nm)
         ]
+        revsty = reverse(pa[1]).sty
+        @test Paths.trace(revsty, 0.0μm) == Paths.trace(pa[1].sty, 50.0μm)
+        @test Paths.trace(revsty, 50.0μm) == Paths.trace(pa[1].sty, 0.0μm)
 
         @test_throws "length" split(Paths.TaperCPW(10.0μm, 6.0μm, 8.0μm, 2.0μm), 10μm)
 
@@ -446,6 +460,7 @@ end
         pa = Path(μm)
         turn!(pa, π / 2, 20μm, Paths.TaperTrace(10μm, 20μm))
         render!(c, pa, GDSMeta(0))
+        @test Paths.trace(pa[1].sty, 0μm) == 10μm
 
         @test (elements(c)[1]).p[1] ≈ p(0.0nm, -5000.0nm)
         @test (elements(c)[1]).p[end] ≈ p(0.0nm, 5000.0nm)
@@ -555,6 +570,9 @@ end
         straight!(pa, 20μm, Paths.Trace(15μm))
         straight!(pa, 20μm, Paths.Trace(20μm))
         simplify!(pa)
+        revsty = reverse(pa[1]).sty
+        @test Paths.trace(revsty, 55μm) == Paths.trace(pa[1].sty, 5μm)
+        @test Paths.trace(revsty, 5μm) == Paths.trace(pa[1].sty, 55μm)
 
         pa2 = split(pa[1], 20μm)
         @test length(pa2) == 2
