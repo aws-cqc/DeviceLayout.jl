@@ -83,7 +83,7 @@ will also have a direction of 90° at that point.
 Channel routing at the schematic level also gets some special handling. When using
 the [`Paths.SingleChannelRouting`](@ref) rule, the router will look for the rule's [`Paths.RouteChannel`](@ref)
 in the schematic to get its global coordinates for routing. Additionally, paths are not assigned tracks in the rule using `Paths.set_track!` before `route!`. Instead, a route's track is set using the `track` keyword in `route!`,
-defaulting to a new track at the top of the channel so far (`track=num_tracks(channel)+1`).
+defaulting to a new track at the bottom of the channel so far (`track=num_tracks(channel)+1`).
 Because the routes are not drawn until later, the track offsets are still calculated using a
 number of tracks given by the maximum track number of all routes that are eventually added to
 the channel with the same rule. (Each route in the channel should still use the same instance of the `SingleChannelRouting` rule.)

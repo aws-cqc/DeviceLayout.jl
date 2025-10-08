@@ -78,23 +78,23 @@ function test_single_channel(
 
     # Variety of cases
     p0s = [
-        Point(100.0, -200.0)μm,  # Enter and exit from bottom
-        Point(50.0, -150)μm,     # Enter from bottom, exit from right
-        Point(-100.0, -100.0)μm, # Enter from lower left, exit from right
-        Point(-100.0, 0.0)μm,    # Centered
-        Point(-100.0, 100.0)μm,  # Enter from upper left, exit from right
+        Point(100.0, 200.0)μm,    # Enter and exit from top
         Point(50.0, 150)μm,      # Enter from top, exit from right
-        Point(100.0, 200.0)μm    # Enter and exit from top
+        Point(-100.0, 100.0)μm,  # Enter from upper left, exit from right
+        Point(-100.0, 0.0)μm,    # Centered
+        Point(-100.0, -100.0)μm, # Enter from lower left, exit from right
+        Point(50.0, -150)μm,     # Enter from bottom, exit from right
+        Point(100.0, -200.0)μm  # Enter and exit from bottom
     ]
 
     p1s = [
-        Point(900.0, -200.0)μm,
-        Point(1100.0, -150.0)μm,
-        Point(1100.0, -100.0)μm,
-        Point(1100.0, 0.0)μm,
-        Point(1100.0, 100.0)μm,
+        Point(900.0, 200.0)μm,
         Point(1100.0, 150.0)μm,
-        Point(900.0, 200.0)μm
+        Point(1100.0, 100.0)μm,
+        Point(1100.0, 0.0)μm,
+        Point(1100.0, -100.0)μm,
+        Point(1100.0, -150.0)μm,
+        Point(900.0, -200.0)μm
     ]
     reverse_paths && ((p0s, p1s) = (p1s, p0s))
 
@@ -141,9 +141,9 @@ function test_schematic_single_channel()
     sch = plan(g; log_dir=nothing) # channel global coordinate update happens in plan
     pa1 = SchematicDrivenLayout.path(r1.component)
     pa2 = SchematicDrivenLayout.path(r2.component)
-    # Track assignment means pa1 track is 100um below pa2 track
-    @test pathlength(pa1) ≈ 2 * (450μm + pi * 50μm + 0.4mm) + 1mm atol = 1nm
-    @test pathlength(pa2) ≈ 2 * (350μm + pi * 50μm + 0.4mm) + 1mm atol = 1nm
+    # Track assignment means pa1 track is 100um above pa2 track
+    @test pathlength(pa1) ≈ 2 * (350μm + pi * 50μm + 0.4mm) + 1mm atol = 1nm
+    @test pathlength(pa2) ≈ 2 * (450μm + pi * 50μm + 0.4mm) + 1mm atol = 1nm
     c = Cell("test", nm)
     return render!(c, pa1, GDSMeta()) # No error
 end
