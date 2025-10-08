@@ -215,7 +215,7 @@ that determine how or whether entities with an `OptionalStyle` with the correspo
 
 When rendering `ent::GeometryEntity` with `target::LayoutTarget`, its metadata `m` is handled as follows:
 
- 0. If `target.map_meta_dict[m]` exists (as a `GDSMeta` instance or `nothing`), use that. This can be manually assigned before rendering, overriding the default behavior for any metadata type, including `GDSMeta`.
+ 0. If `target.map_meta_dict[m]` exists (as a `GDSMeta` instance or `nothing`), use that. This can be manually assigned before rendering, overriding the default behavior for any metadata type, including `GDSMeta`. Otherwise, the result of the steps below will be stored in `target.map_meta_dict[m]`.
  1. If `m` is already a `GDSMeta` and not in `map_meta_dict`, use as is.
  2. If `layer(m) == layer(DeviceLayout.NORENDER_META)` (that is, `:norender`), use `nothing`.
  3. If `!(level(m) in target.levels)`, use `nothing`.
