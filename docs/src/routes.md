@@ -67,19 +67,19 @@ using DeviceLayout, .PreferredUnits, FileIO
 import DeviceLayout.Graphics: inch
 # Define start and end points for various routes
 p0s = [
-    Point(100.0, -200.0)μm,  # Enter and exit from bottom
-    Point(600.0, -150)μm,    # Enter from bottom, exit from right
-    Point(-100.0, -100.0)μm, # Enter from lower left, exit from right
+    Point(100.0, 200.0)μm,   # Enter and exit from top
     Point(50.0, 150)μm,      # Enter from top, exit from right
-    Point(100.0, 200.0)μm    # Enter and exit from top
+    Point(-100.0, -100.0)μm, # Enter from lower left, exit from right
+    Point(600.0, -150)μm,    # Enter from bottom, exit from right
+    Point(100.0, -200.0)μm   # Enter and exit from bottom
 ]
 
 p1s = [
-    Point(400.0, -200.0)μm,
-    Point(1100.0, -150.0)μm,
-    Point(1200.0, 50.0)μm,
+    Point(900.0, 200.0)μm,
     Point(1100.0, 150.0)μm,
-    Point(900.0, 200.0)μm
+    Point(1200.0, 50.0)μm,
+    Point(1100.0, -150.0)μm,
+    Point(400.0, -200.0)μm
 ]
 
 # Create channel
@@ -93,7 +93,7 @@ transition_rule = Paths.StraightAnd90(25μm) # Manhattan with 25μm bend radius
 margin = 50.0μm # Room for bends between endpoints and channel
 rule = Paths.SingleChannelRouting(channel, transition_rule, margin)
 # Set tracks
-tracks = [1, 1, 2, 3, 4] # First two share a track
+tracks = [1, 2, 3, 4, 4] # Last two share a track
 setindex!.(Ref(rule.segment_tracks), tracks, paths)
 # Draw routes
 for (pa, p1) in zip(paths, p1s)
@@ -131,7 +131,7 @@ transition_rule = Paths.BSplineRouting(auto_speed=true, auto_curvature=true)
 margin = 50.0μm
 rule = Paths.SingleChannelRouting(channel, transition_rule, margin)
 # Set tracks
-tracks = [1, 1, 2, 3, 4] # First two share a track
+tracks = [1, 2, 3, 4, 4] # Last two share a track
 setindex!.(Ref(rule.segment_tracks), tracks, paths)
 # Draw routes
 for (pa, p1) in zip(paths, p1s)
@@ -167,7 +167,7 @@ transition_rule = Paths.BSplineRouting(auto_speed=true, auto_curvature=true)
 margin = 50.0μm
 rule = Paths.SingleChannelRouting(channel, transition_rule, margin)
 # Set tracks
-tracks = [1, 1, 2, 3, 4] # First two share a track
+tracks = [1, 2, 3, 4, 4] # Last two share a track
 setindex!.(Ref(rule.segment_tracks), tracks, paths)
 # Draw routes
 for (pa, p1) in zip(paths, p1s)
