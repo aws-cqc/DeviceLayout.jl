@@ -136,7 +136,9 @@ function map_layer(target::Target, meta::DeviceLayout.Meta)
     target.map_meta_dict[meta] = res
     return res
 end
-map_layer(::Target, m::GDSMeta) = m # No need to warn
+
+# For GDSMeta, return as-is (pass through)
+_map_layer(target, meta::GDSMeta) = meta
 
 function _map_layer(target, meta)
     (layer(meta) == layer(DeviceLayout.NORENDER_META)) && return nothing
@@ -213,8 +215,8 @@ that determine how or whether entities with an `OptionalStyle` with the correspo
 
 When rendering `ent::GeometryEntity` with `target::LayoutTarget`, its metadata `m` is handled as follows:
 
- 0. If `m` is already a `GDSMeta`, use as is.
- 1. If `target.map_meta_dict[m]` exists (as a `GDSMeta` instance or `nothing`), use that. This can be manually assigned before rendering, overriding the default that would result from the steps below. If it does not yet exist, then the result of the steps below will be stored in `target.map_meta_dict[m]`.
+ 0. If `target.map_meta_dict[m]` exists (as a `GDSMeta` instance or `nothing`), use that. This can be manually assigned before rendering, overriding the default behavior for any metadata type, including `GDSMeta`.
+ 1. If `m` is already a `GDSMeta` and not in `map_meta_dict`, use as is.
  2. If `layer(m) == layer(DeviceLayout.NORENDER_META)` (that is, `:norender`), use `nothing`.
  3. If `!(level(m) in target.levels)`, use `nothing`.
  4. If `layer(m)` is not present as a key in `layer_record(target.technology)` and is not of the form `:GDS<layer>_<datatype>`, then emit a warning and use `GDSMeta(0,0)`, ignoring level and layer index.

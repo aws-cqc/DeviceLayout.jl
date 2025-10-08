@@ -532,6 +532,14 @@ end
           [GDSMeta(), GDSMeta(300), GDSMeta(302, 4), GDSMeta(), GDSMeta(2, 2)]
     @test SchematicDrivenLayout.map_layer(ArtworkTarget(tech), SemanticMeta(:GDS2)) ==
           GDSMeta(2)
+
+    # Manual map_meta_dict override
+    target = ArtworkTarget(tech; levels=[1])
+    target.map_meta_dict[meta] = nothing
+    target.map_meta_dict[GDSMeta(2, 2)] = GDSMeta(3, 3)
+    cell = Cell("test", nm)
+    render!(cell, cs, target) # undef_meta, GDSMeta(2,2)
+    @test cell.element_metadata == [GDSMeta(), GDSMeta(3, 3)]
 end
 
 @variant TestCompVariant TestComponent new_defaults =
