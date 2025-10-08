@@ -84,7 +84,7 @@ function track_section_offset(
     # (spacing) * number of tracks away from middle track
     sgn = reversed ? -1 : 1
     spacing = section_width / (n_tracks + 1)
-    return sgn * spacing * (track_idx - (1 + n_tracks) / 2)
+    return sgn * spacing * ((1 + n_tracks) / 2 - track_idx)
 end
 
 function track_section_offset(n_tracks, section_width::Function, track_idx; reversed=false)
@@ -92,7 +92,7 @@ function track_section_offset(n_tracks, section_width::Function, track_idx; reve
     return t ->
         (reversed ? -1 : 1) *
         (section_width(t) / (n_tracks + 1)) *
-        (track_idx - (1 + n_tracks) / 2)
+        ((1 + n_tracks) / 2 - track_idx)
 end
 
 reverse(n::Node) = Paths.Node(reverse(n.seg), reverse(n.sty, pathlength(n.seg)))
@@ -214,10 +214,10 @@ A `RouteRule` for guiding routed paths along tracks in a [`Paths.RouteChannel`](
 ## Tracks
 
 "Tracks" are offsets of the channel's path, with equal spacing between each other
-and the extents of the channel's trace width. Tracks are ordered from right to left
-when facing along the channel. For example, track 1 is the bottom track
-(most negative offset) for a channel directed along the positive x axis, while
-the highest track index is its top track.
+and the extents of the channel's trace width. Tracks are ordered from left to right
+when facing along the channel. For example, track 1 is the top track
+(most positive offset) for a channel directed along the positive x axis, while
+the highest track index is its bottom track.
 
 The user manually assigns tracks to paths that will be routed with
 `rule::SingleChannelRouting` using `Paths.set_track!(rule, path, track_idx)` for each path,
@@ -226,7 +226,7 @@ of tracks, and the number of tracks is determined by the maximum track index of 
 added to `rule`, all paths should be assigned tracks before any `route!` call.
 
 If used for schematic routing, the track is supplied as a keyword argument,
-defaulting to a new track added at the top of the channel:
+defaulting to a new track added at the bottom of the channel:
 `route!(g::SchematicGraph, rule, ...; track=num_tracks(rule)+1)`.
 
 ## Routing
@@ -291,9 +291,9 @@ end
 
 Sets `pa` to be routed along track `track_idx` in the channel used by `rule`.
 
-Tracks are ordered from right to left when facing along the channel.
-For example, track 1 is the bottom track (most negative offset) for a
-channel directed along the positive x axis, while the highest track index is its top track.
+Tracks are ordered from left to right when facing along the channel.
+For example, track 1 is the top track (most positive offset) for a
+channel directed along the positive x axis, while the highest track index is its bottom track.
 """
 function set_track!(scr, pa, track_idx)
     return scr.segment_tracks[pa] = track_idx
