@@ -142,6 +142,8 @@ function test_component(component, clip_area, mesh=false, gui=false)
         Rectangle(2μm, 2μm) + Point(50μm, 50μm),
         DeviceLayout.NORENDER_META
     )
+    # Also an element in a layer that will be designated as ignored by the target
+    render!(floorplan.coordinate_system, Rectangle(2μm, 2μm) + Point(50μm, 50μm), :ignored)
 
     check!(floorplan)
     build!(floorplan)
@@ -167,6 +169,7 @@ function test_component(component, clip_area, mesh=false, gui=false)
         substrate_layers=[:chip_outline],
         levelwise_layers=[:chip_outline],
         indexed_layers=[:port],
+        ignored_layers=[:ignored],
         postrender_ops=[
             (
                 "substrates",
@@ -189,7 +192,8 @@ function test_component(component, clip_area, mesh=false, gui=false)
             ("vacuum", 3),
             ("base_metal", 2),
             ("circle", 2),
-            ("norender", 2)
+            ("norender", 2),
+            ("ignored", 2)
         ],
         solidmodel=true,
         simulation=true
@@ -212,6 +216,7 @@ function test_component(component, clip_area, mesh=false, gui=false)
 
     # Verify that NORENDER_META element is not present (should be skipped even though it's retained)
     @test !SolidModels.hasgroup(sm, "norender", 2)
+    @test !SolidModels.hasgroup(sm, "ignored", 2) # Same for `ignored_layers=[:ignored]`
 
     # The physical groups should be reindexed in decreasing order of dimension, and then
     # alphabetically

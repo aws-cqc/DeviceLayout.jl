@@ -5,6 +5,7 @@
         levelwise_layers::Vector{Symbol}
         indexed_layers::Vector{Symbol}
         substrate_layers::Vector{Symbol}
+        ignored_layers::Vector{Symbol}
         rendering_options::NamedTuple
         postrenderer
     end
@@ -19,9 +20,10 @@ to position and extrude 2D geometry elements.
 When rendering entities, metadata is mapped to physical group names as follows:
 
  1. If `layer(m) == layer(DeviceLayout.NORENDER_META)` (i.e., `:norender`), the entity is skipped and not rendered to the solid model.
- 2. The base name is taken from `layername(m)`.
- 3. If `layer(m)` is in `levelwise_layers`, `"_L\$(level(m))"` is appended.
- 4. If `layer(m)` is in `indexed_layers` and `layerindex(m) != 0`, `"_\$(layerindex(m))"` is appended.
+ 2. If `layer(m)` is in `ignored_layers`, the entity is skipped and not rendered to the solid model.
+ 3. The base name is taken from `layername(m)`.
+ 4. If `layer(m)` is in `levelwise_layers`, `"_L\$(level(m))"` is appended.
+ 5. If `layer(m)` is in `indexed_layers` and `layerindex(m) != 0`, `"_\$(layerindex(m))"` is appended.
 
 This behavior matches `LayoutTarget` for consistency across rendering targets.
 
@@ -40,6 +42,7 @@ The `rendering_options` include any keyword arguments to be passed down to the l
   - `indexed_layers`: A list of layer `Symbol`s to be turned into separate `PhysicalGroup`s with `"_\$i"` appended for each index `i`. These layers will be automatically indexed if not already present in a `Schematic`'s `index_dict`.
   - `substrate_layers`: A list of layer `Symbol`s for layers that are extruded by their
     `technology` into the substrate, rather than away from it.
+  - `ignored_layers`: A list of layer `Symbol`s for layers that should be ignored during rendering (mapped to `nothing`). This provides an alternative to using `NORENDER_META` for layers that should be conditionally ignored in solid model rendering but may be needed for other rendering targets.
 
 The `postrenderer` is a list of geometry kernel commands that create new named groups of
 entities from other groups, for example by geometric Boolean operations like intersection.
@@ -52,6 +55,7 @@ struct SolidModelTarget <: Target
     levelwise_layers::Vector{Symbol}
     indexed_layers::Vector{Symbol}
     substrate_layers::Vector{Symbol}
+    ignored_layers::Vector{Symbol}
     preserved_groups::Vector{Tuple{String, Int}}
     rendering_options
     postrenderer
@@ -63,6 +67,7 @@ SolidModelTarget(
     levelwise_layers=[],
     indexed_layers=[],
     substrate_layers=[],
+    ignored_layers=[],
     postrender_ops=[],
     preserved_groups=[],
     kwargs...
@@ -72,6 +77,7 @@ SolidModelTarget(
     levelwise_layers,
     indexed_layers,
     substrate_layers,
+    ignored_layers,
     preserved_groups,
     (; solidmodel=true, kwargs...),
     postrender_ops
@@ -143,6 +149,9 @@ function _map_meta_fn(target::SolidModelTarget)
     return m -> begin
         # Skip rendering if this is the NORENDER_META layer
         (layer(m) == layer(DeviceLayout.NORENDER_META)) && return nothing
+
+        # Skip rendering if layer is in ignored_layers
+        (layer(m) in target.ignored_layers) && return nothing
 
         name = layername(m)
         if layer(m) in levelwise_layers(target)
