@@ -60,7 +60,7 @@ A `Route` supports endpoint inspection much like a `Path` does:
 
 ### Channel routing
 
-`RouteChannels` offer a way to run routes in parallel, with routes joining or leaving a channel at different points. Using `SingleChannelRouting`, we can set the "track" (a path offset from the channel centerline) for each route through the channel, as well as some rules for joining and leaving the channel from route start and end points. Here's a basic example with a straight channel:
+`RouteChannels` offer a way to run routes in parallel, with routes joining or leaving a channel at different points. Using [`Paths.SingleChannelRouting`](@ref), we can set the "track" (a curve offset from the channel centerline) for each route to follow through the channel, as well as some rules for joining and leaving the channel from route start and end points. Here's a basic example with a straight channel:
 
 ```@example 1
 using DeviceLayout, .PreferredUnits, FileIO
@@ -101,7 +101,7 @@ for (pa, p1) in zip(paths, p1s)
 end
 c = Cell("test")
 render!.(c, paths, GDSMeta())
-render!(c, channel_path, GDSMeta(2))
+render!(c, channel_path, GDSMeta(1))
 save("straight_channel.svg", flatten(c); width=6inch, height=2inch);
 nothing; # hide
 ```
@@ -139,7 +139,7 @@ for (pa, p1) in zip(paths, p1s)
 end
 c = Cell("test")
 render!.(c, paths, GDSMeta())
-render!(c, channel_path, GDSMeta(2))
+render!(c, channel_path, GDSMeta(1))
 save("bspline_channel.svg", flatten(c); width=6inch, height=4inch);
 nothing; # hide
 ```
@@ -175,7 +175,7 @@ for (pa, p1) in zip(paths, p1s)
 end
 c = Cell("test")
 render!.(c, paths, GDSMeta())
-render!(c, channel_path, GDSMeta(2))
+render!(c, channel_path, GDSMeta(1))
 save("compound_channel.svg", flatten(c); width=6inch, height=4inch);
 nothing; # hide
 ```

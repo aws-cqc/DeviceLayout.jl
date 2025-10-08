@@ -118,14 +118,7 @@
     @test α1(pa) == α_end
 
     # Use StraightAnd45 with incompatible waypoints
-    r4 = Route(
-        Paths.StraightAnd45(min_bend_radius=20, max_bend_radius=20),
-        p_start,
-        p_end,
-        α_start,
-        α_end,
-        waypoints=waypoints
-    )
+    r4 = Route(Paths.StraightAnd45(20), p_start, p_end, α_start, α_end, waypoints=waypoints)
     @test_throws ErrorException (pa = Path(r4, sty))
 
     # Use StraightAnd45
