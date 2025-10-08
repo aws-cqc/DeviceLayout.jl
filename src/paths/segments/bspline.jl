@@ -326,7 +326,7 @@ Add a BSpline interpolation from the current endpoint of `p` through `nextpoints
 
 The interpolation reaches `nextpoints[end]` making the angle `α_end` with the positive x-axis.
 The `endpoints_speed` is "how fast" the interpolation leaves and enters its endpoints. Higher
-speed means that the start and end angles are approximately α1(p) and α_end over a longer
+speed means that the start and end angles are approximately `α1(p)` and `α_end` over a longer
 distance.
 
 If `auto_speed` is `true`, then `endpoints_speed` is ignored. Instead, the
@@ -341,6 +341,9 @@ additional waypoints are placed so that the curvature at the endpoints is equal 
 If `auto_curvature` is specified, then `endpoints_curvature` is ignored.
 Instead, the curvature at the end of the previous segment of the path is used, or
 zero curvature if the path was empty.
+
+`endpoints_speed` and `endpoints_curvature` can also be provided as 2-element
+iterables to specify initial and final boundary conditions separately.
 """
 function bspline!(
     p::Path{T},
@@ -358,9 +361,8 @@ function bspline!(
         error("`Paths.Straight` segments must follow `Paths.Corner`s.")
     ps = [p1(p)]
     append!(ps, nextpoints)
-    endpoints_speed = endpoints_speed * 1 / (length(ps) - 1) # From scaling interpolation from i=1:length(ps) => t=0..1
-    t0 = endpoints_speed * Point(cos(α1(p)), sin(α1(p)))
-    t1 = endpoints_speed * Point(cos(α_end), sin(α_end))
+    tangent_scale = 1 / (length(ps) - 1) # From scaling interpolation from i=1:length(ps) => t=0..1
+    t0, t1 = _bspline_tangents(tangent_scale, α1(p), α_end, endpoints_speed)
     seg = BSpline(ps, t0, t1)
     auto_curvature && (endpoints_curvature = _last_curvature(p))
     if auto_speed
@@ -374,6 +376,15 @@ function bspline!(
     end
     push!(p, Node(seg, convert(ContinuousStyle, sty)))
     return nothing
+end
+
+_bspline_tangents(scale, dir0, dir1, speed0speed1) =
+    _bspline_tangents(scale, dir0, dir1, first(speed0speed1), last(speed0speed1))
+
+function _bspline_tangents(scale, dir0, dir1, speed0::Coordinate, speed1=speed0)
+    t0 = scale * speed0 * Point(cos(dir0), sin(dir0))
+    t1 = scale * speed1 * Point(cos(dir1), sin(dir1))
+    return t0, t1
 end
 
 # Patch in new boundary condition for Interpolations.jl allowing us to specify derivative

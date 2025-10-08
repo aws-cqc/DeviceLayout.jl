@@ -18,10 +18,13 @@ function _optimize_bspline!(b::BSpline; endpoints_curvature=nothing)
 end
 
 function _set_endpoints_curvature!(::BSpline, ::Nothing; add_points=false) end
+function _set_endpoints_curvature!(b::BSpline, κ0κ1; add_points=false)
+    return _set_endpoints_curvature!(b, first(κ0κ1), last(κ0κ1); add_points)
+end
 
 function _set_endpoints_curvature!(
     b::BSpline{T},
-    κ0=0.0 / oneunit(T),
+    κ0::Union{Float64, DeviceLayout.InverseLength}=0.0 / oneunit(T),
     κ1=κ0;
     add_points=false
 ) where {T}

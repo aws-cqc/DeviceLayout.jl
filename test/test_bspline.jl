@@ -318,4 +318,20 @@ end
     c = Cell("test")
     render!(c, pa5, GDSMeta())
     @test length(elements(c)[1].p) > 500 # 856, but discretization is subject to change
+
+    ## Different stop/start boundary conditions
+    pa6 = Path()
+    bspline!(
+        pa6,
+        [Point(100μm, 100μm), Point(200μm, 200μm), Point(0μm, 0μm)],
+        -90°,
+        Paths.Trace(1μm);
+        endpoints_speed=[160μm, 120μm],
+        endpoints_curvature=[1 / (50μm), 0 / (50μm)]
+    )
+    @test Paths.signed_curvature(pa6[1].seg, 0nm) ≈ 1 / (50μm)
+    @test Paths.signed_curvature(pa6[1].seg, pathlength(pa6[1])) ≈ zero(1 / (50μm)) atol =
+        1e-15 / nm
+    @test Paths.norm(Paths.Interpolations.gradient(pa6[1].seg.r, 0)[1]) ≈ 160μm
+    @test Paths.norm(Paths.Interpolations.gradient(pa6[1].seg.r, 1)[1]) ≈ 120μm
 end
