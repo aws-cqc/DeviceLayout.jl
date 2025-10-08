@@ -25,8 +25,6 @@ When rendering entities, metadata is mapped to physical group names as follows:
  4. If `layer(m)` is in `levelwise_layers`, `"_L\$(level(m))"` is appended.
  5. If `layer(m)` is in `indexed_layers` and `layerindex(m) != 0`, `"_\$(layerindex(m))"` is appended.
 
-This behavior matches `LayoutTarget` for consistency across rendering targets.
-
 # Rendering Options
 
 The `rendering_options` include any keyword arguments to be passed down to the lower-level

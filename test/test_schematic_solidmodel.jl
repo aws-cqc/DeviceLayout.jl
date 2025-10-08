@@ -143,7 +143,11 @@ function test_component(component, clip_area, mesh=false, gui=false)
         DeviceLayout.NORENDER_META
     )
     # Also an element in a layer that will be designated as ignored by the target
-    render!(floorplan.coordinate_system, Rectangle(2μm, 2μm) + Point(50μm, 50μm), :ignored)
+    render!(
+        floorplan.coordinate_system,
+        Rectangle(2μm, 2μm) + Point(50μm, 50μm),
+        SemanticMeta(:ignored)
+    )
 
     check!(floorplan)
     build!(floorplan)

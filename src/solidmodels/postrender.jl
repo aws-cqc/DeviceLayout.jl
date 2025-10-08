@@ -357,7 +357,7 @@ function union_geom!(
 
     # Actual entities were deleted as part of the operation, just empty the groups.
     if remove_object
-        remove_group!.(getindex.(sm, valid_object, d1))
+        remove_group!.(getindex.(sm, valid_object, d1), remove_entities=false)
     end
     if remove_tool
         remove_group!.(
@@ -365,7 +365,8 @@ function union_geom!(
                 sm,
                 remove_object ? setdiff(valid_tool, valid_object) : valid_tool,
                 d2
-            )
+            ),
+            remove_entities=false
         )
     end
     return dt
@@ -485,7 +486,7 @@ function intersect_geom!(
 
     # Actual entities were deleted as part of the operation, just empty the groups.
     if remove_object
-        remove_group!.(getindex.(sm, valid_object, d1))
+        remove_group!.(getindex.(sm, valid_object, d1), remove_entities=false)
     end
     if remove_tool
         remove_group!.(
@@ -493,7 +494,8 @@ function intersect_geom!(
                 sm,
                 remove_object ? setdiff(valid_tool, valid_object) : valid_tool,
                 d2
-            )
+            ),
+            remove_entities=false
         )
     end
     return dt
@@ -650,7 +652,7 @@ function difference_geom!(
 
     # Actual entities were deleted as part of the operation, just empty the groups.
     if remove_object
-        remove_group!.(getindex.(sm, valid_object, d1))
+        remove_group!.(getindex.(sm, valid_object, d1), remove_entities=false)
     end
     if remove_tool
         remove_group!.(
@@ -658,7 +660,8 @@ function difference_geom!(
                 sm,
                 remove_object ? setdiff(valid_tool, valid_object) : valid_tool,
                 d2
-            )
+            ),
+            remove_entities=false
         )
     end
     return dt
@@ -794,7 +797,7 @@ function fragment_geom!(
 
     # Actual entities were deleted as part of the operation, just empty the groups.
     if remove_object
-        remove_group!.(getindex.(sm, valid_object, d1))
+        remove_group!.(getindex.(sm, valid_object, d1), remove_entities=false)
     end
     if remove_tool
         remove_group!.(
@@ -802,7 +805,8 @@ function fragment_geom!(
                 sm,
                 remove_object ? setdiff(valid_tool, valid_object) : valid_tool,
                 d2
-            )
+            ),
+            remove_entities=false
         )
     end
     return dt
@@ -953,21 +957,23 @@ function set_periodic!(group1::AbstractPhysicalGroup, group2::AbstractPhysicalGr
 end
 
 """
-    remove_group!(sm::SolidModel, group::Union{String, Symbol}, dim; recursive=true, remove_entities=false)
-    remove_group!(group::AbstractPhysicalGroup; recursive=true, remove_entities=false)
+    remove_group!(sm::SolidModel, group::Union{String, Symbol}, dim; recursive=true, remove_entities=true)
+    remove_group!(group::AbstractPhysicalGroup; recursive=true, remove_entities=true)
 
-Remove entities in `group` from the model, unless they are boundaries of higher-dimensional entities.
+Remove entities in `group` from the model, unless they are boundaries of higher-dimensional entities or part of another physical group.
 
 If `recursive` is true, remove all entities on their boundaries, down to dimension zero (points).
 
-Also removes the (now-empty) physical group.
+Also removes the record of the (now-empty) physical group.
+
+If `remove_entities` is false, only removes the record of the group from the model.
 """
 function remove_group!(
     sm::SolidModel,
     group::Union{String, Symbol},
     dim;
     recursive=true,
-    remove_entities=false
+    remove_entities=true
 )
     if !hasgroup(sm, group, dim)
         @info "remove_group!(sm, $group, $dim; recursive=$recursive, remove_entities=$remove_entities): ($group, $dim) is not a physical group."
@@ -983,7 +989,7 @@ end
 remove_group!(sm::SolidModel, group, dim; kwargs...) =
     remove_group!.(sm, group, dim; kwargs...)
 
-function remove_group!(group::PhysicalGroup; recursive=true, remove_entities=false)
+function remove_group!(group::PhysicalGroup; recursive=true, remove_entities=true)
     if remove_entities
         kernel(group).remove(dimtags(group), recursive)
     end

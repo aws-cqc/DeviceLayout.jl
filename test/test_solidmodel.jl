@@ -260,7 +260,7 @@ import DeviceLayout.SolidModels.STP_UNIT
         ) SolidModels.get_boundary(sm["test", 2]; direction="X", position="no")
     )
 
-    SolidModels.remove_group!(sm, "test", 2; recursive=false)
+    SolidModels.remove_group!(sm, "test", 2; recursive=false, remove_entities=false)
     @test !SolidModels.hasgroup(sm, "test", 2)
     @test !isempty(SolidModels.dimtags(sm["test_bdy", 1]))
     @test !isempty(SolidModels.dimtags(sm["test_bdy_xmin", 1]))
@@ -276,7 +276,7 @@ import DeviceLayout.SolidModels.STP_UNIT
         @test_logs (
             :info,
             "remove_group!(sm, foo, 3; recursive=true, remove_entities=false): (foo, 3) is not a physical group."
-        ) SolidModels.remove_group!(sm, "foo", 3)
+        ) SolidModels.remove_group!(sm, "foo", 3; remove_entities=false)
     )
     @test isempty(
         @test_logs (
