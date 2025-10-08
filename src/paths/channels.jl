@@ -215,13 +215,15 @@ A `RouteRule` for guiding routed paths along tracks in a [`Paths.RouteChannel`](
 
 "Tracks" are offsets of the channel's path, with equal spacing between each other
 and the extents of the channel's trace width. Tracks are ordered from right to left
-when looking along the channel. For example, track 1 is the bottom track
+when facing along the channel. For example, track 1 is the bottom track
 (most negative offset) for a channel directed along the positive x axis, while
-the highest track index is the top track.
+the highest track index is its top track.
 
 The user manually assigns tracks to paths that will be routed with
-`rule::SingleChannelRouting` using `set_track!(rule, path)` for each path,
-prior to calling `route!(path, ...)`.
+`rule::SingleChannelRouting` using `Paths.set_track!(rule, path, track_idx)` for each path,
+prior to calling `route!(path, ...)`. Because the track offset depends on the total number
+of tracks, and the number of tracks is determined by the maximum track index of any path
+added to `rule`, all paths should be assigned tracks before any `route!` call.
 
 If used for schematic routing, the track is supplied as a keyword argument,
 defaulting to a new track added at the top of the channel:
@@ -283,6 +285,16 @@ end
 function track_idx(scr, pa)
     return scr.segment_tracks[pa]
 end
+
+"""
+    set_track!(rule::SingleChannelRouting, pa::Path, track_idx::Int)
+
+Sets `pa` to be routed along track `track_idx` in the channel used by `rule`.
+
+Tracks are ordered from right to left when facing along the channel.
+For example, track 1 is the bottom track (most negative offset) for a
+channel directed along the positive x axis, while the highest track index is its top track.
+"""
 function set_track!(scr, pa, track_idx)
     return scr.segment_tracks[pa] = track_idx
 end
