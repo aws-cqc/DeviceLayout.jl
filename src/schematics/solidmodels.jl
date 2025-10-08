@@ -14,6 +14,19 @@ Contains information about how to render a `Schematic` to a 3D `SolidModel`.
 The `technology` contains parameters like layer heights and thicknesses that are used
 to position and extrude 2D geometry elements.
 
+# Metadata Mapping
+
+When rendering entities, metadata is mapped to physical group names as follows:
+
+ 1. If `layer(m) == layer(DeviceLayout.NORENDER_META)` (i.e., `:norender`), the entity is skipped and not rendered to the solid model.
+ 2. The base name is taken from `layername(m)`.
+ 3. If `layer(m)` is in `levelwise_layers`, `"_L\$(level(m))"` is appended.
+ 4. If `layer(m)` is in `indexed_layers` and `layerindex(m) != 0`, `"_\$(layerindex(m))"` is appended.
+
+This behavior matches `LayoutTarget` for consistency across rendering targets.
+
+# Rendering Options
+
 The `rendering_options` include any keyword arguments to be passed down to the lower-level
 `render!(::SolidModel, ::CoordinateSystem; kwargs...)`. The target also includes some
 3D-specific options:
@@ -128,6 +141,9 @@ function _map_meta_fn(target::SolidModelTarget)
     # By default, target maps a layer to layername (string)
     # Append -L$(level) and/or _$(index) if appropriate
     return m -> begin
+        # Skip rendering if this is the NORENDER_META layer
+        (layer(m) == layer(DeviceLayout.NORENDER_META)) && return nothing
+
         name = layername(m)
         if layer(m) in levelwise_layers(target)
             name = name * "_L$(level(m))"

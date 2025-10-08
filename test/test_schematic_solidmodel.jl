@@ -136,6 +136,13 @@ function test_component(component, clip_area, mesh=false, gui=false)
         SemanticMeta(:circle)
     )
 
+    # Add a NORENDER_META element that should be skipped in solid model rendering
+    render!(
+        floorplan.coordinate_system,
+        Rectangle(2μm, 2μm) + Point(50μm, 50μm),
+        DeviceLayout.NORENDER_META
+    )
+
     check!(floorplan)
     build!(floorplan)
 
@@ -181,7 +188,8 @@ function test_component(component, clip_area, mesh=false, gui=false)
             ("substrates", 3),
             ("vacuum", 3),
             ("base_metal", 2),
-            ("circle", 2)
+            ("circle", 2),
+            ("norender", 2)
         ],
         solidmodel=true,
         simulation=true
@@ -201,6 +209,9 @@ function test_component(component, clip_area, mesh=false, gui=false)
     @test !SolidModels.hasgroup(sm, "writeable_area", 2)
     @test !SolidModels.hasgroup(sm, "base_negative", 2)
     @test !SolidModels.hasgroup(sm, "circle", 2)
+
+    # Verify that NORENDER_META element is not present (should be skipped even though it's retained)
+    @test !SolidModels.hasgroup(sm, "norender", 2)
 
     # The physical groups should be reindexed in decreasing order of dimension, and then
     # alphabetically
