@@ -127,7 +127,7 @@ function test_schematic_single_channel()
         rule,
         spacer1 => :p1_west,
         spacer2 => :p1_east,
-        Paths.SimpleTrace(1μm),
+        Paths.CPW(1μm, 1μm),
         GDSMeta()
     )
     r2 = route!(
@@ -144,6 +144,8 @@ function test_schematic_single_channel()
     # Track assignment means pa1 track is 100um below pa2 track
     @test pathlength(pa1) ≈ 2 * (450μm + pi * 50μm + 0.4mm) + 1mm atol = 1nm
     @test pathlength(pa2) ≈ 2 * (350μm + pi * 50μm + 0.4mm) + 1mm atol = 1nm
+    c = Cell("test", nm)
+    return render!(c, pa1, GDSMeta()) # No error
 end
 
 @testset "Channels" begin
@@ -183,8 +185,6 @@ end
     )
     Paths.set_track!(rule, pa2, 1)
     route!(pa2, Point(0.1mm, 0.1mm), 0, rule, Paths.CPW(2nm, 2nm))
-    c = Cell("test", nm)
-    render!(c, pa2, GDSMeta()) # No error
     @test length(pa2) == 1 # Channel segment turned into waypoint
 
     ## Schematic-level routing
