@@ -169,14 +169,52 @@ function convert(::Type{Ellipse{T}}, e::Ellipse{S}) where {T, S}
     return Ellipse{T}(convert(Point{T}, e.center), convert(NTuple{2, T}, e.radii), e.angle)
 end
 
-function to_polygons(e::Ellipse; Δθ=5°, kwargs...)
-    r =
-        θ ->
-            (e.radii[1] * e.radii[2]) /
-            sqrt((e.radii[2] * cos(θ))^2 + (e.radii[1] * sin(θ))^2)
-    # θ₀ = atand(e.axis[2], e.axis[1])°
-    p = θ -> e.center + r(θ - e.angle) .* Point(cos(θ), sin(θ))
-    return Polygon(p.(0:Δθ:(360° - Δθ)))
+"""
+    ellipse_curvature(e::Ellipse, θ)
+
+Compute the curvature of an ellipse at parameter θ.
+For an ellipse with semi-major axis `a` and semi-minor axis `b`,
+the curvature is κ(φ) = ab / (a²sin²φ + b²cos²φ)^(3/2)
+where φ is the angle measured from the major axis of the ellipse.
+
+Since θ in the ellipse parameterization is measured from the global x-axis,
+we need φ = θ - e.angle to get the angle relative to the ellipse's major axis.
+"""
+function ellipse_curvature(e::Ellipse, θ)
+    a, b = e.radii[1], e.radii[2]  # a is major axis, b is minor axis
+    φ = θ - e.angle  # Convert from global angle θ to ellipse-relative angle φ
+    return (a * b) / (a^2 * sin(φ)^2 + b^2 * cos(φ)^2)^1.5
+end
+
+function to_polygons(
+    e::Ellipse;
+    atol=DeviceLayout.onenanometer(eltype(e.center)),
+    Δθ=nothing,
+    kwargs...
+)
+    if !isnothing(Δθ) # Use Δθ-based discretization
+        r =
+            θ ->
+                (e.radii[1] * e.radii[2]) /
+                sqrt((e.radii[2] * cos(θ))^2 + (e.radii[1] * sin(θ))^2)
+        p = θ -> e.center + r(θ - e.angle) .* Point(cos(θ), sin(θ))
+        return Polygon(p.(0:Δθ:(360° - Δθ)))
+    else # Use tolerance-based discretization
+        curvature_fn = θ -> ellipse_curvature(e, θ)
+        # t_scale is used to approximately convert "t" (θ) to arclength, use the larger radius to be safe
+        θs = DeviceLayout.discretization_grid(
+            curvature_fn,
+            atol,
+            (0.0, 2π);
+            t_scale=e.radii[1]
+        )
+        r =
+            θ ->
+                (e.radii[1] * e.radii[2]) /
+                sqrt((e.radii[2] * cos(θ))^2 + (e.radii[1] * sin(θ))^2)
+        p = θ -> e.center + r(θ - e.angle) .* Point(cos(θ), sin(θ))
+        return Polygon(p.(θs[1:(end - 1)])) # Don't duplicate last point
+    end
 end
 
 DeviceLayout.magnify(e::Ellipse, mag) = Ellipse(mag .* e.center, mag .* e.radii, e.angle)

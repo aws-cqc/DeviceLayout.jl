@@ -480,6 +480,53 @@ end
 
     @test_nowarn place!(cs, er, GDSMeta())
     @test_nowarn render!(c, cs)
+
+    # Test tolerance-based discretization (new default)
+    e_default = to_polygons(e)  # Should use atol by default
+    e_delta_style = to_polygons(e; Δθ=5°)  # Δθ-based approach
+
+    # The new tolerance-based approach should produce more points than 5° steps
+    @test length(points(e_default)) > length(points(e_delta_style))
+
+    # Test that atol parameter works
+    e_coarse = to_polygons(e; atol=1.0μm)  # Very coarse tolerance
+    e_fine = to_polygons(e; atol=1.0nm)    # Very fine tolerance
+
+    # Coarse tolerance should produce fewer points than fine tolerance
+    @test length(points(e_coarse)) < length(points(e_fine))
+
+    # Test backward compatibility - Δθ should still work when explicitly provided
+    e_10deg = to_polygons(e; Δθ=10°)
+    e_5deg = to_polygons(e; Δθ=5°)
+
+    # 10° steps should produce fewer points than 5° steps
+    @test length(points(e_10deg)) < length(points(e_5deg))
+
+    # Test that both atol and Δθ can be provided (Δθ should take precedence for backward compatibility)
+    e_mixed = to_polygons(e; atol=1.0nm, Δθ=10°)
+    @test length(points(e_mixed)) == length(points(e_10deg))
+
+    # Test with circles (special case of ellipse)
+    circ = Circle(Point(0.0μm, 0.0μm), 1.0μm)
+    circ_default = to_polygons(circ)
+    circ_delta = to_polygons(circ; Δθ=5.12°) # default atol gives ~5.12° spacing on this circle
+    circ_delta_coarse = to_polygons(circ; Δθ=10°)
+
+    # Delta method also takes away last point if it's closer than Δθ to the end, so n1=n2+1
+    @test length(points(circ_default)) == length(points(circ_delta)) + 1
+    @test length(points(circ_default)) > length(points(circ_delta_coarse))
+    # Discretization should be very similar to circular_arc
+    @test length(points(circ_default)) == length(circular_arc(2pi, 1.0μm, 1.0nm)) - 1 # last pt duplicated
+
+    # Make sure error is as small as tolerance says
+    area(p) =
+        sum(
+            (gety.(p.p) + gety.(circshift(p.p, -1))) .*
+            (getx.(p.p) - getx.(circshift(p.p, -1)))
+        ) / 2
+    e_fine = to_polygons(e; atol=0.1nm)
+    p = to_polygons(difference2d(e_fine, e_default))[1]
+    @test abs(area(p) / perimeter(p)) < 1nm # on average better than 1nm
 end
 
 @testset "Sweeping" begin
