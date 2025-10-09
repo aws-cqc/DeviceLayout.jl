@@ -130,7 +130,7 @@ reverse(s::GeneralCPW, l) = GeneralCPW(t -> trace(s, l - t), t -> gap(s, l - t))
 # Keep the same tag so if a compound segment/style pair matched before they will still match
 reverse(s::CompoundSegment) = CompoundSegment(reverse(reverse.(s.segments)), s.tag)
 function reverse(s::CompoundStyle{T}, l) where {T}
-    lengths = reverse(diff(s.grid))
+    lengths = diff(s.grid)
     return CompoundStyle{T}(
         reverse(reverse.(s.styles, lengths)),
         [zero(T); cumsum(reverse(lengths))],
