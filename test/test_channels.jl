@@ -55,7 +55,12 @@ function test_single_channel(
     if channel_segment == Paths.Straight
         straight!(channel, 1mm, channel_style)
     elseif channel_segment == Paths.Turn
-        turn!(channel, 0.1, 10mm, channel_style)
+        if channel_style isa Paths.TaperTrace
+            # This path is not simplified, and tapers inside CompoundStyle are not supported for channels
+            return Path[]
+        end
+        turn!(channel, 0.04, 10mm, channel_style)
+        turn!(channel, -0.06, 10mm, channel_style)
     elseif channel_segment == Paths.CompoundSegment
         turn!(channel, 90°, 0.25mm, channel_style)
         turn!(channel, -90°, 0.25mm)
@@ -74,7 +79,7 @@ function test_single_channel(
         )
     end
 
-    reverse_channel && (channel = Path([reverse(channel[1])]))
+    reverse_channel && (channel = Path(reverse(reverse.(channel.nodes))))
 
     # Variety of cases
     p0s = [

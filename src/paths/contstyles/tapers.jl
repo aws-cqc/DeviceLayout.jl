@@ -15,10 +15,12 @@ struct TaperTrace{T <: Coordinate} <: Trace{true}
 end
 copy(x::TaperTrace{T}) where {T} = TaperTrace{T}(x.width_start, x.width_end, x.length)
 extent(s::TaperTrace, t) = 0.5 * width(s, t)
+extent(s::TaperTrace) = t -> extent(s, t)
 width(s::TaperTrace, t) =
     (1 - uconvert(NoUnits, t / s.length)) * s.width_start + t / s.length * s.width_end
 width(s::TaperTrace) = t -> width(s, t)
 trace(s::TaperTrace, t) = width(s, t)
+trace(s::TaperTrace) = width(s)
 
 function pin(s::TaperTrace{T}; start=nothing, stop=nothing) where {T}
     iszero(s.length) && error("cannot `pin`; length of $s not yet determined.")
@@ -73,10 +75,13 @@ copy(x::TaperCPW{T}) where {T} =
 extent(s::TaperCPW, t) =
     (1 - uconvert(NoUnits, t / s.length)) * (0.5 * s.trace_start + s.gap_start) +
     (t / s.length) * (0.5 * s.trace_end + s.gap_end)
+extent(s::TaperCPW) = Base.Fix1(extent, s)
 trace(s::TaperCPW, t) =
     (1 - uconvert(NoUnits, t / s.length)) * s.trace_start + t / s.length * s.trace_end
+trace(s::TaperCPW) = Base.Fix1(trace, s)
 gap(s::TaperCPW, t) =
     (1 - uconvert(NoUnits, t / s.length)) * s.gap_start + t / s.length * s.gap_end
+gap(s::TaperCPW) = Base.Fix1(gap, s)
 function TaperCPW(
     trace_start::Coordinate,
     gap_start::Coordinate,

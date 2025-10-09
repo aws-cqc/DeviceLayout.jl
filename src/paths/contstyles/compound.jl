@@ -65,6 +65,14 @@ for x in (:extent, :width, :trace, :gap)
         sty, teff = s(t)
         return ($x)(sty, teff)
     end
+    @eval function ($x)(s::CompoundStyle)
+        # If all the xs are the same constant we can just return the constant
+        uniquexs = unique(($x).(s.styles))
+        if length(uniquexs) == 1 && only(uniquexs) isa Coordinate
+            return only(uniquexs)
+        end
+        return Base.Fix1(($x), s)
+    end
 end
 
 summary(::CompoundStyle) = "Compound style"
