@@ -509,15 +509,21 @@ end
 transform(x::Node, f::Transformation) = transform(x, ScaledIsometry(f))
 function transform(x::Node, f::ScaledIsometry)
     y = deepcopy(x)
+    new_p0 = f(p0(y.seg)) # Handedness change can change p0, α0 for offset segment
+    new_α0 = rotated_direction(α0(y.seg), f) # So calculate them in advance
+    # But handedness matters for offset setα0p0! calculation so we still do it first 
     xrefl(f) && change_handedness!(y)
-    setα0p0!(y.seg, rotated_direction(α0(y.seg), f), f(p0(y.seg)))
+    setα0p0!(y.seg, new_α0, new_p0)
     return y
 end
 
 function transform(x::Segment, f::Transformation)
     y = deepcopy(x)
+    new_p0 = f(p0(y)) # Handedness change can change p0, α0 for offset segment
+    new_α0 = rotated_direction(α0(y), f) # So calculate them in advance
+    # But handedness matters for offset setα0p0! calculation so we still do it first 
     xrefl(f) && change_handedness!(y)
-    setα0p0!(y, rotated_direction(α0(y), f), f(p0(y)))
+    setα0p0!(y, new_α0, new_p0)
     return y
 end
 
