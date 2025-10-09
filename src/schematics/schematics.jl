@@ -1041,6 +1041,7 @@ function _plan_route!(sch::Schematic, node_cs, node, hooks_fn=hooks)
         comp1.r.waypoints = rot.(comp1.r.waypoints) .+ Ref(comp1.r.p0)
         comp1.r.waydirs = comp1.r.waydirs .+ comp1.r.α0
     end
+    _update_with_plan!(comp1.r.rule, node, sch)
     return addref!(node_cs, comp1)
 end
 

@@ -23,7 +23,9 @@ capture an initial and final angle, a radius, and an origin. All circular turns 
 parameterized with these variables.
 
 Another useful `Segment` subtype is [`Paths.BSpline`](@ref), which interpolates between two
-or more points with specified start and end tangents.
+or more points with specified start and end tangents (and curvature, optionally) using a [cubic B-spline](https://en.wikipedia.org/wiki/B-spline#Cubic_B-Splines).
+These have the property that curvature is continuous along the spline, and
+can be automatically optimized further to avoid sharp changes in curvature.
 
 ## Styles
 

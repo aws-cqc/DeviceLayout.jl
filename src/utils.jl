@@ -229,7 +229,7 @@ function discretization_grid(
         )
         t = ts[i - 1]
         # Set dt based on distance from chord assuming constant curvature
-        if cc >= 1e-9 * oneunit(typeof(cc)) # Update dt if curvature is not near zero
+        if cc >= 100 * 8 * tolerance / t_scale^2 # Update dt if curvature is not near zero
             dt = uconvert(NoUnits, sqrt(8 * tolerance / cc) / t_scale)
         end
         if t + dt >= bnds[2]

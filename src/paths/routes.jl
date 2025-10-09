@@ -33,6 +33,7 @@ abstract type RouteRule end
         min_bend_radius = 200μm
         max_bend_radius = Inf*μm
     end
+    StraightAnd90(r) = StraightAnd90(min_bend_radius=r, max_bend_radius=r)
 
 Specifies rules for routing from one point to another using straight segments and 90° bends.
 
@@ -46,12 +47,14 @@ Base.@kwdef struct StraightAnd90 <: RouteRule
     min_bend_radius = 200μm
     max_bend_radius = Inf * μm
 end
+StraightAnd90(r) = StraightAnd90(min_bend_radius=r, max_bend_radius=r)
 
 """
     Base.@kwdef struct StraightAnd45 <: RouteRule
         min_bend_radius = 200μm
         max_bend_radius = Inf*μm
     end
+    StraightAnd45(r) = StraightAnd45(min_bend_radius=r, max_bend_radius=r)
 
 Specifies rules for routing from one point to another using using straight segments and 45° bends.
 
@@ -65,10 +68,14 @@ Base.@kwdef struct StraightAnd45 <: RouteRule
     min_bend_radius = 200μm
     max_bend_radius = Inf * μm
 end
+StraightAnd45(r) = StraightAnd45(min_bend_radius=r, max_bend_radius=r)
 
 """
     Base.@kwdef struct BSplineRouting <: RouteRule
         endpoints_speed = 2500μm
+        auto_speed = false
+        endpoints_curvature = nothing
+        auto_curvature = false
     end
 
 Specifies rules for routing from one point to another using BSplines.
@@ -77,6 +84,9 @@ Ignores `waydirs`.
 """
 Base.@kwdef struct BSplineRouting <: RouteRule
     endpoints_speed = 2500μm
+    auto_speed = false
+    endpoints_curvature = nothing
+    auto_curvature = false
 end
 
 """
@@ -469,7 +479,10 @@ function _route!(
         vcat(waypoints, [p_end]),
         α_end,
         sty,
-        endpoints_speed=rule.endpoints_speed
+        endpoints_speed=rule.endpoints_speed,
+        auto_speed=rule.auto_speed,
+        endpoints_curvature=rule.endpoints_curvature,
+        auto_curvature=rule.auto_curvature
     )
 end
 
