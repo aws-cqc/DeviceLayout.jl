@@ -331,7 +331,7 @@ distance.
 
 If `auto_speed` is `true`, then `endpoints_speed` is ignored. Instead, the
 endpoint speeds are optimized to make curvature changes gradual as possible
-(minimizing the integrated square of the curvature with respect
+(minimizing the integrated square of the curvature derivative with respect
 to arclength).
 
 If `endpoints_curvature` (dimensions of `oneunit(T)^-1`) is specified, then
