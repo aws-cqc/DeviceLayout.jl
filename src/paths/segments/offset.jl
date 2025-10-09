@@ -18,7 +18,7 @@ abstract type OffsetSegment{T, S <: Segment{T}} <: ContinuousSegment{T} end
 """
     struct ConstantOffset{T,S} <: OffsetSegment{T,S}
 """
-struct ConstantOffset{T, S} <: OffsetSegment{T, S}
+mutable struct ConstantOffset{T, S} <: OffsetSegment{T, S}
     seg::S
     offset::T
 end
@@ -26,7 +26,7 @@ end
 """
     struct GeneralOffset{T,S} <: OffsetSegment{T,S}
 """
-struct GeneralOffset{T, S} <: OffsetSegment{T, S}
+mutable struct GeneralOffset{T, S} <: OffsetSegment{T, S}
     seg::S
     offset
 end
@@ -73,6 +73,23 @@ p0(s::GeneralOffset{T}) where {T} =
 function direction(s::GeneralOffset{T}, t) where {T}
     tang = tangent(s, t)
     return uconvert(°, atan(tang.y, tang.x))
+end
+
+function setα0p0!(s::OffsetSegment, angle, p::Point)
+    rotation_angle = angle - α0(s)
+    rotated_offset = Rotation(rotation_angle)(p0(s) - p0(s.seg))
+    return setα0p0!(s.seg, α0(s.seg) + rotation_angle, p - rotated_offset)
+end
+
+function change_handedness!(x::ConstantOffset)
+    x.offset = -x.offset
+    return change_handedness!(x.seg)
+end
+
+function change_handedness!(x::GeneralOffset)
+    orig_offset = x.offset
+    x.offset = (t -> -orig_offset(t))
+    return change_handedness!(x.seg)
 end
 
 function tangent(s::OffsetSegment, t)
@@ -146,20 +163,14 @@ summary(s::OffsetSegment) = summary(s.seg) * " offset by $(s.offset)"
 
 # Methods for creating offset segments
 OffsetSegment(seg::S, offset::Coordinate) where {T, S <: Segment{T}} =
-    ConstantOffset{T, S}(seg, offset)
-OffsetSegment(seg::S, offset) where {T, S <: Segment{T}} = GeneralOffset{T, S}(seg, offset)
+    ConstantOffset{T, S}(copy(seg), offset)
+OffsetSegment(seg::S, offset) where {T, S <: Segment{T}} =
+    GeneralOffset{T, S}(copy(seg), offset)
 offset(seg::Segment, s) = OffsetSegment(seg, s)
 offset(seg::ConstantOffset, s::Coordinate) = offset(seg.seg, s + seg.offset)
 offset(seg::ConstantOffset, s) = offset(seg.seg, t -> s(t) + seg.offset)
 offset(seg::GeneralOffset, s::Coordinate) = offset(seg.seg, t -> s + seg.offset(t))
 offset(seg::GeneralOffset, s) = offset(seg.seg, t -> s(t) + seg.offset(t))
-
-function transform(x::ConstantOffset, f::Transformation)
-    y = deepcopy(x)
-    xrefl(f) && change_handedness!(y)
-    setα0p0!(y.seg, rotated_direction(α0(y.seg), f), f(p0(y.seg)))
-    return y
-end
 
 # Define outer constructors for Turn and Straight from
 Straight(x::ConstantOffset{T, Straight{T}}) where {T} =

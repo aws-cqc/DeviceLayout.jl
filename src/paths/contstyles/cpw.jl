@@ -15,8 +15,11 @@ struct GeneralCPW{S, T} <: CPW{false}
 end
 copy(x::GeneralCPW) = GeneralCPW(x.trace, x.gap)
 extent(s::GeneralCPW, t) = s.trace(t) / 2 + s.gap(t)
+extent(s::GeneralCPW) = Base.Fix1(extent, s)
 trace(s::GeneralCPW, t) = s.trace(t)
+trace(s::GeneralCPW) = s.trace
 gap(s::GeneralCPW, t) = s.gap(t)
+gap(s::GeneralCPW) = s.gap
 translate(s::GeneralCPW, t) = GeneralCPW(x -> s.trace(x + t), x -> s.gap(x + t))
 
 """
