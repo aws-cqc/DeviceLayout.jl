@@ -4,10 +4,18 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Upcoming
+## 1.5.0 (2025-10-10)
 
-  - Fixed incorrect conversion and reflection of split BSplines
+  - Added `auto_speed`, `endpoints_curvature`, and `auto_curvature` keyword options to `bspline!` and `BSplineRouting`
+    
+      + `auto_speed` sets the speed at endpoints to avoid sharp bends (minimizing the integrated square of the curvature derivative with respect to arclength)
+      + `endpoints_curvature` sets boundary conditions on the curvature (by inserting extra waypoints)
+      + `auto_curvature` B-spline sets curvature at endpoints to match previous segment (or to zero if there is no previous segment)
+      + Both `endpoints_speed` and `endpoints_curvature` can be specified as two-element iterables to set the start and end boundary conditions separately
+  - Added `spec_warnings` keyword option for `save` to allow disabling warnings about cell names violating the GDSII specification (modern tools will accept a broader range of names than strictly allowed by the specification)
+  - Added `unfold` method for point arrays to help construct polygons with mirror symmetry
   - Added FAQ entry about MeshSized/OptionalEntity styling on Paths
+  - Fixed incorrect conversion and reflection of split BSplines
   - Fixed issue causing duplicate `Cell` names with paths and composite components, where rendering would use the component's name rather than a unique name
 
 ## 1.4.2 (2025-07-16)
