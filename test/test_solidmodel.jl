@@ -466,6 +466,10 @@ import DeviceLayout.SolidModels.STP_UNIT
     place!(cs, e, SemanticMeta(:test))
     sm = SolidModel("test"; overwrite=true)
     render!(sm, cs)
+    @test SolidModels.to_primitives(sm, e) === e
+    @test SolidModels.to_primitives(sm, e; rounded=true) === e
+    @test length(points(SolidModels.to_primitives(sm, e; rounded=false))) == 8
+    @test length(points(SolidModels.to_primitives(sm, e; Δθ=pi / 2))) == 4
 
     # CurvilinearPolygon
     # A basic, noncurved polygon

@@ -491,6 +491,9 @@ end
     # Test that atol parameter works
     e_coarse = to_polygons(e; atol=1.0μm)  # Very coarse tolerance
     e_fine = to_polygons(e; atol=1.0nm)    # Very fine tolerance
+    @show 1.0μm
+    @show points(e_coarse)
+    @show points(to_polygons(e; atol=100.0nm))
 
     # Coarse tolerance should produce fewer points than fine tolerance
     @test length(points(e_coarse)) < length(points(e_fine))
