@@ -489,14 +489,17 @@ end
     @test length(points(e_default)) > length(points(e_delta_style))
 
     # Test that atol parameter works
-    e_coarse = to_polygons(e; atol=1.0μm)  # Very coarse tolerance
+    e_coarse = to_polygons(e; atol=0.1μm)  # Very coarse tolerance
     e_fine = to_polygons(e; atol=1.0nm)    # Very fine tolerance
-    @show 1.0μm
-    @show points(e_coarse)
-    @show points(to_polygons(e; atol=100.0nm))
 
     # Coarse tolerance should produce fewer points than fine tolerance
     @test length(points(e_coarse)) < length(points(e_fine))
+
+    # If tolerance is too high the discretization will get too scared to update dt from 1%
+    # It's OK if an improvement to the discretization algorithm renders this test obsolete
+    # But currently that's the correct thing to do
+    e_too_coarse = to_polygons(e; atol=1.0μm)
+    @test length(points(e_too_coarse)) > length(points(e_coarse))
 
     # Test backward compatibility - Δθ should still work when explicitly provided
     e_10deg = to_polygons(e; Δθ=10°)

@@ -216,7 +216,7 @@ function discretization_grid(
     bnds::Tuple{Float64, Float64}=(0.0, 1.0);
     t_scale=1.0
 )
-    dt = 0.01
+    dt = 0.01 * bnds[2]
     ts = zeros(4000)
     ts[1] = bnds[1]
     t = bnds[1]
@@ -229,7 +229,7 @@ function discretization_grid(
         )
         t = ts[i - 1]
         # Set dt based on distance from chord assuming constant curvature
-        if cc >= 100 * 8 * tolerance / t_scale^2 # Update dt if curvature is not near zero
+        if cc >= 100 * 8 * tolerance / (bnds[2]^2 * t_scale^2) # Update dt if curvature is not near zero
             dt = uconvert(NoUnits, sqrt(8 * tolerance / cc) / t_scale)
         end
         if t + dt >= bnds[2]
