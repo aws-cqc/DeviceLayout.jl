@@ -113,7 +113,7 @@ A `CoordinateSystem` (or any `GeometryStructure`) can be rendered to a `Cell` fo
     Cell(::CoordinateSystem{S}) where {S}
     render!(::Cell, ::DeviceLayout.GeometryStructure)
     DeviceLayout.default_meta_map
-    gdslayers(::GeometryStructure)
+    gdslayers(::DeviceLayout.GeometryStructure)
 ```
 
 Note that `Cell`s inherit the names of rendered `CoordinateSystem`s, so the original coordinate systems ought to have unique names (for example using [`uniquename`](@ref)).

@@ -15,16 +15,61 @@ using ..Cells
 import FileIO: File, @format_str, stream
 
 using ColorSchemes
+using Preferences
 
-using ColorSchemes
-# Glasbey color scheme for categorical data (version avoiding greys and light colors)
-lcolor(l, scheme=:glasbey_bw_minc_20_maxl_70_n256) = # Make transparent
-    (
-        colorschemes[scheme][l + 1].r,
-        colorschemes[scheme][l + 1].g,
-        colorschemes[scheme][l + 1].b,
-        0.5
-    )
+# Available color schemes -- Glasbey themes for categorical data
+const LIGHT_MODE_SCHEME = :glasbey_bw_minc_20_maxl_70_n256  # Good for light backgrounds
+const DARK_MODE_SCHEME = :glasbey_bw_minc_20_minl_30_n256   # Good for dark backgrounds
+
+# Preference key for color theme
+const COLOR_THEME_PREF = "color_theme"
+
+"""
+    get_color_scheme()
+
+Get the current color scheme based on user preferences.
+Returns either `:glasbey_bw_minc_20_maxl_70_n256` (light theme) or
+`:glasbey_bw_minc_20_minl_30_n256` (dark theme).
+
+The default is light theme.
+"""
+function get_color_scheme()
+    scheme_name = @load_preference(COLOR_THEME_PREF, "light")
+    return scheme_name == "dark" ? DARK_MODE_SCHEME : LIGHT_MODE_SCHEME
+end
+
+"""
+    set_theme!(theme::String)
+
+Set the color scheme for graphics based on background lightness (`"light"` or `"dark"`).
+
+Light theme uses `:glasbey_bw_minc_20_maxl_70_n256` (avoids light colors, good for light backgrounds).
+
+Dark theme uses `:glasbey_bw_minc_20_minl_30_n256` (avoids dark colors, good for dark backgrounds).
+"""
+function set_theme!(theme::String)
+    if theme ∉ ["light", "dark"]
+        error("Theme must be 'light' or 'dark', got: '$theme'")
+    end
+    @set_preferences!(COLOR_THEME_PREF => theme)
+    for i = 0:255
+        layercolors[i] = lcolor(i)
+    end
+    @info "Color scheme set for '$theme' theme."
+end
+
+# Generate layer color with transparency
+lcolor(l, scheme) = (
+    colorschemes[scheme][l + 1].r,
+    colorschemes[scheme][l + 1].g,
+    colorschemes[scheme][l + 1].b,
+    0.5
+)
+
+# Use preference-based color scheme
+lcolor(l) = lcolor(l, get_color_scheme())
+
+# Initialize layercolors with the preferred scheme
 const layercolors = Dict([(i => lcolor(i)) for i = 0:255]...)
 
 function fillcolor(options, layer)
