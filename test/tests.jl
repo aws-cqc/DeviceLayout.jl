@@ -922,6 +922,15 @@ include("test_render.jl")
         save(path, s1, width=72 * 4)
         rm(path, force=true)
 
+        # Non-Cell straight to graphics
+        cs1 = CoordinateSystem("test", nm)
+        r1 = Rectangle(10μm, 10μm)
+        polys = union2d(r1, r1 + Point(20μm, 20μm))
+        render!(cs1, polys, SemanticMeta(:test))
+        path = joinpath(tdir, "test_cs.png")
+        save(path, cs1)
+        rm(path, force=true)
+
         # Color themes -- default is light theme
         @test DeviceLayout.Graphics.get_color_scheme() == :glasbey_bw_minc_20_maxl_70_n256
         c = DeviceLayout.Graphics.lcolor(1)
