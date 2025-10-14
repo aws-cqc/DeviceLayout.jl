@@ -138,9 +138,9 @@ function map_layer(target::Target, meta::DeviceLayout.Meta)
 end
 
 # For GDSMeta, return as-is (pass through)
-_map_layer(target, meta::GDSMeta) = meta
+_map_layer(::Target, meta::GDSMeta) = meta
 
-function _map_layer(target, meta)
+function _map_layer(target::Target, meta)
     (layer(meta) == layer(DeviceLayout.NORENDER_META)) && return nothing
     !(level(meta) in target.levels) && return nothing
     if !haskey(layer_record(target.technology), layer(meta))
