@@ -467,22 +467,36 @@ mutable struct SchematicLogger <: AbstractLogger
     stage::Symbol
     logname::String
     logger::TeeLogger
+end
 
-    function SchematicLogger(name; path="build", level=Logging.Info)
-        logname, logger = if isnothing(path)
-            "output", Base.NullLogger()
-        else
-            mkpath(path)
-            filename = joinpath(path, name * ".log")
-            filename, MinLevelLogger(FormatLogger(_format_log, filename), level)
-        end
-        return new(
-            Dict{Symbol, LogLevel}(),
-            :plan,
-            logname,
-            TeeLogger(current_logger(), logger)
-        )
+function SchematicLogger(name; path="build", level=Logging.Info)
+    logname, logger = if isnothing(path)
+        "output", Base.NullLogger()
+    else
+        mkpath(path)
+        filename = joinpath(path, name * ".log")
+        filename, MinLevelLogger(FormatLogger(_format_log, filename), level)
     end
+    return SchematicLogger(
+        Dict{Symbol, LogLevel}(),
+        :plan,
+        logname,
+        TeeLogger(current_logger(), logger)
+    )
+end
+
+Base.copy(x::SchematicLogger) = SchematicLogger(
+    copy(x.max_level_logged),
+    x.stage,
+    x.logname,
+    TeeLogger(x.logger.loggers...)
+)
+# Needed for an edge case where a `current_logger` was not copyable
+function Base.deepcopy_internal(x::SchematicLogger, stackdict::IdDict)
+    haskey(stackdict, x) && return stackdict[x]
+    y = copy(x)
+    stackdict[x] = y
+    return y
 end
 
 # Overrides required for custom logger
