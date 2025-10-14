@@ -44,6 +44,7 @@ the GDSII format. Accordingly, they hold `Polygon`s with metadata of type `GDSMe
     CellArray
     CellReference
     GDSMeta
+    gdslayers(::Cell)
     render!(::Cell, ::Polygon, ::GDSMeta)
     DeviceLayout.save(::File{format"GDS"}, ::Cell, ::Cell...)
 ```
@@ -97,8 +98,6 @@ Unlike `Cell`s, a `CoordinateSystem` is not tied to a database unit (a GDSII con
 
 Since `CoordinateSystem`s are intended to be backend-agnostic, a useful pattern is to give
 coordinate objects "semantic" metadata, consisting of a layer name `Symbol` as well as `level` and `index` attributes.
-This metadata can then be processed with designer-provided methods when rendering to an
-output format.
 
 ```@docs
     SemanticMeta
@@ -108,12 +107,13 @@ output format.
     level
 ```
 
-This means that a `CoordinateSystem` can be rendered to a `Cell` for output to a GDS format.
-During rendering, an `entity::GeometryEntity` with metadata `SemanticMeta(:ground_plane)` would be mapped to `to_polygons(entity)` with GDS layer number and datatype (for example, `GDSMeta(1,0)`) corresponding to the ground plane according to a mapping function `map_meta` provided to `render!`.
+A `CoordinateSystem` (or any `GeometryStructure`) can be rendered to a `Cell` for output to a GDS format by mapping its metadata to GDSMeta. Specifically, during rendering, an `entity::GeometryEntity` with metadata `SemanticMeta(:my_layer)` will be rendered as one or more polygons (`to_polygons(entity)`). These polygons will have GDSMeta (layer number and datatype) determined by `map_meta(SemanticMeta(:my_layer))`, where `map_meta` is a function supplied as a keyword argument to `render!`. A default hash-based map is supplied to allow quick visualizations when the specific output GDS layers don't matter.
 
 ```@docs
     Cell(::CoordinateSystem{S}) where {S}
     render!(::Cell, ::DeviceLayout.GeometryStructure)
+    DeviceLayout.default_meta_map
+    gdslayers(::GeometryStructure)
 ```
 
 Note that `Cell`s inherit the names of rendered `CoordinateSystem`s, so the original coordinate systems ought to have unique names (for example using [`uniquename`](@ref)).

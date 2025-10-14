@@ -17,7 +17,7 @@ representation corresponding to a particular output format (e.g., a `Cell` for G
 A call to `render!(cell::Cell{S}, cs::CoordinateSystem; map_meta = default_meta_map, kwargs...)`
 will use the `map_meta` function to map each `GeometryEntity`'s metadata to `GDSMeta`.
 
-By default, [`default_meta_map`](@ref) is used, which:
+By default, [`DeviceLayout.default_meta_map`](@ref) is used, which:
 
   - Passes GDSMeta through unchanged
   - Converts other metadata types to GDSMeta using a hash-based layer assignment (0-255)

@@ -88,7 +88,7 @@ The entities making up the `Path` are rendered into `Polygon`s, but the `Geometr
 Let's see how it looks:
 
 ```@example 1
-save("dogbone_path.svg", flatten(c); layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)));
+save("dogbone_path.svg", c; layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)));
 nothing; # hide
 ```
 
@@ -96,9 +96,7 @@ nothing; # hide
 <img src="../dogbone_path.svg" style="width: 3in;"/>
 ```
 
-!!! info
-    
-    The SVG backend only draws the top-level `Cell`, so it's necessary to [`flatten`](./geometry.md#Flattening) the cell before saving. `flatten` traverses references to place all entities in a single `Cell`, applying transformations as necessary. For further examples, we'll hide the line that flattens and saves to SVG just to display a cell.
+For further examples, we'll hide the line that saves to SVG just to display a cell.
 
 We can also add `Cell` references directly to a `Cell`, for example to apply a global rotation:
 

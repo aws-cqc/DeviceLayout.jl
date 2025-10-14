@@ -528,8 +528,8 @@ export Paths,
     undecorated
 
 include("cells.jl")
-import .Cells: Cell, CellReference, CellArray, cell, layers, text!
-export Cells, Cell, CellReference, CellArray, cell, layers, text!
+import .Cells: Cell, CellReference, CellArray, cell, gdslayers, layers, text!
+export Cells, Cell, CellReference, CellArray, cell, gdslayers, layers, text!
 
 include("utils.jl")
 

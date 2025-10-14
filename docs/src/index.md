@@ -106,7 +106,7 @@ attach!(
 )
 c = Cell("decoratedpath", nm)
 render!(c, p, GDSMeta(0))
-save("units.svg", flatten(c); layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)));
+save("units.svg", c; layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)));
 nothing; # hide
 ```
 

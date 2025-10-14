@@ -24,7 +24,7 @@ import DeviceLayout:
 import DeviceLayout: flatten, flatten!, order!, traverse!, uniquename # to re-export
 
 export Cell, CellArray, CellReference
-export cell, dbscale, layers, flatten, flatten!, order!, traverse!, uniquename
+export cell, dbscale, layers, gdslayers, flatten, flatten!, order!, traverse!, uniquename
 
 # Avoid circular definitions
 abstract type AbstractCell{S} <: AbstractCoordinateSystem{S} end
@@ -247,12 +247,24 @@ function CoordinateSystems.append_coordsys!(
 end
 
 """
-    layers(x::Cell)
+    gdslayers(x::Cell)
 
-Returns the GDS layers of elements in cell `x` as a set. Does *not* return the layers
+Returns the unique GDS layers of elements in cell `x`. Does *not* return the layers
 in referenced or arrayed cells.
 """
+gdslayers(x::Cell) = unique(map(gdslayer, x.element_metadata))
+
+"""
+    gdslayers(x::GeometryStructure)
+
+Returns the unique GDS layers of elements in `x`, using [`DeviceLayout.default_meta_map`](@ref). Does *not* return the layers
+in referenced structures.
+"""
+gdslayers(x::GeometryStructure) =
+    unique(map(gdslayer ∘ DeviceLayout.default_meta_map, element_metadata(x)))
 layers(x::Cell) = unique(map(gdslayer, x.element_metadata))
+
+@deprecate layers(x) gdslayers(x)
 
 """
     text!(c::Cell{S}, str::String, origin::Point=zero(Point{S}), meta::Meta=GDSMeta(); kwargs...) where {S}
