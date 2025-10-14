@@ -246,6 +246,9 @@ function discretization_grid(
         ts[i] = min(bnds[2], t + dt)
         t = ts[i]
     end
-
+    # Make sure last two points aren't unnecessarily close together
+    if ts[i - 1] > (ts[i] + ts[i - 2]) / 2
+        ts[i - 1] = (ts[i] + ts[i - 2]) / 2
+    end
     return ts[1:i]
 end

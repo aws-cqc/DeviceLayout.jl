@@ -533,6 +533,10 @@ end
     e_fine = to_polygons(e; atol=0.1nm)
     p = to_polygons(difference2d(e_fine, e_default))[1]
     @test abs(area(p) / perimeter(p)) < 1nm # on average better than 1nm
+
+    # Last two points are not too close together
+    p = points(to_polygons(e, atol=60nm))
+    @test norm(p[1] - p[end]) > norm(p[end] - p[end - 1]) / 2
 end
 
 @testset "Sweeping" begin
