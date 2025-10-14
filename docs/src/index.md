@@ -167,3 +167,5 @@ main() # execute main() at end of script.
 In a typical workflow, you'll have a text editor open alongside a Julia REPL. You'll save the above code in a file (e.g., `mycad.jl`) and then run `include("mycad.jl")` from the Julia REPL to generate your pattern.
 You'll iteratively revise `mycad.jl` and save your changes.
 Subsequent runs should be several times faster than the first, if you `include` the file again from the same Julia session.
+
+If you use a REPL started by the Julia for VS Code extension (`Alt+J Alt+O`), then objects that can be displayed graphically (`Cells` and `CoordinateSystems`) will be shown in a separate tab.
