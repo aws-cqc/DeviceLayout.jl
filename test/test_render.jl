@@ -926,3 +926,37 @@ end
         @test halo(union2d(r3), 1μm, -0.5μm) == dr1 # ClippedPolygon halo with inner delta
     end
 end
+
+@testset "Metadata mapping" begin
+    # Preserves GDSMeta
+    @test DeviceLayout.default_meta_map(GDSMeta(10, 2)) == GDSMeta(10, 2)
+
+    meta1 = SemanticMeta(:metal)
+    gds1 = DeviceLayout.default_meta_map(meta1)
+    @test gds1 isa GDSMeta
+    @test 0 <= gdslayer(gds1) <= 255
+    @test datatype(gds1) == 0  # index=1 → datatype=0
+    @test datatype(DeviceLayout.default_meta_map(SemanticMeta(meta1, index=2))) == 1
+    @test DeviceLayout.default_meta_map(SemanticMeta(meta1, level=2)) != gds1
+    # Test repeatability
+    @test DeviceLayout.default_meta_map(meta1) == DeviceLayout.default_meta_map(meta1)
+    # Test different layers get different GDS layers (though collisions are possible)
+    meta2 = SemanticMeta(:base)
+    gds2 = DeviceLayout.default_meta_map(meta2)
+    @test gds1 != gds2
+
+    # Rendering with default map_meta
+    cs = CoordinateSystem("test", nm)
+    place!(cs, Rectangle(10nm, 10nm), SemanticMeta(:metal))
+    place!(cs, Rectangle(20nm, 20nm), SemanticMeta(:base))
+    place!(cs, Rectangle(30nm, 30nm), SemanticMeta(:base))
+
+    c = Cell("test", nm)
+
+    # Should work without explicit map_meta and produce warning
+    @test_logs (:warn, r"Automatically converting") match_mode = :any render!(c, cs)
+
+    @test length(c.elements) == 3
+    @test c.element_metadata[1] != c.element_metadata[2]
+    @test c.element_metadata[2] == c.element_metadata[3]
+end
