@@ -215,6 +215,12 @@ end
     @test transformation(floorplan2, z_node2) == transformation(floorplan, z_node)
     @test transformation(floorplan2, xy_node2) == transformation(floorplan, xy_node)
 
+    # Reset matching hooks to something that returns original error
+    SchematicDrivenLayout.matching_hook(t1::TestComponent, s::Symbol, ::TestComponent) =
+        SchematicDrivenLayout.matching_hook(t1, s, Spacer())
+    SchematicDrivenLayout.matching_hooks(t1::TestComponent, ::TestComponent) =
+        SchematicDrivenLayout.matching_hooks(t1, Spacer())
+
     @testset "Replace" begin
         append_x(tc, p) =
             TestComponent(name=(tc.name * "$(ustrip(mm, p.x))"), hooks=tc.hooks)
@@ -302,7 +308,7 @@ end
         @test SchematicDrivenLayout.max_level_logged(floorplan, :build) == Logging.Error
         @test contains(
             read(floorplan.logger.logname, String),
-            "Failed to build RouteComponent"
+            "Could not automatically route"
         )
     end
 
