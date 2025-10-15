@@ -40,7 +40,8 @@ function render!(
     meta::GDSMeta=GDSMeta();
     kwargs...
 ) where {S}
-    return render!.(cell, to_polygons(obj; kwargs...), meta; kwargs...)
+    render!.(cell, to_polygons(obj; kwargs...), meta; kwargs...)
+    return cell
 end
 
 # Vectorize render

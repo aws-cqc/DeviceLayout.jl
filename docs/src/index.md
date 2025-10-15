@@ -168,4 +168,4 @@ In a typical workflow, you'll have a text editor open alongside a Julia REPL. Yo
 You'll iteratively revise `mycad.jl` and save your changes.
 Subsequent runs should be several times faster than the first, if you `include` the file again from the same Julia session.
 
-If you use a REPL started by the Julia for VS Code extension (`Alt+J Alt+O`), then objects that can be displayed graphically (`Cells` and `CoordinateSystems`) will be shown in a separate tab.
+If you use a REPL started by the Julia for VS Code extension (`Alt+J Alt+O`), then objects that can be displayed graphically (`Cells` and `CoordinateSystems`) will be shown in a separate tab when returned by REPL execution. This display is not updated interactively with every command, but running `julia> my_cs` will show the latest version. You can zoom in and out to inspect details by holding `Command` (Mac) or `Alt` and scrolling.

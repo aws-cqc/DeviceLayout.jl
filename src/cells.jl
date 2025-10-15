@@ -279,8 +279,7 @@ function text!(
     meta::GDSMeta=GDSMeta();
     kwargs...
 ) where {S}
-    push!(c.texts, Texts.Text(; text, origin, kwargs...))
-    return push!(c.text_metadata, meta)
+    return text!(c, Texts.Text(; text, origin, kwargs...), meta)
 end
 
 function text!(
@@ -290,8 +289,7 @@ function text!(
     origin=zero(Point{S}),
     kwargs...
 ) where {S}
-    push!(c.texts, Texts.Text(; text, origin, kwargs...))
-    return push!(c.text_metadata, meta)
+    return text!(c, Texts.Text(; text, origin, kwargs...), meta)
 end
 
 """
@@ -301,12 +299,14 @@ Annotate cell `c` with `Texts.Text` object.
 """
 function text!(c::Cell, text::Texts.Text, meta)
     push!(c.texts, text)
-    return push!(c.text_metadata, meta)
+    push!(c.text_metadata, meta)
+    return c
 end
 
 function text!(c::Cell{S}, texts::Vector{Texts.Text{S}}, meta::Vector{GDSMeta}) where {S}
     append!(c.texts, texts)
-    return append!(c.text_metadata, meta)
+    append!(c.text_metadata, meta)
+    return c
 end
 
 Base.isempty(c::Cell) = isempty(elements(c)) && isempty(refs(c)) && isempty(c.texts)
