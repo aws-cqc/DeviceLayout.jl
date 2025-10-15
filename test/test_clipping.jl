@@ -163,7 +163,7 @@ import DeviceLayout.Polygons: circularapprox, circularequality
         @test length(ip) == 1
         @test ip[1] == Polygon(Point{Int}[(2.0, 1.0), (1.0, 1.0), (1.0, 0.0), (2.0, 0.0)])
 
-        c = circle(1, 30°)
+        c = circle_polygon(1, 30°)
         f = θ -> Point(cosd(θ), sind(θ))
         ptrue = f.(0:30:330)
         @test circularapprox(points(c), ptrue)
@@ -293,7 +293,7 @@ import DeviceLayout.Polygons: circularapprox, circularequality
             Point{T}[(2.0μm, 1.0μm), (1.0μm, 1.0μm), (1.0μm, 0.0μm), (2.0μm, 0.0μm)]
         )
 
-        c = circle(1.0μm, 30°)
+        c = circle_polygon(1.0μm, 30°)
         f = θ -> Point(T(cosd(θ)), T(sind(θ)))
         ptrue = f.(0:30:330)
         @test circularapprox(points(c), ptrue)
@@ -330,7 +330,7 @@ import DeviceLayout.Polygons: circularapprox, circularequality
             @test u == union2d([u], r1)
             @test u == union2d(r1, [u])
 
-            c = circle(1, 1°)
+            c = circle_polygon(1, 1°)
             u = union2d(c, c)
             @test u == union2d(c, [c])
             @test u == union2d([c], c)
@@ -426,25 +426,25 @@ import DeviceLayout.Polygons: circularapprox, circularequality
         for CASE = 3:7
             if CASE == 3 # works
                 inner = Rectangle(10μm, 10μm)
-                outer = circle(50μm, 1°)
+                outer = circle_polygon(50μm, 1°)
             elseif CASE == 4 # works
                 inner = Rectangle(10μm, 10μm) |> Translation(0μm, 10μm)
-                outer = circle(50μm, 1°)
+                outer = circle_polygon(50μm, 1°)
             elseif CASE == 5 # DOESN'T work
                 inner = Rectangle(10μm, 10μm) |> Translation(10μm, 0μm)
-                outer = circle(50μm, 1°)
+                outer = circle_polygon(50μm, 1°)
             elseif CASE == 6 # works
                 inner = Rectangle(10μm, 10μm) |> Translation(10μm, 0μm)
-                outer = circle(50μm, 60°)
+                outer = circle_polygon(50μm, 60°)
             elseif CASE == 7 # DOESN'T work
                 inner = Rectangle(10μm, 10μm) |> Translation(10μm, 0μm)
-                outer = circle(50μm, 45°)
+                outer = circle_polygon(50μm, 45°)
             end
             diff = to_polygons(difference2d(outer, inner))
             @test length(diff[1].p) > length(outer.p)
         end
 
-        rout = circle(100μm, π / 50)
+        rout = circle_polygon(100μm, π / 50)
         rin = centered(Rectangle(10μm, 10μm))
         pcb_outline = to_polygons(difference2d(rout, rin))[1]
         @test length(pcb_outline.p) > length(rout.p)

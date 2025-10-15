@@ -65,6 +65,7 @@ import IntervalSets.endpoints
 
 export Polygon, ClippedPolygon, Ellipse, Circle
 export circle,
+    circle_polygon,
     clip,
     cliptree,
     circularapprox,
@@ -519,11 +520,20 @@ function perimeter(e::Ellipse)
 end
 
 """
-    circle(r, α=10°)
+    circle_polygon(r, Δθ=10°)
 
-Return a circular `Polygon` centered about the origin with radius `r` and angular step `α`.
+Return a circular `Polygon` centered about the origin with radius `r` and angular step `Δθ`.
 """
-circle(r, α=10°) = Polygon(r .* (a -> Point(cos(a), sin(a))).(0:α:(360° - α)))
+circle_polygon(r, Δθ=10°) = Polygon(r .* (a -> Point(cos(a), sin(a))).(0:Δθ:(360° - Δθ)))
+function circle(r, α=10°)
+    @warn """"
+        `circle(r, α)` is deprecated. Use `Circle(r)` or `Circle(center, r)` to create an \
+        exact circle that will be discretized at render time according to rendering keyword \
+        `atol` (default 1nm) or `Δθ` (if provided). To construct the polygon directly, use \
+        `circle_polygon(r, α)`.
+    """
+    return circle_polygon(r, α)
+end
 
 """
     struct Rounded{T <: Coordinate} <: GeometryEntityStyle

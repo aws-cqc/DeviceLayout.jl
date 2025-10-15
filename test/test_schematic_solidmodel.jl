@@ -132,7 +132,7 @@ function test_component(component, clip_area, mesh=false, gui=false)
     # Should not render to the solid model.
     render!(
         floorplan.coordinate_system,
-        not_solidmodel(circle(5μm, 1°)),
+        not_solidmodel(circle_polygon(5μm, 1°)),
         SemanticMeta(:circle)
     )
 

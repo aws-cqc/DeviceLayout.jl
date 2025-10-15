@@ -13,7 +13,7 @@ rng = MersenneTwister(1337)
     @test length(points((elements(c)[1]))) == 9
 
     # check that polygons aren't rounded if min_angle is set
-    poly = Polygons._round_poly(circle(10μm, 5°), 0.5μm, min_angle=10 / 180 * π)
+    poly = Polygons._round_poly(circle_polygon(10μm, 5°), 0.5μm, min_angle=10 / 180 * π)
     @test length(points(poly)) == 72
 
     @test Polygons._round_poly(Rectangle(10.0, 10.0), 1.0) isa Polygon
@@ -537,6 +537,9 @@ end
     # Last two points are not too close together
     p = points(to_polygons(e, atol=60nm))
     @test norm(p[1] - p[end]) > norm(p[end] - p[end - 1]) / 2
+
+    # circle is deprecated
+    @test_logs (:warn, r"deprecated") circle(10.0)
 end
 
 @testset "Sweeping" begin
