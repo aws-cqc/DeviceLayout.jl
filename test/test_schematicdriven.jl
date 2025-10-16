@@ -215,6 +215,12 @@ end
     @test transformation(floorplan2, z_node2) == transformation(floorplan, z_node)
     @test transformation(floorplan2, xy_node2) == transformation(floorplan, xy_node)
 
+    # Reset matching hooks to something that returns original error
+    SchematicDrivenLayout.matching_hook(t1::TestComponent, s::Symbol, ::TestComponent) =
+        SchematicDrivenLayout.matching_hook(t1, s, Spacer())
+    SchematicDrivenLayout.matching_hooks(t1::TestComponent, ::TestComponent) =
+        SchematicDrivenLayout.matching_hooks(t1, Spacer())
+
     @testset "Replace" begin
         append_x(tc, p) =
             TestComponent(name=(tc.name * "$(ustrip(mm, p.x))"), hooks=tc.hooks)
@@ -302,7 +308,7 @@ end
         @test SchematicDrivenLayout.max_level_logged(floorplan, :build) == Logging.Error
         @test contains(
             read(floorplan.logger.logname, String),
-            "Failed to build RouteComponent"
+            "Could not automatically route"
         )
     end
 
@@ -532,6 +538,14 @@ end
           [GDSMeta(), GDSMeta(300), GDSMeta(302, 4), GDSMeta(), GDSMeta(2, 2)]
     @test SchematicDrivenLayout.map_layer(ArtworkTarget(tech), SemanticMeta(:GDS2)) ==
           GDSMeta(2)
+
+    # Manual map_meta_dict override
+    target = ArtworkTarget(tech; levels=[1])
+    target.map_meta_dict[meta] = nothing
+    target.map_meta_dict[GDSMeta(2, 2)] = GDSMeta(3, 3)
+    cell = Cell("test", nm)
+    render!(cell, cs, target) # undef_meta, GDSMeta(2,2)
+    @test cell.element_metadata == [GDSMeta(), GDSMeta(3, 3)]
 end
 
 @variant TestCompVariant TestComponent new_defaults =

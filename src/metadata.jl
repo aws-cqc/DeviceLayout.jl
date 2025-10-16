@@ -10,12 +10,17 @@
 DeviceLayout-native representation of an object's layer information and attributes.
 
 Semantic metadata refers to the meaning of an element without reference to a fixed encoding.
-For example, “this polygon is in the negative of the ground plane” is semantic, while
-“this polygon is in GDS layer 1, datatype 2” is not. The semantic metadata is used in the
+For example, "this polygon is in the negative of the ground plane" is semantic, while
+"this polygon is in GDS layer 1, datatype 2" is not. The semantic metadata is used in the
 final `render` step, where a layout is converted from a `CoordinateSystem` to a
 representation corresponding to a particular output format (e.g., a `Cell` for GDSII).
-A call to `render!(cell::Cell{S}, cs::CoordinateSystem; map_meta = identity, kwargs...)`
+A call to `render!(cell::Cell{S}, cs::CoordinateSystem; map_meta = default_meta_map, kwargs...)`
 will use the `map_meta` function to map each `GeometryEntity`'s metadata to `GDSMeta`.
+
+By default, [`DeviceLayout.default_meta_map`](@ref) is used, which:
+
+  - Passes GDSMeta through unchanged
+  - Converts other metadata types to GDSMeta using a hash-based layer assignment (0-255)
 
 The `level` and `index` fields do not have a strict interpretation imposed by DeviceLayout. (In
 this sense they are similar to GDS `datatype`.) The suggested use is as follows:
@@ -142,3 +147,53 @@ layer_inclusion(only_layers, ignore_layers::Union{Symbol, Meta}) =
     layer_inclusion(only_layers, [ignore_layers])
 layer_inclusion(only_layers::Union{Symbol, Meta}, ignore_layers::Union{Symbol, Meta}) =
     layer_inclusion([only_layers], [ignore_layers])
+
+"""
+    hash_to_gdslayer(meta::Meta) -> Int
+
+Convert metadata `m` to a GDS layer number (0-255) by hashing `(layer(m), level(m))`.
+
+Values are repeatable for different metadata, but only probably distinct.
+"""
+function hash_to_gdslayer(meta::Meta)
+    h = hash((layer(meta), level(meta)))
+    return Int(h % UInt8)
+end
+
+"""
+    default_meta_map(meta::Meta) -> GDSMeta
+
+Default metadata mapping function for rendering to Cell.
+
+This map is for convenient graphical display and should not be relied on in production workflows.
+
+GDSMeta passes through unchanged.
+
+Other Meta types are converted to GDSMeta using a
+layer in (0-255) based on the hash of `(layer(m), level(m))` and datatype
+`layerindex(m)-1` (clamped to 0-255). This means that other metadata
+types are not guaranteed to be mapped to unique GDSMeta.
+
+# Examples
+
+```julia
+julia> default_meta_map(GDSMeta(10, 2))
+GDSMeta(10, 2)
+
+julia> default_meta_map(SemanticMeta(:metal))
+GDSMeta(63, 0)  # Hash-based layer, datatype from index
+
+julia> default_meta_map(SemanticMeta(:metal, index=5))
+GDSMeta(63, 4)  # Same layer, different datatype
+```
+"""
+function default_meta_map(meta::GDSMeta)
+    return meta
+end
+
+function default_meta_map(meta::Meta)
+    layer_num = hash_to_gdslayer(meta)
+    # Use layerindex-1 as datatype (0-based), clamped to valid range
+    datatype_num = clamp(layerindex(meta) - 1, 0, 255)
+    return GDSMeta(layer_num, datatype_num)
+end

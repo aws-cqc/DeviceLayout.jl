@@ -200,7 +200,7 @@ Last angle of a route, returns `r.α1`.
     reconcile!(path::Path, endpoint::Point, end_direction, rule::RouteRule, waypoints, waydirs;
         initialize_waydirs = false)
 
-Ensure that `path` can be routed to `endpoint` at `end_direction` using `rule, waypoints, waydirs`, or throw an error.
+Ensure that `path` can be routed to `endpoint` at `end_direction` using `rule, waypoints, waydirs`, or log an error.
 
 Does nothing for a generic `RouteRule`. Subtypes of `RouteRule` may implement specialized methods
 to do their own validation when `route!` is called.
@@ -234,9 +234,9 @@ function reconcile!(
     startdir = α1(path)
     dα = uconvert(°, rem(end_direction - startdir, 360°, RoundNearest))
 
-    isapprox((dα / α_bend), round(dα / α_bend), atol=1e-9) || error(
-        "StraightAnd90 routing can only be used with start and end vectors on the same 4-point compass"
-    )
+    isapprox((dα / α_bend), round(dα / α_bend), atol=1e-9) ||
+        @error "StraightAnd90 routing can only be used with start and end vectors on the same 4-point compass" _group =
+            :route
 
     i = 0
     while i < length(waypoints) + 1 # Waypoints may be added
@@ -252,9 +252,9 @@ function reconcile!(
         par = dx * dir_x + dy * dir_y
         perp = -dx * dir_y + dy * dir_x # perp > 0 requires +90° turn
 
-        par >= zero(par) || error(
-            "StraightAnd90 routing cannot go backwards from $startpoint to $nextpoint. Try adding intermediate points."
-        )
+        par >= zero(par) ||
+            @error "StraightAnd90 routing cannot go backwards from $startpoint to $nextpoint. Try adding intermediate points." _group =
+                :route
 
         sgn = isapprox(perp, zero(dx), atol=1e-6 * oneunit(dx)) ? 0 : sign(perp)
 
@@ -263,9 +263,8 @@ function reconcile!(
                 (abs(perp) >= rule.min_bend_radius || (abs(perp) ≈ rule.min_bend_radius)) &&
                 (par >= rule.min_bend_radius || par ≈ rule.min_bend_radius)
             ) ||
-            error(
-                "Required bend between $startpoint and $nextpoint is too sharp for single segment of StraightAnd90 routing"
-            )
+            @error "Required bend between $startpoint and $nextpoint is too sharp for single segment of StraightAnd90 routing" _group =
+                :route
 
         dα_01 = sgn * α_bend
         nextdir = startdir + dα_01 # direction after next turn
@@ -279,9 +278,8 @@ function reconcile!(
         elseif isapprox_angle(nextdir_target, startdir) && sgn != 0
             # Add an intermediate waypoint to snake to endpoint
             abs(perp) >= 2 * rule.min_bend_radius && par >= 2 * rule.min_bend_radius ||
-                error(
-                    "Required bend between $startpoint and $((startpoint + nextpoint)/2) is too sharp for single segment of StraightAnd90 routing"
-                )
+                @error "Required bend between $startpoint and $((startpoint + nextpoint)/2) is too sharp for single segment of StraightAnd90 routing" _group =
+                    :route
             nextpoint = (startpoint + nextpoint) / 2
             insert!(waypoints, i, nextpoint)
             insert!(waydirs, i, nextdir)
@@ -306,9 +304,9 @@ function reconcile!(
     startdir = α1(path)
     dα = uconvert(°, rem(end_direction - startdir, 360°, RoundNearest))
 
-    isapprox((dα / α_bend), round(dα / α_bend), atol=1e-9) || error(
-        "StraightAnd45 routing can only be used with start and end vectors on the same 8-point compass"
-    )
+    isapprox((dα / α_bend), round(dα / α_bend), atol=1e-9) ||
+        @error "StraightAnd45 routing can only be used with start and end vectors on the same 8-point compass" _group =
+            :route
 
     i = 0
     while i < length(waypoints) + 1 # Waypoints may be added
@@ -324,9 +322,9 @@ function reconcile!(
         par = dx * dir_x + dy * dir_y
         perp = -dx * dir_y + dy * dir_x # perp > 0 requires +90° turn
 
-        par >= zero(par) || error(
-            "StraightAnd45 routing cannot go backwards from $startpoint to $nextpoint. Try adding intermediate points."
-        )
+        par >= zero(par) ||
+            @error "StraightAnd45 routing cannot go backwards from $startpoint to $nextpoint. Try adding intermediate points." _group =
+                :route
 
         sgn = isapprox(perp, zero(dx), atol=1e-6 * oneunit(dx)) ? 0 : sign(perp)
         dα_01 = sgn * α_bend
@@ -349,7 +347,8 @@ function reconcile!(
                 d_diag = sqrt(2) * abs(perp) - d
                 d_straight = abs(par) - abs(perp) - d
                 d_diag > -1e-9 * oneunit(d) && d_straight > -1e-9 * oneunit(d) ||
-                    error("$nextpoint can't be reached from $startpoint with a 45° turn")
+                    @error "$nextpoint can't be reached from $startpoint with a 45° turn" _group =
+                        :route
             end
             # Otherwise, this is the endpoint or waydirs are initialized
             # If this is a snake, try to insert a waypoint
@@ -369,7 +368,8 @@ function reconcile!(
             d_diag = sqrt(2) * abs(perp / 2) - d
             d_straight = abs(par / 2) - abs(perp / 2) - d
             d_diag > -1e-9 * oneunit(d) && d_straight > -1e-9 * oneunit(d) ||
-                error("Next point can't be reached with a pair of opposite 45° turns")
+                @error "Next point can't be reached with a pair of opposite 45° turns" _group =
+                    :route
             # Add an intermediate waypoint to snake to endpoint
             # Pushing to waypoints won't cause confusion because this is the last iteration
             nextpoint = (startpoint + nextpoint) / 2
@@ -382,7 +382,8 @@ function reconcile!(
             # Check if double turn is possible
             abs(perp) < rule.min_bend_radius ||
                 abs(par) < rule.min_bend_radius &&
-                    error("Next point can't be reached with a pair of 45° turns")
+                    @error "Next point can't be reached with a pair of 45° turns" _group =
+                        :route
             bend_r =
                 max(rule.min_bend_radius, min(abs(perp), abs(par), rule.max_bend_radius))
 
@@ -454,15 +455,15 @@ function route!(
         initialize_waydirs=initialize_waydirs
     )
     _route!(path, p_end, α_end, rule, sty, waypoints, waydirs)
-    isapprox(rem(α1(path) - α_end, 360°, RoundNearest), 0, atol=1e-9) || error("""
+    isapprox_angle(α1(path), α_end) || @error """
                                                           Could not automatically route to destination with the correct arrival angle \
                                                           (got $(α1(path)) instead of $α_end). Try adding or adjusting waypoints.\
-                                                          """)
+                                                          """ _group = :route
     pts = promote(p1(path), p_end)
-    return isapprox(pts...; atol=atol) || error("""
+    return isapprox(pts...; atol=atol) || @error """
                  Could not automatically route to destination with the correct arrival point \
                  (got $(p1(path)) instead of $p_end). Try adding or adjusting waypoints.\
-                 """)
+                 """ _group = :route
 end
 
 """
@@ -513,9 +514,10 @@ function route!(
     waydirs=Vector{typeof(1.0°)}(undef, length(waypoints))
 ) where {S}
     sum(crr.leg_lengths) == length(waypoints) + 1 ||
-        error("CompoundRouteRule leg lengths must match the number of waypoints + endpoint")
+        @error "CompoundRouteRule leg lengths must match the number of waypoints + endpoint" _group =
+            :route
     length(waydirs) == length(waypoints) ||
-        error("CompoundRouteRule requires a direction for each waypoint")
+        @error "CompoundRouteRule requires a direction for each waypoint" _group = :route
     leg_start = 1
     for (idx, leg_rule) in enumerate(crr.rules)
         if idx == length(crr.rules)

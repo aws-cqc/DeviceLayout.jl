@@ -4,6 +4,16 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Upcoming
+
+  - Improved metadata handling for `LayoutTarget` and `SolidModelTarget`
+    
+      + SolidModelTargets will now ignore `NORENDER_META` (the `:norender` layer)
+      + SolidModelTargets now take `ignored_layers`, a list of layer symbols which are not rendered
+      + LayoutTargets now allow overriding the mapping of `GDSMeta` by setting `target.map_meta_dict[my_gdsmeta] = my_override`, allowing changes to different `GDSMeta` or `nothing` rather than always mapping a `GDSMeta` to itself
+
+  - Changed `remove_group!` SolidModel postrendering operation to use `remove_entities=true` by default, fixing the unexpected and undesired default behavior that only removed the record of the group and not its entities
+
 ## 1.5.0 (2025-10-10)
 
   - Added `auto_speed`, `endpoints_curvature`, and `auto_curvature` keyword options to `bspline!` and `BSplineRouting`

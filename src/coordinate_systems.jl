@@ -135,14 +135,16 @@ Place `ent` in `cs` with metadata `metadata`.
 """
 function place!(cs::CoordinateSystem, ent::GeometryEntity, metadata::Meta)
     push!(cs.elements, ent)
-    return push!(cs.element_metadata, metadata)
+    push!(cs.element_metadata, metadata)
+    return cs
 end
 place!(cs::CoordinateSystem, geom, layer::Union{Symbol, String}) =
     place!(cs, geom, SemanticMeta(layer))
 
 function place!(cs::CoordinateSystem, ents::Vector, metadata::Vector{<:Meta})
     append!(cs.elements, ents)
-    return append!(cs.element_metadata, metadata)
+    append!(cs.element_metadata, metadata)
+    return cs
 end
 
 """
@@ -151,7 +153,8 @@ end
 Place a reference to `s` in `cs`.
 """
 function place!(cs::CoordinateSystem, s::GeometryStructure)
-    return addref!(cs, s)
+    addref!(cs, s)
+    return cs
 end
 
 """

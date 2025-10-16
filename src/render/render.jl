@@ -17,10 +17,19 @@ function _map_render!(
     cell::Cell{S},
     obj::GeometryEntity,
     meta_obj::Meta;
-    map_meta=identity,
+    map_meta=default_meta_map,
     kwargs...
 ) where {S}
     isnothing(map_meta(meta_obj)) && return
+
+    # Warn if using default mapping with non-GDSMeta
+    if map_meta === default_meta_map && !(meta_obj isa GDSMeta)
+        @warn "Automatically converting $(typeof(meta_obj)) to GDSMeta using hash-based mapping. " *
+              "Layer $(layer(meta_obj)) → GDS layer $(gdslayer(default_meta_map(meta_obj))). " *
+              "Provide explicit map_meta function or LayoutTarget to customize this behavior." _group =
+            :render
+    end
+
     mapped_meta = convert(GDSMeta, map_meta(meta_obj))
     return render!(cell, obj, mapped_meta; map_meta=map_meta, kwargs...)
 end
@@ -31,7 +40,8 @@ function render!(
     meta::GDSMeta=GDSMeta();
     kwargs...
 ) where {S}
-    return render!.(cell, to_polygons(obj; kwargs...), meta; kwargs...)
+    render!.(cell, to_polygons(obj; kwargs...), meta; kwargs...)
+    return cell
 end
 
 # Vectorize render
@@ -61,7 +71,7 @@ function _render_elements!(
     cell::Cell,
     cs::GeometryStructure;
     memoized_cells=Dict{GeometryStructure, Cell}(),
-    map_meta=identity,
+    map_meta=default_meta_map,
     kwargs...
 )
     return _map_render!.(
@@ -78,7 +88,7 @@ function _render!(
     cell::Cell{S},
     cs::GeometryStructure;
     memoized_cells=Dict{GeometryStructure, Cell}(),
-    map_meta=identity,
+    map_meta=default_meta_map,
     kwargs...
 ) where {S}
     stack = Vector{Tuple{Cell, GeometryReference}}()
@@ -175,7 +185,7 @@ end
 """
     render!(cell::Cell{S}, cs::GeometryStructure;
         memoized_cells=Dict{GeometryStructure, Cell}(),
-        map_meta = identity,
+        map_meta = default_meta_map,
         kwargs...) where {S}
 
 Render a geometry structure (e.g., `CoordinateSystem`) to a cell.
@@ -188,7 +198,10 @@ places, it will become a single cell referred to in multiple places.
 Rendering a `GeometryStructure` to a `Cell` uses the optional keyword arguments
 
   - `map_meta`, a function that takes a `Meta` object and returns a `GDSMeta` object
-    (or `nothing`, in which case rendering is skipped)
+    (or `nothing`, in which case rendering is skipped). Defaults to [`DeviceLayout.default_meta_map`](@ref),
+    which passes `GDSMeta` through unchanged. Other metadata types will be converted using hash-based
+    layer assignment, but this conversion is provided for quick GDS viewing and should not be relied on
+    in production workflows.
   - `memoized_cells`, a dictionary used internally to make sure that if a structure is referred to in multiple
     places, it will become a single cell referred to in multiple places. Calling this function with non-empty dictionary
     `memoized_cells = Dict{GeometryStructure, Cell}(geom => prerendered_cell)`

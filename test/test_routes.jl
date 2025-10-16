@@ -26,7 +26,9 @@
         α_start,
         α_end
     )
-    @test_throws ErrorException pa = Path(r, sty)
+    @test_logs (:error, r"Could not automatically route") match_mode = :any pa =
+        Path(r, sty)
+    @test length(pa) > 0 # Partial/best-effort route was drawn
 
     r = Route(
         Paths.StraightAnd90(min_bend_radius=20, max_bend_radius=200),
@@ -35,7 +37,7 @@
         α_start,
         pi
     )
-    @test_throws ErrorException (pa = Path(r, sty))
+    @test_logs (:error, r"Could not automatically route") (pa = Path(r, sty))
 
     r = Route(
         Paths.StraightAnd90(min_bend_radius=20, max_bend_radius=200),
@@ -126,7 +128,7 @@
         α_end,
         waypoints=waypoints
     )
-    @test_throws ErrorException (pa = Path(r4, sty))
+    @test_logs (:error, r"can't be reached") (pa = Path(r4, sty))
 
     # Use StraightAnd45
     p_end = Point(200, 150)

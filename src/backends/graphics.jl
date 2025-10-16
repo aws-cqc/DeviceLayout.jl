@@ -3,7 +3,9 @@ using Unitful
 import Unitful: Length, inch, ustrip
 import Cairo
 
-import DeviceLayout: bounds, datatype, gdslayer, load, save
+import DeviceLayout:
+    bounds, datatype, default_meta_map, element_metadata, gdslayer, load, save, to_polygons
+import DeviceLayout: CoordinateSystem, GeometryEntity
 using ..Points
 using ..Transformations
 import ..Rectangles: Rectangle, width, height
@@ -13,16 +15,61 @@ using ..Cells
 import FileIO: File, @format_str, stream
 
 using ColorSchemes
+using Preferences
 
-using ColorSchemes
-# Glasbey color scheme for categorical data (version avoiding greys and light colors)
-lcolor(l, scheme=:glasbey_bw_minc_20_maxl_70_n256) = # Make transparent
-    (
-        colorschemes[scheme][l + 1].r,
-        colorschemes[scheme][l + 1].g,
-        colorschemes[scheme][l + 1].b,
-        0.5
-    )
+# Available color schemes -- Glasbey themes for categorical data
+const LIGHT_MODE_SCHEME = :glasbey_bw_minc_20_maxl_70_n256  # Good for light backgrounds
+const DARK_MODE_SCHEME = :glasbey_bw_minc_20_minl_30_n256   # Good for dark backgrounds
+
+# Preference key for color theme
+const COLOR_THEME_PREF = "color_theme"
+
+"""
+    get_color_scheme()
+
+Get the current color scheme based on user preferences.
+Returns either `:glasbey_bw_minc_20_maxl_70_n256` (light theme) or
+`:glasbey_bw_minc_20_minl_30_n256` (dark theme).
+
+The default is light theme.
+"""
+function get_color_scheme()
+    scheme_name = @load_preference(COLOR_THEME_PREF, "light")
+    return scheme_name == "dark" ? DARK_MODE_SCHEME : LIGHT_MODE_SCHEME
+end
+
+"""
+    set_theme!(theme::String)
+
+Set the color scheme for graphics based on background lightness (`"light"` or `"dark"`).
+
+Light theme uses `:glasbey_bw_minc_20_maxl_70_n256` (avoids light colors, good for light backgrounds).
+
+Dark theme uses `:glasbey_bw_minc_20_minl_30_n256` (avoids dark colors, good for dark backgrounds).
+"""
+function set_theme!(theme::String)
+    if theme ∉ ["light", "dark"]
+        error("Theme must be 'light' or 'dark', got: '$theme'")
+    end
+    @set_preferences!(COLOR_THEME_PREF => theme)
+    for i = 0:255
+        layercolors[i] = lcolor(i)
+    end
+    @info "Color scheme set for '$theme' theme."
+end
+
+# Generate layer color with transparency
+lcolor(l, scheme) = (
+    colorschemes[scheme][l + 1].r,
+    colorschemes[scheme][l + 1].g,
+    colorschemes[scheme][l + 1].b,
+    0.5
+)
+
+# Use preference-based color scheme
+lcolor(l) = lcolor(l, get_color_scheme())
+
+# Initialize layercolors with the preferred scheme
 const layercolors = Dict([(i => lcolor(i)) for i = 0:255]...)
 
 function fillcolor(options, layer)
@@ -43,10 +90,16 @@ MIMETypes = Union{
     MIME"application/pdf",
     MIME"application/postscript"
 }
-function Base.show(io, mime::MIMETypes, c0::Cell{T}; options...) where {T}
+function Base.show(
+    io,
+    mime::MIMETypes,
+    geom::Union{Cell{T}, CoordinateSystem{T}};
+    options...
+) where {T}
+    c0 = flatten(geom)
     opt = Dict{Symbol, Any}(options)
-    bnd = ustrip(bounds(c0))
-    w, h = width(bnd), height(bnd)
+    bnd = bounds(c0)
+    w, h = width(ustrip(bnd)), height(ustrip(bnd))
     w1 = haskey(opt, :width) ? lscale(opt[:width]) : 4 * 72
     h1 = haskey(opt, :height) ? lscale(opt[:height]) : 4 * 72
     bboxes = haskey(opt, :bboxes) ? opt[:bboxes] : false
@@ -71,7 +124,7 @@ function Base.show(io, mime::MIMETypes, c0::Cell{T}; options...) where {T}
         Cairo.fill(ctx)
     end
 
-    ly = collect(layers(c0))
+    ly = collect(gdslayers(c0))
     trans = Translation(-bnd.ll.x, bnd.ur.y) ∘ XReflection()
 
     sf = min(w1 / w, h1 / h)
@@ -80,8 +133,8 @@ function Base.show(io, mime::MIMETypes, c0::Cell{T}; options...) where {T}
     for l in sort(ly)
         Cairo.save(ctx)
         Cairo.set_source_rgba(ctx, fillcolor(options, l)...)
-        for p in c0.elements[gdslayer.(c0.element_metadata) .== l]
-            poly!(ctx, trans.(ustrip(points(p))))
+        for el in c0.elements[gdslayer.(default_meta_map.(element_metadata(c0))) .== l]
+            poly!(ctx, trans(el))
         end
         Cairo.fill(ctx)
         Cairo.restore(ctx)
@@ -121,6 +174,10 @@ function poly!(cr::Cairo.CairoContext, pts)
     end
     return Cairo.close_path(cr)
 end
+
+poly!(cr::Cairo.CairoContext, p::Polygon) = poly!(cr, ustrip(points(p)))
+poly!(cr::Cairo.CairoContext, ps::Vector{<:Polygon}) = poly!.(Ref(cr), ps)
+poly!(cr::Cairo.CairoContext, ent::GeometryEntity) = poly!(cr, to_polygons(ent))
 
 function save(f::File{format"SVG"}, c0::Cell; options...)
     open(f, "w") do s

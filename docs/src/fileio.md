@@ -21,8 +21,6 @@ Using the [Cairo graphics library](https://cairographics.org), it is possible to
 cells into SVG, PDF, and EPS vector graphics formats, or into the PNG raster graphic
 format. This enables patterns to be displayed in web browsers, publications, presentations,
 and so on. You can save a cell to a graphics file by, e.g. `save("/path/to/file.svg", mycell)`.
-Note that cell references and arrays are not saved, so you should flatten cells if desired
-before saving them.
 
 Possible keyword arguments include:
 
