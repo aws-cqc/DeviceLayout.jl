@@ -4,7 +4,7 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Upcoming
+## 1.6.0 (2025-10-16)
 
   - Improved metadata handling for `LayoutTarget` and `SolidModelTarget`
     
@@ -13,6 +13,14 @@ The format of this changelog is based on
       + LayoutTargets now allow overriding the mapping of `GDSMeta` by setting `target.map_meta_dict[my_gdsmeta] = my_override`, allowing changes to different `GDSMeta` or `nothing` rather than always mapping a `GDSMeta` to itself
 
   - Changed `remove_group!` SolidModel postrendering operation to use `remove_entities=true` by default, fixing the unexpected and undesired default behavior that only removed the record of the group and not its entities
+  - Changed routing errors to be logged instead of throwing exceptions, so that a "best-effort" route is always drawn
+  - Changed graphical backend to display everything in the entire reference hierarchy by default, rather than only displaying the contents of the top-level coordinate system
+  - Added default metadata map, so that a CoordinateSystem or Component with SemanticMeta can be rendered directly to a Cell for quick GDS inspection
+  - Added graphical `show` method for CoordinateSystem (like what `Cell` already had), so `julia> my_cs` or `julia> geometry(my_component)` will display the geometry if graphical output is available (for example, in the Julia for VS Code REPL)
+  - Added dark theme for graphical output (lighter colors that look better on dark background) and `DeviceLayout.Graphics.set_theme!(theme)` for `"light"` (default) and `"dark"` themes
+  - Changed ellipse rendering to use `atol` for absolute tolerance by default (supplying `Δθ` keyword will still use that as angular step)
+  - Deprecated `circle` in favor of `Circle` (exact circle entity) and `circle_polygon` (discretized by angular step)
+  - Deprecated `rounded` keyword in SolidModel rendering; supplying `Δθ` keyword alone will discretize ellipses
 
 ## 1.5.0 (2025-10-10)
 
