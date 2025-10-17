@@ -107,8 +107,12 @@ function intersection_ops(t::SolidModelTarget)
             #("exterior_boundary_Zmax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Z", :position => "max")
             # need a check that the wave ports DO INTERSECT the exterior boundary
             [
-                ("exterior_boundary", SolidModels.difference_geom!, ("exterior_boundary", wave_ports[i], 2, 2), :remove_object => true)
-                for i = 1:length(wave_ports)
+                (
+                    "exterior_boundary",
+                    SolidModels.difference_geom!,
+                    ("exterior_boundary", wave_ports[i], 2, 2),
+                    :remove_object => true
+                ) for i = 1:length(wave_ports)
             ]...
         ]
     end
@@ -128,8 +132,12 @@ function intersection_ops(t::SolidModelTarget)
         #("exterior_boundary_Zmax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Z", :position => "max")
         # need a check that the wave ports DO INTERSECT the exterior boundary
         [
-            ("exterior_boundary", SolidModels.difference_geom!, ("exterior_boundary", wave_ports[i], 2, 2), :remove_object => true)
-            for i = 1:length(wave_ports)
+            (
+                "exterior_boundary",
+                SolidModels.difference_geom!,
+                ("exterior_boundary", wave_ports[i], 2, 2),
+                :remove_object => true
+            ) for i = 1:length(wave_ports)
         ]...
     ]
 end
