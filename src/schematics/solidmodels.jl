@@ -99,12 +99,6 @@ function intersection_ops(t::SolidModelTarget)
         return [
             ("rendered_volume", SolidModels.restrict_to_volume!, (bv[1],)),
             ("exterior_boundary", SolidModels.get_boundary, ("rendered_volume", 3)),
-            #("exterior_boundary_Xmin", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "X", :position => "min"),
-            #("exterior_boundary_Xmax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "X", :position => "max"),
-            #("exterior_boundary_Ymin", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Y", :position => "min"),
-            #("exterior_boundary_Ymax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Y", :position => "max"),
-            #("exterior_boundary_Zmin", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Z", :position => "min"),
-            #("exterior_boundary_Zmax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Z", :position => "max")
             # need a check that the wave ports DO INTERSECT the exterior boundary
             [
                 (
@@ -124,12 +118,6 @@ function intersection_ops(t::SolidModelTarget)
         ]...,
         ("rendered_volume", SolidModels.restrict_to_volume!, ("rendered_volume",)),
         ("exterior_boundary", SolidModels.get_boundary, ("rendered_volume", 3)),
-        #("exterior_boundary_Xmin", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "X", :position => "min"),
-        #("exterior_boundary_Xmax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "X", :position => "max"),
-        #("exterior_boundary_Ymin", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Y", :position => "min"),
-        #("exterior_boundary_Ymax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Y", :position => "max"),
-        #("exterior_boundary_Zmin", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Z", :position => "min"),
-        #("exterior_boundary_Zmax", SolidModels.get_boundary, ("rendered_volume", 3), :direction => "Z", :position => "max")
         # need a check that the wave ports DO INTERSECT the exterior boundary
         [
             (
@@ -173,7 +161,6 @@ function layer_extrusions_dz(target)
             end
         end
     end
-    print("layer_extrusions_dz t_dict: $t_dict \n")
     return t_dict
 end
 layer_height(t::Target, m::DeviceLayout.Meta) = layer_height(t.technology, m)
