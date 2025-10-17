@@ -1,4 +1,4 @@
-@testset "Alignment" begin
+@testitem "Alignment" setup = [CommonTestSetup] begin
     r1 = Rectangle(1, 1)
     r2 = Rectangle(Point(-1, -1), Point(2, 3))
     p1 = Polygon(Point(0, -3), Point(2, -1), Point(-1, 3))

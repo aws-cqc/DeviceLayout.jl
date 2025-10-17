@@ -1,4 +1,4 @@
-@testset "PDK Tools" begin
+@testitem "PDK Tools" setup = [CommonTestSetup] begin
     # PDK
     SchematicDrivenLayout.generate_pdk("MyPDK"; dir=tdir, user="testuser")
     pdkpath = joinpath(tdir, "MyPDK")

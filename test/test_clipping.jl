@@ -1,5 +1,5 @@
-import DeviceLayout.Polygons: circularapprox, circularequality
-@testset "Polygon clipping" begin
+@testitem "Polygon clipping" setup = [CommonTestSetup] begin
+    import DeviceLayout.Polygons: circularapprox, circularequality
     @testset "> Clipping individuals w/o units" begin
         # Rectangle{Int}, Rectangle{Int} clipping
         r1 = Rectangle(2, 2)
@@ -476,7 +476,7 @@ import DeviceLayout.Polygons: circularapprox, circularequality
     end
 end
 
-@testset "Polygon offsetting" begin
+@testitem "Polygon offsetting" setup = [CommonTestSetup] begin
     @testset "Offsetting individuals w/o units" begin
         # Int rectangle, Int delta
         r = Rectangle(1, 1)
@@ -776,7 +776,7 @@ end
     end
 end
 
-@testset "Clipping CurvilinearPolygon" begin
+@testitem "Clipping CurvilinearPolygon" setup = [CommonTestSetup] begin
 
     # Reversing curve index formula tests
     f = (i, N) -> mod1(i + 1, N) - N - 1 # circ inc by 1 then reverse then negate

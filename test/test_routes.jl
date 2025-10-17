@@ -1,4 +1,4 @@
-@testset "Routes" begin
+@testitem "Routes" setup = [CommonTestSetup] begin
     # Break traversal into two routing segments
     p_start = Point(10.0, 20.0)
     p_end = Point(100.0, 200.0)

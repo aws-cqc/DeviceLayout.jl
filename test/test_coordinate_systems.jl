@@ -1,4 +1,4 @@
-@testset "CoordinateSystems" begin
+@testitem "CoordinateSystems" setup = [CommonTestSetup] begin
     # Setup nested cell refs
     c = CoordinateSystem{Float64}("main")
     c2 = CoordinateSystem{Float64}("c2")

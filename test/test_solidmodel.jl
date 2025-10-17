@@ -1,6 +1,5 @@
-import DeviceLayout.SolidModels.STP_UNIT
-
-@testset "SolidModels" begin
+@testitem "SolidModels" setup = [CommonTestSetup] begin
+    import DeviceLayout.SolidModels.STP_UNIT
     pa = Path(0nm, 0nm)
     turn!(pa, -90°, 50μm, Paths.SimpleTrace(10μm))
     seg = pa[1].seg
@@ -537,14 +536,14 @@ import DeviceLayout.SolidModels.STP_UNIT
     # Recursively rounded style
     pp =
         [Point(0.0μm, 0.0μm), Point(1.0μm, 0.0μm), Point(1.0μm, 1.0μm), Point(0.0μm, 1.0μm)]
-    p = Polygon(pp)
+    poly = Polygon(pp)
     sty = [
         RelativeRounded(0.05, p0=[pp[1]]),
         RelativeRounded(0.125, p0=[pp[2]]),
         RelativeRounded(0.25, p0=[pp[3]]),
         RelativeRounded(0.5, p0=[pp[4]])
     ]
-    psty = styled(styled(styled(styled(p, sty[1]), sty[2]), sty[3]), sty[4])
+    psty = styled(styled(styled(styled(poly, sty[1]), sty[2]), sty[3]), sty[4])
     pri = SolidModels.to_primitives(sm, psty)
 
     @test length(pri.exterior.p) == 8 # all corners became 2 points
@@ -569,13 +568,13 @@ import DeviceLayout.SolidModels.STP_UNIT
 
     # Recursive rounding of a ClippedPolygon -- "lollipop sign"
     r = Rectangle(10.0μm, 10.0μm)
-    s = Align.below(Rectangle(2.0μm, 5.0μm), r, centered=true)
-    cc = union2d(r, s)
+    ss = Align.below(Rectangle(2.0μm, 5.0μm), r, centered=true)
+    cc = union2d(r, ss)
     cs = CoordinateSystem("abc", nm)
     place!(cs, cc, SemanticMeta(:test))
     place!(cs, Rounded(1.0μm)(cc), SemanticMeta(:test))
     sty1 = Rounded(2.0μm, p0=points(r))
-    sty2 = Rounded(0.5μm, p0=points(s))
+    sty2 = Rounded(0.5μm, p0=points(ss))
     cs = CoordinateSystem("abc", nm)
     place!(cs, styled(styled(cc, sty1), sty2), SemanticMeta(:test))
     @test_nowarn render!(SolidModel("test"; overwrite=true), cs)
@@ -604,7 +603,7 @@ import DeviceLayout.SolidModels.STP_UNIT
     end
     δx = Point(0.5μm, 0.0μm)
     δy = Point(0.0μm, 0.5μm)
-    ps = points(s)
+    ps = points(ss)
     shifted_ps = [
         ps[1] + δy,
         ps[1] + δy,

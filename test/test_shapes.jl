@@ -1,7 +1,6 @@
-using Random, LinearAlgebra
-rng = MersenneTwister(1337)
-
-@testset "Rounding" begin
+@testitem "Rounding" setup = [CommonTestSetup] begin
+    using Random, LinearAlgebra
+    rng = MersenneTwister(1337)
     c = Cell("main", nm)
     poly = Polygon(Point(0, 0)μm, Point(1, 0)μm, Point(1, 1)μm)
     render!(c, Polygons.Rounded(0.1μm)(poly); atol=20nm)
@@ -323,8 +322,7 @@ rng = MersenneTwister(1337)
     @test !iszero(points(rrr)[1]) # first point would be (0,0) if rounding failed
 end
 
-@testset "Curvilinear" begin
-
+@testitem "Curvilinear" setup = [CommonTestSetup] begin
     # A basic, noncurved polygon
     pp = [Point(0.0μm, 0.0μm), Point(1.0μm, 0.0μm), Point(0.0μm, 1.0μm)]
     cp = CurvilinearPolygon(pp)
@@ -378,7 +376,8 @@ end
     @test_nowarn render!(c, cs)
 end
 
-@testset "Ellipses" begin
+@testitem "Ellipses" setup = [CommonTestSetup] begin
+    import LinearAlgebra: norm
     e = Ellipse(2 .* Point(2.0μm, 1.0μm), (2.0μm, 1.0μm), 0°)
 
     em = magnify(e, 2)
@@ -531,24 +530,24 @@ end
             (getx.(p.p) - getx.(circshift(p.p, -1)))
         ) / 2
     e_fine = to_polygons(e; atol=0.1nm)
-    p = to_polygons(difference2d(e_fine, e_default))[1]
-    @test abs(area(p) / perimeter(p)) < 1nm # on average better than 1nm
+    poly = to_polygons(difference2d(e_fine, e_default))[1]
+    @test abs(area(poly) / perimeter(poly)) < 1nm # on average better than 1nm
 
     # Last two points are not too close together
-    p = points(to_polygons(e, atol=60nm))
-    @test norm(p[1] - p[end]) > norm(p[end] - p[end - 1]) / 2
+    poly = points(to_polygons(e, atol=60nm))
+    @test norm(poly[1] - poly[end]) > norm(poly[end] - poly[end - 1]) / 2
 
     # circle is deprecated
     @test_logs (:warn, r"deprecated") circle(10.0)
 end
 
-@testset "Sweeping" begin
+@testitem "Sweeping" setup = [CommonTestSetup] begin
     poly = Polygon(Point(0.0, 0.0), Point(1, 0), Point(1, 1), Point(2, 1), Point(0, 3))
     p2 = sweep_poly(poly, Point(0, -1))
     @test length(points(to_polygons(p2)[1])) == 6
 end
 
-@testset "Compound shapes" begin
+@testitem "Compound shapes" setup = [CommonTestSetup] begin
     hu = hatching_unit(1, 1) # runs without error
     @test Polygons.orientation(radial_cut(10, pi / 4, 5)) == 1
     @test Polygons.orientation(radial_stub(10, pi / 4, 5, 20)) == 1
@@ -621,6 +620,8 @@ end
     end
 
     @testset "PolyText" begin
+        using Random, LinearAlgebra
+        rng = MersenneTwister(1337)
         # bounding box tests for tall font with random pixel size and spacing (no units)
         c = Cell{Float64}("main")
         (r1, r2) = (rand(rng), rand(rng))
