@@ -1,4 +1,4 @@
-@testset "GeometryEntity" begin
+@testitem "GeometryEntity" setup = [CommonTestSetup] begin
     # Plus shape entity to test methods
     struct OriginPlus{S} <: GeometryEntity{S}
         h::S

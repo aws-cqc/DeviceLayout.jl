@@ -1,4 +1,4 @@
-@testset "Gridpoints in polygon" begin
+@testitem "Gridpoints in polygon" setup = [CommonTestSetup] begin
     r1 = Rectangle(2μm, 2μm)
     r2 = r1 + Point(3μm, 0μm)
     r3 = r1 + Point(0μm, 3μm)
@@ -90,7 +90,7 @@
     @test all(in_poly .== gridpoints_in_polygon(poly, dx, dy))
 end
 
-@testset "Autofill" begin
+@testitem "Autofill" setup = [CommonTestSetup] begin
     cs = CoordinateSystem("autofill", nm)
 
     # Add Path with attachments

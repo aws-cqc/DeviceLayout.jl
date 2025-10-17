@@ -1,4 +1,4 @@
-@testset "Points" begin
+@testitem "Points" setup = [CommonTestSetup] begin
     @testset "> Point constructors" begin
         @test_throws ErrorException Point(2, 3m2μm)
         @test_throws ErrorException Point(2s, 3s)    # has to be a length
@@ -109,7 +109,7 @@
     end
 end
 
-@testset "Preferences" begin
+@testitem "Preferences" setup = [CommonTestSetup] begin
     @test DeviceLayout.unit_preference == "PreferNanometers"
     @test_throws ArgumentError DeviceLayout.set_unit_preference!("Nanometers")
     DeviceLayout.set_unit_preference!("PreferMicrons"; local_only=false) # triggers @info, just ignore
@@ -122,9 +122,25 @@ end
     #   DeviceLayout.set_unit_preference!("PreferMicrons"; local_only=false)
     # is not ignored.
     Preferences.delete_preferences!("DeviceLayout", "units"; force=true)
+
+    # Color themes -- default is light theme
+    @test DeviceLayout.Graphics.get_color_scheme() == :glasbey_bw_minc_20_maxl_70_n256
+    c = DeviceLayout.Graphics.lcolor(1)
+    # Switch to dark
+    DeviceLayout.Graphics.set_theme!("dark")
+    @test DeviceLayout.Graphics.get_color_scheme() == :glasbey_bw_minc_20_minl_30_n256
+    # Change takes place without restarting
+    @test DeviceLayout.Graphics.lcolor(1) != c
+    @test_throws "Theme must be" DeviceLayout.Graphics.set_theme!("invalid")
+    # Leave no preference
+    Preferences.delete_preferences!(
+        DeviceLayout,
+        DeviceLayout.Graphics.COLOR_THEME_PREF,
+        force=true
+    )
 end
 
-@testset "Polygon basics" begin
+@testitem "Polygon basics" setup = [CommonTestSetup] begin
     @testset "> Rectangle construction" begin
         # lower-left and upper-right constructor
         r = Rectangle(Point(1, 2), Point(2, 0))
@@ -185,7 +201,7 @@ end
     end
 end
 
-@testset "Polygon coordinate transformations" begin
+@testitem "Polygon coordinate transformations" setup = [CommonTestSetup] begin
     pfloat = Polygon(Point(0.0m, 0.0m), Point(1.0m, 0.0m), Point(0.0m, 1.0m))
     pint = Polygon(Point(0m, 0m), Point(1m, 0m), Point(0m, 1m))
     rfloat = Rectangle(1.0m, 1.0m)
@@ -304,7 +320,7 @@ end
           [Point(-1μm, 0μm), Point(-1μm, 1μm), Point(3μm, 1μm), Point(3μm, 0μm)]
 end
 
-@testset "Polygon rendering" begin
+@testitem "Polygon rendering" setup = [CommonTestSetup] begin
     @testset "Rectangle rendering" begin
         c3 = Cell{Float64}("c3")
         r = Rectangle(5, 10)
@@ -312,7 +328,7 @@ end
     end
 end
 
-@testset "Intersections" begin
+@testitem "Intersections" setup = [CommonTestSetup] begin
     @test promote(Polygons.Line(p(0, 0), p(1, 1)), Polygons.Line(p(1.0, 0.0), p(2, 0))) ===
           (Polygons.Line(p(0.0, 0.0), p(1.0, 1.0)), Polygons.Line(p(1.0, 0.0), p(2.0, 0.0)))
     @test promote(
@@ -333,7 +349,7 @@ end
     @test Polygons.intersects(Point(1, 1), ls)
 end
 
-@testset "Cell methods" begin
+@testitem "Cell methods" setup = [CommonTestSetup] begin
     # Setup nested cell refs
     c = Cell{Float64}("main")
     c2 = Cell{Float64}("c2")
@@ -486,7 +502,7 @@ end
     @test Cells.dbscale(c1, c2, c3) == 1.0pm
 end
 
-@testset "Path basics" begin
+@testitem "Path basics" setup = [CommonTestSetup] begin
     @testset "> Path constructors" begin
         @test typeof(Path()) == Path{typeof(1.0nm2nm)}
         @test typeof(Path(0, 0)) == Path{Float64}
@@ -746,9 +762,7 @@ end
     end
 end
 
-include("test_render.jl")
-
-@testset "Backends" begin
+@testitem "Backends" setup = [CommonTestSetup] begin
     @testset "GDS format" begin
         s1 = Cell("sub1", nm)
         render!(s1, Rectangle(10μm, 10μm), GDSMeta(1, 0))
@@ -930,21 +944,5 @@ include("test_render.jl")
         path = joinpath(tdir, "test_cs.png")
         save(path, cs1)
         rm(path, force=true)
-
-        # Color themes -- default is light theme
-        @test DeviceLayout.Graphics.get_color_scheme() == :glasbey_bw_minc_20_maxl_70_n256
-        c = DeviceLayout.Graphics.lcolor(1)
-        # Switch to dark
-        DeviceLayout.Graphics.set_theme!("dark")
-        @test DeviceLayout.Graphics.get_color_scheme() == :glasbey_bw_minc_20_minl_30_n256
-        # Change takes place without restarting
-        @test DeviceLayout.Graphics.lcolor(1) != c
-        @test_throws "Theme must be" DeviceLayout.Graphics.set_theme!("invalid")
-        # Leave no preference
-        Preferences.delete_preferences!(
-            DeviceLayout,
-            DeviceLayout.Graphics.COLOR_THEME_PREF,
-            force=true
-        )
     end
 end

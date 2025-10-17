@@ -1,4 +1,4 @@
-@testset "BSpline" begin
+@testitem "BSpline" setup = [CommonTestSetup] begin
     po0 = Point(1.0μm, 1.0μm)
     po1 = Point(1000.0μm, -20.0μm)
 
@@ -134,7 +134,7 @@
           rotated_direction(direction(pa3[3].seg, 50μm), tr)
 end
 
-@testset "BSpline approximation" begin
+@testitem "BSpline approximation" setup = [CommonTestSetup] begin
     pa = Path(Point(0.0, 0.0)nm, α0=90°)
     bspline!(
         pa,
@@ -185,8 +185,8 @@ end
             (gety.(p.p) + gety.(circshift(p.p, -1))) .*
             (getx.(p.p) - getx.(circshift(p.p, -1)))
         ) / 2
-    p = Polygon([pts; reverse(pts_approx)])
-    @test abs(area(p) / perimeter(p)) < 100nm # It's actually ~25nm but the guarantee is ~< tolerance
+    poly = Polygon([pts; reverse(pts_approx)])
+    @test abs(area(poly) / perimeter(poly)) < 100nm # It's actually ~25nm but the guarantee is ~< tolerance
     c = curv[8].curves[1] # ConstantOffset Turn
     @test Paths.curvatureradius(c, 10μm) == sign(c.seg.α) * c.seg.r - c.offset
     @test curvatureradius_fd(c, 10μm) ≈ Paths.curvatureradius(c, 10μm) atol = 1nm
@@ -203,7 +203,7 @@ end
     @test_logs (:warn, r"Maximum error") Paths.bspline_approximation(cps[1].curves[1])
 end
 
-@testset "BSpline optimization" begin
+@testitem "BSpline optimization" setup = [CommonTestSetup] begin
     ## 90 degree turn
     pa = Path() # auto_speed
     bspline!(pa, [Point(100μm, 100μm)], 90°, Paths.Trace(1μm); auto_speed=true)

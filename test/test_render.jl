@@ -1,5 +1,4 @@
-
-@testset "Rendering unit tests" begin
+@testitem "Rendering unit tests" setup = [CommonTestSetup] begin
     # Observe aliasing with rand_factor = 0.
     # Choosing large grid_step yields the minimum possible number of grid points (5).
     f = t -> (2.0μm + 1.0μm * cos(2π * t / (50μm)))
@@ -13,7 +12,7 @@
     @test grid == [0.0μm, 25μm, 50μm, 75μm, 100μm]
 end
 
-@testset "Styles" begin
+@testitem "Styles" setup = [CommonTestSetup] begin
     @testset "NoRender" begin
         c = Cell{Float64}("main")
         pa = Path(NoUnits, α0=24.31°)
@@ -927,7 +926,7 @@ end
     end
 end
 
-@testset "Metadata mapping" begin
+@testitem "Metadata mapping" setup = [CommonTestSetup] begin
     # Preserves GDSMeta
     @test DeviceLayout.default_meta_map(GDSMeta(10, 2)) == GDSMeta(10, 2)
 

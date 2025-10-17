@@ -1,4 +1,4 @@
-@testset "Texts" begin
+@testitem "Texts" setup = [CommonTestSetup] begin
     @testset "Load and save" begin
         c1 = load(joinpath(dirname(@__FILE__), "texts.gds"))["noname"]
         dir = mktempdir()
