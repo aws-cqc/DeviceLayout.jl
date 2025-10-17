@@ -24,6 +24,7 @@ using PRIMA
         n_meander_turns=5,
         hanger_length=500μm,
         bend_radius=50μm,
+        waveports::Bool=false,
         save_mesh::Bool=false,
         save_gds::Bool=false)
 
@@ -41,6 +42,7 @@ function single_transmon(;
     n_meander_turns=5,
     hanger_length=500μm,
     bend_radius=50μm,
+    waveports::Bool=false,
     save_mesh::Bool=false,
     save_gds::Bool=false,
     mesh_order=2
@@ -130,7 +132,7 @@ function single_transmon(;
 
     #### Prepare solid model
     # Specify the extent of the simulation domain.
-    substrate_x = 2.5mm #4mm
+    substrate_x = waveports ? 2.5mm : 4mm
     substrate_y = 3.7mm
 
     center_xyz = DeviceLayout.center(floorplan)
@@ -144,22 +146,28 @@ function single_transmon(;
     # Define rectangle that gets extruded to generate substrate volume
     render!(floorplan.coordinate_system, chip, LayerVocabulary.CHIP_AREA)
 
-    # Define lines that get extruded to generate wave port surface
-    # The lines NEED to be on outline of sim_area since wave ports
-    # NEED to be on the exterior boundary of the domain
-    x1 = center_xyz.x - substrate_x / 2
-    x2 = center_xyz.x + substrate_x / 2
-    ymin = center_xyz.y + 0.8mm
-    ymax = center_xyz.y + 1.4mm
-    line1 = LineSegment(Point(x1, ymin), Point(x1, ymax))
-    line2 = LineSegment(Point(x2, ymin), Point(x2, ymax))
-    render!(floorplan.coordinate_system, only_simulated(line1), LayerVocabulary.WAVE_PORT_1)
-    render!(floorplan.coordinate_system, only_simulated(line2), LayerVocabulary.WAVE_PORT_2)
+    if waveports
+        # Define lines that will get extruded to generate wave port surface
+        # The lines NEED to be on outline of sim_area since wave ports
+        # NEED to be on the exterior boundary of the domain
+        x1 = center_xyz.x - substrate_x / 2
+        x2 = center_xyz.x + substrate_x / 2
+        ymin = center_xyz.y + 0.8mm # would be nice for these positions to not be hardcoded?!?!??
+        ymax = center_xyz.y + 1.4mm # ???
+        line1 = LineSegment(Point(x1, ymin), Point(x1, ymax))
+        line2 = LineSegment(Point(x2, ymin), Point(x2, ymax))
+        render!(floorplan.coordinate_system, only_simulated(line1), LayerVocabulary.WAVE_PORT_1)
+        render!(floorplan.coordinate_system, only_simulated(line2), LayerVocabulary.WAVE_PORT_2)
+    end
 
     check!(floorplan)
 
     # Need to pass generated physical group names so they can be retained
-    tech = ExamplePDK.singlechip_solidmodel_target("lumped_element", "wave_port_1_extrusion", "wave_port_2_extrusion")
+    if waveports
+        tech = ExamplePDK.singlechip_solidmodel_target("wave_port_1_extrusion", "wave_port_2_extrusion", "lumped_element") ## would be nice to not need _extrusion??
+    else
+        tech = ExamplePDK.singlechip_solidmodel_target("port_1", "port_2", "lumped_element")
+    end
     sm = SolidModel("test", overwrite=true)
 
     # Adjust mesh_scale to increase the resolution of the mesh, < 1 will result in greater
@@ -190,7 +198,7 @@ function single_transmon(;
 end
 
 """
-    configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0)
+    configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0, waveports=false)
 
 Given a `SolidModel`, assemble a dictionary defining a configuration file for use within
 Palace.
@@ -202,7 +210,7 @@ Palace.
     high-order spaces.
   - `amr = 0`: Maximum number of adaptive mesh refinement (AMR) iterations.
 """
-function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0)
+function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0, waveports=false)
     attributes = SolidModels.attributes(sm)
 
     config = Dict(
@@ -244,39 +252,39 @@ function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0)
             "PEC" => Dict("Attributes" => [attributes["metal"]]),
             "Absorbing" => Dict(
                 "Attributes" => [attributes["exterior_boundary"]],
-                #"Attributes" => [
-                #    attributes["exterior_boundary_Ymin"],
-                #    attributes["exterior_boundary_Ymax"],
-                #    attributes["exterior_boundary_Zmin"],
-                #    attributes["exterior_boundary_Zmax"]
-                #],
                 "Order" => 1
             ),
-            "WavePort" => [
-                Dict(
-                    "Index" => 1,
-                    #"Attributes" => [attributes["exterior_boundary_Xmin"]]
-                    "Attributes" => [attributes["wave_port_1_extrusion"]]
-                ),
-                Dict(
-                    "Index" => 2,
-                    #"Attributes" => [attributes["exterior_boundary_Xmax"]]
-                    "Attributes" => [attributes["wave_port_2_extrusion"]]
-                ),
-            ],
+            (waveports ?
+                (
+                    "WavePort" => [
+                        Dict(
+                            "Index" => 1,
+                            "Attributes" => [attributes["wave_port_1_extrusion"]]
+                        ),
+                        Dict(
+                            "Index" => 2,
+                            "Attributes" => [attributes["wave_port_2_extrusion"]]
+                        ),],
+                )
+                : ()
+            )...,
             "LumpedPort" => [
-                #Dict(
-                #    "Index" => 1,
-                #    "Attributes" => [attributes["port_1"]],
-                #    "R" => 50,
-                #    "Direction" => "+X"
-                #),
-                #Dict(
-                #    "Index" => 2,
-                #    "Attributes" => [attributes["port_2"]],
-                #    "R" => 50,
-                #    "Direction" => "+X"
-                #),
+                (waveports ? () :
+                    (
+                        Dict(
+                            "Index" => 1,
+                            "Attributes" => [attributes["port_1"]],
+                            "R" => 50,
+                            "Direction" => "+X"
+                        ),
+                        Dict(
+                            "Index" => 2,
+                            "Attributes" => [attributes["port_2"]],
+                            "R" => 50,
+                            "Direction" => "+X"
+                        ),
+                    )
+                )...,
                 Dict(
                     "Index" => 3,
                     "Attributes" => [attributes["lumped_element"]],
