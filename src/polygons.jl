@@ -187,6 +187,16 @@ function ellipse_curvature(e::Ellipse, θ)
     return (a * b) / (a^2 * sin(φ)^2 + b^2 * cos(φ)^2)^1.5
 end
 
+# Distance from centroid at θ from major axis
+function _ellipse_r(φ, a, b)
+    return (a * b) / sqrt((b * cos(φ))^2 + (a * sin(φ))^2)
+end
+
+# Point at θ from x axis with major axis at θ1
+function _ellipse_p(θ, θ1, a, b)
+    return _ellipse_r(θ - θ1, a, b) * Point(cos(θ), sin(θ))
+end
+
 function to_polygons(
     e::Ellipse;
     atol=DeviceLayout.onenanometer(eltype(e.center)),
@@ -194,28 +204,17 @@ function to_polygons(
     kwargs...
 )
     if !isnothing(Δθ) # Use Δθ-based discretization
-        r =
-            θ ->
-                (e.radii[1] * e.radii[2]) /
-                sqrt((e.radii[2] * cos(θ))^2 + (e.radii[1] * sin(θ))^2)
-        p = θ -> e.center + r(θ - e.angle) .* Point(cos(θ), sin(θ))
-        return Polygon(p.(0:Δθ:(360° - Δθ)))
+        θs = ((0.0°):Δθ:(360° - Δθ))
     else # Use tolerance-based discretization
-        curvature_fn = θ -> ellipse_curvature(e, θ)
         # t_scale is used to approximately convert "t" (θ) to arclength, use the larger radius to be safe
-        θs = DeviceLayout.discretization_grid(
-            curvature_fn,
+        θs = (DeviceLayout.discretization_grid(
+            Base.Fix1(ellipse_curvature, e),
             atol,
             (0.0, 2π);
             t_scale=e.radii[1]
-        )
-        r =
-            θ ->
-                (e.radii[1] * e.radii[2]) /
-                sqrt((e.radii[2] * cos(θ))^2 + (e.radii[1] * sin(θ))^2)
-        p = θ -> e.center + r(θ - e.angle) .* Point(cos(θ), sin(θ))
-        return Polygon(p.(θs[1:(end - 1)])) # Don't duplicate last point
+        )[1:(end - 1)])
     end
+    return Polygon([e.center + _ellipse_p(θ, e.angle, e.radii[1], e.radii[2]) for θ in θs])
 end
 
 DeviceLayout.magnify(e::Ellipse, mag) = Ellipse(mag .* e.center, mag .* e.radii, e.angle)
@@ -434,6 +433,8 @@ end
 
 DeviceLayout.transform(p::Polygon, f::Transformation) =
     xrefl(f) ? Polygon(reverse(f.(points(p)))) : Polygon(f.(points(p)))
+DeviceLayout.translate(p::Polygon, dp::Point) = Polygon(points(p) .+ dp)
+DeviceLayout.magnify(p::Polygon, mag) = Polygon([mag * pp for pp in points(p)])
 
 function DeviceLayout.transform(c::ClippedPolygon, f::Transformation)
     T = typeof(f.(c.tree.contour)).parameters[1]
@@ -524,7 +525,8 @@ end
 
 Return a circular `Polygon` centered about the origin with radius `r` and angular step `Δθ`.
 """
-circle_polygon(r, Δθ=10°) = Polygon(r .* (a -> Point(cos(a), sin(a))).(0:Δθ:(360° - Δθ)))
+circle_polygon(r, Δθ=10°) =
+    Polygon([Point(r * cos(a), r * sin(a)) for a in ((0°):Δθ:(360° - Δθ))])
 function circle(r, α=10°)
     @warn """"
         `circle(r, α)` is deprecated. Use `Circle(r)` or `Circle(center, r)` to create an \
