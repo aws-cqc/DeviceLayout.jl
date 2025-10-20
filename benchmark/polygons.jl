@@ -55,7 +55,7 @@ end
 function circles_entity_atol(n; output_dir=nothing)
     c = Cell{Float64}("circles")
     for i = 1:n
-        render!(c, Circle(Point(i, 0.0), 1.0), atol=4e-7)#, atol=7.714e-8) # 7999 points
+        render!(c, Circle(Point(i, 0.0), 1.0), atol=7.714e-8) # 7999 points
     end
     return !isnothing(output_dir) && save(joinpath(output_dir, "$(n)_circles_atol.gds"), c)
 end
