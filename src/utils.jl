@@ -217,16 +217,14 @@ function discretization_grid(
     t_scale=1.0
 )
     dt = 0.01 * bnds[2]
-    ts = zeros(4000)
+    ts = zeros(100)
     ts[1] = bnds[1]
     t = bnds[1]
     i = 1
     cc = norm(ddf(t))
     while t < bnds[2]
         i = i + 1
-        i > length(ts) && error(
-            "Too many points in curve for GDS. Increase discretization tolerance or split the curve."
-        )
+        i > length(ts) && resize!(ts, 2 * length(ts))
         t = ts[i - 1]
         # Set dt based on distance from chord assuming constant curvature
         if cc >= 100 * 8 * tolerance / (bnds[2]^2 * t_scale^2) # Update dt if curvature is not near zero
