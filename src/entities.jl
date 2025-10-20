@@ -371,7 +371,8 @@ function transform(
     )
 end
 
-(f::Translation{V})(ent::AbstractGeometry) where {V} = transform(ent, f)
+(f::Translation{V})(ent::AbstractGeometry) where {V} =
+    translate(ent, convert(Point, f.translation))
 (f::LinearMap{M})(ent::AbstractGeometry) where {M} = transform(ent, f)
 (f::AffineMap{M, V})(ent::AbstractGeometry) where {M, V} = transform(ent, f)
 (f::ScaledIsometry{T})(ent::AbstractGeometry) where {T} = transform(ent, f)

@@ -320,6 +320,7 @@ affine(origin, rot, xrefl, mag) = Translation(origin) ∘ linearmap(rot, xrefl, 
 affine(::Nothing, rot, xrefl, mag) = linearmap(rot, xrefl, mag)
 
 function linearmap(rot, xrefl, mag)
+    iszero(rot) && !xrefl && isone(mag) && return IdentityTransformation()
     rd = uconvert(°, rot) # so for example cos(pi/2) is exactly zero
     sgn = xrefl ? -1 : 1
     lin = LinearMap(
