@@ -434,7 +434,7 @@ end
 DeviceLayout.transform(p::Polygon, f::Transformation) =
     xrefl(f) ? Polygon(reverse(f.(points(p)))) : Polygon(f.(points(p)))
 DeviceLayout.translate(p::Polygon, dp::Point) = Polygon(points(p) .+ dp)
-DeviceLayout.magnify(p::Polygon, mag) = Polygon([mag * pp for pp in points(p)])
+DeviceLayout.magnify(p::Polygon, mag) = Polygon(mag * points(p))
 
 function DeviceLayout.transform(c::ClippedPolygon, f::Transformation)
     T = typeof(f.(c.tree.contour)).parameters[1]

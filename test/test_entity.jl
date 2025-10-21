@@ -42,6 +42,7 @@
     @test translate(plus, Point(10, 0)) == to_polygons(plus) + Point(10, 0)
     @test length(points(to_polygons(plus))) == 12
     @test bounds(plus) == centered(Rectangle(5, 5))
+    @test bounds(2 * plus) == 2 * bounds(plus)
     aplus = [plus, plus - Point(10, 0)]
     @test footprint(aplus) == Rectangle(Point(-12.5, -2.5), Point(2.5, 2.5))
     @test halo(plus, 1) == OriginPlus(7, 4)
