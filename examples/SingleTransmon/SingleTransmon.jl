@@ -103,15 +103,17 @@ function single_transmon(;
     straight!(p_readout, readout_length / 2, PATH_STYLE)
 
     # Readout lumped ports - squares on CPW trace, one at each end
-    csport = CoordinateSystem(uniquename("port"), nm)
-    render!(
-        csport,
-        only_simulated(centered(Rectangle(cpw_width, cpw_width))),
-        LayerVocabulary.PORT
-    )
-    # Attach with port center `cpw_width` from the end (instead of `cpw_width/2`) to avoid corner effects
-    attach!(p_readout, sref(csport), cpw_width, i=1) # @ start
-    attach!(p_readout, sref(csport), readout_length / 2 - cpw_width, i=2) # @ end
+    if !waveports
+        csport = CoordinateSystem(uniquename("port"), nm)
+        render!(
+            csport,
+            only_simulated(centered(Rectangle(cpw_width, cpw_width))),
+            LayerVocabulary.PORT
+        )
+        # Attach with port center `cpw_width` from the end (instead of `cpw_width/2`) to avoid corner effects
+        attach!(p_readout, sref(csport), cpw_width, i=1) # @ start
+        attach!(p_readout, sref(csport), readout_length / 2 - cpw_width, i=2) # @ end
+    end
 
     #### Build schematic graph
     g = SchematicGraph("single-transmon")
@@ -132,7 +134,7 @@ function single_transmon(;
 
     #### Prepare solid model
     # Specify the extent of the simulation domain.
-    substrate_x = waveports ? 2.5mm : 4mm
+    substrate_x = waveports ? readout_length : 4mm # waveport domain boundary needs to touch the readout line
     substrate_y = 3.7mm
 
     center_xyz = DeviceLayout.center(floorplan)
@@ -147,15 +149,23 @@ function single_transmon(;
     render!(floorplan.coordinate_system, chip, LayerVocabulary.CHIP_AREA)
 
     if waveports
-        # Define lines that will get extruded to generate wave port surface
+        # Define lines that will get extruded to generate wave port surfaces
         # The lines NEED to be on outline of sim_area since wave ports
         # NEED to be on the exterior boundary of the domain
         x1 = center_xyz.x - substrate_x / 2
         x2 = center_xyz.x + substrate_x / 2
-        ymin = center_xyz.y + 0.8mm # would be nice for these positions to not be hardcoded?!?!??
-        ymax = center_xyz.y + 1.4mm # ???
-        line1 = LineSegment(Point(x1, ymin), Point(x1, ymax))
-        line2 = LineSegment(Point(x2, ymin), Point(x2, ymax))
+        # Get the path start and end coordinates to determine waveport y coordinates
+        path_node = floorplan.graph.node_dict[:p_ro]
+        trans = transformation(floorplan, path_node)
+        y1 = trans(p0(path_node.component.nodes[1].seg)).y
+        y2 = trans(p1(path_node.component.nodes[end].seg)).y
+        waveport_width = 0.6mm
+        ymin1 = y1 - waveport_width / 2
+        ymax1 = y1 + waveport_width / 2
+        ymin2 = y2 - waveport_width / 2
+        ymax2 = y2 + waveport_width / 2
+        line1 = LineSegment(Point(x1, ymin1), Point(x1, ymax1))
+        line2 = LineSegment(Point(x2, ymin2), Point(x2, ymax2))
         render!(floorplan.coordinate_system, only_simulated(line1), LayerVocabulary.WAVE_PORT_1)
         render!(floorplan.coordinate_system, only_simulated(line2), LayerVocabulary.WAVE_PORT_2)
     end
