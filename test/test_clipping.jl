@@ -114,6 +114,11 @@
         @test to_polygons(
             union2d(Rectangle(2, 2) + Point(1, 1), [Rectangle(2, 2), Rectangle(10, 10)])
         )[1] == Polygon(Point{Int}[(10, 10), (0, 10), (0, 0), (10, 0)])
+
+        # XOR
+        r1 = Rectangle(2.0, 2.0)
+        r2 = Rectangle(2.0, 2.0) + Point(1.0, 1.0)
+        @test xor2d(r1, r2) == union2d(difference2d(r2, r1), difference2d(r1, r2))
     end
 
     @testset "> ClippedPolygon operations w/o units" begin

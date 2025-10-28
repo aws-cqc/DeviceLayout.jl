@@ -385,7 +385,8 @@ import .Polygons:
     rounded_corner,
     sweep_poly,
     unfold,
-    union2d
+    union2d,
+    xor2d
 export Polygons,
     Polygon,
     Ellipse,
@@ -409,7 +410,8 @@ export Polygons,
     rounded_corner,
     sweep_poly,
     unfold,
-    union2d
+    union2d,
+    xor2d
 
 include("align.jl")
 using .Align

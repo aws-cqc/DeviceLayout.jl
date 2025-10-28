@@ -80,7 +80,8 @@ export circle,
     rounded_corner,
     sweep_poly,
     unfold,
-    union2d
+    union2d,
+    xor2d
 
 const USCALE = 1.0 * Unitful.fm
 const SCALE  = 10.0^9
@@ -1151,6 +1152,34 @@ function intersect2d(plus, minus)
         Clipper.ClipTypeIntersection,
         plus,
         minus,
+        pfs=Clipper.PolyFillTypePositive,
+        pfc=Clipper.PolyFillTypePositive
+    )
+end
+
+"""
+    xor2d(p1, p2)
+
+Return the symmetric difference (XOR) of `p1` and `p2` as a `ClippedPolygon`.
+
+The XOR operation returns regions that are in either `p1` or `p2`, but not in both.
+This is useful for finding non-overlapping regions between two sets of polygons.
+
+Each of `p1` and `p2` may be a `GeometryEntity` or array of `GeometryEntity`. All entities
+are first converted to polygons using [`to_polygons`](@ref).
+
+Each of `p1` and `p2` can also be a `GeometryStructure` or `GeometryReference`, in which case
+`elements(flatten(p))` will be converted to polygons.
+
+Each can also be a pair `geom => layer`, where `geom` is a
+`GeometryStructure` or `GeometryReference`, while `layer` is a `DeviceLayout.Meta`, a layer name `Symbol`, and/or a collection
+of either, in which case only the elements in those layers will be used.
+"""
+function xor2d(p1, p2)
+    return clip(
+        Clipper.ClipTypeXor,
+        p1,
+        p2,
         pfs=Clipper.PolyFillTypePositive,
         pfc=Clipper.PolyFillTypePositive
     )

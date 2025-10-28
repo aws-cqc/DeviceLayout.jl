@@ -14,7 +14,7 @@ For example, if you ask for the bounding box of a path node (which could define 
 
 ## Clipping
 
-Geometric Boolean operations on polygons are called "clipping" operations. For 2D geometry, these—`union2d`, `difference2d`, and `intersection2d`—are the only geometric Booleans available. Other geometry types are first converted to polygons using `to_polygons` to perform clipping.
+Geometric Boolean operations on polygons are called "clipping" operations. For 2D geometry, these—`union2d`, `difference2d`, `intersection2d`, and `xor2d`—are the only geometric Booleans available. Other geometry types are first converted to polygons using `to_polygons` to perform clipping.
 
 !!! info
     
@@ -27,6 +27,7 @@ More general operations may be accomplished using the `clip` function.
     union2d
     difference2d
     intersect2d
+    xor2d
     clip
     cliptree
 ```
