@@ -67,8 +67,9 @@ const LAYER_RECORD = (;
     simulated_area = GDSMeta(200, 0),
     port           = GDSMeta(210, 0),
     lumped_element = GDSMeta(211, 0),
-    wave_port_1    = GDSMeta(212, 0),
-    wave_port_2    = GDSMeta(212, 1),
+    wave_port      = GDSMeta(212, 0), #try to index and not require multiple? what about flip chip?
+    #wave_port_1    = GDSMeta(212, 0),
+    #wave_port_2    = GDSMeta(212, 1),
     mesh_control   = GDSMeta(220, 0),
     integration    = GDSMeta(230, 0)
 )
@@ -125,14 +126,16 @@ const EXAMPLE_SINGLECHIP_TECHNOLOGY = ProcessTechnology(
     (;
         height=(; # z height at the bottom of simulation volume
             simulated_area=-1mm,
-            wave_port_1=-100μm,
-            wave_port_2=-200μm
+            wave_port=-200μm,
+            #wave_port_1=-100μm,
+            #wave_port_2=-200μm
         ),
         thickness=(; # Extrusion distances for various layers
             simulated_area=2mm,
             chip_area=525μm,
-            wave_port_1=200μm,
-            wave_port_2=400μm
+            wave_port=400μm
+            #wave_port_1=200μm,
+            #wave_port_2=400μm
         )
     )
 )
@@ -165,7 +168,8 @@ const SINGLECHIP_SOLIDMODEL_TARGET = SolidModelTarget(
     bounding_layers=[:simulated_area], # SIMULATED_AREA defines the simulation bounds
     substrate_layers=[:chip_area], # CHIP_AREA will be extruded downward
     indexed_layers=[:port, :lumped_element, :integration], # Automatically index these layers
-    wave_port_layers=[:wave_port_1, :wave_port_2],
+    #wave_port_layers=[:wave_port_1, :wave_port_2],
+    wave_port_layers=[:wave_port], # automatically index? and extrude? add :wave_port to indexed_layers?
     postrender_ops=[ # Manual definition of operations to run after 2D rendering
         (   # Get metal ground plane by subtracting negative from writeable area
             "metal", # Output group name
@@ -257,6 +261,7 @@ const FLIPCHIP_SOLIDMODEL_TARGET = SolidModelTarget(
         :bridge
     ],
     indexed_layers=[:port, :lumped_element, :integration],
+    wave_port_layers=[:wave_port], #add wave_port to indexed and levelwise layers???
     postrender_ops=[
         (   # Get metal ground plane by subtracting negative from writeable area
             "metal_L1",
