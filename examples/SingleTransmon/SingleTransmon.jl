@@ -113,6 +113,19 @@ function single_transmon(;
         # Attach with port center `cpw_width` from the end (instead of `cpw_width/2`) to avoid corner effects
         attach!(p_readout, sref(csport), cpw_width, i=1) # @ start
         attach!(p_readout, sref(csport), readout_length / 2 - cpw_width, i=2) # @ end
+    else
+        # wave ports - line segments at each end of the CPW
+        # will be extruded according to the height/thickness specified in ExamplePDK
+        waveport_width = 0.6mm # or make it a multiple of cpw width?
+        print("ratio of waveport to CPW width: $(waveport_width/cpw_width)\n")
+        csport = CoordinateSystem(uniquename("waveport"), nm)
+        render!(
+            csport,
+            only_simulated(LineSegment(Point(0nm, -waveport_width / 2), Point(0nm, waveport_width / 2))),
+            LayerVocabulary.WAVE_PORT
+        )
+        attach!(p_readout, sref(csport), 0nm, i=1) # @ start
+        attach!(p_readout, sref(csport), readout_length / 2, i=2) # @ end
     end
 
     #### Build schematic graph
@@ -155,6 +168,8 @@ function single_transmon(;
         x1 = center_xyz.x - substrate_x / 2
         x2 = center_xyz.x + substrate_x / 2
         # Get the path start and end coordinates to determine waveport y coordinates
+        ## or... do something more general like loop over all graph nodes, and if it's a
+        ## path or route, find where it intersects the chip/sim_area, and place waveport there
         path_node = floorplan.graph.node_dict[:p_ro]
         trans = transformation(floorplan, path_node)
         y1 = trans(p0(path_node.component.nodes[1].seg)).y
@@ -166,8 +181,8 @@ function single_transmon(;
         ymax2 = y2 + waveport_width / 2
         line1 = LineSegment(Point(x1, ymin1), Point(x1, ymax1))
         line2 = LineSegment(Point(x2, ymin2), Point(x2, ymax2))
-        render!(floorplan.coordinate_system, only_simulated(line1), LayerVocabulary.WAVE_PORT_1)
-        render!(floorplan.coordinate_system, only_simulated(line2), LayerVocabulary.WAVE_PORT_2)
+        #render!(floorplan.coordinate_system, only_simulated(line1), LayerVocabulary.WAVE_PORT)#_1)
+        #render!(floorplan.coordinate_system, only_simulated(line2), LayerVocabulary.WAVE_PORT)#_2)
     end
 
     check!(floorplan)
@@ -204,7 +219,7 @@ function single_transmon(;
         flatten!(c)
         save(joinpath(@__DIR__, "single_transmon.gds"), c)
     end
-    return sm
+    return sm, floorplan # return floorplan just for debugging, remove later
 end
 
 """
