@@ -1,6 +1,7 @@
 ######## Rendering
 import Clipper: children, contour, ishole, PolyNode
 import Unitful: Length
+import StaticArrays: SVector
 
 """
     to_primitives(::SolidModel, ent::GeometryEntity; kwargs...)
@@ -603,19 +604,46 @@ function render!(
             append!(get!(sizeandgrading_dimtags, s, []), h_dimtags)
         end
     end
+    # Synchronize the entities to the model, so can find subentities.
+    _synchronize!(sm)
 
-    # Make agglomerated physical group for sizes
-    meshsize_dict = Dict{String, Tuple{Float64, Float64}}()
+    SolidModels.CALLBACK_PARAMS[:cp] = Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}()
     for ((h, α), dts) in sizeandgrading_dimtags
         iszero(h) && continue
-        h_name = uniquename("mesh_size")
-        sm[h_name] = kernel(sm).copy(dts)
-        if isa(kernel(sm), OpenCascade)
-            # Only OpenCascade supports boolean union.
-            sm[h_name] = union_geom!(sm[h_name, 2], sm[h_name, 2], remove_object=true)
+        bdts = gmsh.model.get_boundary(dts, true, false, false) # line segments
+        # TODO: Calculate an actual sample rate per line, just use 3 points for now.
+        # For straight lines (i.e. if curvature is inf), can measure and directly sample.
+        # For a circular arc, can use the radius of curvature to compute sampling rate on
+        # radius.
+        # For a spline, it's a shit show.
+        for (dim, tag) in bdts
+            @assert dim == 1
+            bounds = gmsh.model.get_parametrization_bounds(dim, tag)
+            curv = gmsh.model.get_curvature(dim, tag, [bounds[1][1], (bounds[1][1] + bounds[2][1])/2 ,bounds[2][1]])
+            if maximum(curv) <= 1e-14 # Straight
+                xyz = gmsh.model.get_value(dim, tag, [bounds[1][1], bounds[2][1]])
+                l = sqrt((xyz[1] - xyz[4])^2 + (xyz[2] - xyz[5])^2 + (xyz[3] - xyz[6])^2)
+                Ns = l ÷ h
+            elseif abs(minimum(curv) - maximum(curv)) < 1e-9  # a circular arc
+                # For a circular arc, use the midpoint to construct the swept angle
+                xyz = gmsh.model.get_value(dim, tag, [bounds[1][1], (bounds[1][1] + bounds[2][1])/2])
+                δ = sqrt((xyz[1] - xyz[4])^2 + (xyz[2] - xyz[5])^2 + (xyz[3] - xyz[6])^2) / 2
+                mcurv = sum(curv)/length(curv)
+                l = (2 * atan(δ, 1/mcurv)) * 1/mcurv # θ * r
+                Ns = l ÷ h
+            else
+                Ns = 10 # Use a fixed 10 point sample.
+                # TODO: Approximate spline length with a linear interpolation. Sample xyz,
+                # then sum length of each segment. Should do reasonably for linearish splines.
+                # t = [bounds[1][1] + i * (bounds[2][1] - bounds[1][1]) / Ns for i in 0:Ns - 1]
+            end
+            t = [bounds[1][1] + i * (bounds[2][1] - bounds[1][1]) / Ns for i in 0:Ns - 1]
+            xyz = gmsh.model.get_value(dim, tag, t) # [x1,y1,z1,x2,y2,z2,...]
+
+            append!(get!(SolidModels.CALLBACK_PARAMS[:cp],
+                (h, α < 0 ? meshing_parameters.α_default : α),
+                    Vector{SVector{3,Float64}}()), reinterpret(SVector{3,Float64}, xyz))
         end
-        # gmsh is always interpreting in mm units.
-        meshsize_dict[h_name] = (h, α < 0 ? meshing_parameters.α_default : α)
     end
 
     # Extrusions, Booleans, etc
@@ -625,42 +653,26 @@ function render!(
     _synchronize!(sm)
     _fragment_and_map!(sm)
 
-    # Set sizes
-    for (g, (h_name, (h, α))) in enumerate(pairs(meshsize_dict))
-        if hasgroup(sm, h_name, 2)
-            group = sm[h_name, 2]
-            pts = gmsh.model.get_boundary(dimtags(group), false, true, true) # not combined
-            edges = gmsh.model.get_boundary(dimtags(group), false, false, false)
+    SolidModels.gmsh.option.setNumber("General.NumThreads", 1)
+    # Call back function for meshing against the vertices found previously.
+    # Need to use module global CALLBACK_PARAMS to circumvent llvm trampoline issue
+    # preventing usage of a closure.
+    SolidModels.CALLBACK_PARAMS[:s] = meshing_parameters.mesh_scale
 
-            @assert all(getindex.(pts, 1) .== 0) # all must be points
-            @assert all(getindex.(edges, 1) .== 1) # all must be edges
-            gmsh.model.mesh.field.add("Distance", 2 * g - 1)
-            gmsh.model.mesh.field.set_numbers(2 * g - 1, "PointsList", getindex.(pts, 2))
-            gmsh.model.mesh.field.set_numbers(2 * g - 1, "CurvesList", getindex.(edges, 2))
-            gmsh.model.mesh.field.set_number(2 * g - 1, "Sampling", sampling_rate)
-            if meshing_parameters.apply_size_to_surfaces
-                gmsh.model.mesh.field.set_numbers(
-                    2 * g - 1,
-                    "SurfacesList",
-                    getindex.(dimtags(group), 2)
-                )
+    # Store the required variables in the module-level dictionary
+    function meshsizecallback(dim::Cint, tag::Cint, x::Cdouble, y::Cdouble, z::Cdouble, lc::Cdouble)
+        l2 = Inf64
+        # The type tag here is extremely important to remove type instability.
+        for ((h, α), vs) in SolidModels.CALLBACK_PARAMS[:cp]::Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}
+
+            for v in vs
+                d = sqrt((x - v[1])^2 + (y - v[2])^2 + (z - v[3])^2)
+                l2 = min(l2, h * max(SolidModels.CALLBACK_PARAMS[:s]::Float64, (d/h)^α))
             end
         end
-        gmsh.model.mesh.field.add("MathEval", 2 * g)
-        s = meshing_parameters.mesh_scale
-        field = "$h * max($s, (F$(2*g-1) / $h)^$α)"
-        gmsh.model.mesh.field.set_string(2 * g, "F", field)
+        return l2
     end
-
-    # Take a minimum over all the distance fields
-    min_field_index = 2 * length(meshsize_dict) + 1
-    gmsh.model.mesh.field.add("Min", min_field_index)
-    gmsh.model.mesh.field.set_numbers(
-        min_field_index,
-        "FieldsList",
-        collect(2:2:(2 * length(meshsize_dict)))
-    )
-    gmsh.model.mesh.field.set_as_background_mesh(min_field_index)
+    gmsh.model.mesh.setSizeCallback(meshsizecallback)
 
     gmsh.option.set_number(
         "Mesh.MeshSizeFromPoints",
@@ -692,18 +704,6 @@ function render!(
 
     # Always save meshes in binary for faster disk I/O
     gmsh.option.set_number("Mesh.Binary", 1)
-
-    # Remove all mesh sizing groups -- do not delete entities, as the fragment operation can
-    # result in them being shared with other physical groups.
-    for (sz_name, _) ∈ meshsize_dict
-        if hasgroup(sm, sz_name, 2)
-            remove_group!(sm[sz_name, 2], remove_entities=false)
-            delete!(meshsize_dict, sz_name)
-        elseif hasgroup(sm, sz_name, 1)
-            remove_group!(sm[sz_name, 1], remove_entities=false)
-            delete!(meshsize_dict, sz_name)
-        end
-    end
 
     # Remove all physical groups except those on the retained list.
     if !isempty(retained_physical_groups)

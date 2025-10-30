@@ -3,6 +3,12 @@ module SolidModels
 import Gmsh: gmsh, gmsh.model.occ
 export gmsh
 
+# Explicit callback dictionary, to overcome closure limitation on apple silicon.
+import StaticArrays: SVector
+const CALLBACK_PARAMS = Dict{Symbol,
+    Union{Float64,
+          Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}
+        }}()
 import DeviceLayout
 import DeviceLayout:
     AbstractCoordinateSystem,
