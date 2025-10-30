@@ -2,6 +2,7 @@
 import Clipper: children, contour, ishole, PolyNode
 import Unitful: Length
 import StaticArrays: SVector
+# import NearestNeighbors: nn
 
 """
     to_primitives(::SolidModel, ent::GeometryEntity; kwargs...)
@@ -607,7 +608,8 @@ function render!(
     # Synchronize the entities to the model, so can find subentities.
     _synchronize!(sm)
 
-    SolidModels.CALLBACK_PARAMS[:cp] = Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}()
+    SolidModels.CALLBACK_PARAMS[:cp] =
+        Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}()
     for ((h, α), dts) in sizeandgrading_dimtags
         iszero(h) && continue
         bdts = gmsh.model.get_boundary(dts, true, false, false) # line segments
@@ -619,15 +621,25 @@ function render!(
         for (dim, tag) in bdts
             @assert dim == 1
             bounds = gmsh.model.get_parametrization_bounds(dim, tag)
-            curv = gmsh.model.get_curvature(dim, tag, [bounds[1][1], (bounds[1][1] + bounds[2][1])/2 ,bounds[2][1]])
+            curv = gmsh.model.get_curvature(
+                dim,
+                tag,
+                [bounds[1][1], (bounds[1][1] + bounds[2][1])/2, bounds[2][1]]
+            )
             if maximum(curv) <= 1e-14 # Straight
                 xyz = gmsh.model.get_value(dim, tag, [bounds[1][1], bounds[2][1]])
                 l = sqrt((xyz[1] - xyz[4])^2 + (xyz[2] - xyz[5])^2 + (xyz[3] - xyz[6])^2)
                 Ns = l ÷ h
             elseif abs(minimum(curv) - maximum(curv)) < 1e-9  # a circular arc
                 # For a circular arc, use the midpoint to construct the swept angle
-                xyz = gmsh.model.get_value(dim, tag, [bounds[1][1], (bounds[1][1] + bounds[2][1])/2])
-                δ = sqrt((xyz[1] - xyz[4])^2 + (xyz[2] - xyz[5])^2 + (xyz[3] - xyz[6])^2) / 2
+                xyz = gmsh.model.get_value(
+                    dim,
+                    tag,
+                    [bounds[1][1], (bounds[1][1] + bounds[2][1])/2]
+                )
+                δ =
+                    sqrt((xyz[1] - xyz[4])^2 + (xyz[2] - xyz[5])^2 + (xyz[3] - xyz[6])^2) /
+                    2
                 mcurv = sum(curv)/length(curv)
                 l = (2 * atan(δ, 1/mcurv)) * 1/mcurv # θ * r
                 Ns = l ÷ h
@@ -637,14 +649,28 @@ function render!(
                 # then sum length of each segment. Should do reasonably for linearish splines.
                 # t = [bounds[1][1] + i * (bounds[2][1] - bounds[1][1]) / Ns for i in 0:Ns - 1]
             end
-            t = [bounds[1][1] + i * (bounds[2][1] - bounds[1][1]) / Ns for i in 0:Ns - 1]
+            t = [bounds[1][1] + i * (bounds[2][1] - bounds[1][1]) / Ns for i = 0:(Ns - 1)]
             xyz = gmsh.model.get_value(dim, tag, t) # [x1,y1,z1,x2,y2,z2,...]
 
-            append!(get!(SolidModels.CALLBACK_PARAMS[:cp],
-                (h, α < 0 ? meshing_parameters.α_default : α),
-                    Vector{SVector{3,Float64}}()), reinterpret(SVector{3,Float64}, xyz))
+            append!(
+                get!(
+                    SolidModels.CALLBACK_PARAMS[:cp],
+                    (h, α < 0 ? meshing_parameters.α_default : α),
+                    Vector{SVector{3, Float64}}()
+                ),
+                reinterpret(SVector{3, Float64}, xyz)
+            )
         end
     end
+
+    # For each collection of (h, α), can assemble a KDTree to find closest. This will be the
+    # smallest mesh size over that collection of vertices, as size is proportional to
+    # distance for this subset. Thereby the comparison over lengths need only be over the
+    # number of different (h, α) combinations.
+    # SolidModels.CALLBACK_PARAMS[:ct] = Dict{Tuple{Float64, Float64}, KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}}()
+    # for k in keys(SolidModels.CALLBACK_PARAMS[:cp])
+    #     SolidModels.CALLBACK_PARAMS[:ct][k] = KDTree(deepcopy(SolidModels.CALLBACK_PARAMS[:cp][k]))
+    # end
 
     # Extrusions, Booleans, etc
     _synchronize!(sm)
@@ -657,13 +683,32 @@ function render!(
     # Call back function for meshing against the vertices found previously.
     # Need to use module global CALLBACK_PARAMS to circumvent llvm trampoline issue
     # preventing usage of a closure.
+    # SolidModels.CALLBACK_PARAMS[:cp] = mesh_control_points
     SolidModels.CALLBACK_PARAMS[:s] = meshing_parameters.mesh_scale
+    # @show keys(SolidModels.CALLBACK_PARAMS[:ct])
 
     # Store the required variables in the module-level dictionary
-    function meshsizecallback(dim::Cint, tag::Cint, x::Cdouble, y::Cdouble, z::Cdouble, lc::Cdouble)
+    function meshsizecallback(
+        dim::Cint,
+        tag::Cint,
+        x::Cdouble,
+        y::Cdouble,
+        z::Cdouble,
+        lc::Cdouble
+    )
+        # l1 = Inf64
+
+        # for ((h, α), tree) in SolidModels.CALLBACK_PARAMS[:ct]::Dict{Tuple{Float64, Float64}, KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}}
+        #     nn(tree, [x,y,z])
+        #     # _, d::Float64 = nn(tree, SVector{3}(x,y,z))
+        #     # l1 = min(l1, h * max(SolidModels.CALLBACK_PARAMS[:s]::Float64, (d/h)^α))::Float64
+        # end
         l2 = Inf64
         # The type tag here is extremely important to remove type instability.
-        for ((h, α), vs) in SolidModels.CALLBACK_PARAMS[:cp]::Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}
+        for ((h, α), vs) in SolidModels.CALLBACK_PARAMS[:cp]::Dict{
+            Tuple{Float64, Float64},
+            Vector{SVector{3, Float64}}
+        }
 
             for v in vs
                 d = sqrt((x - v[1])^2 + (y - v[2])^2 + (z - v[3])^2)
@@ -1014,12 +1059,11 @@ function _add_curve!(endpoints, seg::Paths.Turn, k::OpenCascade, z; kwargs...)
         end
         arclengths = range(zero(pathlength(seg)), pathlength(seg), length=n_arcs + 1)
         middle_pts = seg.(arclengths[(begin + 1):(end - 1)])
-        middle_tags =
-            k.add_point.(
-                ustrip.(STP_UNIT, getx.(middle_pts)),
-                ustrip.(STP_UNIT, gety.(middle_pts)),
-                ustrip(STP_UNIT, z)
-            )
+        middle_tags = k.add_point.(
+            ustrip.(STP_UNIT, getx.(middle_pts)),
+            ustrip.(STP_UNIT, gety.(middle_pts)),
+            ustrip(STP_UNIT, z)
+        )
         tags = [endpoints[1]; middle_tags; endpoints[2]]
         return k.add_circle_arc.(tags[1:(end - 1)], cen, tags[2:end], -1)
     end
@@ -1029,12 +1073,11 @@ end
 # Exact *interpolating* cubic BSpline in OCC
 # (occ.addBSpline and geo.addBSpline instead use control points, and geo.addSpline uses Catmull-Rom splines)
 function _add_curve!(endpoints, seg::Paths.BSpline, k::OpenCascade, z; kwargs...)
-    midpts =
-        k.add_point.(
-            ustrip.(STP_UNIT, getx.(seg.p[2:(end - 1)])),
-            ustrip.(STP_UNIT, gety.(seg.p[2:(end - 1)])),
-            ustrip(STP_UNIT, z)
-        )
+    midpts = k.add_point.(
+        ustrip.(STP_UNIT, getx.(seg.p[2:(end - 1)])),
+        ustrip.(STP_UNIT, gety.(seg.p[2:(end - 1)])),
+        ustrip(STP_UNIT, z)
+    )
     pts = [endpoints[1], midpts..., endpoints[2]]
     # Tangents for start and end as concatenated 3d vectors
     tangents = [
@@ -1081,12 +1124,11 @@ function _add_offset_curve!(
 )
     bspline_approx = bspline_approximation(Paths.offset(seg, offset); atol)
     newstarts = DeviceLayout.p0.(bspline_approx.segments)[2:end]
-    newpts =
-        k.add_point.(
-            ustrip.(STP_UNIT, getx.(newstarts)),
-            ustrip.(STP_UNIT, gety.(newstarts)),
-            ustrip(STP_UNIT, z)
-        )
+    newpts = k.add_point.(
+        ustrip.(STP_UNIT, getx.(newstarts)),
+        ustrip.(STP_UNIT, gety.(newstarts)),
+        ustrip(STP_UNIT, z)
+    )
     starts = [first(endpoints), newpts...]
     stops = [newpts..., last(endpoints)]
     endp_pairs = [[start, stop] for (start, stop) in zip(starts, stops)]
