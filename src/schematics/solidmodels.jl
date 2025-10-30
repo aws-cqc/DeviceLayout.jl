@@ -85,31 +85,28 @@ SolidModelTarget(
 )
 
 function extrusion_ops(t::SolidModelTarget, sch::Schematic)
-    return [
-        (string(layer) * "_extrusion", SolidModels.extrude_z!, (layer, thickness, dim)) for
-        (layer, (thickness, dim)) in pairs(layer_extrusions_dz(t, sch))
-    ]
+    ops = []
+    for (layer, (thickness, dim)) in pairs(layer_extrusions_dz(t, sch))
+        ext = dim == 1 ? "" : "_extrusion"
+        push!(ops, (string(layer) * ext, SolidModels.extrude_z!, (layer, thickness, dim)))
+    end
+    return ops
 end
 
 function intersection_ops(t::SolidModelTarget, sch::Schematic)
     bv = string.(bounding_layers(t)) .* "_extrusion"
-    #wave_ports = string.(wave_port_layers(t)) .* "_extrusion" ## needs to be all indexed wave port layers?!
-    #careful about levelwise for flipchip???
     wave_ports = []
-    for layer in wave_port_layers(t)
-        for (idx, node) in pairs(sch.index_dict[layer])
-            layeridx = layerindex(element_metadata(coordsys(sch[node]))[idx])
-            push!(wave_ports, string(layer) * "_$layeridx" * "_extrusion")
+    for m in element_metadata(sch.coordinate_system)
+        if iswaveportlayer(t, layer(m))
+            levelstr = layer(m) in levelwise_layers(t) ? "_L$(level(m))" : ""
+            push!(wave_ports, string(layer(m)) * levelstr * "_$(layerindex(m))")
         end
     end
-    # need a check somewhere that the wave ports DO INTERSECT the exterior boundary
-    print("intersection_ops wave_ports: $wave_ports \n")
     isempty(bv) && return []
     if length(bv) == 1
         return [
             ("rendered_volume", SolidModels.restrict_to_volume!, (bv[1],)),
             ("exterior_boundary", SolidModels.get_boundary, ("rendered_volume", 3)),
-
             [
                 (
                     "exterior_boundary",
@@ -158,24 +155,32 @@ end
 function layer_extrusions_dz(target, sch)
     thickness = get(target.technology.parameters, :thickness, (;))
     t_dict = Dict{String, Any}()
-    for (layer, t) in pairs(thickness)
-        dim = iswaveportlayer(target, layer) ? 1 : 2
-        sgn = issublayer(target, layer) ? -1 : 1
+    for (ly, t) in pairs(thickness)
+        dim = iswaveportlayer(target, ly) ? 1 : 2
+        sgn = issublayer(target, ly) ? -1 : 1
         if isempty(size(t))
-            if iswaveportlayer(target, layer)
-                for (idx, node) in pairs(sch.index_dict[layer])
-                    layeridx = layerindex(element_metadata(coordsys(sch[node]))[idx])
-                    t_dict[string(layer) * "_$layeridx"] = (sgn * t, dim)
+            if iswaveportlayer(target, ly)
+                for m in element_metadata(sch.coordinate_system)
+                    if layer(m) == ly
+                        t_dict[string(ly) * "_$(layerindex(m))"] = (sgn * t, dim)
+                    end
                 end
             else
-                t_dict[string(layer)] = (sgn * t, dim)
+                t_dict[string(ly)] = (sgn * t, dim)
             end
         else
-            # what about flipchip+waveports?? waveports should be allowed for single or flip and there we'd want somthing like waveport_1_L1, waveport_2_L1, waveport_3_L2 etc
-            # use level(element_metadata(...))
-            for (level, t_level) in pairs(t)
-                sgn = isodd(level) ? sgn : -sgn
-                t_dict[string(layer) * "_L$level"] = (sgn * t_level, dim)
+            for (lev, t_level) in pairs(t)
+                if iswaveportlayer(target, ly)
+                    for m in element_metadata(sch.coordinate_system)
+                        if layer(m) == ly && level(m) == lev
+                            t_dict[string(ly) * "_L$lev" * "_$(layerindex(m))"] =
+                                (sgn * t_level, dim)
+                        end
+                    end
+                else
+                    sgn = isodd(lev) ? sgn : -sgn
+                    t_dict[string(ly) * "_L$lev"] = (sgn * t_level, dim)
+                end
             end
         end
     end
@@ -204,10 +209,8 @@ function _map_meta_fn(target::SolidModelTarget)
         if layer(m) in levelwise_layers(target)
             name = name * "_L$(level(m))"
         end
-        #if (layer(m) in indexed_layers(target) || layer(m) in wave_port_layers(target)) && layerindex(m) != 0
         if layer(m) in indexed_layers(target) && layerindex(m) != 0
             name = name * "_$(layerindex(m))"
-            print("solidmodels.jl L192 layerindex($m): $(layerindex(m)), new name: $name\n")
         end
         return name
     end
@@ -238,22 +241,16 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
     sch.checked[] || error(
         "Cannot render an unchecked Schematic. Run check!(sch::Schematic), or override by setting sch.checked[] = true (not recommended!)"
     )
+    # Index layers
+    for ly in indexed_layers(target)
+        !haskey(sch.index_dict, ly) && index_layer!(sch::Schematic, ly)
+    end
     # Finish assembling postrender operations
     # Extrusions
     # Target specific actions
     # Intersections with rendered volume
-    #postrender_ops =
-    #    vcat(extrusion_ops(target), target.postrenderer, intersection_ops(target))
-    # Index layers
-    #for ly in Iterators.Flatten([indexed_layers(target), wave_port_layers(target)])
-    for ly in indexed_layers(target)
-        print("solidmodels.jl L233 indexing ly: $ly\n")
-        !haskey(sch.index_dict, ly) && index_layer!(sch::Schematic, ly)
-    end
-    # should we pass the metadata to extrusion ops to get layer index?
-    print("soldimodels.jl L237 sch.index_dict: $(sch.index_dict)\n")
     postrender_ops =
-        vcat(extrusion_ops(target, sch), target.postrenderer, intersection_ops(target, sch)) # test moving after indexing?
+        vcat(extrusion_ops(target, sch), target.postrenderer, intersection_ops(target, sch))
     reopen_logfile(sch, :render_solidmodel)
     with_logger(sch.logger) do
         return render!(

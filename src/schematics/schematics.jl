@@ -1151,10 +1151,17 @@ end
 
 function index_layer!(sch::Schematic, ly, nextindex=1)
     index_components = ComponentNode[]
+    # Index top-level schematic elements
+    for (idx, m) in pairs(element_metadata(sch.coordinate_system))
+        if (layer(m) == ly)
+            element_metadata(sch.coordinate_system)[idx] = SemanticMeta(m, index=nextindex)
+            nextindex = nextindex + 1
+        end
+    end
+    # Index component-level elements
     for node in nodes(sch.graph)
         startindex = nextindex
         nextindex = index_layer!(coordsys(sch[node]), component(node), ly, nextindex)
-        print("schematics.jl L1157 ly: $ly, startindex: $startindex, nextindex: $nextindex \n")
         for _ = startindex:(nextindex - 1)
             push!(index_components, node)
         end

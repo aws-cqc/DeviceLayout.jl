@@ -132,3 +132,88 @@ function add_bridges!(path::Path, bridge; margin=50μm)
         attach!(path, ref, pathlength(pathnode) / 2, i=i)
     end
 end
+
+"""
+    add_wave_ports!(floorplan::Schematic, nodes::Vector{ComponentNode}, sim_area::Rectangle,
+                    wave_port_width::T, wave_port_layer::SemanticMeta)
+
+Add wave port line segments where the path or route component `nodes` intersect `sim_area`. The line
+segments will have a length of `wave_port_width` and will be placed in the `wave_port_layer` layer. No
+wave port is placed for nodes that do not intersect `sim_area`.
+"""
+function add_wave_ports!(
+    floorplan::Schematic,
+    nodes::Vector{ComponentNode},
+    sim_area::Rectangle,
+    wave_port_width::T,
+    wave_port_layer::SemanticMeta
+) where {T}
+    for node in nodes
+        # Check component type
+        node_component = component(node)
+        if isa(node_component, Path)
+            path = deepcopy(node_component)
+        elseif isa(node_component, RouteComponent)
+            path = LayoutComponents.path(deepcopy(node_component))
+            path.metadata = node_component.meta
+        else
+            @warn "Cannot place a wave port for node $(node.id) since it is not a Path or Route."
+            continue
+        end
+        # Find intersection locations and directions
+        trans = transformation(floorplan, node)
+        intersections = path_intersections(path, trans, sim_area)
+        isempty(intersections) &&
+            @warn "Cannot place a wave port for node $(node.id) since it does not intersect the simulation area."
+        # Create a line segment for each wave port along the domain x or y boundaries
+        for (loc, dir) in intersections
+            if dir == :x
+                line = LineSegment(Point(loc.x - wave_port_width / 2, loc.y), Point(loc.x + wave_port_width / 2, loc.y))
+            else
+                line = LineSegment(Point(loc.x, loc.y - wave_port_width / 2), Point(loc.x, loc.y + wave_port_width / 2))
+            end
+            render!(floorplan.coordinate_system, only_simulated(line), wave_port_layer)
+        end
+    end
+end
+
+"""
+    path_intersections(path::Path, transformation, bounding_box::Rectangle)
+
+Find the locations where `path` intersects the `bounding_box`.
+"""
+function path_intersections(path::Path, trans, bounding_box::Rectangle)
+    # Create path for the bounding_box edges.
+    box_edges = Path(bounding_box.ll)
+    box_width, box_height = width(bounding_box), height(bounding_box)
+    edges_style = Paths.Trace(1nm)
+    straight!(box_edges, box_width, edges_style)
+    turn!(box_edges, "l", zero(box_width))
+    straight!(box_edges, box_height, edges_style)
+    turn!(box_edges, "l", zero(box_width))
+    straight!(box_edges, box_width, edges_style)
+    turn!(box_edges, "l", zero(box_width))
+    straight!(box_edges, box_height, edges_style)
+
+    # Ensure box_edges and path have the same type/units.
+    box_edges = convert(typeof(path), box_edges)
+
+    # Get intersections of the path with the bounding box path.
+    intersections =
+        unique(x -> x[3], sort(Intersect.prepared_intersections([trans(path), box_edges])))
+
+    # Determine intersection direction (x or y) and return intersections
+    out = []
+    for intersection in intersections
+        x, y = intersection[3][1], intersection[3][2]
+        if (isapprox(x, bounding_box.ll.x) || isapprox(x, bounding_box.ur.x))
+            dir = :y
+        elseif (isapprox(y, bounding_box.ll.y) || isapprox(y, bounding_box.ur.y))
+            dir = :x
+        else
+            continue
+        end
+        push!(out, (Point(x,y), dir))
+    end
+    return out
+end
