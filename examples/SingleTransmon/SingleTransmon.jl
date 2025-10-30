@@ -5,7 +5,7 @@ module SingleTransmon
 using FileIO, CSV, DataFrames, JSON, JSONSchema
 using DeviceLayout, DeviceLayout.SchematicDrivenLayout, DeviceLayout.PreferredUnits
 import .SchematicDrivenLayout.ExamplePDK
-import .SchematicDrivenLayout.ExamplePDK: LayerVocabulary, L1_TARGET, add_bridges!
+import .SchematicDrivenLayout.ExamplePDK: LayerVocabulary, L1_TARGET, add_bridges!, add_wave_ports!
 using .ExamplePDK.Transmons, .ExamplePDK.ReadoutResonators
 import .ExamplePDK.SimpleJunctions: ExampleSimpleJunction
 import DeviceLayout: uconvert
@@ -24,7 +24,7 @@ using PRIMA
         n_meander_turns=5,
         hanger_length=500μm,
         bend_radius=50μm,
-        waveports::Bool=false,
+        wave_ports::Bool=false,
         save_mesh::Bool=false,
         save_gds::Bool=false)
 
@@ -42,7 +42,7 @@ function single_transmon(;
     n_meander_turns=5,
     hanger_length=500μm,
     bend_radius=50μm,
-    waveports::Bool=false,
+    wave_ports::Bool=false,
     save_mesh::Bool=false,
     save_gds::Bool=false,
     mesh_order=2
@@ -103,7 +103,7 @@ function single_transmon(;
     straight!(p_readout, readout_length / 2, PATH_STYLE)
 
     # Readout lumped ports - squares on CPW trace, one at each end
-    if !waveports
+    if !wave_ports
         csport = CoordinateSystem(uniquename("port"), nm)
         render!(
             csport,
@@ -113,19 +113,6 @@ function single_transmon(;
         # Attach with port center `cpw_width` from the end (instead of `cpw_width/2`) to avoid corner effects
         attach!(p_readout, sref(csport), cpw_width, i=1) # @ start
         attach!(p_readout, sref(csport), readout_length / 2 - cpw_width, i=2) # @ end
-    else
-        # wave ports - line segments at each end of the CPW
-        # will be extruded according to the height/thickness specified in ExamplePDK
-        waveport_width = 0.6mm # or make it a multiple of cpw width?
-        print("ratio of waveport to CPW width: $(waveport_width/cpw_width)\n")
-        csport = CoordinateSystem(uniquename("waveport"), nm)
-        render!(
-            csport,
-            only_simulated(LineSegment(Point(0nm, -waveport_width / 2), Point(0nm, waveport_width / 2))),
-            LayerVocabulary.WAVE_PORT
-        )
-        attach!(p_readout, sref(csport), 0nm, i=1) # @ start
-        attach!(p_readout, sref(csport), readout_length / 2, i=2) # @ end
     end
 
     #### Build schematic graph
@@ -147,7 +134,7 @@ function single_transmon(;
 
     #### Prepare solid model
     # Specify the extent of the simulation domain.
-    substrate_x = waveports ? readout_length : 4mm # waveport domain boundary needs to touch the readout line
+    substrate_x = wave_ports ? readout_length : 4mm # wave port domain boundary needs to touch the readout line
     substrate_y = 3.7mm
 
     center_xyz = DeviceLayout.center(floorplan)
@@ -161,35 +148,14 @@ function single_transmon(;
     # Define rectangle that gets extruded to generate substrate volume
     render!(floorplan.coordinate_system, chip, LayerVocabulary.CHIP_AREA)
 
-    if waveports
-        # Define lines that will get extruded to generate wave port surfaces
-        # The lines NEED to be on outline of sim_area since wave ports
-        # NEED to be on the exterior boundary of the domain
-        x1 = center_xyz.x - substrate_x / 2
-        x2 = center_xyz.x + substrate_x / 2
-        # Get the path start and end coordinates to determine waveport y coordinates
-        ## or... do something more general like loop over all graph nodes, and if it's a
-        ## path or route, find where it intersects the chip/sim_area, and place waveport there
-        path_node = floorplan.graph.node_dict[:p_ro]
-        trans = transformation(floorplan, path_node)
-        y1 = trans(p0(path_node.component.nodes[1].seg)).y
-        y2 = trans(p1(path_node.component.nodes[end].seg)).y
-        waveport_width = 0.6mm
-        ymin1 = y1 - waveport_width / 2
-        ymax1 = y1 + waveport_width / 2
-        ymin2 = y2 - waveport_width / 2
-        ymax2 = y2 + waveport_width / 2
-        line1 = LineSegment(Point(x1, ymin1), Point(x1, ymax1))
-        line2 = LineSegment(Point(x2, ymin2), Point(x2, ymax2))
-        #render!(floorplan.coordinate_system, only_simulated(line1), LayerVocabulary.WAVE_PORT)#_1)
-        #render!(floorplan.coordinate_system, only_simulated(line2), LayerVocabulary.WAVE_PORT)#_2)
-    end
+    # Add wave ports
+    wave_ports && add_wave_ports!(floorplan, [floorplan.graph.node_dict[:p_ro]], sim_area, 0.6mm, LayerVocabulary.WAVE_PORT)
 
     check!(floorplan)
 
     # Need to pass generated physical group names so they can be retained
-    if waveports
-        tech = ExamplePDK.singlechip_solidmodel_target("wave_port_1_extrusion", "wave_port_2_extrusion", "lumped_element") ## would be nice to not need _extrusion??
+    if wave_ports
+        tech = ExamplePDK.singlechip_solidmodel_target("wave_port_1", "wave_port_2", "lumped_element")
     else
         tech = ExamplePDK.singlechip_solidmodel_target("port_1", "port_2", "lumped_element")
     end
@@ -219,11 +185,11 @@ function single_transmon(;
         flatten!(c)
         save(joinpath(@__DIR__, "single_transmon.gds"), c)
     end
-    return sm, floorplan # return floorplan just for debugging, remove later
+    return sm
 end
 
 """
-    configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0, waveports=false)
+    configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0, wave_ports=false)
 
 Given a `SolidModel`, assemble a dictionary defining a configuration file for use within
 Palace.
@@ -235,7 +201,7 @@ Palace.
     high-order spaces.
   - `amr = 0`: Maximum number of adaptive mesh refinement (AMR) iterations.
 """
-function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0, waveports=false)
+function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0, wave_ports=false)
     attributes = SolidModels.attributes(sm)
 
     config = Dict(
@@ -279,22 +245,22 @@ function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0,
                 "Attributes" => [attributes["exterior_boundary"]],
                 "Order" => 1
             ),
-            (waveports ?
+            (wave_ports ?
                 (
                     "WavePort" => [
                         Dict(
                             "Index" => 1,
-                            "Attributes" => [attributes["wave_port_1_extrusion"]]
+                            "Attributes" => [attributes["wave_port_1"]]
                         ),
                         Dict(
                             "Index" => 2,
-                            "Attributes" => [attributes["wave_port_2_extrusion"]]
+                            "Attributes" => [attributes["wave_port_2"]]
                         ),],
                 )
                 : ()
             )...,
             "LumpedPort" => [
-                (waveports ? () :
+                (wave_ports ? () :
                     (
                         Dict(
                             "Index" => 1,
