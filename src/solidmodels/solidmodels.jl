@@ -5,10 +5,18 @@ export gmsh
 
 # Explicit callback dictionary, to overcome closure limitation on apple silicon.
 import StaticArrays: SVector
-const CALLBACK_PARAMS = Dict{Symbol,
-    Union{Float64,
-          Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}
-        }}()
+# import NearestNeighbors: KDTree
+# import Distances: Euclidean
+# const CALLBACK_PARAMS = Dict{Symbol,
+#     Union{Float64, Dict{Tuple{Float64, Float64}, KDTree}}}()
+const CALLBACK_PARAMS = Dict{
+    Symbol,
+    Union{
+        Float64,
+        Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}
+        #   Dict{Tuple{Float64, Float64}, KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}}
+    }
+}()
 import DeviceLayout
 import DeviceLayout:
     AbstractCoordinateSystem,
@@ -178,8 +186,9 @@ struct PhysicalGroup <: AbstractPhysicalGroup
     grouptag::Int32
 end
 
-summary(pg::PhysicalGroup) =
-    "Physical Group $(pg.name) of dimension $(pg.dim) with $(length(dimtags(pg))) entities"
+summary(
+    pg::PhysicalGroup
+) = "Physical Group $(pg.name) of dimension $(pg.dim) with $(length(dimtags(pg))) entities"
 Base.show(io::IO, pg::PhysicalGroup) = print(io, summary(pg))
 
 """
