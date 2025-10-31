@@ -439,14 +439,6 @@ meshgrading(node::Paths.Node; kwargs...) = -1.0
 sizeandgrading(e::GeometryEntity; kwargs...) =
     (float(meshsize(e; kwargs...)), float(meshgrading(e; kwargs...)))
 
-# Compute sampling rate for mesh sizing
-samplingrate(ent::StyledEntity, local_size) =
-    !iszero(local_size) ? samplingrate(ent.ent, local_size) : 0
-samplingrate(ent::GeometryEntity, local_size) =
-    !iszero(local_size) ? ceil(Int, ustrip(STP_UNIT, perimeter(ent) / local_size)) : 0
-samplingrate(path::Paths.Node, local_size) =
-    !iszero(local_size) ? ceil(Int, ustrip(STP_UNIT, pathlength(path.seg) / local_size)) : 0
-
 """
     Base.@kwdef struct MeshingParameters
         mesh_scale::Float64 = 1.0
@@ -556,7 +548,6 @@ function render!(
 
     # Collections of dimtags corresponding to a given sizing field
     sizeandgrading_dimtags = Dict{Tuple{Float64, Float64}, Vector{Tuple{Int32, Int32}}}()
-    sampling_rate = 0
 
     # Create RTree for avoiding duplicating points
     points_tree = RTree{Float64, 3}(Int32)
@@ -567,16 +558,6 @@ function render!(
         idx = (element_metadata(flat) .== meta) # Get the corresponding elements
         els = to_primitives.(sm, elements(flat)[idx]; kwargs...)
         meshsizes = sizeandgrading.(elements(flat)[idx]; kwargs...)
-
-        sampling_rate = maximum(
-            append!(
-                samplingrate.(
-                    elements(flat)[idx],
-                    meshing_parameters.mesh_scale * getindex.(meshsizes, 1)
-                ),
-                sampling_rate
-            )
-        )
 
         # Add to model using kernel
         group_dimtags_unflattened = _add_to_current_solidmodel!(
@@ -643,10 +624,14 @@ function render!(
                 l = 1/mcurv * (2 * atan(δ, 1/mcurv)) # rθ
                 Ns = cld(l, h)
             else
-                Ns = 10 # Use a fixed 10 point sample.
-                # TODO: Approximate spline length with a linear interpolation. Sample xyz,
-                # then sum length of each segment. Should do reasonably for linearish splines.
-                # t = [bounds[1][1] + i * (bounds[2][1] - bounds[1][1]) / Ns for i in 0:Ns - 1]
+                Ns = 11
+                # Approximate the spline with 10 linear segments, and use the corresponding
+                # linear length to compute the sample rate.
+                t = [bounds[1][1] + i * (bounds[2][1] - bounds[1][1]) / Ns for i in 0:Ns]
+                xyz = gmsh.model.get_value(dim, tag, t) # [x1,y1,z1,x2,y2,z2,...]
+                XYZ = reinterpret(SVector{3, Float64}, xyz)
+                l = sum(norm.(XYZ[2:end] .- XYZ[1:end-1]))
+                Ns = cld(l, h)
             end
             t = [bounds[1][1] + i * (bounds[2][1] - bounds[1][1]) / Ns for i = 0:(Ns - 1)]
             xyz = gmsh.model.get_value(dim, tag, t) # [x1,y1,z1,x2,y2,z2,...]
