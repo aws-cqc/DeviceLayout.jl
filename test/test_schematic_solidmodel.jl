@@ -165,6 +165,28 @@
             SemanticMeta(:ignored)
         )
 
+        # Add a wave port on the xmin boundary of L1
+        bbox = bounds(sim_area)
+        x1, y1 = bbox.ll.x, (bbox.ll.y + bbox.ur.y) / 2
+        wave_port_width1 = (bbox.ur.y - bbox.ll.y) / 2
+        line = LineSegment(
+            Point(x1, y1 - wave_port_width1 / 2),
+            Point(x1, y1 + wave_port_width1 / 2)
+        )
+        render!(floorplan.coordinate_system, only_simulated(line), SemanticMeta(:wave_port))
+        # Add a wave port on the ymax boundary of L2
+        x2, y2 = (bbox.ll.x + bbox.ur.x) / 2, bbox.ur.y
+        wave_port_width2 = (bbox.ur.x - bbox.ll.x) / 2
+        line = LineSegment(
+            Point(x2 - wave_port_width2 / 2, y2),
+            Point(x2 + wave_port_width2 / 2, y2)
+        )
+        render!(
+            floorplan.coordinate_system,
+            only_simulated(line),
+            facing(SemanticMeta(:wave_port))
+        )
+
         check!(floorplan)
         build!(floorplan)
 
@@ -174,11 +196,16 @@
                 base_negative=GDSMeta(),
                 simulated_area=GDSMeta(2),
                 chip_outline=GDSMeta(3),
-                writeable_area=GDSMeta(4)
+                writeable_area=GDSMeta(4),
+                wave_port=GDSMeta(5)
             ),
             (;
-                height=(; simulated_area=-1mm),
-                thickness=(; simulated_area=2mm, chip_outline=[250μm, 250μm]),
+                height=(; simulated_area=-1mm, wave_port=[-375μm, -275μm]),
+                thickness=(;
+                    simulated_area=2mm,
+                    chip_outline=[250μm, 250μm],
+                    wave_port=[1000μm, 800μm]
+                ),
                 chip_thicknesses=[250μm, 250μm],
                 flipchip_gaps=[250μm]
             )
@@ -187,8 +214,9 @@
             tech;
             bounding_layers=[:simulated_area],
             substrate_layers=[:chip_outline],
-            levelwise_layers=[:chip_outline],
-            indexed_layers=[:port],
+            levelwise_layers=[:chip_outline, :wave_port],
+            indexed_layers=[:port, :wave_port],
+            wave_port_layers=[:wave_port],
             ignored_layers=[:ignored],
             postrender_ops=[
                 (
@@ -213,7 +241,9 @@
                 ("base_metal", 2),
                 ("circle", 2),
                 ("norender", 2),
-                ("ignored", 2)
+                ("ignored", 2),
+                ("wave_port_L1_1", 2),
+                ("wave_port_L2_2", 2)
             ],
             solidmodel=true,
             simulation=true
@@ -227,6 +257,8 @@
         @test SolidModels.hasgroup(sm, "substrates", 3)
         @test SolidModels.hasgroup(sm, "vacuum", 3)
         @test SolidModels.hasgroup(sm, "base_metal", 2)
+        @test SolidModels.hasgroup(sm, "wave_port_L1_1", 2)
+        @test SolidModels.hasgroup(sm, "wave_port_L2_2", 2)
         @test !SolidModels.hasgroup(sm, "chip_outline_L1_extrusion", 3)
         @test !SolidModels.hasgroup(sm, "chip_outline_L2_extrusion", 3)
         @test !SolidModels.hasgroup(sm, "simulated_area_extrusion", 3)
@@ -243,10 +275,50 @@
         @test sm["substrates", 3].grouptag == 1
         @test sm["vacuum", 3].grouptag == 2
         @test sm["base_metal", 2].grouptag == 3
+        @test sm["wave_port_L1_1", 2].grouptag == 4
+        @test sm["wave_port_L2_2", 2].grouptag == 5
         @test length(SolidModels.dimgroupdict(sm, 3)) == 2
-        @test length(SolidModels.dimgroupdict(sm, 2)) == 1
+        @test length(SolidModels.dimgroupdict(sm, 2)) == 3
         @test length(SolidModels.dimgroupdict(sm, 1)) == 0
         @test length(SolidModels.dimgroupdict(sm, 0)) == 0
+
+        # Verify the wave ports have the expected bounds
+        bbox_port1 = SolidModels.bounds3d(sm["wave_port_L1_1", 2])
+        bbox_port2 = SolidModels.bounds3d(sm["wave_port_L2_2", 2])
+        @test all(
+            isapprox.(
+                bbox_port1,
+                ustrip.(
+                    SolidModels.STP_UNIT,
+                    [
+                        x1,
+                        y1 - wave_port_width1 / 2,
+                        -375μm,
+                        x1,
+                        y1 + wave_port_width1 / 2,
+                        -375μm + 1000μm
+                    ]
+                ),
+                atol=1e-6
+            )
+        )
+        @test all(
+            isapprox.(
+                bbox_port2,
+                ustrip.(
+                    SolidModels.STP_UNIT,
+                    [
+                        x2 - wave_port_width2 / 2,
+                        y2,
+                        -275μm,
+                        x2 + wave_port_width2 / 2,
+                        y2,
+                        -275μm + 800μm
+                    ]
+                ),
+                atol=1e-6
+            )
+        )
 
         if mesh
             # Reduce the noise in the REPL

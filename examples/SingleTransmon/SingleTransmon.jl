@@ -185,7 +185,7 @@ function single_transmon(;
         flatten!(c)
         save(joinpath(@__DIR__, "single_transmon.gds"), c)
     end
-    return sm
+    return sm, floorplan # REMOVE THIS LATER!!!!!
 end
 
 """
