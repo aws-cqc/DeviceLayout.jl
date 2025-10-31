@@ -5,18 +5,17 @@ export gmsh
 
 # Explicit callback dictionary, to overcome closure limitation on apple silicon.
 import StaticArrays: SVector
-# import NearestNeighbors: KDTree
-# import Distances: Euclidean
-# const CALLBACK_PARAMS = Dict{Symbol,
-#     Union{Float64, Dict{Tuple{Float64, Float64}, KDTree}}}()
+import NearestNeighbors: KDTree
+import Distances: Euclidean
 const CALLBACK_PARAMS = Dict{
     Symbol,
     Union{
-        Float64,
-        Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}
-        #   Dict{Tuple{Float64, Float64}, KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}}
+        Float64, Int64,
+        Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}},
+        Dict{Tuple{Float64, Float64}, KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}}
     }
 }()
+
 import DeviceLayout
 import DeviceLayout:
     AbstractCoordinateSystem,
