@@ -19,6 +19,7 @@ const MESHSIZE_PARAMS = Dict{
         }
     }
 }()
+export MESHSIZE_PARAMS
 
 import DeviceLayout
 import DeviceLayout:
