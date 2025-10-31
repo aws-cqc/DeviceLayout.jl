@@ -2,7 +2,7 @@
 import Clipper: children, contour, ishole, PolyNode
 import Unitful: Length
 import StaticArrays: SVector
-# import NearestNeighbors: nn
+import NearestNeighbors: nn
 
 """
     to_primitives(::SolidModel, ent::GeometryEntity; kwargs...)
@@ -613,11 +613,7 @@ function render!(
     for ((h, α), dts) in sizeandgrading_dimtags
         iszero(h) && continue
         bdts = gmsh.model.get_boundary(dts, true, false, false) # line segments
-        # TODO: Calculate an actual sample rate per line, just use 3 points for now.
-        # For straight lines (i.e. if curvature is inf), can measure and directly sample.
-        # For a circular arc, can use the radius of curvature to compute sampling rate on
-        # radius.
-        # For a spline, it's a shit show.
+
         for (dim, tag) in bdts
             @assert dim == 1
             bounds = gmsh.model.get_parametrization_bounds(dim, tag)
@@ -626,12 +622,14 @@ function render!(
                 tag,
                 [bounds[1][1], (bounds[1][1] + bounds[2][1])/2, bounds[2][1]]
             )
-            if maximum(curv) <= 1e-14 # Straight
+            # Calculate a sampling rate on a per segment basis.
+            if maximum(curv) <= 1e-14
+                # Straight.
                 xyz = gmsh.model.get_value(dim, tag, [bounds[1][1], bounds[2][1]])
                 l = sqrt((xyz[1] - xyz[4])^2 + (xyz[2] - xyz[5])^2 + (xyz[3] - xyz[6])^2)
                 Ns = l ÷ h
             elseif abs(minimum(curv) - maximum(curv)) < 1e-9  # a circular arc
-                # For a circular arc, use the midpoint to construct the swept angle
+                # For a circular arc, use the midpoint to construct the swept angle.
                 xyz = gmsh.model.get_value(
                     dim,
                     tag,
@@ -641,7 +639,7 @@ function render!(
                     sqrt((xyz[1] - xyz[4])^2 + (xyz[2] - xyz[5])^2 + (xyz[3] - xyz[6])^2) /
                     2
                 mcurv = sum(curv)/length(curv)
-                l = (2 * atan(δ, 1/mcurv)) * 1/mcurv # θ * r
+                l = 1/mcurv * (2 * atan(δ, 1/mcurv)) # rθ
                 Ns = l ÷ h
             else
                 Ns = 10 # Use a fixed 10 point sample.
@@ -666,11 +664,12 @@ function render!(
     # For each collection of (h, α), can assemble a KDTree to find closest. This will be the
     # smallest mesh size over that collection of vertices, as size is proportional to
     # distance for this subset. Thereby the comparison over lengths need only be over the
-    # number of different (h, α) combinations.
-    # SolidModels.CALLBACK_PARAMS[:ct] = Dict{Tuple{Float64, Float64}, KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}}()
-    # for k in keys(SolidModels.CALLBACK_PARAMS[:cp])
-    #     SolidModels.CALLBACK_PARAMS[:ct][k] = KDTree(deepcopy(SolidModels.CALLBACK_PARAMS[:cp][k]))
-    # end
+    # number of different (h, α) combinations. This is most impactful for large graphs with
+    # many duplicates of a given component, where there will be many points per (h, α).
+    SolidModels.CALLBACK_PARAMS[:ct] = Dict{Tuple{Float64, Float64}, KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}}()
+    for k in keys(SolidModels.CALLBACK_PARAMS[:cp])
+        SolidModels.CALLBACK_PARAMS[:ct][k] = KDTree(deepcopy(SolidModels.CALLBACK_PARAMS[:cp][k]))
+    end
 
     # Extrusions, Booleans, etc
     _synchronize!(sm)
@@ -679,13 +678,11 @@ function render!(
     _synchronize!(sm)
     _fragment_and_map!(sm)
 
-    SolidModels.gmsh.option.setNumber("General.NumThreads", 1)
+    SolidModels.gmsh.option.setNumber("General.NumThreads", 0)
     # Call back function for meshing against the vertices found previously.
     # Need to use module global CALLBACK_PARAMS to circumvent llvm trampoline issue
     # preventing usage of a closure.
-    # SolidModels.CALLBACK_PARAMS[:cp] = mesh_control_points
     SolidModels.CALLBACK_PARAMS[:s] = meshing_parameters.mesh_scale
-    # @show keys(SolidModels.CALLBACK_PARAMS[:ct])
 
     # Store the required variables in the module-level dictionary
     function meshsizecallback(
@@ -696,27 +693,27 @@ function render!(
         z::Cdouble,
         lc::Cdouble
     )
-        # l1 = Inf64
-
-        # for ((h, α), tree) in SolidModels.CALLBACK_PARAMS[:ct]::Dict{Tuple{Float64, Float64}, KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}}
-        #     nn(tree, [x,y,z])
-        #     # _, d::Float64 = nn(tree, SVector{3}(x,y,z))
-        #     # l1 = min(l1, h * max(SolidModels.CALLBACK_PARAMS[:s]::Float64, (d/h)^α))::Float64
-        # end
-        l2 = Inf64
-        # The type tag here is extremely important to remove type instability.
-        for ((h, α), vs) in SolidModels.CALLBACK_PARAMS[:cp]::Dict{
-            Tuple{Float64, Float64},
-            Vector{SVector{3, Float64}}
-        }
-
-            for v in vs
-                d = sqrt((x - v[1])^2 + (y - v[2])^2 + (z - v[3])^2)
-                l2 = min(l2, h * max(SolidModels.CALLBACK_PARAMS[:s]::Float64, (d/h)^α))
+        if true
+            l1 = Inf64
+            # Explicit type tag here to remove hypothetical type instability.
+            for ((h, α), tree) in SolidModels.CALLBACK_PARAMS[:ct]::Dict{Tuple{Float64, Float64}, KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}}
+                _, d::Float64 = nn(tree, SVector{3}(x,y,z))
+                l1 = min(l1, h * max(SolidModels.CALLBACK_PARAMS[:s]::Float64, (d/h)^α))::Float64
             end
+            return l1
+        else # Alternate implementation with direct loop, left for debugging.
+            l2 = Inf64
+            # Explicit type tag here to remove hypothetical type instability.
+            for ((h, α), vs) in SolidModels.CALLBACK_PARAMS[:cp]::Dict{Tuple{Float64, Float64},Vector{SVector{3, Float64}}}
+                for v in vs
+                    d = sqrt((x - v[1])^2 + (y - v[2])^2 + (z - v[3])^2)
+                    l2 = min(l2, h * max(SolidModels.CALLBACK_PARAMS[:s]::Float64, (d/h)^α))
+                end
+            end
+            return l2
         end
-        return l2
     end
+
     gmsh.model.mesh.setSizeCallback(meshsizecallback)
 
     gmsh.option.set_number(
@@ -737,7 +734,7 @@ function render!(
 
     # With the setting below, Gmsh will look for OMP_NUM_THREADS environment variables;
     # this needs to be >1 for HXT algorithm to use parallelism.
-    gmsh.option.set_number("General.NumThreads", 0)
+    gmsh.option.set_number("General.NumThreads", 1)
 
     gmsh.option.set_number("Mesh.ElementOrder", meshing_parameters.mesh_order)
     if meshing_parameters.mesh_order > 1
