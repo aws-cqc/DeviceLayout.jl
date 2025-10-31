@@ -165,12 +165,24 @@ function add_wave_ports!(
         intersections = path_intersections(path, trans, sim_area)
         isempty(intersections) &&
             @warn "Cannot place a wave port for node $(node.id) since it does not intersect the simulation area."
+
         # Create a line segment for each wave port along the domain x or y boundaries
-        for (loc, dir) in intersections
+        for (loc, dir, node_idx, t) in intersections
+            # Warn if the intersection is in a curved segment
+            if path.nodes[node_idx].seg isa Paths.BSpline ||
+               !(Paths.curvature(path.nodes[node_idx].seg, t) ≈ Point(0 / nm, 0 / nm))
+                @warn "Placing a wave port in curved segment of node $(node.id) can lead to erroneous results."
+            end
             if dir == :x
-                line = LineSegment(Point(loc.x - wave_port_width / 2, loc.y), Point(loc.x + wave_port_width / 2, loc.y))
+                line = LineSegment(
+                    Point(loc.x - wave_port_width / 2, loc.y),
+                    Point(loc.x + wave_port_width / 2, loc.y)
+                )
             else
-                line = LineSegment(Point(loc.x, loc.y - wave_port_width / 2), Point(loc.x, loc.y + wave_port_width / 2))
+                line = LineSegment(
+                    Point(loc.x, loc.y - wave_port_width / 2),
+                    Point(loc.x, loc.y + wave_port_width / 2)
+                )
             end
             render!(floorplan.coordinate_system, only_simulated(line), wave_port_layer)
         end
@@ -213,7 +225,7 @@ function path_intersections(path::Path, trans, bounding_box::Rectangle)
         else
             continue
         end
-        push!(out, (Point(x,y), dir))
+        push!(out, (Point(x, y), dir, intersection[1][2], intersection[1][3]))
     end
     return out
 end

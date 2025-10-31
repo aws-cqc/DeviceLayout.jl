@@ -40,6 +40,7 @@ The `rendering_options` include any keyword arguments to be passed down to the l
   - `indexed_layers`: A list of layer `Symbol`s to be turned into separate `PhysicalGroup`s with `"_\$i"` appended for each index `i`. These layers will be automatically indexed if not already present in a `Schematic`'s `index_dict`.
   - `substrate_layers`: A list of layer `Symbol`s for layers that are extruded by their
     `technology` into the substrate, rather than away from it.
+  - `wave_port_layers`: A list of layer `Symbol`s for layers that are 1D line segments extruded to define wave port boundary conditions.
   - `ignored_layers`: A list of layer `Symbol`s for layers that should be ignored during rendering (mapped to `nothing`). This provides an alternative to using `NORENDER_META` for layers that should be conditionally ignored in solid model rendering but may be needed for other rendering targets.
 
 The `postrenderer` is a list of geometry kernel commands that create new named groups of
@@ -170,6 +171,7 @@ function layer_extrusions_dz(target, sch)
             end
         else
             for (lev, t_level) in pairs(t)
+                sgn = isodd(lev) ? sgn : -sgn
                 if iswaveportlayer(target, ly)
                     for m in element_metadata(sch.coordinate_system)
                         if layer(m) == ly && level(m) == lev
@@ -178,7 +180,6 @@ function layer_extrusions_dz(target, sch)
                         end
                     end
                 else
-                    sgn = isodd(lev) ? sgn : -sgn
                     t_dict[string(ly) * "_L$lev"] = (sgn * t_level, dim)
                 end
             end
