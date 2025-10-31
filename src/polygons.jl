@@ -1553,54 +1553,6 @@ function Base.getindex(v::LineSegmentView, i)
     return LineSegment(v.v[i], v.v[ifelse(i == length(v), 1, i + 1)])
 end
 
-function DeviceLayout.magnify(l::LineSegment, mag)
-    return LineSegment(mag .* l.p0, mag .* l.p1)
-end
-function DeviceLayout.rotate(l::LineSegment, rot)
-    Rot = Rotation(rot)
-    return LineSegment(Rot(l.p0), Rot(l.p1))
-end
-function DeviceLayout.reflect_across_xaxis(l::LineSegment)
-    Refl = Reflection(0)
-    return LineSegment(Refl(l.p0), Refl(l.p1))
-end
-
-function DeviceLayout.translate(l::LineSegment, tra::Point)
-    return LineSegment(Translation(tra)(l.p0), Translation(tra)(l.p1))
-end
-
-function DeviceLayout.reflect_across_line(l::LineSegment, dir; through_pt=nothing)
-    Refl = Reflection(dir; through_pt=through_pt)
-    return LineSegment(Refl(l.p0), Refl(l.p1))
-end
-
-function DeviceLayout.reflect_across_line(l::LineSegment, p0, p1)
-    Refl = Reflection(p0, p1)
-    return LineSegment(Refl(l.p0), Refl(l.p1))
-end
-
-function DeviceLayout.transform(l::LineSegment, f::Transformation)
-    preserves_angles(f) && return transform(l, ScaledIsometry(f))
-    return f(convert(Polygon, l))
-end
-
-function DeviceLayout.transform(l::LineSegment, f::ScaledIsometry)
-    rotd = uconvert(°, rotation(f))
-    if isapprox_cardinal(rotd)
-        return translate(
-            magnify(
-                rotate90(
-                    xrefl(f) ? reflect_across_xaxis(l) : l,
-                    Int(round(uconvert(Unitful.NoUnits, rotd / 90°)))
-                ),
-                mag(f)
-            ),
-            origin(f)
-        )
-    end
-    return f(convert(Polygon, l))
-end
-
 """
     Ray{T} <: D1{T}
 

@@ -7,10 +7,11 @@ The format of this changelog is based on
 ## Upcoming
 
   - Added `xor2d` for polygon XOR
-  - Improved support of wave port boundary conditions in SolidModel
+  - Improved support for wave port boundaries in a `SolidModel`
 
       + `SolidModelTargets` now take `wave_port_layers`, a list of layer symbols used to define wave port boundary conditions
       + Added support for `LineSegment` in SolidModel
+      + Added `add_wave_ports!` to automatically place wave port boundaries where specified paths/routes intersect the simulation area
       + Added option to use wave ports instead of lumped ports in the single transmon example
 
 ## 1.6.0 (2025-10-16)
