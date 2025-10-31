@@ -7,12 +7,16 @@ export gmsh
 import StaticArrays: SVector
 import NearestNeighbors: KDTree
 import Distances: Euclidean
-const CALLBACK_PARAMS = Dict{
+const MESHSIZE_PARAMS = Dict{
     Symbol,
     Union{
-        Float64, Int64,
+        Float64,
+        Int64,
         Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}},
-        Dict{Tuple{Float64, Float64}, KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}}
+        Dict{
+            Tuple{Float64, Float64},
+            KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
+        }
     }
 }()
 
