@@ -166,7 +166,7 @@ const SINGLECHIP_SOLIDMODEL_TARGET = SolidModelTarget(
     bounding_layers=[:simulated_area], # SIMULATED_AREA defines the simulation bounds
     substrate_layers=[:chip_area], # CHIP_AREA will be extruded downward
     indexed_layers=[:port, :lumped_element, :integration, :wave_port], # Automatically index these layers
-    wave_port_layers=[:wave_port], # WAVE_PORT will be extruded upward
+    wave_port_layers=[:wave_port], # WAVE_PORT are 1D line segments in x-y to be extruded in z
     postrender_ops=[ # Manual definition of operations to run after 2D rendering
         (   # Get metal ground plane by subtracting negative from writeable area
             "metal", # Output group name
@@ -256,7 +256,7 @@ const FLIPCHIP_SOLIDMODEL_TARGET = SolidModelTarget(
         :chip_area, # and for chip and bridge extrusion in opposite directions by layer
         :bridge_base,
         :bridge,
-        :wave_port # extruded upward for both layers
+        :wave_port
     ],
     indexed_layers=[:port, :lumped_element, :integration, :wave_port],
     wave_port_layers=[:wave_port],
