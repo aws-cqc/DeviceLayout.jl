@@ -608,7 +608,7 @@ function render!(
     # Synchronize the entities to the model, so can find subentities.
     _synchronize!(sm)
 
-    SolidModels.CALLBACK_PARAMS[:cp] =
+    SolidModels.MESHSIZE_PARAMS[:cp] =
         Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}()
     for ((h, α), dts) in sizeandgrading_dimtags
         iszero(h) && continue
@@ -627,9 +627,10 @@ function render!(
                 # Straight.
                 xyz = gmsh.model.get_value(dim, tag, [bounds[1][1], bounds[2][1]])
                 l = sqrt((xyz[1] - xyz[4])^2 + (xyz[2] - xyz[5])^2 + (xyz[3] - xyz[6])^2)
-                Ns = l ÷ h
+                Ns = cld(l, h)
             elseif abs(minimum(curv) - maximum(curv)) < 1e-9  # a circular arc
-                # For a circular arc, use the midpoint to construct the swept angle.
+                # For a circular arc, use the midpoint to construct the swept angle, and
+                # from that the arc length and number of required samples.
                 xyz = gmsh.model.get_value(
                     dim,
                     tag,
@@ -638,9 +639,9 @@ function render!(
                 δ =
                     sqrt((xyz[1] - xyz[4])^2 + (xyz[2] - xyz[5])^2 + (xyz[3] - xyz[6])^2) /
                     2
-                mcurv = sum(curv)/length(curv)
+                mcurv = sum(curv) / length(curv)
                 l = 1/mcurv * (2 * atan(δ, 1/mcurv)) # rθ
-                Ns = l ÷ h
+                Ns = cld(l, h)
             else
                 Ns = 10 # Use a fixed 10 point sample.
                 # TODO: Approximate spline length with a linear interpolation. Sample xyz,
@@ -652,7 +653,7 @@ function render!(
 
             append!(
                 get!(
-                    SolidModels.CALLBACK_PARAMS[:cp],
+                    SolidModels.MESHSIZE_PARAMS[:cp],
                     (h, α < 0 ? meshing_parameters.α_default : α),
                     Vector{SVector{3, Float64}}()
                 ),
@@ -666,9 +667,12 @@ function render!(
     # distance for this subset. Thereby the comparison over lengths need only be over the
     # number of different (h, α) combinations. This is most impactful for large graphs with
     # many duplicates of a given component, where there will be many points per (h, α).
-    SolidModels.CALLBACK_PARAMS[:ct] = Dict{Tuple{Float64, Float64}, KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}}()
-    for k in keys(SolidModels.CALLBACK_PARAMS[:cp])
-        SolidModels.CALLBACK_PARAMS[:ct][k] = KDTree(deepcopy(SolidModels.CALLBACK_PARAMS[:cp][k]))
+    SolidModels.MESHSIZE_PARAMS[:ct] = Dict{
+        Tuple{Float64, Float64},
+        KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
+    }()
+    for k in keys(SolidModels.MESHSIZE_PARAMS[:cp])
+        SolidModels.MESHSIZE_PARAMS[:ct][k] = KDTree(SolidModels.MESHSIZE_PARAMS[:cp][k])
     end
 
     # Extrusions, Booleans, etc
@@ -679,42 +683,10 @@ function render!(
     _fragment_and_map!(sm)
 
     SolidModels.gmsh.option.setNumber("General.NumThreads", 0)
-    # Call back function for meshing against the vertices found previously.
-    # Need to use module global CALLBACK_PARAMS to circumvent llvm trampoline issue
-    # preventing usage of a closure.
-    SolidModels.CALLBACK_PARAMS[:s] = meshing_parameters.mesh_scale
+    SolidModels.MESHSIZE_PARAMS[:s] = meshing_parameters.mesh_scale
 
-    # Store the required variables in the module-level dictionary
-    function meshsizecallback(
-        dim::Cint,
-        tag::Cint,
-        x::Cdouble,
-        y::Cdouble,
-        z::Cdouble,
-        lc::Cdouble
-    )
-        if true
-            l1 = Inf64
-            # Explicit type tag here to remove hypothetical type instability.
-            for ((h, α), tree) in SolidModels.CALLBACK_PARAMS[:ct]::Dict{Tuple{Float64, Float64}, KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}}
-                _, d::Float64 = nn(tree, SVector{3}(x,y,z))
-                l1 = min(l1, h * max(SolidModels.CALLBACK_PARAMS[:s]::Float64, (d/h)^α))::Float64
-            end
-            return l1
-        else # Alternate implementation with direct loop, left for debugging.
-            l2 = Inf64
-            # Explicit type tag here to remove hypothetical type instability.
-            for ((h, α), vs) in SolidModels.CALLBACK_PARAMS[:cp]::Dict{Tuple{Float64, Float64},Vector{SVector{3, Float64}}}
-                for v in vs
-                    d = sqrt((x - v[1])^2 + (y - v[2])^2 + (z - v[3])^2)
-                    l2 = min(l2, h * max(SolidModels.CALLBACK_PARAMS[:s]::Float64, (d/h)^α))
-                end
-            end
-            return l2
-        end
-    end
-
-    gmsh.model.mesh.setSizeCallback(meshsizecallback)
+    # Pass in call back function for meshing against the vertices found previously.
+    gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
 
     gmsh.option.set_number(
         "Mesh.MeshSizeFromPoints",
@@ -763,6 +735,51 @@ function render!(
     end
 
     return _synchronize!(sm)
+end
+
+# Callback function that access module global parameters. This is passed into gmsh as a
+# callback function, but presumes that the global MESHSIZE_PARAMS have been set
+# appropriately, otherwise will error. Usage of a global is necessary to avoid an LLVM
+# limitation on apple silicon, where closures are not supported.
+function gmsh_meshsize(
+    dim::Cint,
+    tag::Cint,
+    x::Cdouble,
+    y::Cdouble,
+    z::Cdouble,
+    lc::Cdouble
+)
+    # If true, use KDTree for evaluating the map, if false use a direct loop over control
+    # points. KDTree appears to use more memory, but can be significantly faster, especially
+    # for highly repetitive geometries.
+    if true
+        l1 = Inf64
+        # Explicit type tag here to remove hypothetical type instability.
+        for ((h, α), tree) in SolidModels.MESHSIZE_PARAMS[:ct]::Dict{
+            Tuple{Float64, Float64},
+            KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
+        }
+
+            _, d::Float64 = nn(tree, SVector{3}(x, y, z))
+            l1 =
+                min(l1, h * max(SolidModels.MESHSIZE_PARAMS[:s]::Float64, (d/h)^α))::Float64
+        end
+        return l1
+    else
+        l2 = Inf64
+        # Explicit type tag here to remove hypothetical type instability.
+        for ((h, α), vs) in SolidModels.MESHSIZE_PARAMS[:cp]::Dict{
+            Tuple{Float64, Float64},
+            Vector{SVector{3, Float64}}
+        }
+
+            for v in vs
+                d = sqrt((x - v[1])^2 + (y - v[2])^2 + (z - v[3])^2)
+                l2 = min(l2, h * max(SolidModels.MESHSIZE_PARAMS[:s]::Float64, (d/h)^α))
+            end
+        end
+        return l2
+    end
 end
 
 # Utility intended for very last step in rendering, to get rid of overlapping geometry
