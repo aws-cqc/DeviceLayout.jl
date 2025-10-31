@@ -1138,16 +1138,16 @@
         x_start, x_end = 150μm, 475μm
         y_start, y_end = 100μm, 500μm
         pa1 = Path(x_start, 0μm; metadata=BASE_NEGATIVE)
-        straight!(pa1, x_end-x_start, Paths.SimpleCPW(10μm, 6μm))
+        straight!(pa1, x_end - x_start, Paths.SimpleCPW(10μm, 6μm))
         add_node!(g, pa1)
-        pa2 = Path(0μm, y_start; α0 = π/2, metadata=BASE_NEGATIVE)
-        straight!(pa2, y_end-y_start, Paths.SimpleCPW(10μm, 6μm))
+        pa2 = Path(0μm, y_start; α0=π / 2, metadata=BASE_NEGATIVE)
+        straight!(pa2, y_end - y_start, Paths.SimpleCPW(10μm, 6μm))
         add_node!(g, pa2)
-        pa3 = Path(-x_start, 0μm; α0 = π, metadata=BASE_NEGATIVE)
-        straight!(pa3, x_end-x_start, Paths.SimpleCPW(10μm, 6μm))
+        pa3 = Path(-x_start, 0μm; α0=π, metadata=BASE_NEGATIVE)
+        straight!(pa3, x_end - x_start, Paths.SimpleCPW(10μm, 6μm))
         add_node!(g, pa3)
-        pa4 = Path(0μm, -y_start; α0 = -π/2, metadata=BASE_NEGATIVE)
-        straight!(pa4, y_end-y_start, Paths.SimpleCPW(10μm, 6μm))
+        pa4 = Path(0μm, -y_start; α0=-π / 2, metadata=BASE_NEGATIVE)
+        straight!(pa4, y_end - y_start, Paths.SimpleCPW(10μm, 6μm))
         add_node!(g, pa4)
 
         floorplan = plan(g)
@@ -1157,10 +1157,7 @@
         chip_area = union2d(halo(bounds(floorplan), halo_dist))
         sim_area = chip_area
 
-        render!(
-            floorplan.coordinate_system,
-            chip_area,
-            SemanticMeta(:chip_outline))
+        render!(floorplan.coordinate_system, chip_area, SemanticMeta(:chip_outline))
         render!(
             floorplan.coordinate_system,
             chip_area,
@@ -1179,14 +1176,18 @@
 
         # Add wave ports automatically where paths intersect sim area
         wave_port_width = 60μm
-        add_wave_ports!(floorplan,
-                        [floorplan.graph.nodes[1],
-                         floorplan.graph.nodes[2],
-                         floorplan.graph.nodes[3],
-                         floorplan.graph.nodes[4]],
-                        bounds(sim_area),
-                        wave_port_width,
-                        SemanticMeta(:wave_port))
+        add_wave_ports!(
+            floorplan,
+            [
+                floorplan.graph.nodes[1],
+                floorplan.graph.nodes[2],
+                floorplan.graph.nodes[3],
+                floorplan.graph.nodes[4]
+            ],
+            bounds(sim_area),
+            wave_port_width,
+            SemanticMeta(:wave_port)
+        )
 
         # Add a wave port manually on the xmin boundary of L2
         bbox = bounds(sim_area)
@@ -1272,7 +1273,7 @@
                 ("wave_port_L1_3", 2),
                 ("wave_port_L1_4", 2),
                 ("wave_port_L2_5", 2),
-                ("wave_port_L2_6", 2),
+                ("wave_port_L2_6", 2)
             ],
             solidmodel=true,
             simulation=true
@@ -1323,11 +1324,12 @@
                     SolidModels.STP_UNIT,
                     [
                         x_end + halo_dist,
-                        - wave_port_width / 2,
+                        -wave_port_width / 2,
                         tech.parameters.height.wave_port[1],
                         x_end + halo_dist,
-                        + wave_port_width / 2,
-                        tech.parameters.height.wave_port[1] + tech.parameters.thickness.wave_port[1]
+                        +wave_port_width / 2,
+                        tech.parameters.height.wave_port[1] +
+                        tech.parameters.thickness.wave_port[1]
                     ]
                 ),
                 atol=1e-6
@@ -1339,12 +1341,13 @@
                 ustrip.(
                     SolidModels.STP_UNIT,
                     [
-                        - wave_port_width / 2,
+                        -wave_port_width / 2,
                         y_end + halo_dist,
                         tech.parameters.height.wave_port[1],
                         wave_port_width / 2,
                         y_end + halo_dist,
-                        tech.parameters.height.wave_port[1] + tech.parameters.thickness.wave_port[1]
+                        tech.parameters.height.wave_port[1] +
+                        tech.parameters.thickness.wave_port[1]
                     ]
                 ),
                 atol=1e-6
@@ -1356,12 +1359,13 @@
                 ustrip.(
                     SolidModels.STP_UNIT,
                     [
-                        - (x_end + halo_dist),
-                        - wave_port_width / 2,
+                        -(x_end + halo_dist),
+                        -wave_port_width / 2,
                         tech.parameters.height.wave_port[1],
-                        - (x_end + halo_dist),
-                        + wave_port_width / 2,
-                        tech.parameters.height.wave_port[1] + tech.parameters.thickness.wave_port[1]
+                        -(x_end + halo_dist),
+                        +wave_port_width / 2,
+                        tech.parameters.height.wave_port[1] +
+                        tech.parameters.thickness.wave_port[1]
                     ]
                 ),
                 atol=1e-6
@@ -1373,12 +1377,13 @@
                 ustrip.(
                     SolidModels.STP_UNIT,
                     [
-                        - wave_port_width / 2,
-                        - (y_end + halo_dist),
+                        -wave_port_width / 2,
+                        -(y_end + halo_dist),
                         tech.parameters.height.wave_port[1],
                         wave_port_width / 2,
-                        - (y_end + halo_dist),
-                        tech.parameters.height.wave_port[1] + tech.parameters.thickness.wave_port[1]
+                        -(y_end + halo_dist),
+                        tech.parameters.height.wave_port[1] +
+                        tech.parameters.thickness.wave_port[1]
                     ]
                 ),
                 atol=1e-6
@@ -1392,10 +1397,13 @@
                     [
                         x1,
                         y1 - wave_port_width1 / 2,
-                        tech.parameters.flipchip_gaps[1] - tech.parameters.height.wave_port[2] - tech.parameters.thickness.wave_port[2],
+                        tech.parameters.flipchip_gaps[1] -
+                        tech.parameters.height.wave_port[2] -
+                        tech.parameters.thickness.wave_port[2],
                         x1,
                         y1 + wave_port_width1 / 2,
-                        tech.parameters.flipchip_gaps[1] - tech.parameters.height.wave_port[2]
+                        tech.parameters.flipchip_gaps[1] -
+                        tech.parameters.height.wave_port[2]
                     ]
                 ),
                 atol=1e-6
@@ -1409,16 +1417,17 @@
                     [
                         x2 - wave_port_width2 / 2,
                         y2,
-                        tech.parameters.flipchip_gaps[1] - tech.parameters.height.wave_port[2] - tech.parameters.thickness.wave_port[2],
+                        tech.parameters.flipchip_gaps[1] -
+                        tech.parameters.height.wave_port[2] -
+                        tech.parameters.thickness.wave_port[2],
                         x2 + wave_port_width2 / 2,
                         y2,
-                        tech.parameters.flipchip_gaps[1] - tech.parameters.height.wave_port[2]
+                        tech.parameters.flipchip_gaps[1] -
+                        tech.parameters.height.wave_port[2]
                     ]
                 ),
                 atol=1e-6
             )
         )
     end
-
-
 end
