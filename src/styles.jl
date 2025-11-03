@@ -158,11 +158,11 @@ mesh size = h * max(s_g, (d/h)^α)
 ```
 
 where d is the distance away from the styled entity, and `s_g` is the global mesh scale
-parameter specified in [`mesh_scale`](@ref). A smaller value of `h` will give a finer mesh
+parameter specified in [`SolidModels.mesh_scale`](@ref). A smaller value of `h` will give a finer mesh
 attached to the styled entity, and a larger value of `α` will give a more rapid increase in
 size away from the styled entity.
 
-If `α < 0`, the size field will use [`mesh_grading_default`](@ref) used in rendering.
+If `α < 0`, the size field will use [`SolidModels.mesh_grading_default`](@ref) used in rendering.
 
 See also [`meshsized_entity`](@ref).
 """
@@ -183,11 +183,11 @@ mesh size = h * max(s_g, (d/h)^α)
 ```
 
 where d is the distance away from the styled entity, and `s_g` is the global mesh scale
-parameter specified in [`mesh_scale`](@ref). A smaller value of `h` will give a finer mesh
+parameter specified in [`SolidModels.mesh_scale`](@ref). A smaller value of `h` will give a finer mesh
 attached to the styled entity, and a larger value of `α` will give a more rapid increase in
 size away from the styled entity.
 
-If `α < 0`, the size field will use [`mesh_grading_default`](@ref) used in rendering.
+If `α < 0`, the size field will use [`SolidModels.mesh_grading_default`](@ref) used in rendering.
 """
 meshsized_entity(ent::GeometryEntity, h::T, α::S=-1.0) where {T, S <: Real} =
     MeshSized(h, α)(ent)

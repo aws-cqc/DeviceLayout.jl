@@ -943,7 +943,7 @@ function gmsh_meshsize(
     # points. KDTree appears to use more memory, but can be significantly faster, especially
     # for highly repetitive geometries.
     if true
-        l1 = Inf64
+        l = Inf64
         # Explicit type tag here to remove hypothetical type instability.
         for ((h, α), tree) in SolidModels.MESHSIZE_PARAMS[:ct]::Dict{
             Tuple{Float64, Float64},
@@ -951,30 +951,33 @@ function gmsh_meshsize(
         }
 
             _, d::Float64 = nn(tree, SVector{3}(x, y, z))
-            l1 = min(
-                l1,
+            l = min(
+                l,
                 h * max(SolidModels.MESHSIZE_PARAMS[:mesh_scale]::Float64, (d/h)^α)
             )::Float64
         end
-        return l1
+        return l
     else
-        l2 = Inf64
+        l = Inf64
         # Explicit type tag here to remove hypothetical type instability.
         for ((h, α), vs) in SolidModels.MESHSIZE_PARAMS[:cp]::Dict{
             Tuple{Float64, Float64},
             Vector{SVector{3, Float64}}
         }
 
-            α_local = α < 0 ? SolidModels.MESHSIZE_PARAMS[:alpha_default] : α
+            local_α = α < 0 ? SolidModels.MESHSIZE_PARAMS[:global_α] : α
             for v in vs
                 d = sqrt((x - v[1])^2 + (y - v[2])^2 + (z - v[3])^2)
-                l2 = min(
-                    l2,
-                    h * max(SolidModels.MESHSIZE_PARAMS[:mesh_scale]::Float64, (d/h)^α)
+                l = min(
+                    l,
+                    h * max(
+                        SolidModels.MESHSIZE_PARAMS[:mesh_scale]::Float64,
+                        (d/h)^local_α
+                    )
                 )
             end
         end
-        return l2
+        return l
     end
 end
 
