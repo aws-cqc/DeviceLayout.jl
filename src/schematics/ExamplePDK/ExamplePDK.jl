@@ -67,6 +67,7 @@ const LAYER_RECORD = (;
     simulated_area = GDSMeta(200, 0),
     port           = GDSMeta(210, 0),
     lumped_element = GDSMeta(211, 0),
+    wave_port      = GDSMeta(212, 0),
     mesh_control   = GDSMeta(220, 0),
     integration    = GDSMeta(230, 0)
 )
@@ -104,10 +105,14 @@ const EXAMPLE_FLIPCHIP_TECHNOLOGY = ProcessTechnology(
     (;  # Use unrealistic thicknesses for the sake of clearer visualizations
         chip_thicknesses=[100μm, 100μm], # [Bottom chip, top chip] (for calculating z height by level)
         flipchip_gaps=[80μm], # Space between chip surfaces (for calculating z height by level)
-        height=(; simulated_area=-1mm), # z height at the bottom of simulation volume
+        height=(; # z height at the bottom
+            simulated_area=-1mm,
+            wave_port=[-160μm, -160μm]
+        ),
         thickness=(; # Extrusion distances for various layers
             simulated_area=2mm,
             chip_area=[100μm, 100μm], # For levelwise layers, specify thickness for each level
+            wave_port=[400μm, 400μm],
             bump=80μm
         )
     )
@@ -121,8 +126,15 @@ single chip assembly.
 const EXAMPLE_SINGLECHIP_TECHNOLOGY = ProcessTechnology(
     LAYER_RECORD,
     (;
-        height=(; simulated_area=-1mm), # z height at the bottom of simulation volume
-        thickness=(; simulated_area=2mm, chip_area=525μm) # Extrusion distances for various layers
+        height=(; # z height at the bottom
+            simulated_area=-1mm,
+            wave_port=-200μm
+        ),
+        thickness=(; # Extrusion distances for various layers
+            simulated_area=2mm,
+            chip_area=525μm,
+            wave_port=400μm
+        )
     )
 )
 
@@ -153,7 +165,8 @@ const SINGLECHIP_SOLIDMODEL_TARGET = SolidModelTarget(
     simulation=true, # Optional simulation-only geometry entities will be rendered
     bounding_layers=[:simulated_area], # SIMULATED_AREA defines the simulation bounds
     substrate_layers=[:chip_area], # CHIP_AREA will be extruded downward
-    indexed_layers=[:port, :lumped_element, :integration], # Automatically index these layers
+    indexed_layers=[:port, :lumped_element, :integration, :wave_port], # Automatically index these layers
+    wave_port_layers=[:wave_port], # WAVE_PORT are 1D line segments in x-y to be extruded in z
     postrender_ops=[ # Manual definition of operations to run after 2D rendering
         (   # Get metal ground plane by subtracting negative from writeable area
             "metal", # Output group name
@@ -242,9 +255,11 @@ const FLIPCHIP_SOLIDMODEL_TARGET = SolidModelTarget(
         :metal_positive,
         :chip_area, # and for chip and bridge extrusion in opposite directions by layer
         :bridge_base,
-        :bridge
+        :bridge,
+        :wave_port
     ],
-    indexed_layers=[:port, :lumped_element, :integration],
+    indexed_layers=[:port, :lumped_element, :integration, :wave_port],
+    wave_port_layers=[:wave_port],
     postrender_ops=[
         (   # Get metal ground plane by subtracting negative from writeable area
             "metal_L1",

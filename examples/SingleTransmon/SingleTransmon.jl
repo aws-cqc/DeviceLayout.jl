@@ -5,7 +5,7 @@ module SingleTransmon
 using FileIO, CSV, DataFrames, JSON, JSONSchema
 using DeviceLayout, DeviceLayout.SchematicDrivenLayout, DeviceLayout.PreferredUnits
 import .SchematicDrivenLayout.ExamplePDK
-import .SchematicDrivenLayout.ExamplePDK: LayerVocabulary, L1_TARGET, add_bridges!
+import .SchematicDrivenLayout.ExamplePDK: LayerVocabulary, L1_TARGET, add_bridges!, add_wave_ports!
 using .ExamplePDK.Transmons, .ExamplePDK.ReadoutResonators
 import .ExamplePDK.SimpleJunctions: ExampleSimpleJunction
 import DeviceLayout: uconvert
@@ -24,6 +24,7 @@ using PRIMA
         n_meander_turns=5,
         hanger_length=500μm,
         bend_radius=50μm,
+        wave_ports::Bool=false,
         save_mesh::Bool=false,
         save_gds::Bool=false)
 
@@ -41,6 +42,7 @@ function single_transmon(;
     n_meander_turns=5,
     hanger_length=500μm,
     bend_radius=50μm,
+    wave_ports::Bool=false,
     save_mesh::Bool=false,
     save_gds::Bool=false,
     mesh_order=2
@@ -101,15 +103,17 @@ function single_transmon(;
     straight!(p_readout, readout_length / 2, PATH_STYLE)
 
     # Readout lumped ports - squares on CPW trace, one at each end
-    csport = CoordinateSystem(uniquename("port"), nm)
-    render!(
-        csport,
-        only_simulated(centered(Rectangle(cpw_width, cpw_width))),
-        LayerVocabulary.PORT
-    )
-    # Attach with port center `cpw_width` from the end (instead of `cpw_width/2`) to avoid corner effects
-    attach!(p_readout, sref(csport), cpw_width, i=1) # @ start
-    attach!(p_readout, sref(csport), readout_length / 2 - cpw_width, i=2) # @ end
+    if !wave_ports
+        csport = CoordinateSystem(uniquename("port"), nm)
+        render!(
+            csport,
+            only_simulated(centered(Rectangle(cpw_width, cpw_width))),
+            LayerVocabulary.PORT
+        )
+        # Attach with port center `cpw_width` from the end (instead of `cpw_width/2`) to avoid corner effects
+        attach!(p_readout, sref(csport), cpw_width, i=1) # @ start
+        attach!(p_readout, sref(csport), readout_length / 2 - cpw_width, i=2) # @ end
+    end
 
     #### Build schematic graph
     g = SchematicGraph("single-transmon")
@@ -130,7 +134,7 @@ function single_transmon(;
 
     #### Prepare solid model
     # Specify the extent of the simulation domain.
-    substrate_x = 4mm
+    substrate_x = wave_ports ? readout_length : 4mm # wave port domain boundary needs to touch the readout line
     substrate_y = 3.7mm
 
     center_xyz = DeviceLayout.center(floorplan)
@@ -144,10 +148,17 @@ function single_transmon(;
     # Define rectangle that gets extruded to generate substrate volume
     render!(floorplan.coordinate_system, chip, LayerVocabulary.CHIP_AREA)
 
+    # Add wave ports
+    wave_ports && add_wave_ports!(floorplan, [floorplan.graph.node_dict[:p_ro]], sim_area, 0.6mm, LayerVocabulary.WAVE_PORT)
+
     check!(floorplan)
 
     # Need to pass generated physical group names so they can be retained
-    tech = ExamplePDK.singlechip_solidmodel_target("port_1", "port_2", "lumped_element")
+    if wave_ports
+        tech = ExamplePDK.singlechip_solidmodel_target("wave_port_1", "wave_port_2", "lumped_element")
+    else
+        tech = ExamplePDK.singlechip_solidmodel_target("port_1", "port_2", "lumped_element")
+    end
     sm = SolidModel("test", overwrite=true)
 
     # Adjust mesh_scale to increase the resolution of the mesh, < 1 will result in greater
@@ -178,7 +189,7 @@ function single_transmon(;
 end
 
 """
-    configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0)
+    configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0, wave_ports=false)
 
 Given a `SolidModel`, assemble a dictionary defining a configuration file for use within
 Palace.
@@ -190,7 +201,7 @@ Palace.
     high-order spaces.
   - `amr = 0`: Maximum number of adaptive mesh refinement (AMR) iterations.
 """
-function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0)
+function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0, wave_ports=false)
     attributes = SolidModels.attributes(sm)
 
     config = Dict(
@@ -234,19 +245,37 @@ function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0)
                 "Attributes" => [attributes["exterior_boundary"]],
                 "Order" => 1
             ),
+            (wave_ports ?
+                (
+                    "WavePort" => [
+                        Dict(
+                            "Index" => 1,
+                            "Attributes" => [attributes["wave_port_1"]]
+                        ),
+                        Dict(
+                            "Index" => 2,
+                            "Attributes" => [attributes["wave_port_2"]]
+                        ),],
+                )
+                : ()
+            )...,
             "LumpedPort" => [
-                Dict(
-                    "Index" => 1,
-                    "Attributes" => [attributes["port_1"]],
-                    "R" => 50,
-                    "Direction" => "+X"
-                ),
-                Dict(
-                    "Index" => 2,
-                    "Attributes" => [attributes["port_2"]],
-                    "R" => 50,
-                    "Direction" => "+X"
-                ),
+                (wave_ports ? () :
+                    (
+                        Dict(
+                            "Index" => 1,
+                            "Attributes" => [attributes["port_1"]],
+                            "R" => 50,
+                            "Direction" => "+X"
+                        ),
+                        Dict(
+                            "Index" => 2,
+                            "Attributes" => [attributes["port_2"]],
+                            "R" => 50,
+                            "Direction" => "+X"
+                        ),
+                    )
+                )...,
                 Dict(
                     "Index" => 3,
                     "Attributes" => [attributes["lumped_element"]],
@@ -258,7 +287,7 @@ function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0)
         ),
         "Solver" => Dict(
             "Order" => solver_order,
-            "Eigenmode" => Dict("N" => 2, "Tol" => 1.0e-6, "Target" => 1, "Save" => 2),
+            "Eigenmode" => Dict("N" => 2, "Tol" => 1.0e-6, "Target" => 3, "Save" => 2),
             "Linear" => Dict("Type" => "Default", "Tol" => 1.0e-7, "MaxIts" => 500)
         )
     )
