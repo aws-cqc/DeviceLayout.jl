@@ -152,6 +152,8 @@ struct SolidModel{T <: SolidModelKernel}
         iszero(gmsh.is_initialized()) && gmsh.initialize()
         # SolidModel initiated gmsh uses μm
         gmsh.option.set_string("Geometry.OCCTargetUnit", "UM")
+        # Use threads in open cascade
+        gmsh.option.set_number("Geometry.OCCParallel", 1)
 
         # If a model with this name exists, throw error or delete it
         names = gmsh.model.list()

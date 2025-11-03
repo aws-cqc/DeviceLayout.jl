@@ -174,13 +174,9 @@ function single_transmon(;
 
     # Adjust mesh_scale to increase the resolution of the mesh, < 1 will result in greater
     # resolution near edges of the geometry.
-    meshing_parameters = SolidModels.MeshingParameters(
-        mesh_scale=1.0,
-        α_default=0.9,
-        mesh_order=mesh_order,
-        options=Dict("General.Verbosity" => 1) # General Gmsh option input
-    )
-    render!(sm, floorplan, tech, meshing_parameters=meshing_parameters)
+    SolidModels.set_gmsh_option("General.Verbosity", 1)
+    SolidModels.set_mesh_order(2)
+    render!(sm, floorplan, tech)
 
     if save_mesh
         # SolidModels.gmsh.option.set_number("General.NumThreads", 1) # Force single-threaded (deterministic) meshing
