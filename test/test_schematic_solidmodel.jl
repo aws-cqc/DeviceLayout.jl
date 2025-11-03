@@ -533,7 +533,7 @@
 
         # Half the global scale, should be a finer mesh.
         SolidModels.mesh_scale(0.5)
-        SolidModels.gmsh.model.mesh.clear()
+        SolidModels.gmsh.model.mesh.clear() # Force gmsh to regenerate the mesh
         @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
         @test SolidModels.gmsh.option.get_number("Mesh.NbTriangles") > num_tri
 
