@@ -440,58 +440,167 @@ sizeandgrading(e::GeometryEntity; kwargs...) =
     (float(meshsize(e; kwargs...)), float(meshgrading(e; kwargs...)))
 
 """
-    Base.@kwdef struct MeshingParameters
-        mesh_scale::Float64 = 1.0
-        mesh_order::Int = 1
-        α_default::Float64 = 0.9
-        apply_size_to_surfaces::Bool = false
-        high_order_optimize::Int = 1
-        surface_mesh_algorithm::Int = 6
-        volume_mesh_algorithm::Int = 1
-        options::Dict{String, Float64} = Dict{String, Float64}()
-    end
-
-MeshingParameters contains high level parameters to specify mesh sizing
-fields throughout the domain.
-
-  - `mesh_scale` applies multiplicatively to the smallest size specified by any size field
-    function, comparing to the formula in the `MeshSized` style, this results in all mesh size
-    fields being rescaled where `h` ← `mesh_scale` * `h`.
-  - `mesh_order` specifies the order of polynomials to use in representing the geometry, this
-    is important if curved geometric features are present, `mesh_order == 1` will represent
-    the geometry with linear polynomials, whilst `mesh_order == 2` will represent it with
-    quadratic polynomials, and `mesh_order == 3` with cubic polynomials. Increasing the value
-    of `mesh_order` results in greater geometric fidelity, whilst making meshing more
-    difficult (and prone to errors).
-  - `α_default` specifies the default value of `α` to use for `MeshSized` entities where `α`
-    is set to less than 0, `α_default ∈ (0, 1]` is particularly used for the default grading
-    of `Path` entities. A value closer to 1 can result in an unstable meshing algorithm in gmsh,
-    particularly for complex geometries.
-  - `apply_size_to_surfaces=true` will cause the mesh sizing field to specify the size within
-    any sized entities, as opposed to only along the perimeter of the entity if
-    `apply_size_to_surfaces=false`. Setting `apply_size_to_surfaces=true` will result in a
-    larger number of elements.
-  - `high_order_optimize=0` flag to pass to gmsh if optimization of a higher order mesh is
-    to be performed. (0: none, 1: optimization, 2: elastic+optimization, 3: elastic, 4: fast
-    curving). Refer to the gmsh documentation for more details.
-  - `surface_mesh_algorithm` specifies the algorithm gmsh should use when performing the
-    surface mesh generation. Refer to the gmsh documentation for more details.
-  - `volume_mesh_algorithm` specifies the algorithm gmsh should use when performing the
-    volume mesh generation. Refer to the gmsh documentation for more details.
-  - `options` used to specify any additional options provided to gmsh, which will be set with
-    `gmsh.options.set_number(key, value)` for each `key => value` pair. Refer to the gmsh
-    documentation for a list of available options. Will override any other options as is
-    called last.
+    Global defaults for key meshing parameters.
 """
-Base.@kwdef struct MeshingParameters
-    mesh_scale::Float64 = 1.0
-    mesh_order::Int = 1
-    α_default::Float64 = 0.9
-    apply_size_to_surfaces::Bool = false
-    high_order_optimize::Int = 1
-    surface_mesh_algorithm::Int = 6
-    volume_mesh_algorithm::Int = 1
-    options::Dict{String, Float64} = Dict{String, Float64}()
+MESHSIZE_PARAMS[:mesh_scale] = 1.0
+MESHSIZE_PARAMS[:mesh_order] = 1
+MESHSIZE_PARAMS[:global_α] = 0.9
+
+"""
+    set_gmsh_option(s, o::Number)
+    set_gmsh_option(s, o::AbstractString)
+
+Set options within the gmsh API.
+"""
+set_gmsh_option(s, o::Number) = gmsh.option.set_number(s, o)
+set_gmsh_option(s, o::AbstractString) = gmsh.option.set_string(s, o)
+
+"""
+    mesh_scale()
+    mesh_scale(s)
+
+Get and set the mesh scale which applies multiplicatively to the smallest size specified by any size field
+function, comparing to the formula in the `MeshSized` style, this results in all mesh size
+fields being rescaled where `h` ← `mesh_scale` * `h`.
+"""
+mesh_scale(s) = MESHSIZE_PARAMS[:mesh_scale]::Float64 = s
+mesh_scale() = MESHSIZE_PARAMS[:mesh_scale]::Float64
+
+"""
+    mesh_order()
+    mesh_order(order::Number, higher_order_optimize::Number=1)
+
+Get or set the order of polynomials to use in representing the geometry, this
+is important if curved geometric features are present, `mesh_order == 1` will represent
+the geometry with linear polynomials, whilst `mesh_order == 2` will represent it with
+quadratic polynomials, and `mesh_order == 3` with cubic polynomials. Increasing the value
+of `mesh_order` results in greater geometric fidelity, whilst making meshing more
+difficult (and prone to errors).
+"""
+mesh_order() = SolidModels.gmsh.get_number("Mesh.ElementOrder")
+function mesh_order(order::Number, higher_order_optimize::Number=1)
+    set_gmsh_option("Mesh.ElementOrder", order)
+    set_gmsh_option("Mesh.HighOrderOptimize", higher_order_optimize)
+    return nothing
+end
+
+"""
+    mesh_grading_default()
+    mesh_grading_default(α)
+
+Get or set the default value of `α` to use for `MeshSized` entities where `α`
+is set to less than 0, `global_α ∈ (0, 1]` is particularly used for the default grading
+of `Path` entities. A value closer to 1 can result in an unstable meshing algorithm in gmsh,
+particularly for complex geometries.
+"""
+mesh_grading_default() = MESHSIZE_PARAMS[:global_α]::Float64
+function mesh_grading_default(α)
+    @assert 0 < α <= 1
+    MESHSIZE_PARAMS[:global_α]::Float64 = α
+    return finalize_size_fields!()
+end
+
+"""
+    add_mesh_size_point(; h, α=-1, p)
+
+Add a mesh size control point to the global mesh sizing parameters.
+
+# Arguments
+
+  - `p`: 3D point coordinates where mesh size is controlled. Can be a single point, or array
+    of concatenated points [x1,y1,z1,x2,y2,z2,...].
+  - `h`: Target mesh size at the point
+  - `α`: Mesh grading parameter (α ≤ 1). If negative the default global value will be used
+    when the size trees are regenerated. All negative values are mapped together for efficient
+    KDTree calculations.
+
+The point is added to a collection grouped by `(h, α)` values for efficient mesh size field computation.
+"""
+function add_mesh_size_point(p; h, α=-1)
+    return push!(
+        get!(
+            SolidModels.MESHSIZE_PARAMS[:cp],
+            (h, α < 0 ? -1 : α),
+            Vector{SVector{3, Float64}}()
+        ),
+        reinterpret(SVector{3, Float64}, p)
+    )
+end
+
+"""
+    finalize_size_fields!()
+
+Rebuild KDTree data structures for mesh size field computation.
+
+Must be called after manually adding mesh size points with [`add_mesh_size_point`](@ref)
+to enable efficient spatial queries during meshing. Creates KDTrees grouped by `(h, α)`
+parameters for fast nearest-neighbor lookups.
+"""
+function finalize_size_fields!()
+    # For each collection of (h, α), can assemble a KDTree to find closest. This will be the
+    # smallest mesh size over that collection of vertices, as size is proportional to
+    # distance for this subset. Thereby the comparison over lengths need only be over the
+    # number of different (h, α) combinations. This is most impactful for large graphs with
+    # many duplicates of a given component, where there will be many points per (h, α).
+    SolidModels.MESHSIZE_PARAMS[:ct] = Dict{
+        Tuple{Float64, Float64},
+        KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
+    }()
+    for (h, α) in keys(SolidModels.MESHSIZE_PARAMS[:cp])
+        # Substitute any negative grading value for the global default. Delaying this
+        # substitution allows for modifying the size field after rendering, without needing
+        # to recompute the locations of all control points.
+        SolidModels.MESHSIZE_PARAMS[:ct][(
+            h,
+            α < 0 ? SolidModels.MESHSIZE_PARAMS[:global_α] : α
+        )] = KDTree(SolidModels.MESHSIZE_PARAMS[:cp][(h, α)])
+    end
+    return nothing
+end
+
+"""
+    mesh_control_points()
+
+Get the dictionary of mesh size control points grouped by `(h, α)` parameters.
+
+Returns a `Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}` where keys are
+`(mesh_size, grading_parameter)` tuples and values are vectors of 3D points.
+
+If this dictionary is modified, by erasing points or adding points using
+[`add_mesh_size_point`](@ref), then it is necessary to call [`finalize_size_fields`](@ref)
+to rebuild the KDTree from the data, else any resulting mesh will not reflect the change in
+data.
+"""
+mesh_control_points() = SolidModels.MESHSIZE_PARAMS[:cp]
+
+"""
+    mesh_control_trees()
+
+Get the dictionary of KDTrees for efficient spatial queries of mesh size control points.
+
+Returns a `Dict{Tuple{Float64, Float64}, KDTree}` where keys are `(mesh_size, grading_parameter)`
+tuples and values are KDTrees for fast nearest-neighbor lookups.
+"""
+mesh_control_trees() = SolidModels.MESHSIZE_PARAMS[:ct]
+
+"""
+    clear_mesh_control_points!()
+
+Clear all mesh size control points and associated KDTrees.
+"""
+function clear_mesh_control_points!()
+    empty!(SolidModels.MESHSIZE_PARAMS[:cp])
+    return empty!(SolidModels.MESHSIZE_PARAMS[:ct])
+end
+
+"""
+    reset_mesh_control!()
+
+Reset the mesh scaling and grading to the original defaults of (1.0, 0.9).
+"""
+function reset_mesh_control!()
+    mesh_scale(1.0)
+    return mesh_grading_default(0.9)
 end
 
 """
@@ -517,8 +626,6 @@ Render `cs` to `sm`.
     group `"base_negative"` are both removed when `"base"` is created.
   - `zmap`: Function (m::SemanticMeta) -> `z` coordinate of corresponding elements. Default:
     Map all metadata to zero.
-  - `meshing_parameters`: `MeshingParameters` allows customization of the top level meshing
-    parameters when calling Gmsh.
 
 Available postrendering operations include [`translate!`](@ref), [`extrude_z!`](@ref), [`revolve!`](@ref),
 [`union_geom!`](@ref), [`intersect_geom!`](@ref), [`difference_geom!`](@ref), [`fragment_geom!`](@ref), and [`box_selection`](@ref).
@@ -535,13 +642,13 @@ function render!(
     postrender_ops=[],
     retained_physical_groups=[],
     zmap=(_) -> zero(T),
-    meshing_parameters::MeshingParameters=MeshingParameters(),
+    gmsh_options=Dict{String, Union{String, Float64}}(),
     kwargs...
 ) where {T}
     gmsh.model.set_current(name(sm))
 
-    for (k, v) ∈ meshing_parameters.options
-        gmsh.option.set_number(k, v)
+    for (k, v) ∈ gmsh_options
+        set_gmsh_option(k, v)
     end
 
     flat = flatten(cs)
@@ -627,10 +734,10 @@ function render!(
                 Ns = 11
                 # Approximate the spline with 10 linear segments, and use the corresponding
                 # linear length to compute the sample rate.
-                t = [bounds[1][1] + i * (bounds[2][1] - bounds[1][1]) / Ns for i in 0:Ns]
+                t = [bounds[1][1] + i * (bounds[2][1] - bounds[1][1]) / Ns for i = 0:Ns]
                 xyz = gmsh.model.get_value(dim, tag, t) # [x1,y1,z1,x2,y2,z2,...]
                 XYZ = reinterpret(SVector{3, Float64}, xyz)
-                l = sum(norm.(XYZ[2:end] .- XYZ[1:end-1]))
+                l = sum(norm.(XYZ[2:end] .- XYZ[1:(end - 1)]))
                 Ns = cld(l, h)
             end
             t = [bounds[1][1] + i * (bounds[2][1] - bounds[1][1]) / Ns for i = 0:(Ns - 1)]
@@ -639,7 +746,7 @@ function render!(
             append!(
                 get!(
                     SolidModels.MESHSIZE_PARAMS[:cp],
-                    (h, α < 0 ? meshing_parameters.α_default : α),
+                    (h, α < 0 ? -1 : α),
                     Vector{SVector{3, Float64}}()
                 ),
                 reinterpret(SVector{3, Float64}, xyz)
@@ -647,18 +754,8 @@ function render!(
         end
     end
 
-    # For each collection of (h, α), can assemble a KDTree to find closest. This will be the
-    # smallest mesh size over that collection of vertices, as size is proportional to
-    # distance for this subset. Thereby the comparison over lengths need only be over the
-    # number of different (h, α) combinations. This is most impactful for large graphs with
-    # many duplicates of a given component, where there will be many points per (h, α).
-    SolidModels.MESHSIZE_PARAMS[:ct] = Dict{
-        Tuple{Float64, Float64},
-        KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
-    }()
-    for k in keys(SolidModels.MESHSIZE_PARAMS[:cp])
-        SolidModels.MESHSIZE_PARAMS[:ct][k] = KDTree(SolidModels.MESHSIZE_PARAMS[:cp][k])
-    end
+    # Generate the KDTrees corresponding to the meshing control points.
+    finalize_size_fields!()
 
     # Extrusions, Booleans, etc
     _synchronize!(sm)
@@ -668,38 +765,34 @@ function render!(
     _fragment_and_map!(sm)
 
     SolidModels.gmsh.option.setNumber("General.NumThreads", 0)
-    SolidModels.MESHSIZE_PARAMS[:s] = meshing_parameters.mesh_scale
 
     # Pass in call back function for meshing against the vertices found previously.
     gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
 
     gmsh.option.set_number(
         "Mesh.MeshSizeFromPoints",
-        get(meshing_parameters.options, "Mesh.MeshSizeFromPoints", 0)
+        get(gmsh_options, "Mesh.MeshSizeFromPoints", 0)
     )
     gmsh.option.set_number(
         "Mesh.MeshSizeFromCurvature",
-        get(meshing_parameters.options, "Mesh.MeshSizeFromCurvature", 0)
+        get(gmsh_options, "Mesh.MeshSizeFromCurvature", 0)
     )
     gmsh.option.set_number(
         "Mesh.MeshSizeExtendFromBoundary",
-        get(meshing_parameters.options, "Mesh.MeshSizeExtendFromBoundary", 0)
+        get(gmsh_options, "Mesh.MeshSizeExtendFromBoundary", 0)
     )
-
-    gmsh.option.set_number("Mesh.Algorithm", meshing_parameters.surface_mesh_algorithm)
-    gmsh.option.set_number("Mesh.Algorithm3D", meshing_parameters.volume_mesh_algorithm)
+    gmsh.option.set_number(
+        "Mesh.MeshSizeFromPoints",
+        get(gmsh_options, "Mesh.Algorithm", 6)
+    )
+    gmsh.option.set_number(
+        "Mesh.MeshSizeFromCurvature",
+        get(gmsh_options, "Mesh.Algorithm3D", 1)
+    )
 
     # With the setting below, Gmsh will look for OMP_NUM_THREADS environment variables;
     # this needs to be >1 for HXT algorithm to use parallelism.
     gmsh.option.set_number("General.NumThreads", 1)
-
-    gmsh.option.set_number("Mesh.ElementOrder", meshing_parameters.mesh_order)
-    if meshing_parameters.mesh_order > 1
-        gmsh.option.set_number(
-            "Mesh.HighOrderOptimize",
-            meshing_parameters.high_order_optimize
-        )
-    end
 
     # Always save meshes in binary for faster disk I/O
     gmsh.option.set_number("Mesh.Binary", 1)
@@ -746,8 +839,10 @@ function gmsh_meshsize(
         }
 
             _, d::Float64 = nn(tree, SVector{3}(x, y, z))
-            l1 =
-                min(l1, h * max(SolidModels.MESHSIZE_PARAMS[:s]::Float64, (d/h)^α))::Float64
+            l1 = min(
+                l1,
+                h * max(SolidModels.MESHSIZE_PARAMS[:mesh_scale]::Float64, (d/h)^α)
+            )::Float64
         end
         return l1
     else
@@ -758,9 +853,13 @@ function gmsh_meshsize(
             Vector{SVector{3, Float64}}
         }
 
+            α_local = α < 0 ? SolidModels.MESHSIZE_PARAMS[:alpha_default] : α
             for v in vs
                 d = sqrt((x - v[1])^2 + (y - v[2])^2 + (z - v[3])^2)
-                l2 = min(l2, h * max(SolidModels.MESHSIZE_PARAMS[:s]::Float64, (d/h)^α))
+                l2 = min(
+                    l2,
+                    h * max(SolidModels.MESHSIZE_PARAMS[:mesh_scale]::Float64, (d/h)^α)
+                )
             end
         end
         return l2

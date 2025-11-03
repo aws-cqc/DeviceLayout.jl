@@ -526,46 +526,24 @@
 
         # Reduce the noise in the REPL
         SolidModels.gmsh.option.setNumber("General.Verbosity", 0)
+        SolidModels.reset_mesh_control!()
         @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
 
         num_tri = SolidModels.gmsh.option.get_number("Mesh.NbTriangles")
 
-        # Smaller meshscale -- results in finer mesh attached to all sized entities
-        sm = SolidModel("test", overwrite=true)
-        render!(
-            sm,
-            floorplan,
-            target,
-            meshing_parameters=SolidModels.MeshingParameters(mesh_scale=0.5)
-        )
+        # Half the global scale, should be a finer mesh.
+        SolidModels.mesh_scale(0.5)
+        SolidModels.gmsh.model.mesh.clear()
         @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
         @test SolidModels.gmsh.option.get_number("Mesh.NbTriangles") > num_tri
 
         # Less aggressive grading -- results in slower mesh size growth away from sized entities
         # with default grading (nonstyled paths)
-        sm = SolidModel("test", overwrite=true)
-        render!(
-            sm,
-            floorplan,
-            target,
-            meshing_parameters=SolidModels.MeshingParameters(α_default=0.7)
-        )
+        SolidModels.mesh_scale(1.0)
+        SolidModels.mesh_grading_default(0.7)
+        SolidModels.gmsh.model.mesh.clear()
         @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
         @test SolidModels.gmsh.option.get_number("Mesh.NbTriangles") > num_tri
-
-        # Apply sizing field to surfaces -- measures the distance function from the whole
-        # surface of sized entities, rather than only the perimeter. Results in finer mesh
-        # interior to sized entities.
-        sm = SolidModel("test", overwrite=true)
-        render!(
-            sm,
-            floorplan,
-            target,
-            meshing_parameters=SolidModels.MeshingParameters(apply_size_to_surfaces=true)
-        )
-        @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
-        @test SolidModels.gmsh.option.get_number("Mesh.NbTriangles") > num_tri
-
         return sm
     end
 
