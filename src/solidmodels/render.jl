@@ -449,11 +449,21 @@ MESHSIZE_PARAMS[:global_α] = 0.9
 """
     set_gmsh_option(s, o::Number)
     set_gmsh_option(s, o::AbstractString)
+    set_gmsh_option(s, d::Dict, default)
+    set_gmsh_option(d::Dict)
 
 Set options within the gmsh API.
 """
 set_gmsh_option(s, o::Number) = gmsh.option.set_number(s, o)
 set_gmsh_option(s, o::AbstractString) = gmsh.option.set_string(s, o)
+function set_gmsh_option(s, d::Dict, default)
+    return set_gmsh_option(s, get(d, s, default))
+end
+function set_gmsh_option(d::Dict{String, Union{Float64, String}})
+    for (k, v) in d
+        set_gmsh_option(k, v)
+    end
+end
 
 """
     mesh_scale()
@@ -604,6 +614,66 @@ function reset_mesh_control!()
 end
 
 """
+    Base.@kwdef struct MeshingParameters
+        mesh_scale::Float64 = 1.0
+        mesh_order::Int = 1
+        α_default::Float64 = 0.9
+        apply_size_to_surfaces::Bool = false
+        high_order_optimize::Int = 1
+        surface_mesh_algorithm::Int = 6
+        volume_mesh_algorithm::Int = 1
+        options::Dict{String, Float64} = Dict{String, Float64}()
+    end
+
+!!! warning "Deprecated"
+
+    This struct is deprecated. Use [`mesh_scale`](@ref), [`mesh_grading_default`](@ref),
+    [`mesh_order`](@ref), and [`set_gmsh_option`](@ref) instead.
+
+MeshingParameters contains high level parameters to specify mesh sizing
+fields throughout the domain.
+
+  - `mesh_scale` applies multiplicatively to the smallest size specified by any size field
+    function, comparing to the formula in the `MeshSized` style, this results in all mesh size
+    fields being rescaled where `h` ← `mesh_scale` * `h`.
+  - `mesh_order` specifies the order of polynomials to use in representing the geometry, this
+    is important if curved geometric features are present, `mesh_order == 1` will represent
+    the geometry with linear polynomials, whilst `mesh_order == 2` will represent it with
+    quadratic polynomials, and `mesh_order == 3` with cubic polynomials. Increasing the value
+    of `mesh_order` results in greater geometric fidelity, whilst making meshing more
+    difficult (and prone to errors).
+  - `α_default` specifies the default value of `α` to use for `MeshSized` entities where `α`
+    is set to less than 0, `α_default ∈ (0, 1]` is particularly used for the default grading
+    of `Path` entities. A value closer to 1 can result in an unstable meshing algorithm in gmsh,
+    particularly for complex geometries.
+  - `apply_size_to_surfaces=true` will cause the mesh sizing field to specify the size within
+    any sized entities, as opposed to only along the perimeter of the entity if
+    `apply_size_to_surfaces=false`. Setting `apply_size_to_surfaces=true` will result in a
+    larger number of elements.
+  - `high_order_optimize=0` flag to pass to gmsh if optimization of a higher order mesh is
+    to be performed. (0: none, 1: optimization, 2: elastic+optimization, 3: elastic, 4: fast
+    curving). Refer to the gmsh documentation for more details.
+  - `surface_mesh_algorithm` specifies the algorithm gmsh should use when performing the
+    surface mesh generation. Refer to the gmsh documentation for more details.
+  - `volume_mesh_algorithm` specifies the algorithm gmsh should use when performing the
+    volume mesh generation. Refer to the gmsh documentation for more details.
+  - `options` used to specify any additional options provided to gmsh, which will be set with
+    `gmsh.options.set_number(key, value)` for each `key => value` pair. Refer to the gmsh
+    documentation for a list of available options. Will override any other options as is
+    called last.
+"""
+Base.@kwdef struct MeshingParameters
+    mesh_scale::Float64 = 1.0
+    mesh_order::Int = 1
+    α_default::Float64 = 0.9
+    apply_size_to_surfaces::Bool = false
+    high_order_optimize::Int = 1
+    surface_mesh_algorithm::Int = 6
+    volume_mesh_algorithm::Int = 1
+    options::Dict{String, Union{String, Float64}} = Dict{String, Union{String, Float64}}()
+end
+
+"""
     render!(sm::SolidModel, cs::AbstractCoordinateSystem{T}; map_meta=layer, postrender_ops=[], zmap=(_) -> zero(T), kwargs...) where {T}
 
 Render `cs` to `sm`.
@@ -642,10 +712,67 @@ function render!(
     postrender_ops=[],
     retained_physical_groups=[],
     zmap=(_) -> zero(T),
+    meshing_parameters::MeshingParameters=MeshingParameters(),
     gmsh_options=Dict{String, Union{String, Float64}}(),
     kwargs...
 ) where {T}
     gmsh.model.set_current(name(sm))
+
+    # Check for meshing_parameters, and if any non-defaults are specified, then give
+    # deprecation warning
+    mp_default = MeshingParameters()
+    if meshing_parameters.mesh_scale != mp_default.mesh_scale
+        Base.depwarn(
+            "Specifying the mesh scale using `MeshingParameters` is deprecated, use [`mesh_scale`](@ref) instead.",
+            :depwarn
+        )
+        mesh_scale(meshing_parameters.mesh_scale)
+    end
+    if meshing_parameters.mesh_order != mp_default.mesh_order
+        Base.depwarn(
+            "Specifying the mesh order using `MeshingParameters` is deprecated, use [`mesh_order`](@ref) instead.",
+            :depwarn
+        )
+        mesh_order(meshing_parameters.mesh_order)
+    end
+    if meshing_parameters.α_default != mp_default.α_default
+        Base.depwarn(
+            "Specifying the mesh grading default using `MeshingParameters` is deprecated, use [`mesh_grading_default`](@ref) instead.",
+            :depwarn
+        )
+        mesh_grading_default(meshing_parameters.α_default)
+    end
+    if meshing_parameters.high_order_optimize != mp_default.high_order_optimize
+        Base.depwarn(
+            "Specifying the higher order optimization using `MeshingParameters` is deprecated, use [`mesh_order`](@ref) instead.",
+            :depwarn
+        )
+        mesh_order(meshing_parameters.mesh_order, meshing_parameters.high_order_optimize)
+    end
+    if meshing_parameters.apply_size_to_surfaces == true
+        Base.error("Size fields can no longer be specified for surfaces!")
+    end
+    if meshing_parameters.surface_mesh_algorithm != mp_default.surface_mesh_algorithm
+        Base.depwarn(
+            "Specifying the surface meshing algorithm using `MeshingParameters` is deprecated, use [`set_gmsh_option`](@ref) or `gmsh_options` instead.",
+            :depwarn
+        )
+        gmsh_options["Mesh.Algorithm"] = meshing_parameters.surface_mesh_algorithm
+    end
+    if meshing_parameters.volume_mesh_algorithm != mp_default.volume_mesh_algorithm
+        Base.depwarn(
+            "Specifying the surface meshing algorithm using `MeshingParameters` is deprecated, use [`set_gmsh_option`](@ref) or `gmsh_options` instead.",
+            :depwarn
+        )
+        gmsh_options["Mesh.Algorithm3D"] = meshing_parameters.volume_mesh_algorithm
+    end
+    if !isempty(meshing_parameters.options)
+        Base.depwarn(
+            "Specifying gmsh options using `MeshingParameters` is deprecated, use `gmsh_options` instead.",
+            :depwarn
+        )
+        merge!(gmsh_options, meshing_parameters.options)
+    end
 
     for (k, v) ∈ gmsh_options
         set_gmsh_option(k, v)
@@ -764,38 +891,23 @@ function render!(
     _synchronize!(sm)
     _fragment_and_map!(sm)
 
-    SolidModels.gmsh.option.setNumber("General.NumThreads", 0)
+    set_gmsh_option("General.NumThreads", 0)
 
     # Pass in call back function for meshing against the vertices found previously.
     gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
 
-    gmsh.option.set_number(
-        "Mesh.MeshSizeFromPoints",
-        get(gmsh_options, "Mesh.MeshSizeFromPoints", 0)
-    )
-    gmsh.option.set_number(
-        "Mesh.MeshSizeFromCurvature",
-        get(gmsh_options, "Mesh.MeshSizeFromCurvature", 0)
-    )
-    gmsh.option.set_number(
-        "Mesh.MeshSizeExtendFromBoundary",
-        get(gmsh_options, "Mesh.MeshSizeExtendFromBoundary", 0)
-    )
-    gmsh.option.set_number(
-        "Mesh.MeshSizeFromPoints",
-        get(gmsh_options, "Mesh.Algorithm", 6)
-    )
-    gmsh.option.set_number(
-        "Mesh.MeshSizeFromCurvature",
-        get(gmsh_options, "Mesh.Algorithm3D", 1)
-    )
+    set_gmsh_option("Mesh.MeshSizeFromPoints", gmsh_options, 0)
+    set_gmsh_option("Mesh.MeshSizeFromCurvature", 0)
+    set_gmsh_option("Mesh.MeshSizeExtendFromBoundary", 0)
+    set_gmsh_option("Mesh.Algorithm", gmsh_options, 6)
+    set_gmsh_option("Mesh.Algorithm3D", gmsh_options, 1)
 
     # With the setting below, Gmsh will look for OMP_NUM_THREADS environment variables;
     # this needs to be >1 for HXT algorithm to use parallelism.
-    gmsh.option.set_number("General.NumThreads", 1)
+    set_gmsh_option("General.NumThreads", 1)
 
     # Always save meshes in binary for faster disk I/O
-    gmsh.option.set_number("Mesh.Binary", 1)
+    set_gmsh_option("Mesh.Binary", 1)
 
     # Remove all physical groups except those on the retained list.
     if !isempty(retained_physical_groups)
