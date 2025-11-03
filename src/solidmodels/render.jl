@@ -891,23 +891,21 @@ function render!(
     _synchronize!(sm)
     _fragment_and_map!(sm)
 
-    set_gmsh_option("General.NumThreads", 0)
-
     # Pass in call back function for meshing against the vertices found previously.
     gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
 
     set_gmsh_option("Mesh.MeshSizeFromPoints", gmsh_options, 0)
-    set_gmsh_option("Mesh.MeshSizeFromCurvature", 0)
-    set_gmsh_option("Mesh.MeshSizeExtendFromBoundary", 0)
+    set_gmsh_option("Mesh.MeshSizeFromCurvature", gmsh_options, 0)
+    set_gmsh_option("Mesh.MeshSizeExtendFromBoundary", gmsh_options, 0)
     set_gmsh_option("Mesh.Algorithm", gmsh_options, 6)
     set_gmsh_option("Mesh.Algorithm3D", gmsh_options, 1)
 
     # With the setting below, Gmsh will look for OMP_NUM_THREADS environment variables;
     # this needs to be >1 for HXT algorithm to use parallelism.
-    set_gmsh_option("General.NumThreads", 1)
+    set_gmsh_option("General.NumThreads", gmsh_options, 0)
 
     # Always save meshes in binary for faster disk I/O
-    set_gmsh_option("Mesh.Binary", 1)
+    set_gmsh_option("Mesh.Binary", gmsh_options, 1)
 
     # Remove all physical groups except those on the retained list.
     if !isempty(retained_physical_groups)
