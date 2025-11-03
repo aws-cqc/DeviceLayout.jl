@@ -154,7 +154,7 @@ function add_wave_ports!(
         if isa(node_component, Path)
             path = deepcopy(node_component)
         elseif isa(node_component, RouteComponent)
-            path = LayoutComponents.path(deepcopy(node_component))
+            path = SchematicDrivenLayout.path(deepcopy(node_component))
             path.metadata = node_component.meta
         else
             @warn "Cannot place a wave port for node $(node.id) since it is not a Path or Route."

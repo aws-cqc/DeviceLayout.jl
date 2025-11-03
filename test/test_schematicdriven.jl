@@ -1132,23 +1132,46 @@
         )
     end
 
-    @testset "SolidModels wave ports" begin
+    @testset "SolidModels wave ports single chip" begin
         g = SchematicGraph("test")
         # Create 4 paths in the +x, +y, -x, and -y directions
+        # These paths will intersect simulation area
         x_start, x_end = 150μm, 475μm
         y_start, y_end = 100μm, 500μm
-        pa1 = Path(x_start, 0μm; metadata=BASE_NEGATIVE)
-        straight!(pa1, x_end - x_start, Paths.SimpleCPW(10μm, 6μm))
-        add_node!(g, pa1)
-        pa2 = Path(0μm, y_start; α0=π / 2, metadata=BASE_NEGATIVE)
-        straight!(pa2, y_end - y_start, Paths.SimpleCPW(10μm, 6μm))
-        add_node!(g, pa2)
-        pa3 = Path(-x_start, 0μm; α0=π, metadata=BASE_NEGATIVE)
-        straight!(pa3, x_end - x_start, Paths.SimpleCPW(10μm, 6μm))
-        add_node!(g, pa3)
-        pa4 = Path(0μm, -y_start; α0=-π / 2, metadata=BASE_NEGATIVE)
-        straight!(pa4, y_end - y_start, Paths.SimpleCPW(10μm, 6μm))
-        add_node!(g, pa4)
+        path_sty = Paths.SimpleCPW(10μm, 6μm)
+        pa1 = Path(x_start, 0μm; name="path1", metadata=BASE_NEGATIVE)
+        straight!(pa1, x_end - x_start, path_sty)
+        pa1_node = add_node!(g, pa1)
+        pa2 = Path(0μm, y_start; α0=π / 2, name="path2", metadata=BASE_NEGATIVE)
+        straight!(pa2, y_end - y_start, path_sty)
+        pa2_node = add_node!(g, pa2)
+        pa3 = Path(-x_start, 0μm; α0=π, name="path3", metadata=BASE_NEGATIVE)
+        straight!(pa3, x_end - x_start, path_sty)
+        pa3_node = add_node!(g, pa3)
+        pa4 = Path(0μm, -y_start; α0=-π / 2, name="path4", metadata=BASE_NEGATIVE)
+        straight!(pa4, y_end - y_start, path_sty)
+        pa4_node = add_node!(g, pa4)
+
+        # Create a curved path to trigger warning
+        x_end_short = 200μm
+        turn_radius = 150μm
+        pa5 = Path(x_start, y_end - 20μm; name="path5", metadata=BASE_NEGATIVE)
+        straight!(pa5, x_end_short - x_start, path_sty)
+        turn!(pa5, -π / 2, turn_radius, path_sty)
+        pa5_node = add_node!(g, pa5)
+
+        # Add a route that will not intersect the simulation area
+        r1_node = route!(
+            g,
+            Paths.BSplineRouting(),
+            pa1_node => :p0,
+            pa3_node => :p0,
+            path_sty,
+            BASE_NEGATIVE
+        )
+
+        # Add a non-path/route component
+        spacer_node = add_node!(g, Spacer(name="spacer", p1=Point(10μm, 0μm)))
 
         floorplan = plan(g)
 
@@ -1157,22 +1180,9 @@
         chip_area = union2d(halo(bounds(floorplan), halo_dist))
         sim_area = chip_area
 
-        render!(floorplan.coordinate_system, chip_area, SemanticMeta(:chip_outline))
-        render!(
-            floorplan.coordinate_system,
-            chip_area,
-            SemanticMeta(:chip_outline, level=2)
-        )
-        render!(
-            floorplan.coordinate_system,
-            only_solidmodel(sim_area),
-            SemanticMeta(:simulated_area)
-        )
-        render!(
-            floorplan.coordinate_system,
-            only_solidmodel(chip_area),
-            SemanticMeta(:writeable_area)
-        )
+        render!(floorplan.coordinate_system, sim_area, SemanticMeta(:simulated_area))
+        render!(floorplan.coordinate_system, sim_area, SemanticMeta(:writeable_area))
+        render!(floorplan.coordinate_system, chip_area, SemanticMeta(:chip_area))
 
         # Add wave ports automatically where paths intersect sim area
         wave_port_width = 60μm
@@ -1189,31 +1199,40 @@
             SemanticMeta(:wave_port)
         )
 
-        # Add a wave port manually on the xmin boundary of L2
-        bbox = bounds(sim_area)
-        x1, y1 = bbox.ll.x, (bbox.ll.y + bbox.ur.y) / 2
-        wave_port_width1 = (bbox.ur.y - bbox.ll.y) / 2
-        line = LineSegment(
-            Point(x1, y1 - wave_port_width1 / 2),
-            Point(x1, y1 + wave_port_width1 / 2)
-        )
-        render!(
-            floorplan.coordinate_system,
-            only_simulated(line),
-            SemanticMeta(:wave_port, level=2)
+        # Test warning when path is curved
+        @test_logs (
+            :warn,
+            "Placing a wave port in curved segment of node path5 can lead to erroneous results."
+        ) add_wave_ports!(
+            floorplan,
+            [floorplan.graph.nodes[5]],
+            bounds(sim_area),
+            wave_port_width,
+            SemanticMeta(:wave_port)
         )
 
-        # Add a wave port manually on the ymax boundary of L2
-        x2, y2 = (bbox.ll.x + bbox.ur.x) / 2, bbox.ur.y
-        wave_port_width2 = (bbox.ur.x - bbox.ll.x) / 2
-        line = LineSegment(
-            Point(x2 - wave_port_width2 / 2, y2),
-            Point(x2 + wave_port_width2 / 2, y2)
+        #  Test warning when path does not intersect
+        @test_logs (
+            :warn,
+            "Cannot place a wave port for node r_path1_path3 since it does not intersect the simulation area."
+        ) add_wave_ports!(
+            floorplan,
+            [floorplan.graph.nodes[6]],
+            bounds(sim_area),
+            wave_port_width,
+            SemanticMeta(:wave_port)
         )
-        render!(
-            floorplan.coordinate_system,
-            only_simulated(line),
-            SemanticMeta(:wave_port, level=2)
+
+        # Test warning when node is not a path or route
+        @test_logs (
+            :warn,
+            "Cannot place a wave port for node spacer since it is not a Path or Route."
+        ) add_wave_ports!(
+            floorplan,
+            [floorplan.graph.nodes[7]],
+            bounds(sim_area),
+            wave_port_width,
+            SemanticMeta(:wave_port)
         )
 
         check!(floorplan)
@@ -1224,39 +1243,31 @@
             (;
                 base_negative=GDSMeta(),
                 simulated_area=GDSMeta(2),
-                chip_outline=GDSMeta(3),
+                chip_area=GDSMeta(3),
                 writeable_area=GDSMeta(4),
                 wave_port=GDSMeta(5)
             ),
             (;
-                height=(; simulated_area=-1mm, wave_port=[-300μm, -400μm]),
-                thickness=(;
-                    simulated_area=2mm,
-                    chip_outline=[250μm, 250μm],
-                    wave_port=[700μm, 900μm]
-                ),
-                chip_thicknesses=[250μm, 250μm],
-                flipchip_gaps=[250μm]
+                height=(; simulated_area=-1mm, wave_port=-200μm),
+                thickness=(; simulated_area=2mm, chip_area=525μm, wave_port=400μm)
             )
         )
         target = SchematicDrivenLayout.SolidModelTarget(
             tech;
             bounding_layers=[:simulated_area],
-            substrate_layers=[:chip_outline],
-            levelwise_layers=[:chip_outline, :wave_port],
+            substrate_layers=[:chip_area],
             indexed_layers=[:port, :wave_port],
             wave_port_layers=[:wave_port],
-            ignored_layers=[:ignored],
             postrender_ops=[
                 (
-                    "substrates",
+                    "substrate",
                     SolidModels.union_geom!,
-                    ("chip_outline_L1_extrusion", "chip_outline_L2_extrusion", 3, 3)
+                    ("chip_area_extrusion", "chip_area_extrusion", 3, 3)
                 ),
                 (
                     "vacuum",
                     SolidModels.difference_geom!,
-                    ("simulated_area_extrusion", "substrates", 3, 3)
+                    ("simulated_area_extrusion", "substrate", 3, 3)
                 ),
                 (
                     "base_metal",
@@ -1265,17 +1276,15 @@
                 )
             ],
             retained_physical_groups=[
-                ("substrates", 3),
+                ("substrate", 3),
                 ("vacuum", 3),
                 ("base_metal", 2),
-                ("wave_port_L1_1", 2),
-                ("wave_port_L1_2", 2),
-                ("wave_port_L1_3", 2),
-                ("wave_port_L1_4", 2),
-                ("wave_port_L2_5", 2),
-                ("wave_port_L2_6", 2)
+                ("wave_port_1", 2),
+                ("wave_port_2", 2),
+                ("wave_port_3", 2),
+                ("wave_port_4", 2),
+                ("wave_port_5", 2)
             ],
-            solidmodel=true,
             simulation=true
         )
 
@@ -1284,39 +1293,35 @@
         render!(sm, floorplan, target)
 
         # Check the specified groups are kept
-        @test SolidModels.hasgroup(sm, "substrates", 3)
+        @test SolidModels.hasgroup(sm, "substrate", 3)
         @test SolidModels.hasgroup(sm, "vacuum", 3)
         @test SolidModels.hasgroup(sm, "base_metal", 2)
-        @test SolidModels.hasgroup(sm, "wave_port_L1_1", 2)
-        @test SolidModels.hasgroup(sm, "wave_port_L1_2", 2)
-        @test SolidModels.hasgroup(sm, "wave_port_L1_3", 2)
-        @test SolidModels.hasgroup(sm, "wave_port_L1_4", 2)
-        @test SolidModels.hasgroup(sm, "wave_port_L2_5", 2)
-        @test SolidModels.hasgroup(sm, "wave_port_L2_6", 2)
+        @test SolidModels.hasgroup(sm, "wave_port_1", 2)
+        @test SolidModels.hasgroup(sm, "wave_port_2", 2)
+        @test SolidModels.hasgroup(sm, "wave_port_3", 2)
+        @test SolidModels.hasgroup(sm, "wave_port_4", 2)
+        @test SolidModels.hasgroup(sm, "wave_port_5", 2)
 
         # The physical groups should be reindexed in decreasing order of dimension, and then
         # alphabetically
-        @test sm["substrates", 3].grouptag == 1
+        @test sm["substrate", 3].grouptag == 1
         @test sm["vacuum", 3].grouptag == 2
         @test sm["base_metal", 2].grouptag == 3
-        @test sm["wave_port_L1_1", 2].grouptag == 4
-        @test sm["wave_port_L1_2", 2].grouptag == 5
-        @test sm["wave_port_L1_3", 2].grouptag == 6
-        @test sm["wave_port_L1_4", 2].grouptag == 7
-        @test sm["wave_port_L2_5", 2].grouptag == 8
-        @test sm["wave_port_L2_6", 2].grouptag == 9
+        @test sm["wave_port_1", 2].grouptag == 4
+        @test sm["wave_port_2", 2].grouptag == 5
+        @test sm["wave_port_3", 2].grouptag == 6
+        @test sm["wave_port_4", 2].grouptag == 7
+        @test sm["wave_port_5", 2].grouptag == 8
         @test length(SolidModels.dimgroupdict(sm, 3)) == 2
-        @test length(SolidModels.dimgroupdict(sm, 2)) == 7
+        @test length(SolidModels.dimgroupdict(sm, 2)) == 6
         @test length(SolidModels.dimgroupdict(sm, 1)) == 0
         @test length(SolidModels.dimgroupdict(sm, 0)) == 0
 
         # Verify the wave ports have the expected bounds
-        bbox_port1 = SolidModels.bounds3d(sm["wave_port_L1_1", 2])
-        bbox_port2 = SolidModels.bounds3d(sm["wave_port_L1_2", 2])
-        bbox_port3 = SolidModels.bounds3d(sm["wave_port_L1_3", 2])
-        bbox_port4 = SolidModels.bounds3d(sm["wave_port_L1_4", 2])
-        bbox_port5 = SolidModels.bounds3d(sm["wave_port_L2_5", 2])
-        bbox_port6 = SolidModels.bounds3d(sm["wave_port_L2_6", 2])
+        bbox_port1 = SolidModels.bounds3d(sm["wave_port_1", 2])
+        bbox_port2 = SolidModels.bounds3d(sm["wave_port_2", 2])
+        bbox_port3 = SolidModels.bounds3d(sm["wave_port_3", 2])
+        bbox_port4 = SolidModels.bounds3d(sm["wave_port_4", 2])
         @test all(
             isapprox.(
                 bbox_port1,
@@ -1389,21 +1394,176 @@
                 atol=1e-6
             )
         )
+    end
+
+    @testset "SolidModels wave ports flip chip" begin
+        g = SchematicGraph("test")
+        # Create 4 paths in the +x, +y, -x, and -y directions
+        x_start, x_end = 150μm, 475μm
+        y_start, y_end = 100μm, 500μm
+        path_sty = Paths.SimpleCPW(10μm, 6μm)
+        pa1 = Path(x_start, 0μm; name="path1", metadata=BASE_NEGATIVE)
+        straight!(pa1, x_end - x_start, path_sty)
+        pa1_node = add_node!(g, pa1)
+        pa2 = Path(0μm, y_start; α0=π / 2, name="path2", metadata=BASE_NEGATIVE)
+        straight!(pa2, y_end - y_start, path_sty)
+        pa2_node = add_node!(g, pa2)
+        pa3 = Path(-x_start, 0μm; α0=π, name="path3", metadata=BASE_NEGATIVE)
+        straight!(pa3, x_end - x_start, path_sty)
+        pa3_node = add_node!(g, pa3)
+        pa4 = Path(0μm, -y_start; α0=-π / 2, name="path4", metadata=BASE_NEGATIVE)
+        straight!(pa4, y_end - y_start, path_sty)
+        pa4_node = add_node!(g, pa4)
+
+        floorplan = plan(g)
+
+        # Chip/sim area smaller than floorplan bounds
+        halo_dist = -100μm
+        chip_area = union2d(halo(bounds(floorplan), halo_dist))
+        sim_area = chip_area
+
+        render!(floorplan.coordinate_system, chip_area, SemanticMeta(:chip_outline))
+        render!(
+            floorplan.coordinate_system,
+            chip_area,
+            SemanticMeta(:chip_outline, level=2)
+        )
+        render!(
+            floorplan.coordinate_system,
+            only_solidmodel(sim_area),
+            SemanticMeta(:simulated_area)
+        )
+        render!(
+            floorplan.coordinate_system,
+            only_solidmodel(chip_area),
+            SemanticMeta(:writeable_area)
+        )
+
+        # Add a wave port manually on the xmin boundary of L1
+        bbox = bounds(sim_area)
+        x1, y1 = bbox.ll.x, (bbox.ll.y + bbox.ur.y) / 2
+        wave_port_width1 = (bbox.ur.y - bbox.ll.y) / 2
+        line = LineSegment(
+            Point(x1, y1 - wave_port_width1 / 2),
+            Point(x1, y1 + wave_port_width1 / 2)
+        )
+        render!(
+            floorplan.coordinate_system,
+            only_simulated(line),
+            SemanticMeta(:wave_port, level=1)
+        )
+
+        # Add a wave port manually on the ymax boundary of L2
+        x2, y2 = (bbox.ll.x + bbox.ur.x) / 2, bbox.ur.y
+        wave_port_width2 = (bbox.ur.x - bbox.ll.x) / 2
+        line = LineSegment(
+            Point(x2 - wave_port_width2 / 2, y2),
+            Point(x2 + wave_port_width2 / 2, y2)
+        )
+        render!(
+            floorplan.coordinate_system,
+            only_simulated(line),
+            SemanticMeta(:wave_port, level=2)
+        )
+
+        check!(floorplan)
+        build!(floorplan)
+
+        # Render to a solid model
+        tech = ProcessTechnology(
+            (;
+                base_negative=GDSMeta(),
+                simulated_area=GDSMeta(2),
+                chip_outline=GDSMeta(3),
+                writeable_area=GDSMeta(4),
+                wave_port=GDSMeta(5)
+            ),
+            (;
+                height=(; simulated_area=-1mm, wave_port=[-300μm, -400μm]),
+                thickness=(;
+                    simulated_area=2mm,
+                    chip_outline=[250μm, 250μm],
+                    wave_port=[700μm, 900μm]
+                ),
+                chip_thicknesses=[250μm, 250μm],
+                flipchip_gaps=[250μm]
+            )
+        )
+        target = SchematicDrivenLayout.SolidModelTarget(
+            tech;
+            bounding_layers=[:simulated_area],
+            substrate_layers=[:chip_outline],
+            levelwise_layers=[:chip_outline, :wave_port],
+            indexed_layers=[:port, :wave_port],
+            wave_port_layers=[:wave_port],
+            ignored_layers=[:ignored],
+            postrender_ops=[
+                (
+                    "substrates",
+                    SolidModels.union_geom!,
+                    ("chip_outline_L1_extrusion", "chip_outline_L2_extrusion", 3, 3)
+                ),
+                (
+                    "vacuum",
+                    SolidModels.difference_geom!,
+                    ("simulated_area_extrusion", "substrates", 3, 3)
+                ),
+                (
+                    "base_metal",
+                    SolidModels.difference_geom!,
+                    ("writeable_area", "base_negative")
+                )
+            ],
+            retained_physical_groups=[
+                ("substrates", 3),
+                ("vacuum", 3),
+                ("base_metal", 2),
+                ("wave_port_L1_1", 2),
+                ("wave_port_L2_2", 2)
+            ],
+            solidmodel=true,
+            simulation=true
+        )
+
+        sm = SolidModel("test", overwrite=true)
+
+        render!(sm, floorplan, target)
+
+        # Check the specified groups are kept
+        @test SolidModels.hasgroup(sm, "substrates", 3)
+        @test SolidModels.hasgroup(sm, "vacuum", 3)
+        @test SolidModels.hasgroup(sm, "base_metal", 2)
+        @test SolidModels.hasgroup(sm, "wave_port_L1_1", 2)
+        @test SolidModels.hasgroup(sm, "wave_port_L2_2", 2)
+
+        # The physical groups should be reindexed in decreasing order of dimension, and then
+        # alphabetically
+        @test sm["substrates", 3].grouptag == 1
+        @test sm["vacuum", 3].grouptag == 2
+        @test sm["base_metal", 2].grouptag == 3
+        @test sm["wave_port_L1_1", 2].grouptag == 4
+        @test sm["wave_port_L2_2", 2].grouptag == 5
+        @test length(SolidModels.dimgroupdict(sm, 3)) == 2
+        @test length(SolidModels.dimgroupdict(sm, 2)) == 3
+        @test length(SolidModels.dimgroupdict(sm, 1)) == 0
+        @test length(SolidModels.dimgroupdict(sm, 0)) == 0
+
+        # Verify the wave ports have the expected bounds
+        bbox_port1 = SolidModels.bounds3d(sm["wave_port_L1_1", 2])
+        bbox_port2 = SolidModels.bounds3d(sm["wave_port_L2_2", 2])
         @test all(
             isapprox.(
-                bbox_port5,
+                bbox_port1,
                 ustrip.(
                     SolidModels.STP_UNIT,
                     [
                         x1,
                         y1 - wave_port_width1 / 2,
-                        tech.parameters.flipchip_gaps[1] -
-                        tech.parameters.height.wave_port[2] -
-                        tech.parameters.thickness.wave_port[2],
+                        tech.parameters.height.wave_port[1],
                         x1,
                         y1 + wave_port_width1 / 2,
-                        tech.parameters.flipchip_gaps[1] -
-                        tech.parameters.height.wave_port[2]
+                        tech.parameters.height.wave_port[1] +
+                        tech.parameters.thickness.wave_port[1]
                     ]
                 ),
                 atol=1e-6
@@ -1411,7 +1571,7 @@
         )
         @test all(
             isapprox.(
-                bbox_port6,
+                bbox_port2,
                 ustrip.(
                     SolidModels.STP_UNIT,
                     [
