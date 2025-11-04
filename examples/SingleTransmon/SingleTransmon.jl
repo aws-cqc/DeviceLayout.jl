@@ -175,7 +175,7 @@ function single_transmon(;
     # Adjust mesh_scale to increase the resolution of the mesh, < 1 will result in greater
     # resolution near edges of the geometry.
     SolidModels.set_gmsh_option("General.Verbosity", 1)
-    SolidModels.set_mesh_order(2)
+    SolidModels.mesh_order(2)
     render!(sm, floorplan, tech)
 
     if save_mesh

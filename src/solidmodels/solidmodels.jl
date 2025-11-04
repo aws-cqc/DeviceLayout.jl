@@ -21,14 +21,19 @@ const MESHSIZE_PARAMS = Dict{
 }(
     :mesh_scale => 1.0,
     :mesh_order => 1,
-    :global_α => 0.9
+    :global_α => 0.9,
+    :cp => Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}(),
+    :ct => Dict{
+        Tuple{Float64, Float64},
+        KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
+    }()
 ) # initial defaults
 export MESHSIZE_PARAMS
 export mesh_order,
     mesh_scale,
     mesh_grading_default,
     add_mesh_size_point,
-    set_gmsh_option,
+    gmsh_option,
     finalize_size_fields!,
     mesh_control_points,
     mesh_control_trees,
