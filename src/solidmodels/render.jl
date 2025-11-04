@@ -475,8 +475,8 @@ set_gmsh_option("General.FileName", "output.msh")
 set_gmsh_option(Dict("Mesh.Algorithm" => 6, "General.NumThreads" => 4))
 ```
 """
-set_gmsh_option(s, o::Number) = gmsh.option.set_number(s, o)
-set_gmsh_option(s, o::AbstractString) = gmsh.option.set_string(s, o)
+set_gmsh_option(s, o::Number) = SolidModels.gmsh.option.set_number(s, o)
+set_gmsh_option(s, o::AbstractString) = SolidModels.gmsh.option.set_string(s, o)
 function set_gmsh_option(s, d::Dict, default)
     return set_gmsh_option(s, get(d, s, default))
 end
