@@ -1369,5 +1369,54 @@
         @test all(sort(collect(keys(SolidModels.mesh_control_points()))) .== [(0.5, -1.0)])
         SolidModels.finalize_size_fields!()
         @test all(sort(collect(keys(SolidModels.mesh_control_trees()))) .== [(0.5, 0.9)])
+
+        # Check that the KDTree implementation matches a brute force search
+        import Random: seed!, default_rng, rand
+        rng = seed!(default_rng(), 111)
+        SolidModels.clear_mesh_control_points!()
+
+        # Add 5 random (h,a) fields made up of 100 points.
+        for n = 1:5
+            SolidModels.add_mesh_size_point(
+                rand(rng, SVector{3, Float64}, 100);
+                h=rand(rng, Float64),
+                α=rand(rng, Float64)
+            )
+        end
+
+        SolidModels.finalize_size_fields!()
+        function bruteforce(x, y, z)
+            # Alternative implementation with brute force search for testing.
+            l = Inf64
+            # Explicit type tag here to remove hypothetical type instability.
+            for ((h, α), vs) in SolidModels.MESHSIZE_PARAMS[:cp]::Dict{
+                Tuple{Float64, Float64},
+                Vector{SVector{3, Float64}}
+            }
+                local_α = α < 0 ? SolidModels.MESHSIZE_PARAMS[:global_α] : α
+                for v in vs
+                    d = sqrt((x - v[1])^2 + (y - v[2])^2 + (z - v[3])^2)
+                    l = min(
+                        l,
+                        h * max(
+                            SolidModels.MESHSIZE_PARAMS[:mesh_scale]::Float64,
+                            (d / h)^local_α
+                        )
+                    )
+                end
+            end
+            return l
+        end
+
+        for p in rand(rng, SVector{3, Float64}, 100)
+            @test bruteforce(p...) ≈ SolidModels.gmsh_meshsize(
+                Cint(0),
+                Cint(0),
+                Cdouble(p[1]),
+                Cdouble(p[2]),
+                Cdouble(p[3]),
+                Cdouble(0.0)
+            )
+        end
     end
 end
