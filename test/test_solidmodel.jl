@@ -1307,11 +1307,12 @@
     end
 
     @testset "Mesh size modifications" begin
+        using StaticArrays
+        SolidModels.gmsh.is_initialized() == 0 && SolidModels.gmsh.initialize()
+
         SolidModels.reset_mesh_control!()
         SolidModels.clear_mesh_control_points!()
         SolidModels.finalize_size_fields!()
-
-        SolidModels.gmsh.initialize()
 
         @test SolidModels.mesh_scale() == 1.0
         @test SolidModels.mesh_grading_default() == 0.9
