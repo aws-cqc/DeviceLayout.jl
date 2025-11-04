@@ -452,7 +452,28 @@ MESHSIZE_PARAMS[:global_α] = 0.9
     set_gmsh_option(s, d::Dict, default)
     set_gmsh_option(d::Dict)
 
-Set options within the gmsh API.
+Set gmsh configuration options.
+
+# Methods
+
+  - `set_gmsh_option(option_name, value)`: Set a single option to a numeric or string value
+  - `set_gmsh_option(option_name, dict, default)`: Set option from dict with fallback to default
+  - `set_gmsh_option(dict)`: Set multiple options from a dictionary
+
+# Arguments
+
+  - `s`: Option name as string (e.g., "Mesh.Algorithm", "General.NumThreads")
+  - `o`: Option value (Number or String)
+  - `d`: Dictionary containing option name-value pairs
+  - `default`: Default value if option not found in dictionary
+
+# Examples
+
+```julia
+set_gmsh_option("Mesh.Algorithm", 6)
+set_gmsh_option("General.FileName", "output.msh")
+set_gmsh_option(Dict("Mesh.Algorithm" => 6, "General.NumThreads" => 4))
+```
 """
 set_gmsh_option(s, o::Number) = gmsh.option.set_number(s, o)
 set_gmsh_option(s, o::AbstractString) = gmsh.option.set_string(s, o)
@@ -466,28 +487,51 @@ function set_gmsh_option(d::Dict{String, Union{Float64, String}})
 end
 
 """
+    get_gmsh_number(s)
+
+Get a numeric option value from gmsh.
+
+# Arguments
+
+  - `s`: Option name as string (e.g., "Mesh.ElementOrder")
+
+Returns the current numeric value of the specified gmsh option.
+"""
+get_gmsh_number(s) = gmsh.option.get_number(s)
+
+"""
+    get_gmsh_string(s)
+
+Get a string option value from gmsh.
+
+# Arguments
+
+  - `s`: Option name as string (e.g., "General.FileName")
+
+Returns the current string value of the specified gmsh option.
+"""
+get_gmsh_string(s) = gmsh.option.get_string(s)
+
+"""
     mesh_scale()
     mesh_scale(s)
 
-Get and set the mesh scale which applies multiplicatively to the smallest size specified by any size field
-function, comparing to the formula in the `MeshSized` style, this results in all mesh size
-fields being rescaled where `h` ← `mesh_scale` * `h`.
+Get or set the global mesh scaling factor.
+
+The mesh scale applies multiplicatively to all mesh size fields: `h_effective = mesh_scale * h`.
 """
 mesh_scale(s) = MESHSIZE_PARAMS[:mesh_scale]::Float64 = s
 mesh_scale() = MESHSIZE_PARAMS[:mesh_scale]::Float64
 
 """
     mesh_order()
-    mesh_order(order::Number, higher_order_optimize::Number=1)
+    mesh_order(order, higher_order_optimize=1)
 
-Get or set the order of polynomials to use in representing the geometry, this
-is important if curved geometric features are present, `mesh_order == 1` will represent
-the geometry with linear polynomials, whilst `mesh_order == 2` will represent it with
-quadratic polynomials, and `mesh_order == 3` with cubic polynomials. Increasing the value
-of `mesh_order` results in greater geometric fidelity, whilst making meshing more
-difficult (and prone to errors).
+Get or set the mesh element order and optimization level.
+
+Higher order elements provide better geometric fidelity for curved boundaries but increase meshing complexity.
 """
-mesh_order() = SolidModels.gmsh.get_number("Mesh.ElementOrder")
+mesh_order() = SolidModels.gmsh.option.get_number("Mesh.ElementOrder")
 function mesh_order(order::Number, higher_order_optimize::Number=1)
     set_gmsh_option("Mesh.ElementOrder", order)
     set_gmsh_option("Mesh.HighOrderOptimize", higher_order_optimize)
@@ -498,10 +542,9 @@ end
     mesh_grading_default()
     mesh_grading_default(α)
 
-Get or set the default value of `α` to use for `MeshSized` entities where `α`
-is set to less than 0, `global_α ∈ (0, 1]` is particularly used for the default grading
-of `Path` entities. A value closer to 1 can result in an unstable meshing algorithm in gmsh,
-particularly for complex geometries.
+Get or set the default mesh grading parameter.
+
+Controls how rapidly mesh size changes with distance from control points. Must satisfy 0 < α ≤ 1.
 """
 mesh_grading_default() = MESHSIZE_PARAMS[:global_α]::Float64
 function mesh_grading_default(α)
@@ -527,7 +570,7 @@ Add a mesh size control point to the global mesh sizing parameters.
 The point is added to a collection grouped by `(h, α)` values for efficient mesh size field computation.
 """
 function add_mesh_size_point(p; h, α=-1)
-    return push!(
+    return append!(
         get!(MESHSIZE_PARAMS[:cp], (h, α < 0 ? -1 : α), Vector{SVector{3, Float64}}()),
         reinterpret(SVector{3, Float64}, p)
     )
@@ -603,6 +646,7 @@ end
 Reset the mesh scaling and grading to the original defaults of (1.0, 0.9).
 """
 function reset_mesh_control!()
+    set_gmsh_option("Mesh.ElementOrder", 1)
     mesh_scale(1.0)
     return mesh_grading_default(0.9)
 end
@@ -622,7 +666,7 @@ end
 !!! warning "Deprecated"
 
     This struct is deprecated. Use [`mesh_scale`](@ref), [`mesh_grading_default`](@ref),
-    [`mesh_order`](@ref), and [`set_gmsh_option`](@ref) instead.
+    [`mesh_order`](@ref), and [`gmsh_option`](@ref) instead.
 
 MeshingParameters contains high level parameters to specify mesh sizing
 fields throughout the domain.
@@ -748,14 +792,14 @@ function render!(
     end
     if meshing_parameters.surface_mesh_algorithm != mp_default.surface_mesh_algorithm
         Base.depwarn(
-            "Specifying the surface meshing algorithm using `MeshingParameters` is deprecated, use [`set_gmsh_option`](@ref) or `gmsh_options` instead.",
+            "Specifying the surface meshing algorithm using `MeshingParameters` is deprecated, use [`gmsh_option`](@ref) or `gmsh_options` instead.",
             :depwarn
         )
         gmsh_options["Mesh.Algorithm"] = meshing_parameters.surface_mesh_algorithm
     end
     if meshing_parameters.volume_mesh_algorithm != mp_default.volume_mesh_algorithm
         Base.depwarn(
-            "Specifying the surface meshing algorithm using `MeshingParameters` is deprecated, use [`set_gmsh_option`](@ref) or `gmsh_options` instead.",
+            "Specifying the surface meshing algorithm using `MeshingParameters` is deprecated, use [`gmsh_option`](@ref) or `gmsh_options` instead.",
             :depwarn
         )
         gmsh_options["Mesh.Algorithm3D"] = meshing_parameters.volume_mesh_algorithm
@@ -768,9 +812,7 @@ function render!(
         merge!(gmsh_options, meshing_parameters.options)
     end
 
-    for (k, v) ∈ gmsh_options
-        set_gmsh_option(k, v)
-    end
+    set_gmsh_option(gmsh_options)
 
     flat = flatten(cs)
 

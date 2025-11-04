@@ -1305,4 +1305,68 @@
         ) SolidModels.fragment_geom!(sm, ["tile00", "foo"], ["tile01", "bar"])) ==
               [(2, 1), (2, 2)]
     end
+
+    @testset "Mesh size modifications" begin
+        SolidModels.reset_mesh_control!()
+        SolidModels.clear_mesh_control_points!()
+        SolidModels.finalize_size_fields!()
+
+        SolidModels.gmsh.initialize()
+
+        @test SolidModels.mesh_scale() == 1.0
+        @test SolidModels.mesh_grading_default() == 0.9
+        @test SolidModels.mesh_order() == 1
+        @test isempty(SolidModels.mesh_control_points())
+        @test isempty(SolidModels.mesh_control_trees())
+
+        SolidModels.mesh_scale(0.5)
+        SolidModels.mesh_grading_default(0.85)
+        SolidModels.mesh_order(2)
+
+        @test SolidModels.mesh_scale() == 0.5
+        @test SolidModels.mesh_grading_default() == 0.85
+        @test SolidModels.mesh_order() == 2
+
+        SolidModels.add_mesh_size_point([1.0, 2.0, 3.0]; h=0.5, α=0.75)
+        SolidModels.add_mesh_size_point([2.0, 3.0, 4.0]; h=0.75, α=-1)
+
+        @test !isempty(SolidModels.mesh_control_points())
+        @test isempty(SolidModels.mesh_control_trees())
+        SolidModels.finalize_size_fields!()
+        @test !isempty(SolidModels.mesh_control_trees())
+
+        @test all(
+            sort(collect(keys(SolidModels.mesh_control_points()))) .==
+            [(0.5, 0.75), (0.75, -1.0)]
+        )
+        @test all(
+            sort(collect(keys(SolidModels.mesh_control_trees()))) .==
+            [(0.5, 0.75), (0.75, 0.85)]
+        )
+
+        SolidModels.reset_mesh_control!()
+        SolidModels.clear_mesh_control_points!()
+        SolidModels.finalize_size_fields!()
+
+        @test SolidModels.mesh_scale() == 1.0
+        @test SolidModels.mesh_grading_default() == 0.9
+        @test SolidModels.mesh_order() == 1
+        @test isempty(SolidModels.mesh_control_points())
+        @test isempty(SolidModels.mesh_control_trees())
+
+        p = [SVector(1.0, 2.0, 3.0), SVector(2.0, 3.0, 4.0), SVector(3.0, 4.0, 5.0)]
+
+        SolidModels.add_mesh_size_point(p; h=0.5, α=-1)
+        @test all(sort(collect(keys(SolidModels.mesh_control_points()))) .== [(0.5, -1.0)])
+        SolidModels.finalize_size_fields!()
+        @test all(sort(collect(keys(SolidModels.mesh_control_trees()))) .== [(0.5, 0.9)])
+
+        SolidModels.clear_mesh_control_points!()
+        p = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
+
+        SolidModels.add_mesh_size_point(p; h=0.5, α=-1)
+        @test all(sort(collect(keys(SolidModels.mesh_control_points()))) .== [(0.5, -1.0)])
+        SolidModels.finalize_size_fields!()
+        @test all(sort(collect(keys(SolidModels.mesh_control_trees()))) .== [(0.5, 0.9)])
+    end
 end
