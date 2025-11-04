@@ -456,9 +456,9 @@ function route!(
     )
     _route!(path, p_end, α_end, rule, sty, waypoints, waydirs)
     isapprox_angle(α1(path), α_end) || @error """
-                                                          Could not automatically route to destination with the correct arrival angle \
-                                                          (got $(α1(path)) instead of $α_end). Try adding or adjusting waypoints.\
-                                                          """ _group = :route
+                                                        Could not automatically route to destination with the correct arrival angle \
+                                                        (got $(α1(path)) instead of $α_end). Try adding or adjusting waypoints.\
+                                                        """ _group = :route
     pts = promote(p1(path), p_end)
     return isapprox(pts...; atol=atol) || @error """
                  Could not automatically route to destination with the correct arrival point \

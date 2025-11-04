@@ -18,7 +18,11 @@ const MESHSIZE_PARAMS = Dict{
             KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
         }
     }
-}()
+}(
+    :mesh_scale => 1.0,
+    :mesh_order => 1,
+    :global_α => 0.9
+) # initial defaults
 export MESHSIZE_PARAMS
 export mesh_order,
     mesh_scale,
@@ -202,9 +206,8 @@ struct PhysicalGroup <: AbstractPhysicalGroup
     grouptag::Int32
 end
 
-summary(
-    pg::PhysicalGroup
-) = "Physical Group $(pg.name) of dimension $(pg.dim) with $(length(dimtags(pg))) entities"
+summary(pg::PhysicalGroup) =
+    "Physical Group $(pg.name) of dimension $(pg.dim) with $(length(dimtags(pg))) entities"
 Base.show(io::IO, pg::PhysicalGroup) = print(io, summary(pg))
 
 """

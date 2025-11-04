@@ -63,19 +63,19 @@ end
 dir = mktempdir()
 SUITE["polygons"]["rectangles"]["render"] = @benchmarkable rectangles(10_000)
 SUITE["polygons"]["rectangles"]["render_gds"] =
-    @benchmarkable rectangles(10_000, output_dir=$dir)
+    @benchmarkable rectangles(10_000, output_dir=($dir))
 SUITE["polygons"]["rectangles"]["render_units"] =
     @benchmarkable rectangles_units(10_000, $nm)
 SUITE["polygons"]["rectangles"]["render_units_gds"] =
-    @benchmarkable rectangles_units(10_000, $nm, output_dir=$dir)
+    @benchmarkable rectangles_units(10_000, $nm, output_dir=($dir))
 SUITE["polygons"]["rectangles"]["render_convertunits"] =
     @benchmarkable rectangles_units(10_000, $μm)
 SUITE["polygons"]["circles"]["direct"] = @benchmarkable circles_direct(1_000)
 SUITE["polygons"]["circles"]["direct_gds"] =
-    @benchmarkable circles_direct(1_000, output_dir=$dir)
+    @benchmarkable circles_direct(1_000, output_dir=($dir))
 SUITE["polygons"]["circles"]["direct_units"] =
     @benchmarkable circles_direct_units(1_000, $nm)
 SUITE["polygons"]["circles"]["direct_units_gds"] =
-    @benchmarkable circles_direct_units(1_000, $nm, output_dir=$dir)
+    @benchmarkable circles_direct_units(1_000, $nm, output_dir=($dir))
 SUITE["polygons"]["circles"]["entity_delta"] = @benchmarkable circles_entity_delta(1_000)
 SUITE["polygons"]["circles"]["entity_atol"] = @benchmarkable circles_entity_atol(1_000)
