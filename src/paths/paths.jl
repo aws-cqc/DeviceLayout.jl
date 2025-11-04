@@ -1206,7 +1206,7 @@ function terminate!(
 ) where {T}
     termlen = gap + rounding
     iszero(termlen) && return
-    termsty = Termination(pa, rounding; initial=initial, cpwopen=!iszero(gap))
+    termsty = Termination(pa, rounding; initial=initial, cpwopen=(!iszero(gap)))
     # Nonzero rounding: splice and delete to make room for rounded part
     if !iszero(rounding)
         orig_sty = initial ? undecorated(style0(pa)) : laststyle(pa)
@@ -1237,9 +1237,14 @@ function terminate!(
             )
         splice!(pa, split_idx, split(split_node, split_len))
         termsty = if initial
-            Termination(Path(pa[2:end]), rounding; initial=initial, cpwopen=!iszero(gap))
+            Termination(Path(pa[2:end]), rounding; initial=initial, cpwopen=(!iszero(gap)))
         else
-            Termination(Path(pa[1:(end - 1)]), rounding; initial=initial, cpwopen=!iszero(gap))
+            Termination(
+                Path(pa[1:(end - 1)]),
+                rounding;
+                initial=initial,
+                cpwopen=(!iszero(gap))
+            )
         end
     end
 

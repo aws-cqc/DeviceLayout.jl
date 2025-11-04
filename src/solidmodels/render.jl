@@ -528,11 +528,7 @@ The point is added to a collection grouped by `(h, α)` values for efficient mes
 """
 function add_mesh_size_point(p; h, α=-1)
     return push!(
-        get!(
-            SolidModels.MESHSIZE_PARAMS[:cp],
-            (h, α < 0 ? -1 : α),
-            Vector{SVector{3, Float64}}()
-        ),
+        get!(MESHSIZE_PARAMS[:cp], (h, α < 0 ? -1 : α), Vector{SVector{3, Float64}}()),
         reinterpret(SVector{3, Float64}, p)
     )
 end
@@ -552,18 +548,16 @@ function finalize_size_fields!()
     # distance for this subset. Thereby the comparison over lengths need only be over the
     # number of different (h, α) combinations. This is most impactful for large graphs with
     # many duplicates of a given component, where there will be many points per (h, α).
-    SolidModels.MESHSIZE_PARAMS[:ct] = Dict{
+    MESHSIZE_PARAMS[:ct] = Dict{
         Tuple{Float64, Float64},
         KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
     }()
-    for (h, α) in keys(SolidModels.MESHSIZE_PARAMS[:cp])
+    for (h, α) in keys(MESHSIZE_PARAMS[:cp])
         # Substitute any negative grading value for the global default. Delaying this
         # substitution allows for modifying the size field after rendering, without needing
         # to recompute the locations of all control points.
-        SolidModels.MESHSIZE_PARAMS[:ct][(
-            h,
-            α < 0 ? SolidModels.MESHSIZE_PARAMS[:global_α] : α
-        )] = KDTree(SolidModels.MESHSIZE_PARAMS[:cp][(h, α)])
+        MESHSIZE_PARAMS[:ct][(h, α < 0 ? MESHSIZE_PARAMS[:global_α] : α)] =
+            KDTree(MESHSIZE_PARAMS[:cp][(h, α)])
     end
     return nothing
 end
@@ -581,7 +575,7 @@ If this dictionary is modified, by erasing points or adding points using
 to rebuild the KDTree from the data, else any resulting mesh will not reflect the change in
 data.
 """
-mesh_control_points() = SolidModels.MESHSIZE_PARAMS[:cp]
+mesh_control_points() = MESHSIZE_PARAMS[:cp]
 
 """
     mesh_control_trees()
@@ -591,7 +585,7 @@ Get the dictionary of KDTrees for efficient spatial queries of mesh size control
 Returns a `Dict{Tuple{Float64, Float64}, KDTree}` where keys are `(mesh_size, grading_parameter)`
 tuples and values are KDTrees for fast nearest-neighbor lookups.
 """
-mesh_control_trees() = SolidModels.MESHSIZE_PARAMS[:ct]
+mesh_control_trees() = MESHSIZE_PARAMS[:ct]
 
 """
     clear_mesh_control_points!()
@@ -599,8 +593,8 @@ mesh_control_trees() = SolidModels.MESHSIZE_PARAMS[:ct]
 Clear all mesh size control points and associated KDTrees.
 """
 function clear_mesh_control_points!()
-    empty!(SolidModels.MESHSIZE_PARAMS[:cp])
-    return empty!(SolidModels.MESHSIZE_PARAMS[:ct])
+    empty!(MESHSIZE_PARAMS[:cp])
+    return empty!(MESHSIZE_PARAMS[:ct])
 end
 
 """
@@ -823,8 +817,7 @@ function render!(
     # Synchronize the entities to the model, so can find subentities.
     _synchronize!(sm)
 
-    SolidModels.MESHSIZE_PARAMS[:cp] =
-        Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}()
+    MESHSIZE_PARAMS[:cp] = Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}()
     for ((h, α), dts) in sizeandgrading_dimtags
         iszero(h) && continue
         bdts = gmsh.model.get_boundary(dts, true, false, false) # line segments
@@ -835,7 +828,7 @@ function render!(
             curv = gmsh.model.get_curvature(
                 dim,
                 tag,
-                [bounds[1][1], (bounds[1][1] + bounds[2][1])/2, bounds[2][1]]
+                [bounds[1][1], (bounds[1][1] + bounds[2][1]) / 2, bounds[2][1]]
             )
             # Calculate a sampling rate on a per segment basis.
             if maximum(curv) <= 1e-14
@@ -849,13 +842,13 @@ function render!(
                 xyz = gmsh.model.get_value(
                     dim,
                     tag,
-                    [bounds[1][1], (bounds[1][1] + bounds[2][1])/2]
+                    [bounds[1][1], (bounds[1][1] + bounds[2][1]) / 2]
                 )
                 δ =
                     sqrt((xyz[1] - xyz[4])^2 + (xyz[2] - xyz[5])^2 + (xyz[3] - xyz[6])^2) /
                     2
                 mcurv = sum(curv) / length(curv)
-                l = 1/mcurv * (2 * atan(δ, 1/mcurv)) # rθ
+                l = 1 / mcurv * (2 * atan(δ, 1 / mcurv)) # rθ
                 Ns = cld(l, h)
             else
                 Ns = 11
@@ -872,7 +865,7 @@ function render!(
 
             append!(
                 get!(
-                    SolidModels.MESHSIZE_PARAMS[:cp],
+                    MESHSIZE_PARAMS[:cp],
                     (h, α < 0 ? -1 : α),
                     Vector{SVector{3, Float64}}()
                 ),
@@ -943,36 +936,23 @@ function gmsh_meshsize(
     if true
         l = Inf64
         # Explicit type tag here to remove hypothetical type instability.
-        for ((h, α), tree) in SolidModels.MESHSIZE_PARAMS[:ct]::Dict{
+        for ((h, α), tree) in MESHSIZE_PARAMS[:ct]::Dict{
             Tuple{Float64, Float64},
             KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
         }
-
             _, d::Float64 = nn(tree, SVector{3}(x, y, z))
-            l = min(
-                l,
-                h * max(SolidModels.MESHSIZE_PARAMS[:mesh_scale]::Float64, (d/h)^α)
-            )::Float64
+            l = min(l, h * max(MESHSIZE_PARAMS[:mesh_scale]::Float64, (d / h)^α))::Float64
         end
         return l
     else
         l = Inf64
         # Explicit type tag here to remove hypothetical type instability.
-        for ((h, α), vs) in SolidModels.MESHSIZE_PARAMS[:cp]::Dict{
-            Tuple{Float64, Float64},
-            Vector{SVector{3, Float64}}
-        }
-
-            local_α = α < 0 ? SolidModels.MESHSIZE_PARAMS[:global_α] : α
+        for ((h, α), vs) in
+            MESHSIZE_PARAMS[:cp]::Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}
+            local_α = α < 0 ? MESHSIZE_PARAMS[:global_α] : α
             for v in vs
                 d = sqrt((x - v[1])^2 + (y - v[2])^2 + (z - v[3])^2)
-                l = min(
-                    l,
-                    h * max(
-                        SolidModels.MESHSIZE_PARAMS[:mesh_scale]::Float64,
-                        (d/h)^local_α
-                    )
-                )
+                l = min(l, h * max(MESHSIZE_PARAMS[:mesh_scale]::Float64, (d / h)^local_α))
             end
         end
         return l
@@ -1270,11 +1250,12 @@ function _add_curve!(endpoints, seg::Paths.Turn, k::OpenCascade, z; kwargs...)
         end
         arclengths = range(zero(pathlength(seg)), pathlength(seg), length=n_arcs + 1)
         middle_pts = seg.(arclengths[(begin + 1):(end - 1)])
-        middle_tags = k.add_point.(
-            ustrip.(STP_UNIT, getx.(middle_pts)),
-            ustrip.(STP_UNIT, gety.(middle_pts)),
-            ustrip(STP_UNIT, z)
-        )
+        middle_tags =
+            k.add_point.(
+                ustrip.(STP_UNIT, getx.(middle_pts)),
+                ustrip.(STP_UNIT, gety.(middle_pts)),
+                ustrip(STP_UNIT, z)
+            )
         tags = [endpoints[1]; middle_tags; endpoints[2]]
         return k.add_circle_arc.(tags[1:(end - 1)], cen, tags[2:end], -1)
     end
@@ -1284,11 +1265,12 @@ end
 # Exact *interpolating* cubic BSpline in OCC
 # (occ.addBSpline and geo.addBSpline instead use control points, and geo.addSpline uses Catmull-Rom splines)
 function _add_curve!(endpoints, seg::Paths.BSpline, k::OpenCascade, z; kwargs...)
-    midpts = k.add_point.(
-        ustrip.(STP_UNIT, getx.(seg.p[2:(end - 1)])),
-        ustrip.(STP_UNIT, gety.(seg.p[2:(end - 1)])),
-        ustrip(STP_UNIT, z)
-    )
+    midpts =
+        k.add_point.(
+            ustrip.(STP_UNIT, getx.(seg.p[2:(end - 1)])),
+            ustrip.(STP_UNIT, gety.(seg.p[2:(end - 1)])),
+            ustrip(STP_UNIT, z)
+        )
     pts = [endpoints[1], midpts..., endpoints[2]]
     # Tangents for start and end as concatenated 3d vectors
     tangents = [
@@ -1335,11 +1317,12 @@ function _add_offset_curve!(
 )
     bspline_approx = bspline_approximation(Paths.offset(seg, offset); atol)
     newstarts = DeviceLayout.p0.(bspline_approx.segments)[2:end]
-    newpts = k.add_point.(
-        ustrip.(STP_UNIT, getx.(newstarts)),
-        ustrip.(STP_UNIT, gety.(newstarts)),
-        ustrip(STP_UNIT, z)
-    )
+    newpts =
+        k.add_point.(
+            ustrip.(STP_UNIT, getx.(newstarts)),
+            ustrip.(STP_UNIT, gety.(newstarts)),
+            ustrip(STP_UNIT, z)
+        )
     starts = [first(endpoints), newpts...]
     stops = [newpts..., last(endpoints)]
     endp_pairs = [[start, stop] for (start, stop) in zip(starts, stops)]
