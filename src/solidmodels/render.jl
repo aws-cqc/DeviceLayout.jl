@@ -614,7 +614,7 @@ Returns a `Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}` where key
 `(mesh_size, grading_parameter)` tuples and values are vectors of 3D points.
 
 If this dictionary is modified, by erasing points or adding points using
-[`add_mesh_size_point`](@ref), then it is necessary to call [`finalize_size_fields`](@ref)
+[`add_mesh_size_point`](@ref), then it is necessary to call [`finalize_size_fields!`](@ref)
 to rebuild the KDTree from the data, else any resulting mesh will not reflect the change in
 data.
 """
@@ -663,10 +663,11 @@ end
         options::Dict{String, Float64} = Dict{String, Float64}()
     end
 
+α
+
 !!! warning "Deprecated"
 
-    This struct is deprecated. Use [`mesh_scale`](@ref), [`mesh_grading_default`](@ref),
-    [`mesh_order`](@ref), and [`gmsh_option`](@ref) instead.
+    This struct is deprecated. See [`render!`](@ref)
 
 MeshingParameters contains high level parameters to specify mesh sizing
 fields throughout the domain.
@@ -737,14 +738,14 @@ Render `cs` to `sm`.
     Map all metadata to zero.
   - `gmsh_options`: Dictionary of gmsh option name-value pairs to set before meshing.
   - `meshing_parameters`: **Deprecated.** Use individual mesh control functions
-    [`mesh_scale`](@ref), [`mesh_order`](@ref) and [`mesh_grading_default`](@ref), along with
+    [`DeviceLayout.SolidModels.mesh_scale`](@ref), [`DeviceLayout.SolidModels.mesh_order`](@ref) and [`DeviceLayout.SolidModels.mesh_grading_default`](@ref), along with
     `gmsh_options` instead.
 
 Available postrendering operations include [`translate!`](@ref), [`extrude_z!`](@ref), [`revolve!`](@ref),
 [`union_geom!`](@ref), [`intersect_geom!`](@ref), [`difference_geom!`](@ref), [`fragment_geom!`](@ref), and [`box_selection`](@ref).
 (The geometric Boolean operations are only available for models using the OpenCASCADE kernel.)
 
-Additional keyword arguments are passed to [`SolidModels.to_primitives`](@ref) (which falls back to
+Additional keyword arguments are passed to [`DeviceLayout.SolidModels.to_primitives`](@ref) (which falls back to
 [`to_polygons`](@ref)) and may be used for
 certain entity types to control how entities of `cs` are converted to primitives and added to `sm`.
 """

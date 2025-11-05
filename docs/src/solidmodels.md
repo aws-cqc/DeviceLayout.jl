@@ -68,10 +68,47 @@ Other operations:
 
 ### Meshing
 
-Entities can carry mesh sizing information with them when rendered to a `SolidModel`. Many entities will default to a maximal size to reasonably resolve the geometry. This is particularly useful together with adaptive mesh refinement to efficiently refine your mesh to minimize estimated error with as few elements as possible. You can also style entities with [`MeshSized`](@ref) to manually control mesh sizing, and provide `MeshingParameters` to `render!` using the `meshing_parameters` keyword argument.
+Entities can carry mesh sizing information with them when rendered to a `SolidModel`. Many
+entities will default to a maximal size to reasonably resolve the geometry. This is
+particularly useful together with adaptive mesh refinement to efficiently refine your mesh
+to minimize estimated error with as few elements as possible. You can also style entities
+with [`MeshSized`](@ref) to manually control mesh sizing, the [`SolidModels.mesh_scale`](@ref),
+[`SolidModels.mesh_order`](@ref) and [`SolidModels.mesh_grading_default`](@ref) methods are used to modify the
+global default parameters used in each sizing field (see [`MeshSized`](@ref)).
+
+Size fields within a `SolidModel` are specified in terms of control points, which are
+spatial locations combined with an `(h, α)` as in [`MeshSized`](@ref). When a model is
+rendered, a set of control points are computed from the geometry, and these are then used to
+create `KDTree` structures to allow for rapid evaluation. Additional points can be manually
+inserted into a `SolidModel` after `render!` is called, and the global size parameters
+[`SolidModels.mesh_scale`](@ref), [`SolidModels.mesh_order`](@ref) and [`SolidModels.mesh_grading_default`](@ref) modified without requiring `render!`
+to be called again. This allows for iteration on the mesh for a given fixed geometry. Manual
+modification of the control points is in general not necessary but can be achieved through
+[`DeviceLayout.SolidModels.add_mesh_size_point`](@ref), [`DeviceLayout.SolidModels.finalize_size_fields!`](@ref),
+[`DeviceLayout.SolidModels.clear_mesh_control_points!`](@ref) and
+[`DeviceLayout.SolidModels.reset_mesh_control!`](@ref).
+
+!!! info
+
+    If [`SolidModels.mesh_control_points`](@ref) is modified, then it is important to call
+    [`SolidModels.finalize_size_fields!`](@ref) in order to ensure that the `KDTree` are rebuilt.
+    Additionally, to generate a new mesh `SolidModels.gmsh.model.mesh.clear()` must be called
+    otherwise `gmsh` will return only any previously generated mesh.
 
 ```@docs
     SolidModels.MeshingParameters
+    SolidModels.mesh_order
+    SolidModels.mesh_scale
+    SolidModels.mesh_grading_default
+    SolidModels.set_gmsh_option
+    SolidModels.get_gmsh_number
+    SolidModels.get_gmsh_string
+    SolidModels.mesh_control_points
+    SolidModels.mesh_control_trees
+    SolidModels.add_mesh_size_point
+    SolidModels.finalize_size_fields!
+    SolidModels.clear_mesh_control_points!
+    SolidModels.reset_mesh_control!
 ```
 
 ## Example
