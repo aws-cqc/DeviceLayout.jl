@@ -1304,6 +1304,14 @@
             "fragment_geom!(sm, [\"tile00\", \"foo\"], [\"tile01\", \"bar\"], 2, 2): invalid arguments ([\"bar\"], 2)"
         ) SolidModels.fragment_geom!(sm, ["tile00", "foo"], ["tile01", "bar"])) ==
               [(2, 1), (2, 2)]
+
+        # Use of MeshingParameters is deprecated.
+        sm = SolidModel("test", overwrite=true)
+        @test_logs (:warn, "Using `MeshingParameters` is deprecated!") render!(
+            sm,
+            CoordinateSystem("test", nm),
+            meshing_parameters=SolidModels.MeshingParameters()
+        )
     end
 
     @testset "Mesh size modifications" begin
@@ -1418,5 +1426,16 @@
                 Cdouble(0.0)
             )
         end
+
+        # Checking option access
+        SolidModels.set_gmsh_option("Mesh.ElementOrder", 3)
+        SolidModels.set_gmsh_option("Geometry.OCCTargetUnit", "M")
+        @test SolidModels.get_gmsh_number("Mesh.ElementOrder") == 3
+        @test SolidModels.get_gmsh_string("Geometry.OCCTargetUnit") == "M"
+
+        dict = Dict("Mesh.ElementOrder" => 2, "Geometry.OCCTargetUnit" => "UM")
+        SolidModels.set_gmsh_option(dict)
+        @test SolidModels.get_gmsh_number("Mesh.ElementOrder") == 2
+        @test SolidModels.get_gmsh_string("Geometry.OCCTargetUnit") == "UM"
     end
 end

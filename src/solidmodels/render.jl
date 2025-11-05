@@ -480,7 +480,7 @@ set_gmsh_option(s, o::AbstractString) = SolidModels.gmsh.option.set_string(s, o)
 function set_gmsh_option(s, d::Dict, default)
     return set_gmsh_option(s, get(d, s, default))
 end
-function set_gmsh_option(d::Dict{String, Union{Float64, String}})
+function set_gmsh_option(d::Dict)
     for (k, v) in d
         set_gmsh_option(k, v)
     end
@@ -732,8 +732,13 @@ Render `cs` to `sm`.
     `"base"`. The keyword pairs `:remove_object=>true` and `:remove_tool=>true` mean
     that the "object" (first argument) group `"writeable_area"` and the "tool" (second argument)
     group `"base_negative"` are both removed when `"base"` is created.
+  - `retained_physical_groups`: Vector of `(name, dimension)` tuples specifying which physical groups to keep after rendering. All other groups are removed.
   - `zmap`: Function (m::SemanticMeta) -> `z` coordinate of corresponding elements. Default:
     Map all metadata to zero.
+  - `gmsh_options`: Dictionary of gmsh option name-value pairs to set before meshing.
+  - `meshing_parameters`: **Deprecated.** Use individual mesh control functions
+    [`mesh_scale`](@ref), [`mesh_order`](@ref) and [`mesh_grading_default`](@ref), along with
+    `gmsh_options` instead.
 
 Available postrendering operations include [`translate!`](@ref), [`extrude_z!`](@ref), [`revolve!`](@ref),
 [`union_geom!`](@ref), [`intersect_geom!`](@ref), [`difference_geom!`](@ref), [`fragment_geom!`](@ref), and [`box_selection`](@ref).
@@ -750,65 +755,21 @@ function render!(
     postrender_ops=[],
     retained_physical_groups=[],
     zmap=(_) -> zero(T),
-    meshing_parameters::MeshingParameters=MeshingParameters(),
-    gmsh_options=Dict{String, Union{String, Float64}}(),
+    gmsh_options=Dict{String, Union{String, Int, Float64}}(),
+    meshing_parameters::Union{Nothing, MeshingParameters}=nothing,
     kwargs...
 ) where {T}
     gmsh.model.set_current(name(sm))
 
-    # Check for meshing_parameters, and if any non-defaults are specified, then give
-    # deprecation warning
-    mp_default = MeshingParameters()
-    if meshing_parameters.mesh_scale != mp_default.mesh_scale
-        Base.depwarn(
-            "Specifying the mesh scale using `MeshingParameters` is deprecated, use [`mesh_scale`](@ref) instead.",
-            :depwarn
-        )
+    # Check for meshing_parameters, if
+    if !isnothing(meshing_parameters)
+        Base.depwarn("Using `MeshingParameters` is deprecated!", :depwarn, force=true)
         mesh_scale(meshing_parameters.mesh_scale)
-    end
-    if meshing_parameters.mesh_order != mp_default.mesh_order
-        Base.depwarn(
-            "Specifying the mesh order using `MeshingParameters` is deprecated, use [`mesh_order`](@ref) instead.",
-            :depwarn
-        )
-        mesh_order(meshing_parameters.mesh_order)
-    end
-    if meshing_parameters.α_default != mp_default.α_default
-        Base.depwarn(
-            "Specifying the mesh grading default using `MeshingParameters` is deprecated, use [`mesh_grading_default`](@ref) instead.",
-            :depwarn
-        )
-        mesh_grading_default(meshing_parameters.α_default)
-    end
-    if meshing_parameters.high_order_optimize != mp_default.high_order_optimize
-        Base.depwarn(
-            "Specifying the higher order optimization using `MeshingParameters` is deprecated, use [`mesh_order`](@ref) instead.",
-            :depwarn
-        )
         mesh_order(meshing_parameters.mesh_order, meshing_parameters.high_order_optimize)
-    end
-    if meshing_parameters.apply_size_to_surfaces == true
-        Base.error("Size fields can no longer be specified for surfaces!")
-    end
-    if meshing_parameters.surface_mesh_algorithm != mp_default.surface_mesh_algorithm
-        Base.depwarn(
-            "Specifying the surface meshing algorithm using `MeshingParameters` is deprecated, use [`gmsh_option`](@ref) or `gmsh_options` instead.",
-            :depwarn
-        )
+        mesh_grading_default(meshing_parameters.α_default)
+        @assert meshing_parameters.apply_size_to_surfaces == false
         gmsh_options["Mesh.Algorithm"] = meshing_parameters.surface_mesh_algorithm
-    end
-    if meshing_parameters.volume_mesh_algorithm != mp_default.volume_mesh_algorithm
-        Base.depwarn(
-            "Specifying the surface meshing algorithm using `MeshingParameters` is deprecated, use [`gmsh_option`](@ref) or `gmsh_options` instead.",
-            :depwarn
-        )
         gmsh_options["Mesh.Algorithm3D"] = meshing_parameters.volume_mesh_algorithm
-    end
-    if !isempty(meshing_parameters.options)
-        Base.depwarn(
-            "Specifying gmsh options using `MeshingParameters` is deprecated, use `gmsh_options` instead.",
-            :depwarn
-        )
         merge!(gmsh_options, meshing_parameters.options)
     end
 

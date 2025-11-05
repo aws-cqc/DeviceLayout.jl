@@ -28,19 +28,6 @@ const MESHSIZE_PARAMS = Dict{
         KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
     }()
 ) # initial defaults
-export MESHSIZE_PARAMS
-export mesh_order,
-    mesh_scale,
-    mesh_grading_default,
-    add_mesh_size_point,
-    set_gmsh_option,
-    get_gmsh_number,
-    get_gmsh_string,
-    finalize_size_fields!,
-    mesh_control_points,
-    mesh_control_trees,
-    clear_mesh_control_points!,
-    reset_mesh_control!
 
 import DeviceLayout
 import DeviceLayout:
