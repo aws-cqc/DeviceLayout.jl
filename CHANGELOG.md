@@ -7,11 +7,18 @@ The format of this changelog is based on
 ## Upcoming
 
   - Added `xor2d` for polygon XOR
+  - Mesh size fields are no longer controlled via `PhysicalGroup` internally, this change
+    allows for changing the size field associated to a `SolidModel` after `render!` via the
+    global parameters accessed in `MeshSized`. This reduces the number of entities in any
+    global boolean operations, improving performance, along with separating the concerns of
+    rendering and meshing thereby improving user experience.
+  - Deprecate `SolidModels.MeshingParameters` in favour of new `mesh_scale`, `mesh_order`,
+    `mesh_grading_default` accessed from `SolidModels`.
 
 ## 1.6.0 (2025-10-16)
 
   - Improved metadata handling for `LayoutTarget` and `SolidModelTarget`
-    
+
       + SolidModelTargets will now ignore `NORENDER_META` (the `:norender` layer)
       + SolidModelTargets now take `ignored_layers`, a list of layer symbols which are not rendered
       + LayoutTargets now allow overriding the mapping of `GDSMeta` by setting `target.map_meta_dict[my_gdsmeta] = my_override`, allowing changes to different `GDSMeta` or `nothing` rather than always mapping a `GDSMeta` to itself
@@ -29,7 +36,7 @@ The format of this changelog is based on
 ## 1.5.0 (2025-10-10)
 
   - Added `auto_speed`, `endpoints_curvature`, and `auto_curvature` keyword options to `bspline!` and `BSplineRouting`
-    
+
       + `auto_speed` sets the speed at endpoints to avoid sharp bends (minimizing the integrated square of the curvature derivative with respect to arclength)
       + `endpoints_curvature` sets boundary conditions on the curvature (by inserting extra waypoints)
       + `auto_curvature` B-spline sets curvature at endpoints to match previous segment (or to zero if there is no previous segment)
