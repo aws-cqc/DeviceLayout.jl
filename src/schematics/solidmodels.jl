@@ -40,6 +40,7 @@ The `rendering_options` include any keyword arguments to be passed down to the l
   - `indexed_layers`: A list of layer `Symbol`s to be turned into separate `PhysicalGroup`s with `"_\$i"` appended for each index `i`. These layers will be automatically indexed if not already present in a `Schematic`'s `index_dict`.
   - `substrate_layers`: A list of layer `Symbol`s for layers that are extruded by their
     `technology` into the substrate, rather than away from it.
+  - `wave_port_layers`: A list of layer `Symbol`s for layers that are 1D line segments extruded to define wave port boundary conditions.
   - `ignored_layers`: A list of layer `Symbol`s for layers that should be ignored during rendering (mapped to `nothing`). This provides an alternative to using `NORENDER_META` for layers that should be conditionally ignored in solid model rendering but may be needed for other rendering targets.
 
 The `postrenderer` is a list of geometry kernel commands that create new named groups of
@@ -53,6 +54,7 @@ struct SolidModelTarget <: Target
     levelwise_layers::Vector{Symbol}
     indexed_layers::Vector{Symbol}
     substrate_layers::Vector{Symbol}
+    wave_port_layers::Vector{Symbol}
     ignored_layers::Vector{Symbol}
     preserved_groups::Vector{Tuple{String, Int}}
     rendering_options
@@ -65,6 +67,7 @@ SolidModelTarget(
     levelwise_layers=[],
     indexed_layers=[],
     substrate_layers=[],
+    wave_port_layers=[],
     ignored_layers=[],
     postrender_ops=[],
     preserved_groups=[],
@@ -75,26 +78,44 @@ SolidModelTarget(
     levelwise_layers,
     indexed_layers,
     substrate_layers,
+    wave_port_layers,
     ignored_layers,
     preserved_groups,
     (; solidmodel=true, kwargs...),
     postrender_ops
 )
 
-function extrusion_ops(t::SolidModelTarget)
-    return [
-        (string(layer) * "_extrusion", SolidModels.extrude_z!, (layer, thickness)) for
-        (layer, thickness) in pairs(layer_extrusions_dz(t))
-    ]
+function extrusion_ops(t::SolidModelTarget, sch::Schematic)
+    ops = []
+    for (layer, (thickness, dim)) in pairs(layer_extrusions_dz(t, sch))
+        ext = dim == 1 ? "" : "_extrusion"
+        push!(ops, (string(layer) * ext, SolidModels.extrude_z!, (layer, thickness, dim)))
+    end
+    return ops
 end
 
-function intersection_ops(t::SolidModelTarget)
+function intersection_ops(t::SolidModelTarget, sch::Schematic)
     bv = string.(bounding_layers(t)) .* "_extrusion"
+    wave_ports = []
+    for m in element_metadata(sch.coordinate_system)
+        if iswaveportlayer(t, layer(m))
+            levelstr = layer(m) in levelwise_layers(t) ? "_L$(level(m))" : ""
+            push!(wave_ports, string(layer(m)) * levelstr * "_$(layerindex(m))")
+        end
+    end
     isempty(bv) && return []
     if length(bv) == 1
         return [
             ("rendered_volume", SolidModels.restrict_to_volume!, (bv[1],)),
-            ("exterior_boundary", SolidModels.get_boundary, ("rendered_volume", 3))
+            ("exterior_boundary", SolidModels.get_boundary, ("rendered_volume", 3)),
+            [
+                (
+                    "exterior_boundary",
+                    SolidModels.difference_geom!,
+                    ("exterior_boundary", wave_ports[i], 2, 2),
+                    :remove_object => true
+                ) for i = 1:length(wave_ports)
+            ]...
         ]
     end
     return [
@@ -104,11 +125,21 @@ function intersection_ops(t::SolidModelTarget)
             for i = 3:length(bv)
         ]...,
         ("rendered_volume", SolidModels.restrict_to_volume!, ("rendered_volume",)),
-        ("exterior_boundary", SolidModels.get_boundary, ("rendered_volume", 3))
+        ("exterior_boundary", SolidModels.get_boundary, ("rendered_volume", 3)),
+        [
+            (
+                "exterior_boundary",
+                SolidModels.difference_geom!,
+                ("exterior_boundary", wave_ports[i], 2, 2),
+                :remove_object => true
+            ) for i = 1:length(wave_ports)
+        ]...
     ]
 end
 
 bounding_layers(t::SolidModelTarget) = t.bounding_layers
+
+wave_port_layers(t::SolidModelTarget) = t.wave_port_layers
 
 function issublayer(t::SolidModelTarget, ly::Symbol)
     sublayers = t.substrate_layers
@@ -116,17 +147,41 @@ function issublayer(t::SolidModelTarget, ly::Symbol)
     return ly in sublayers
 end
 
-function layer_extrusions_dz(target)
+function iswaveportlayer(t::SolidModelTarget, ly::Symbol)
+    wavelayers = wave_port_layers(t)
+    isempty(wavelayers) && return false
+    return ly in wavelayers
+end
+
+function layer_extrusions_dz(target, sch)
     thickness = get(target.technology.parameters, :thickness, (;))
     t_dict = Dict{String, Any}()
-    for (layer, t) in pairs(thickness)
-        sgn = issublayer(target, layer) ? -1 : 1
+    for (ly, t) in pairs(thickness)
+        dim = iswaveportlayer(target, ly) ? 1 : 2
+        sgn = issublayer(target, ly) ? -1 : 1
         if isempty(size(t))
-            t_dict[string(layer)] = sgn * t
+            if iswaveportlayer(target, ly)
+                for m in element_metadata(sch.coordinate_system)
+                    if layer(m) == ly
+                        t_dict[string(ly) * "_$(layerindex(m))"] = (sgn * t, dim)
+                    end
+                end
+            else
+                t_dict[string(ly)] = (sgn * t, dim)
+            end
         else
-            for (level, t_level) in pairs(t)
-                sgn = isodd(level) ? sgn : -sgn
-                t_dict[string(layer) * "_L$level"] = sgn * t_level
+            for (lev, t_level) in pairs(t)
+                sgn = isodd(lev) ? sgn : -sgn
+                if iswaveportlayer(target, ly)
+                    for m in element_metadata(sch.coordinate_system)
+                        if layer(m) == ly && level(m) == lev
+                            t_dict[string(ly) * "_L$lev" * "_$(layerindex(m))"] =
+                                (sgn * t_level, dim)
+                        end
+                    end
+                else
+                    t_dict[string(ly) * "_L$lev"] = (sgn * t_level, dim)
+                end
             end
         end
     end
@@ -187,16 +242,16 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
     sch.checked[] || error(
         "Cannot render an unchecked Schematic. Run check!(sch::Schematic), or override by setting sch.checked[] = true (not recommended!)"
     )
+    # Index layers
+    for ly in indexed_layers(target)
+        !haskey(sch.index_dict, ly) && index_layer!(sch::Schematic, ly)
+    end
     # Finish assembling postrender operations
     # Extrusions
     # Target specific actions
     # Intersections with rendered volume
     postrender_ops =
-        vcat(extrusion_ops(target), target.postrenderer, intersection_ops(target))
-    # Index layers
-    for ly in indexed_layers(target)
-        !haskey(sch.index_dict, ly) && index_layer!(sch::Schematic, ly)
-    end
+        vcat(extrusion_ops(target, sch), target.postrenderer, intersection_ops(target, sch))
     reopen_logfile(sch, :render_solidmodel)
     with_logger(sch.logger) do
         return render!(
