@@ -106,7 +106,7 @@ function schematic(cc::AbstractCompositeComponent)
     floorplan = plan(
         graph(cc);
         log_dir=nothing,
-        id_prefix=cc._schematic.coordinate_system.name * COMPOSITE_NODE_ID_SEPARATOR
+        id_prefix=(cc._schematic.coordinate_system.name * COMPOSITE_NODE_ID_SEPARATOR)
     )
     append_coordsys!(cc._schematic.coordinate_system, floorplan.coordinate_system)
     for (k, v) in pairs(floorplan.ref_dict)
