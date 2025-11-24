@@ -764,7 +764,7 @@ function render!(
 
     # Check for meshing_parameters, if
     if !isnothing(meshing_parameters)
-        Base.depwarn("Using `MeshingParameters` is deprecated!", :depwarn, force=true)
+        Base.depwarn("Using `MeshingParameters` is deprecated!", :render!, force=true)
         mesh_scale(meshing_parameters.mesh_scale)
         mesh_order(meshing_parameters.mesh_order, meshing_parameters.high_order_optimize)
         mesh_grading_default(meshing_parameters.α_default)
