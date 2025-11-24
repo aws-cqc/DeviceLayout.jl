@@ -517,19 +517,19 @@ function restrict_to_volume!(sm::SolidModel, volume)
 
     # Check if the subtraction of the bounding volume from all surfaces and volumes is the
     # empty set.
-    dims = SVector(3,2)
+    dims = SVector(3, 2)
     groups =
         [(name, dimtags(pg)) for dim in dims for (name, pg) in pairs(dimgroupdict(sm, dim))]
     allents = vcat([gmsh.model.get_entities(dim) for dim in dims]...)
 
-    out_dim_tags, _ = kernel(sm).cut(allents, dimtags(sm[volume,3]), -1, false, false)
+    out_dim_tags, _ = kernel(sm).cut(allents, dimtags(sm[volume, 3]), -1, false, false)
     isempty(out_dim_tags) && return dimtags(sm[volume, 3])
 
     # There were entities found after cutting, the restricting volume is a subset of the
     # rendered geometry, will need to perform the intersection.
     kernel(sm).remove(out_dim_tags)
 
-    dims = SVector(3,2,1,0)
+    dims = SVector(3, 2, 1, 0)
     groups =
         [(name, dimtags(pg)) for dim in dims for (name, pg) in pairs(dimgroupdict(sm, dim))]
     allents = vcat([gmsh.model.get_entities(dim) for dim in dims]...)
