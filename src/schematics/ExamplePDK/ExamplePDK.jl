@@ -168,6 +168,12 @@ const SINGLECHIP_SOLIDMODEL_TARGET = SolidModelTarget(
     indexed_layers=[:port, :lumped_element, :integration, :wave_port], # Automatically index these layers
     wave_port_layers=[:wave_port], # WAVE_PORT are 1D line segments in x-y to be extruded in z
     postrender_ops=[ # Manual definition of operations to run after 2D rendering
+        (   # Unify metal negative before removing from writeable_area
+            "metal_negative", # Output group name
+            SolidModels.union_geom!, # Operation
+            ("metal_negative", "metal_negative", 2, 2), # (object, tool, object_dim, tool_dim)
+            :remove_object => true # Remove "metal_negative" entities after operation
+        ),
         (   # Get metal ground plane by subtracting negative from writeable area
             "metal", # Output group name
             SolidModels.difference_geom!, # Operation
@@ -205,7 +211,8 @@ const SINGLECHIP_SOLIDMODEL_TARGET = SolidModelTarget(
             :remove_object => true,
             :remove_tool => true
         ),
-        (("metal", SolidModels.difference_geom!, ("metal", "port")))
+        (("metal", SolidModels.difference_geom!,
+            ("metal", "port"), :remove_object => true))
     ],
     # We only want to retain physical groups that we will need for specifying boundary
     # conditions in the physical domain.
@@ -227,7 +234,7 @@ function singlechip_solidmodel_target(boundary_groups...)
     target = deepcopy(SINGLECHIP_SOLIDMODEL_TARGET)
     push!(
         target.postrenderer,
-        ("metal", SolidModels.difference_geom!, ("metal", [boundary_groups...]))
+        ("metal", SolidModels.difference_geom!, ("metal", [boundary_groups...]), :remove_object=>true)
     )
     retained_physical_groups = [(x, 2) for x ∈ boundary_groups]
     append!(target.rendering_options.retained_physical_groups, retained_physical_groups)
@@ -314,9 +321,10 @@ const FLIPCHIP_SOLIDMODEL_TARGET = SolidModelTarget(
         (   # Union of all physical metal
             "metal",
             SolidModels.union_geom!,
-            (["metal_L1", "metal_L2", "bridge_metal", "bump_surface"], 2)
+            (["metal_L1", "metal_L2", "bridge_metal", "bump_surface"], 2),
+            :remove_object => true, :remove_tool => true
         ),
-        (("metal", SolidModels.difference_geom!, ("metal", "port")))
+        ("metal", SolidModels.difference_geom!, ("metal", "port"), :remove_object => true)
     ],
     # We only want to retain physical groups that we will need for specifying boundary
     # conditions in the physical domain.

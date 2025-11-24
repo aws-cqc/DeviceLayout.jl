@@ -105,7 +105,7 @@ function example_launcher(port_spec)
     launch!(path, extround=0μm)
     port_cs = CoordinateSystem(uniquename("launcherport"))
     gap0 = path[1].sty.gap # Launcher pad gap
-    render!(port_cs, only_simulated(centered(Rectangle(gap0, gap0))), PORT)
+    render!(port_cs, only_simulated(meshsized_entity(centered(Rectangle(gap0, gap0)), gap0/2)), PORT)
     attach!(path, sref(port_cs), path[1].sty.gap / 2, i=1)
     return path
 end
