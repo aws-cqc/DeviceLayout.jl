@@ -403,8 +403,10 @@ meshsize(::Paths.Segment, sty::Paths.TaperTrace; kwargs...) =
 meshsize(::Paths.Segment, sty::Paths.TaperCPW; kwargs...) =
     2 * max(sty.trace_start, sty.trace_end, sty.gap_start, sty.gap_end)
 meshsize(::Paths.Segment, sty::Paths.TraceTermination; kwargs...) = 2 * sty.width
-meshsize(::Paths.Segment, sty::Paths.CPWOpenTermination; kwargs...) = 2 * max(sty.trace, sty.gap)
-meshsize(::Paths.Segment, sty::Paths.CPWShortTermination; kwargs...) = 2 * max(sty.trace, sty.gap)
+meshsize(::Paths.Segment, sty::Paths.CPWOpenTermination; kwargs...) =
+    2 * max(sty.trace, sty.gap)
+meshsize(::Paths.Segment, sty::Paths.CPWShortTermination; kwargs...) =
+    2 * max(sty.trace, sty.gap)
 
 # For GeneralCPW and GeneralTrace, just sample.
 function meshsize(seg::Paths.Segment, sty::Paths.GeneralTrace; kwargs...)
@@ -487,7 +489,7 @@ function set_gmsh_option(s, d::Dict, default)
     return set_gmsh_option(s, get(d, s, default))
 end
 function set_gmsh_option(s, d::Dict)
-    haskey(d, s) && set_gmsh_option(s, d[s])
+    return haskey(d, s) && set_gmsh_option(s, d[s])
 end
 function set_gmsh_option(d::Dict)
     for (k, v) in d
@@ -646,7 +648,8 @@ data.
 See [`DeviceLayout.MeshSized`](@ref) for details and the explicit mesh sizing formula
 utilizing the control points.
 """
-mesh_control_points() = MESHSIZE_PARAMS[:cp]::Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}
+mesh_control_points() =
+    MESHSIZE_PARAMS[:cp]::Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}
 
 """
     mesh_control_trees()
@@ -660,9 +663,9 @@ See [`DeviceLayout.MeshSized`](@ref) for details and the explicit mesh sizing fo
 computed using the control trees.
 """
 mesh_control_trees() = MESHSIZE_PARAMS[:ct]::Dict{
-            Tuple{Float64, Float64},
-            KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
-        }
+    Tuple{Float64, Float64},
+    KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
+}
 
 """
     clear_mesh_control_points!()
@@ -931,8 +934,8 @@ function render!(
     # Additionally, the decreasing order of dimensions is important, as OCC can error
     # sometimes if the higher dimensional entities are not reconciled first.
     _synchronize!(sm)
-    _fragment_and_map!(sm, [1,0]) # Important!
-    _fragment_and_map!(sm, [3,2,1])
+    _fragment_and_map!(sm, [1, 0]) # Important!
+    _fragment_and_map!(sm, [3, 2, 1])
 
     # Pass in call back function for meshing against the vertices found previously.
     gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
@@ -995,9 +998,9 @@ function gmsh_meshsize(
     l = Inf64
     s::Float64 = mesh_scale()
     trees::Dict{
-            Tuple{Float64, Float64},
-            KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
-        } = mesh_control_trees()
+        Tuple{Float64, Float64},
+        KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
+    } = mesh_control_trees()
     # Explicit type tag here to remove hypothetical type instability.
     for ((h, α), tree) in mesh_control_trees()
         _, d::Float64 = nn(tree, SVector{3}(x, y, z))
@@ -1012,7 +1015,7 @@ end
 # excluded_physical_groups are physical groups not to be included in the fragmentation.
 function _fragment_and_map!(
     sm::SolidModel,
-    frag_dims=[3,2,1,0];
+    frag_dims=[3, 2, 1, 0];
     excluded_physical_groups=PhysicalGroup[]
 )
     gmsh.model.set_current(name(sm))
