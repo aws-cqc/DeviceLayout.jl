@@ -211,8 +211,12 @@ const SINGLECHIP_SOLIDMODEL_TARGET = SolidModelTarget(
             :remove_object => true,
             :remove_tool => true
         ),
-        (("metal", SolidModels.difference_geom!,
-            ("metal", "port"), :remove_object => true))
+        ((
+            "metal",
+            SolidModels.difference_geom!,
+            ("metal", "port"),
+            :remove_object => true
+        ))
     ],
     # We only want to retain physical groups that we will need for specifying boundary
     # conditions in the physical domain.
@@ -234,7 +238,12 @@ function singlechip_solidmodel_target(boundary_groups...)
     target = deepcopy(SINGLECHIP_SOLIDMODEL_TARGET)
     push!(
         target.postrenderer,
-        ("metal", SolidModels.difference_geom!, ("metal", [boundary_groups...]), :remove_object=>true)
+        (
+            "metal",
+            SolidModels.difference_geom!,
+            ("metal", [boundary_groups...]),
+            :remove_object => true
+        )
     )
     retained_physical_groups = [(x, 2) for x ∈ boundary_groups]
     append!(target.rendering_options.retained_physical_groups, retained_physical_groups)
@@ -322,7 +331,8 @@ const FLIPCHIP_SOLIDMODEL_TARGET = SolidModelTarget(
             "metal",
             SolidModels.union_geom!,
             (["metal_L1", "metal_L2", "bridge_metal", "bump_surface"], 2),
-            :remove_object => true, :remove_tool => true
+            :remove_object => true,
+            :remove_tool => true
         ),
         ("metal", SolidModels.difference_geom!, ("metal", "port"), :remove_object => true)
     ],
