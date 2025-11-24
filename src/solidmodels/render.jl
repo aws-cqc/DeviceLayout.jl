@@ -402,6 +402,10 @@ meshsize(::Paths.Segment, sty::Paths.TaperTrace; kwargs...) =
     2 * max(sty.width_start, sty.width_end)
 meshsize(::Paths.Segment, sty::Paths.TaperCPW; kwargs...) =
     2 * max(sty.trace_start, sty.trace_end, sty.gap_start, sty.gap_end)
+meshsize(::Paths.Segment, sty::Paths.TraceTermination; kwargs...) = 2 * sty.width
+meshsize(::Paths.Segment, sty::Paths.CPWOpenTermination; kwargs...) = 2 * max(sty.trace, sty.gap)
+meshsize(::Paths.Segment, sty::Paths.CPWShortTermination; kwargs...) = 2 * max(sty.trace, sty.gap)
+
 # For GeneralCPW and GeneralTrace, just sample.
 function meshsize(seg::Paths.Segment, sty::Paths.GeneralTrace; kwargs...)
     l = pathlength(seg)
@@ -458,6 +462,7 @@ Set gmsh configuration options.
 
   - `set_gmsh_option(option_name, value)`: Set a single option to a numeric or string value
   - `set_gmsh_option(option_name, dict, default)`: Set option from dict with fallback to default
+  - `set_gmsh_option(option_name, dict)`: Set option from dict if `option_name` is present
   - `set_gmsh_option(dict)`: Set multiple options from a dictionary
 
 # Arguments
@@ -472,6 +477,7 @@ Set gmsh configuration options.
 ```julia
 set_gmsh_option("Mesh.Algorithm", 6)
 set_gmsh_option("General.FileName", "output.msh")
+set_gmsh_option("General.FileName", Dict("Mesh.Algorithm" => 6)) # does nothing
 set_gmsh_option(Dict("Mesh.Algorithm" => 6, "General.NumThreads" => 4))
 ```
 """
@@ -479,6 +485,9 @@ set_gmsh_option(s, o::Number) = SolidModels.gmsh.option.set_number(s, o)
 set_gmsh_option(s, o::AbstractString) = SolidModels.gmsh.option.set_string(s, o)
 function set_gmsh_option(s, d::Dict, default)
     return set_gmsh_option(s, get(d, s, default))
+end
+function set_gmsh_option(s, d::Dict)
+    haskey(d, s) && set_gmsh_option(s, d[s])
 end
 function set_gmsh_option(d::Dict)
     for (k, v) in d
@@ -558,7 +567,8 @@ mesh_grading_default() = MESHSIZE_PARAMS[:global_α]::Float64
 function mesh_grading_default(α)
     @assert 0 < α <= 1
     MESHSIZE_PARAMS[:global_α]::Float64 = α
-    return finalize_size_fields!()
+    finalize_size_fields!()
+    return MESHSIZE_PARAMS[:global_α]
 end
 
 """
@@ -636,7 +646,7 @@ data.
 See [`DeviceLayout.MeshSized`](@ref) for details and the explicit mesh sizing formula
 utilizing the control points.
 """
-mesh_control_points() = MESHSIZE_PARAMS[:cp]
+mesh_control_points() = MESHSIZE_PARAMS[:cp]::Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}
 
 """
     mesh_control_trees()
@@ -649,7 +659,10 @@ tuples and values are KDTrees for fast nearest-neighbor lookups.
 See [`DeviceLayout.MeshSized`](@ref) for details and the explicit mesh sizing formula
 computed using the control trees.
 """
-mesh_control_trees() = MESHSIZE_PARAMS[:ct]
+mesh_control_trees() = MESHSIZE_PARAMS[:ct]::Dict{
+            Tuple{Float64, Float64},
+            KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
+        }
 
 """
     clear_mesh_control_points!()
@@ -738,7 +751,8 @@ Base.@kwdef struct MeshingParameters
 end
 
 """
-    render!(sm::SolidModel, cs::AbstractCoordinateSystem{T}; map_meta=layer, postrender_ops=[], zmap=(_) -> zero(T), kwargs...) where {T}
+    render!(sm::SolidModel, cs::AbstractCoordinateSystem{T}; map_meta=layer,
+    postrender_ops=[], zmap=(_) -> zero(T), gmsh_options = Dict(), skip_postrender = false, kwargs...) where {T}
 
 Render `cs` to `sm`.
 
@@ -765,6 +779,9 @@ Render `cs` to `sm`.
   - `meshing_parameters`: **Deprecated.** Use individual mesh control functions
     [`DeviceLayout.SolidModels.mesh_scale`](@ref), [`DeviceLayout.SolidModels.mesh_order`](@ref) and [`DeviceLayout.SolidModels.mesh_grading_default`](@ref), along with
     `gmsh_options` instead.
+  - `skip_postrender`: Whether or not to return early without performing any postrendering
+    operations. This can be particularly helpful during debugging, as all two dimensional
+    entities will be placed appropriately but will not have been combined.
 
 Available postrendering operations include [`translate!`](@ref), [`extrude_z!`](@ref), [`revolve!`](@ref),
 [`union_geom!`](@ref), [`intersect_geom!`](@ref), [`difference_geom!`](@ref), [`fragment_geom!`](@ref), and [`box_selection`](@ref).
@@ -783,11 +800,11 @@ function render!(
     zmap=(_) -> zero(T),
     gmsh_options=Dict{String, Union{String, Int, Float64}}(),
     meshing_parameters::Union{Nothing, MeshingParameters}=nothing,
+    skip_postrender=false,
     kwargs...
 ) where {T}
     gmsh.model.set_current(name(sm))
 
-    # Check for meshing_parameters, if
     if !isnothing(meshing_parameters)
         Base.depwarn("Using `MeshingParameters` is deprecated!", :render!, force=true)
         mesh_scale(meshing_parameters.mesh_scale)
@@ -905,30 +922,20 @@ function render!(
 
     # Generate the KDTrees corresponding to the meshing control points.
     finalize_size_fields!()
-
     # Extrusions, Booleans, etc
     _synchronize!(sm)
+    skip_postrender && return nothing
     _postrender!(sm, postrender_ops)
-    # Get rid of redundant entities and update groups accordingly
+    # Get rid of redundant entities and update groups accordingly.
+    # The first [1,0] call improves robustness of the next fragment significantly.
+    # Additionally, the decreasing order of dimensions is important, as OCC can error
+    # sometimes if the higher dimensional entities are not reconciled first.
     _synchronize!(sm)
-    _fragment_and_map!(sm)
+    _fragment_and_map!(sm, [1,0]) # Important!
+    _fragment_and_map!(sm, [3,2,1])
 
     # Pass in call back function for meshing against the vertices found previously.
     gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
-
-    set_gmsh_option("Mesh.MeshSizeFromPoints", gmsh_options, 0)
-    set_gmsh_option("Mesh.MeshSizeFromCurvature", gmsh_options, 0)
-    set_gmsh_option("Mesh.MeshSizeExtendFromBoundary", gmsh_options, 0)
-    set_gmsh_option("Mesh.Algorithm", gmsh_options, 6)
-    set_gmsh_option("Mesh.Algorithm3D", gmsh_options, 1)
-
-    # Default to no threads, as there appear to be race conditions within gmsh.
-    # If set to zero, Gmsh will look for OMP_NUM_THREADS environment variables;
-    # this needs to be >1 for HXT algorithm to use parallelism.
-    set_gmsh_option("General.NumThreads", gmsh_options, 1)
-
-    # Always save meshes in binary for faster disk I/O
-    set_gmsh_option("Mesh.Binary", gmsh_options, 1)
 
     # Remove all physical groups except those on the retained list.
     if !isempty(retained_physical_groups)
@@ -986,6 +993,11 @@ function gmsh_meshsize(
     lc::Cdouble
 )
     l = Inf64
+    s::Float64 = mesh_scale()
+    trees::Dict{
+            Tuple{Float64, Float64},
+            KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
+        } = mesh_control_trees()
     # Explicit type tag here to remove hypothetical type instability.
     for ((h, α), tree) in mesh_control_trees()
         _, d::Float64 = nn(tree, SVector{3}(x, y, z))
@@ -1000,7 +1012,7 @@ end
 # excluded_physical_groups are physical groups not to be included in the fragmentation.
 function _fragment_and_map!(
     sm::SolidModel,
-    frag_dims=[0, 2, 3];
+    frag_dims=[3,2,1,0];
     excluded_physical_groups=PhysicalGroup[]
 )
     gmsh.model.set_current(name(sm))
