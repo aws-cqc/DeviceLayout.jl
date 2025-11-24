@@ -159,9 +159,20 @@ struct SolidModel{T <: SolidModelKernel}
     )
         iszero(gmsh.is_initialized()) && gmsh.initialize()
         # SolidModel initiated gmsh uses μm
-        gmsh.option.set_string("Geometry.OCCTargetUnit", "UM")
+        set_gmsh_option("Geometry.OCCTargetUnit", "UM")
         # Use threads in open cascade
-        gmsh.option.set_number("Geometry.OCCParallel", 1)
+        set_gmsh_option("Geometry.OCCParallel", 1)
+        set_gmsh_option("General.NumThreads", 2)
+
+        # Reasonable defaults for meshing.
+        set_gmsh_option("Mesh.MeshSizeFromPoints", 0)
+        set_gmsh_option("Mesh.MeshSizeFromCurvature", 0)
+        set_gmsh_option("Mesh.MeshSizeExtendFromBoundary", 0)
+        set_gmsh_option("Mesh.Algorithm", 6)
+        set_gmsh_option("Mesh.Algorithm3D", 1)
+
+        # Always save meshes in binary for faster disk I/O
+        set_gmsh_option("Mesh.Binary", 1)
 
         # If a model with this name exists, throw error or delete it
         names = gmsh.model.list()
