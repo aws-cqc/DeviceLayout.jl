@@ -148,6 +148,7 @@ function add_wave_ports!(
     wave_port_width::T,
     wave_port_layer::SemanticMeta
 ) where {T}
+    angle_tol = 1e-1
     for node in nodes
         # Check component type
         node_component = component(node)
@@ -172,6 +173,19 @@ function add_wave_ports!(
             if path.nodes[node_idx].seg isa Paths.BSpline ||
                !(Paths.curvature(path.nodes[node_idx].seg, t) ≈ Point(0 / nm, 0 / nm))
                 @warn "Placing a wave port in curved segment of node $(node.id) can lead to erroneous results."
+            end
+            # Warn if the path intersection is not perpendicular to the domain boundary
+            path_direction = Paths.direction(trans(path).nodes[node_idx].seg, t) % 360°
+            if (
+                dir == :x &&
+                !isapprox_angle(90°, path_direction; atol=angle_tol) &&
+                !isapprox_angle(270°, path_direction; atol=angle_tol)
+            ) || (
+                dir == :y &&
+                !isapprox_angle(0°, path_direction; atol=angle_tol) &&
+                !isapprox_angle(180°, path_direction; atol=angle_tol)
+            )
+                @warn "Placing a wave port in segment of node $(node.id) which is not perpendicular to the domain boundary can lead to erroneous results."
             end
             if dir == :x
                 line = LineSegment(

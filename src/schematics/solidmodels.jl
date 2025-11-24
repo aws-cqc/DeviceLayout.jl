@@ -99,8 +99,8 @@ function intersection_ops(t::SolidModelTarget, sch::Schematic)
     wave_ports = []
     for m in element_metadata(sch.coordinate_system)
         if iswaveportlayer(t, layer(m))
-            levelstr = layer(m) in levelwise_layers(t) ? "_L$(level(m))" : ""
-            push!(wave_ports, string(layer(m)) * levelstr * "_$(layerindex(m))")
+            layer_name = _map_meta_fn(t)(m)
+            !isnothing(layer_name) && push!(wave_ports, layer_name)
         end
     end
     isempty(bv) && return []
@@ -160,10 +160,10 @@ function layer_extrusions_dz(target, sch)
         dim = iswaveportlayer(target, ly) ? 1 : 2
         sgn = issublayer(target, ly) ? -1 : 1
         if isempty(size(t))
-            if iswaveportlayer(target, ly)
+            if ly in indexed_layers(target)
                 for m in element_metadata(sch.coordinate_system)
                     if layer(m) == ly
-                        t_dict[string(ly) * "_$(layerindex(m))"] = (sgn * t, dim)
+                        t_dict[_map_meta_fn(target)(m)] = (sgn * t, dim)
                     end
                 end
             else
@@ -172,11 +172,10 @@ function layer_extrusions_dz(target, sch)
         else
             for (lev, t_level) in pairs(t)
                 sgn = isodd(lev) ? sgn : -sgn
-                if iswaveportlayer(target, ly)
+                if ly in indexed_layers(target)
                     for m in element_metadata(sch.coordinate_system)
                         if layer(m) == ly && level(m) == lev
-                            t_dict[string(ly) * "_L$lev" * "_$(layerindex(m))"] =
-                                (sgn * t_level, dim)
+                            t_dict[_map_meta_fn(target)(m)] = (sgn * t_level, dim)
                         end
                     end
                 else

@@ -1203,6 +1203,9 @@
         @test_logs (
             :warn,
             "Placing a wave port in curved segment of node path5 can lead to erroneous results."
+        ) (
+            :warn,
+            "Placing a wave port in segment of node path5 which is not perpendicular to the domain boundary can lead to erroneous results."
         ) add_wave_ports!(
             floorplan,
             [floorplan.graph.nodes[5]],

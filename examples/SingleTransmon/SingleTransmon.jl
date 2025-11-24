@@ -92,7 +92,7 @@ function single_transmon(;
         bridge=BRIDGE_STYLE
     )
     ## Readout path
-    readout_length = 2700μm
+    readout_length = wave_ports ? 4mm : 2700μm
     p_readout = Path(
         Point(0μm, 0μm);
         α0=π / 2,
@@ -134,7 +134,7 @@ function single_transmon(;
 
     #### Prepare solid model
     # Specify the extent of the simulation domain.
-    substrate_x = wave_ports ? readout_length : 4mm # wave port domain boundary needs to touch the readout line
+    substrate_x = 4mm # wave port domain boundary needs to touch the readout line
     substrate_y = 3.7mm
 
     center_xyz = DeviceLayout.center(floorplan)
@@ -149,7 +149,7 @@ function single_transmon(;
     render!(floorplan.coordinate_system, chip, LayerVocabulary.CHIP_AREA)
 
     # Add wave ports
-    wave_ports && add_wave_ports!(floorplan, [floorplan.graph.node_dict[:p_ro]], sim_area, 0.6mm, LayerVocabulary.WAVE_PORT)
+    wave_ports && add_wave_ports!(floorplan, [p_readout_node], sim_area, 0.6mm, LayerVocabulary.WAVE_PORT)
 
     check!(floorplan)
 
@@ -287,7 +287,7 @@ function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0,
         ),
         "Solver" => Dict(
             "Order" => solver_order,
-            "Eigenmode" => Dict("N" => 2, "Tol" => 1.0e-6, "Target" => 3, "Save" => 2),
+            "Eigenmode" => Dict("N" => 2, "Tol" => 1.0e-6, "Target" => 2.5, "Save" => 2),
             "Linear" => Dict("Type" => "Default", "Tol" => 1.0e-7, "MaxIts" => 500)
         )
     )
