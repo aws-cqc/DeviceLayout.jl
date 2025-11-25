@@ -458,7 +458,7 @@ end
 function cornerindices(p::CurvilinearPolygon, p0::Vector{<:Point}; tol)
     isempty(p0) && return Int[]
     valid_ind = cornerindices(p)
-    return isempty(valid_ind) ? Int[] : cornerindices(p.p[valid_ind], p0; tol)
+    return isempty(valid_ind) ? Int[] : valid_ind[cornerindices(p.p[valid_ind], p0; tol)]
 end
 function cornerindices(p::CurvilinearPolygon, r::Polygons.Rounded)
     corner_indices =
