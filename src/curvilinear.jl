@@ -458,17 +458,7 @@ end
 function cornerindices(p::CurvilinearPolygon, p0::Vector{<:Point}; tol)
     isempty(p0) && return Int[]
     valid_ind = cornerindices(p)
-    isempty(valid_ind) && return Int[]
-    # Pick the closest to p0 satisfying tolerance.
-    return valid_ind[filter!(
-        x -> x > 0,
-        map(p0) do px
-            idx = findfirst(p_idx -> isapprox(px, p_idx), p.p[valid_ind])
-            !isnothing(idx) && return idx
-            d, idx = findmin(norm.(p.p[valid_ind] .- px))
-            return d < tol ? idx : -1
-        end
-    )]
+    return isempty(valid_ind) ? Int[] : cornerindices(p.p[valid_ind], p0; tol)
 end
 function cornerindices(p::CurvilinearPolygon, r::Polygons.Rounded)
     corner_indices =
