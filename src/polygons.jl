@@ -578,14 +578,15 @@ rounded_rect_discretized_poly = to_polygons(rounded_rect)
   - `p0`: set of target points used to select vertices to attempt to round when
     applied to a polygon. Selected vertices where `min_side_len` and
     `min_angle` are satisfied will be rounded. If empty, all vertices will be selected.
-    Otherwise, for each point in `p0`, the nearest point in the styled polygon will be
-    selected. Note that for a `ClippedPolygon`, the same `p0` will be used for every
-    contour; for different rounding styles on different contours, use `StyleDict`.
+    Otherwise, for each point in `p0`, the nearest point that satisfies
+    `selection_tolerance` in the styled polygon will be selected. Note that for a
+    `ClippedPolygon`, the same `p0` will be used for every contour; for different rounding
+    styles on different contours, use `StyleDict`.
   - `inverse_selection`: If true, the selection from `p0` is inverted;
     that is, all corners will be rounded except those selected by `p0`.
   - `selection_tolerance`: Selections using `p0` will only be chosen if they are within
-    `selection_tolerance` of `p0`. The current default of infinite reflects the legacy
-    behaviour of always finding the closest point, and will be replaced with a small
+    `selection_tolerance` distance of `p0`. The current default of infinite reflects the
+    legacy behaviour of always finding the closest point, and will be replaced with a small
     non-zero tolerance to capture floating point precision in future (approximately 1.0nm).
 """
 Base.@kwdef struct Rounded{T <: Coordinate} <: GeometryEntityStyle
@@ -595,7 +596,7 @@ Base.@kwdef struct Rounded{T <: Coordinate} <: GeometryEntityStyle
     min_angle::Float64 = 1e-3
     p0::Vector{Point{T}} = []
     inverse_selection::Bool = false
-    selection_tolerance::T = T(Inf)
+    selection_tolerance::T = T(Inf) # TODO: Set to floating point accurate in next major release
     function Rounded{T}(
         abs_r::Coordinate,
         rel_r,

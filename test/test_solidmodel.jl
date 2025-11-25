@@ -803,6 +803,19 @@
     @test_nowarn place!(cs, rs, SemanticMeta(:test))
     @test_nowarn render!(sm, cs)
 
+    # Targetted rounding with tight tolerance should skip outer
+    cc = difference2d(centered(Rectangle(4.0μm, 4.0μm)), r)
+    sty = Polygons.Rounded(
+        1.0μm,
+        p0=[Point(1.0μm, 1.0μm), Point(-1.0μm, -1.0μm)],
+        selection_tolerance=1nm
+    )
+    ccs = styled(cc, sty)
+    cs = CoordinateSystem("test", nm)
+    sm = SolidModel("test"; overwrite=true)
+    @test_nowarn place!(cs, ccs, SemanticMeta(:test))
+    @test_nowarn render!(sm, cs)
+
     # Reference transform should transform p0 too
     r = to_polygons(Rectangle(2μm, 1μm))
     cs_local = CoordinateSystem("test", nm)
