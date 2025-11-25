@@ -2221,6 +2221,16 @@ function to_polygons(p::ClippedPolygon, s::StyleDict; kwargs...)
     return to_polygons(p; kwargs...)
 end
 
+function to_polygons(p::ClippedPolygon, s::Rounded; kwargs...)
+    p = deepcopy(p) # deepcopy so as not to modify
+    function stylenode!(n::Clipper.PolyNode)
+        n.contour = points.(to_polygons(Polygon(n.contour), s))
+        return stylenode!.(n.children)
+    end
+    stylenode!.(p.tree.children)
+    return to_polygons(p; kwargs...)
+end
+
 function transform(d::StyleDict, f::Transformation)
     newdict = StyleDict(transform(d.default, f))
     for (idx, s) in pairs(d.styles)
