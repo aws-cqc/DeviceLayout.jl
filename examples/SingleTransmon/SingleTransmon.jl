@@ -5,7 +5,8 @@ module SingleTransmon
 using FileIO, CSV, DataFrames, JSON, JSONSchema
 using DeviceLayout, DeviceLayout.SchematicDrivenLayout, DeviceLayout.PreferredUnits
 import .SchematicDrivenLayout.ExamplePDK
-import .SchematicDrivenLayout.ExamplePDK: LayerVocabulary, L1_TARGET, add_bridges!, add_wave_ports!
+import .SchematicDrivenLayout.ExamplePDK:
+    LayerVocabulary, L1_TARGET, add_bridges!, add_wave_ports!
 using .ExamplePDK.Transmons, .ExamplePDK.ReadoutResonators
 import .ExamplePDK.SimpleJunctions: ExampleSimpleJunction
 import DeviceLayout: uconvert
@@ -149,13 +150,23 @@ function single_transmon(;
     render!(floorplan.coordinate_system, chip, LayerVocabulary.CHIP_AREA)
 
     # Add wave ports
-    wave_ports && add_wave_ports!(floorplan, [p_readout_node], sim_area, 0.6mm, LayerVocabulary.WAVE_PORT)
+    wave_ports && add_wave_ports!(
+        floorplan,
+        [p_readout_node],
+        sim_area,
+        0.6mm,
+        LayerVocabulary.WAVE_PORT
+    )
 
     check!(floorplan)
 
     # Need to pass generated physical group names so they can be retained
     if wave_ports
-        tech = ExamplePDK.singlechip_solidmodel_target("wave_port_1", "wave_port_2", "lumped_element")
+        tech = ExamplePDK.singlechip_solidmodel_target(
+            "wave_port_1",
+            "wave_port_2",
+            "lumped_element"
+        )
     else
         tech = ExamplePDK.singlechip_solidmodel_target("port_1", "port_2", "lumped_element")
     end
@@ -201,7 +212,13 @@ Palace.
     high-order spaces.
   - `amr = 0`: Maximum number of adaptive mesh refinement (AMR) iterations.
 """
-function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0, wave_ports=false)
+function configfile(
+    sm::SolidModel;
+    palace_build=nothing,
+    solver_order=2,
+    amr=0,
+    wave_ports=false
+)
     attributes = SolidModels.attributes(sm)
 
     config = Dict(
@@ -245,22 +262,18 @@ function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0,
                 "Attributes" => [attributes["exterior_boundary"]],
                 "Order" => 1
             ),
-            (wave_ports ?
+            (
+                wave_ports ?
                 (
                     "WavePort" => [
-                        Dict(
-                            "Index" => 1,
-                            "Attributes" => [attributes["wave_port_1"]]
-                        ),
-                        Dict(
-                            "Index" => 2,
-                            "Attributes" => [attributes["wave_port_2"]]
-                        ),],
-                )
-                : ()
+                        Dict("Index" => 1, "Attributes" => [attributes["wave_port_1"]]),
+                        Dict("Index" => 2, "Attributes" => [attributes["wave_port_2"]])
+                    ],
+                ) : ()
             )...,
             "LumpedPort" => [
-                (wave_ports ? () :
+                (
+                    wave_ports ? () :
                     (
                         Dict(
                             "Index" => 1,
@@ -273,7 +286,7 @@ function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0,
                             "Attributes" => [attributes["port_2"]],
                             "R" => 50,
                             "Direction" => "+X"
-                        ),
+                        )
                     )
                 )...,
                 Dict(
@@ -287,7 +300,8 @@ function configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0,
         ),
         "Solver" => Dict(
             "Order" => solver_order,
-            "Eigenmode" => Dict("N" => 2, "Tol" => 1.0e-6, "Target" => 2.5, "Save" => 2),
+            "Eigenmode" =>
+                Dict("N" => 2, "Tol" => 1.0e-6, "Target" => 2.5, "Save" => 2),
             "Linear" => Dict("Type" => "Default", "Tol" => 1.0e-7, "MaxIts" => 500)
         )
     )

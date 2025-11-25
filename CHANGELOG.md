@@ -13,6 +13,11 @@ The format of this changelog is based on
       + Added support for `LineSegment` in SolidModel
       + Added `add_wave_ports!` to automatically place wave port boundaries where specified paths/routes intersect the simulation area
       + Added option to use wave ports instead of lumped ports in the single transmon example
+  - Fix bug where `Rounded` might incorrectly not apply to a `ClippedPolygon` with a
+    negative.
+  - Introduced `selection_tolerance` for `Rounded` which allows a rounding style to not
+    select a point unless it is within a tolerance of the target. This defaults to infinite,
+    but in a future major release will be reduced to a value consistent with floating point arithmetic.
 
 ## 1.6.0 (2025-10-16)
 

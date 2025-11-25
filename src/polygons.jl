@@ -583,6 +583,10 @@ rounded_rect_discretized_poly = to_polygons(rounded_rect)
     contour; for different rounding styles on different contours, use `StyleDict`.
   - `inverse_selection`: If true, the selection from `p0` is inverted;
     that is, all corners will be rounded except those selected by `p0`.
+  - `selection_tolerance`: Selections using `p0` will only be chosen if they are within
+    `selection_tolerance` of `p0`. The current default of infinite reflects the legacy
+    behaviour of always finding the closest point, and will be replaced with a small
+    non-zero tolerance to capture floating point precision in future (approximately 1.0nm).
 """
 Base.@kwdef struct Rounded{T <: Coordinate} <: GeometryEntityStyle
     abs_r::T = zero(T)
@@ -591,18 +595,34 @@ Base.@kwdef struct Rounded{T <: Coordinate} <: GeometryEntityStyle
     min_angle::Float64 = 1e-3
     p0::Vector{Point{T}} = []
     inverse_selection::Bool = false
+    selection_tolerance::T = T(Inf)
     function Rounded{T}(
         abs_r::Coordinate,
         rel_r,
         min_side_len,
         min_angle,
         p0,
-        inverse_selection
+        inverse_selection,
+        selection_tolerance
     ) where {T}
         if !iszero(abs_r) && !iszero(rel_r)
             throw(ArgumentError("`abs_r` and `rel_r` cannot both be non-zero"))
         end
-        return new{T}(abs_r, rel_r, min_side_len, min_angle, p0, inverse_selection)
+        if !isempty(p0) && !isfinite(selection_tolerance)
+            Base.depwarn(
+                "Non-finite selection tolerance is deprecated, and will be replaced with `1.0nm` in future.",
+                :Rounded
+            )
+        end
+        return new{T}(
+            abs_r,
+            rel_r,
+            min_side_len,
+            min_angle,
+            p0,
+            inverse_selection,
+            selection_tolerance
+        )
     end
 end
 Rounded(r::Coordinate; kwargs...) = Rounded{float(typeof(r))}(; abs_r=r, kwargs...)
@@ -634,16 +654,19 @@ end
 cornerindices(p, x) = cornerindices(points(p), x)
 cornerindices(p::Point, x) = cornerindices([p], x)
 cornerindices(p::Vector{<:Point}, p0::Point) = cornerindices(p, [p0])
-function cornerindices(p::Vector{<:Point}, p0::Vector{<:Point})
-    return map(p0) do px
+function cornerindices(p::Vector{<:Point}, p0::Vector{<:Point}; tol)
+    # Pick the closest to p0 satisfying tolerance.
+    return filter!(x -> x > 0, map(p0) do px
         idx = findfirst(p_idx -> isapprox(px, p_idx), p)
         !isnothing(idx) && return idx
-        return findmin(norm.(p .- px))[2]
-    end
+        d, idx = findmin(norm.(p .- px))
+        return d < tol ? idx : -1
+    end)
 end
 
-function cornerindices(p::Vector{<:Point}, r)
-    corner_indices = isempty(p0(r)) ? eachindex(p) : cornerindices(p, p0(r))
+function cornerindices(p::Vector{<:Point}, r::Rounded)
+    corner_indices =
+        isempty(p0(r)) ? eachindex(p) : cornerindices(p, p0(r); tol=r.selection_tolerance)
     return r.inverse_selection ? setdiff(eachindex(p), corner_indices) : corner_indices
 end
 

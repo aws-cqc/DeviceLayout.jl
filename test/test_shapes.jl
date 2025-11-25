@@ -321,7 +321,7 @@
     rrr = Polygons._round_poly(rr, 500.0nm; corner_indices=[1]) # Round point at (0,0)
     @test !iszero(points(rrr)[1]) # first point would be (0,0) if rounding failed
 
-    # Applying Rounded to ClippedPolygon
+    # DeviceLayout#115 Applying Rounded to ClippedPolygon
     r1 = centered(Rectangle(2.0μm, 2.0μm))
     r2 = centered(Rectangle(4.0μm, 4.0μm))
     p0 = [Point(1.0μm, 1.0μm)] # should be only point on outer poly
@@ -345,15 +345,51 @@
     csty = styled(cc, sty)
     pp = points(to_polygons(csty)[1])
     @test length(pp) > 11 # There are some rounded points
-    @test Point(1.0μm, 1.0μm) ∉ pp # fail
+    @test Point(1.0μm, 1.0μm) ∉ pp # rounded
     @test Point(-1.0μm, 1.0μm) ∈ pp
     @test Point(-1.0μm, -1.0μm) ∈ pp
     @test Point(1.0μm, -1.0μm) ∈ pp
 
-    @test Point(2.0μm, 2.0μm) ∉ pp # fail
+    @test Point(2.0μm, 2.0μm) ∉ pp # rounded
     @test Point(-2.0μm, 2.0μm) ∈ pp
     @test Point(-2.0μm, -2.0μm) ∈ pp
     @test Point(2.0μm, -2.0μm) ∈ pp
+
+    # Rounded style with tight tolerance
+    sty = Rounded(1.0μm; p0, selection_tolerance=1nm)
+
+    # Removes top right
+    pp = points(to_polygons(styled(r1, sty)))
+    @test Point(1.0μm, 1.0μm) ∉ pp # rounded
+    @test Point(-1.0μm, 1.0μm) ∈ pp
+    @test Point(-1.0μm, -1.0μm) ∈ pp
+    @test Point(1.0μm, -1.0μm) ∈ pp
+
+    # Removes top right
+    pp = points(to_polygons(styled(r2, sty)))
+    @test Point(2.0μm, 2.0μm) ∈ pp
+    @test Point(-2.0μm, 2.0μm) ∈ pp
+    @test Point(-2.0μm, -2.0μm) ∈ pp
+    @test Point(2.0μm, -2.0μm) ∈ pp
+
+    cc = difference2d(r2, r1)
+    csty = styled(cc, sty)
+    pp = points(to_polygons(csty)[1])
+    @test length(pp) > 11 # There are some rounded points
+    @test Point(1.0μm, 1.0μm) ∉ pp # rounded
+    @test Point(-1.0μm, 1.0μm) ∈ pp
+    @test Point(-1.0μm, -1.0μm) ∈ pp
+    @test Point(1.0μm, -1.0μm) ∈ pp
+
+    @test Point(2.0μm, 2.0μm) ∈ pp # not rounded
+    @test Point(-2.0μm, 2.0μm) ∈ pp
+    @test Point(-2.0μm, -2.0μm) ∈ pp
+    @test Point(2.0μm, -2.0μm) ∈ pp
+
+    cs = CoordinateSystem("abc", nm)
+    @test_nowarn place!(cs, csty, GDSMeta())
+    c = Cell("main", nm)
+    @test_nowarn render!(c, cs)
 end
 
 @testitem "Curvilinear" setup = [CommonTestSetup] begin
