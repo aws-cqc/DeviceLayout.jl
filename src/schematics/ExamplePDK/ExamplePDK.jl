@@ -277,6 +277,12 @@ const FLIPCHIP_SOLIDMODEL_TARGET = SolidModelTarget(
     indexed_layers=[:port, :lumped_element, :integration, :wave_port],
     wave_port_layers=[:wave_port],
     postrender_ops=[
+        (   # Reconcile L1 negative
+            "metal_negative_L1",
+            SolidModels.union_geom!,
+            ("metal_negative_L1", "metal_negative_L1", 2, 2),
+            :remove_object => true
+        ),
         (   # Get metal ground plane by subtracting negative from writeable area
             "metal_L1",
             SolidModels.difference_geom!,
@@ -288,6 +294,12 @@ const FLIPCHIP_SOLIDMODEL_TARGET = SolidModelTarget(
             SolidModels.union_geom!,
             ("metal_L1", "metal_positive_L1", 2, 2),
             :remove_tool => true
+        ),
+        (   # Reconcile L2 negative
+            "metal_negative_L2",
+            SolidModels.union_geom!,
+            ("metal_negative_L2", "metal_negative_L2", 2, 2),
+            :remove_object => true
         ),
         (   # Same thing on L2
             "metal_L2",
