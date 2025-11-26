@@ -153,18 +153,55 @@ halo(::StyledEntity{T, U, NoRender}, outer_delta, inner_delta=nothing) where {T,
 Style that annotates a GeometryEntity with a mesh size to use in SolidModel rendering. The
 generated mesh will include a size field defined as:
 
-```
-mesh size = h * max(s_g, (d/h)^α)
-```
+``s = h * max(s_g, (d/h)^α)``
 
-where d is the distance away from the styled entity, and `s_g` is the global mesh scale
-parameter specified in [`DeviceLayout.SolidModels.mesh_scale`](@ref). A smaller value of `h` will give a finer mesh
+where ``s`` is the mesh size, ``d`` is the distance away from the styled entity, ``s_g`` is
+the global mesh scale parameter specified in [`DeviceLayout.SolidModels.mesh_scale`](@ref),
+and `h` and `α` are the parameters provided. A smaller value of `h` will give a finer mesh
 attached to the styled entity, and a larger value of `α` will give a more rapid increase in
 size away from the styled entity.
 
-If `α < 0`, the size field will use [`DeviceLayout.SolidModels.mesh_grading_default`](@ref) used in rendering.
+If `α < 0`, the resulting size field will use
+[`DeviceLayout.SolidModels.mesh_grading_default`](@ref). It is generally recommended to use
+this global value in most scenarios, as it provides a helpful mechanism for global mesh
+modification.
+
+Each `MeshSized` entity generates a corresponding set of
+[`DeviceLayout.SolidModels.mesh_control_points`](@ref) during the call to
+[`DeviceLayout.SolidModels.render!`](@ref) along the perimeter of the styled entity.
+Controlling the mesh only at the edges of entities, rather than within the interior, ensures
+that geometric entities are resolved whilst avoiding overrefinement in surface regions which
+can be reasonably achieved through adaptive mesh refinement. Increasing resolution of edges
+of entities can be achieved through reducing the value of `h` on the particular entity or
+``s_g`` to affect all entities globally.
+
+For the set of all [`DeviceLayout.SolidModels.mesh_control_points`](@ref) computed, a
+corresponding mesh size will be computed, and the resulting mesh size is then the minimum
+over all of these values
+
+``s(x) = \\min_{x_p ∈ X_p} h_p \\max(s_g, \\frac{\\| x - x_p \\|_2}{h_p}^{α_p})``
+
+where ``s(x)`` explicitly expresses that the size is a function of position ``x``, the ``p``
+subscript denotes parameters associated to a single control ``x_p`` from the ``X_p`` of all
+control points. Reducing ``h_p`` will result in a finer mesh next to an entity which will
+then grow as a function of distance from the control point ``x_p``. In the implementation a
+`KDTree` ordering per `(h,α)` pair is used to ensure the reduction over ``X_p`` is highly
+efficient.
 
 See also [`meshsized_entity`](@ref).
+
+Associated methods:
+
+  - [`DeviceLayout.SolidModels.mesh_scale`](@ref) for adjusting the `s_g` parameter.
+  - [`DeviceLayout.SolidModels.mesh_grading_default`](@ref) for adjusting the value of `α`
+    that a `MeshSized` with `α < 0` will map to.
+  - [`DeviceLayout.SolidModels.reset_mesh_control!`](@ref) for resetting the `s_g` and
+    `α_default` values to the default values.
+  - [`DeviceLayout.SolidModels.add_mesh_size_point`](@ref) for adding a mesh sizing point (a
+    point from which distance `d` will be calculated), and used in calculating any size
+    fields.
+  - [`DeviceLayout.SolidModels.mesh_control_points`](@ref) for access to the global dictionary
+    of control points for which `d` and ultimately the mesh size will be calculated.
 """
 struct MeshSized{T, S} <: GeometryEntityStyle where {T <: Coordinate, S <: Real}
     h::T
