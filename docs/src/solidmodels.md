@@ -80,13 +80,15 @@ Size fields within a `SolidModel` are specified in terms of control points, whic
 spatial locations combined with an `(h, α)` as in [`MeshSized`](@ref). When a model is
 rendered, a set of control points are computed from the geometry, and these are then used to
 create `KDTree` structures to allow for rapid evaluation. Additional points can be manually
-inserted into a `SolidModel` after `render!` is called, and the global size parameters
+inserted after `render!` is called using [`DeviceLayout.SolidModels.add_mesh_size_point`](@ref), and the global size parameters
 [`SolidModels.mesh_scale`](@ref), [`SolidModels.mesh_order`](@ref) and [`SolidModels.mesh_grading_default`](@ref) modified without requiring `render!`
 to be called again. This allows for iteration on the mesh for a given fixed geometry. Manual
 modification of the control points is in general not necessary but can be achieved through
 [`DeviceLayout.SolidModels.add_mesh_size_point`](@ref), [`DeviceLayout.SolidModels.finalize_size_fields!`](@ref),
 [`DeviceLayout.SolidModels.clear_mesh_control_points!`](@ref) and
-[`DeviceLayout.SolidModels.reset_mesh_control!`](@ref).
+[`DeviceLayout.SolidModels.reset_mesh_control!`](@ref). Once an improved mesh has been
+achieved through addition of custom size fields like this, it is generally suggested to
+incorporate this information back into the `MeshSized` style used on the original entities.
 
 !!! info
 
