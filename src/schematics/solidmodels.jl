@@ -119,11 +119,7 @@ function intersection_ops(t::SolidModelTarget, sch::Schematic)
         ]
     end
     return [
-        ("rendered_volume", SolidModels.union_geom!, (bv[1], bv[2], 3, 3)),
-        [
-            ("rendered_volume", SolidModels.union_geom!, ("rendered_volume", bv[i], 3, 3))
-            for i = 3:length(bv)
-        ]...,
+        ("rendered_volume", SolidModels.union_geom!, bv, 3),
         ("rendered_volume", SolidModels.restrict_to_volume!, ("rendered_volume",)),
         ("exterior_boundary", SolidModels.get_boundary, ("rendered_volume", 3)),
         [
