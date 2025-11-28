@@ -302,6 +302,14 @@
         end
     end
 
+end
+
+@testitem "Schematic + SolidModel + Paths and Bridges" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+
+    reset_uniquename!()
+    BASE_NEGATIVE = SemanticMeta(:base_negative)
+
     function test_bridge(; meander=false, bridges=false)
         # Helper to define an airbridge
         function low_overlap_bridge(
@@ -403,9 +411,9 @@
 
         # Setup an optional "fine mesh" size field.
         refinement_style = OptionalStyle(
-            MeshSized(1.0μm, 0.9),
+            MeshSized(1.0μm, 0.8),
             :finemesh,
-            false_style=MeshSized(10.0μm, 1.0),
+            false_style=MeshSized(10.0μm, 0.9),
             default=false
         )
         sizing = [
@@ -509,6 +517,7 @@
         )
 
         sm = SolidModel("test", overwrite=true)
+        # SolidModels.set_gmsh_option("")
         render!(sm, floorplan, target)
 
         @test SolidModels.hasgroup(sm, "substrates", 3)
@@ -590,6 +599,16 @@
             @test length(SolidModels.entitytags(sm["vacuum", 3])) == 3
         end
     end
+end
+
+@testitem "Schematic + SolidModel + Overlap Path" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+    import .SchematicDrivenLayout: AbstractComponent
+
+    reset_uniquename!()
+    BASE_NEGATIVE = SemanticMeta(:base_negative)
+
+    using LinearAlgebra
 
     function overlap_path(; path_style, turn_radius=50μm)
 
@@ -679,7 +698,7 @@
         )
 
         sm = SolidModel("test", overwrite=true)
-        render!(sm, floorplan, sm_target)
+        @test_nowarn render!(sm, floorplan, sm_target)
         return sm
     end
 
