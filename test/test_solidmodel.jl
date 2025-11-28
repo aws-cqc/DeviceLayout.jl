@@ -1328,8 +1328,8 @@
         @test isempty(SolidModels.mesh_control_points())
         @test isempty(SolidModels.mesh_control_trees())
 
-        SolidModels.mesh_scale(0.5)
-        SolidModels.mesh_grading_default(0.85)
+        @test SolidModels.mesh_scale(0.5) == 0.5
+        @test SolidModels.mesh_grading_default(0.85) == 0.85
         SolidModels.mesh_order(2)
 
         @test SolidModels.mesh_scale() == 0.5
@@ -1437,5 +1437,8 @@
         SolidModels.set_gmsh_option(dict)
         @test SolidModels.get_gmsh_number("Mesh.ElementOrder") == 2
         @test SolidModels.get_gmsh_string("Geometry.OCCTargetUnit") == "UM"
+        dict["Mesh.ElementOrder"] = 1
+        SolidModels.set_gmsh_option("Mesh.ElementOrder", dict)
+        @test SolidModels.get_gmsh_number("Mesh.ElementOrder") == 1
     end
 end
