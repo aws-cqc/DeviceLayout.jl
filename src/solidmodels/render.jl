@@ -922,9 +922,10 @@ function render!(
     set_gmsh_option("Mesh.Algorithm", gmsh_options, 6)
     set_gmsh_option("Mesh.Algorithm3D", gmsh_options, 1)
 
-    # With the setting below, Gmsh will look for OMP_NUM_THREADS environment variables;
+    # Default to no threads, as there appear to be race conditions within gmsh.
+    # If set to zero, Gmsh will look for OMP_NUM_THREADS environment variables;
     # this needs to be >1 for HXT algorithm to use parallelism.
-    set_gmsh_option("General.NumThreads", gmsh_options, 0)
+    set_gmsh_option("General.NumThreads", gmsh_options, 1)
 
     # Always save meshes in binary for faster disk I/O
     set_gmsh_option("Mesh.Binary", gmsh_options, 1)
