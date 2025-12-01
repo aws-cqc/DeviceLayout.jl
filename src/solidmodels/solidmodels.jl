@@ -162,7 +162,10 @@ struct SolidModel{T <: SolidModelKernel}
         set_gmsh_option("Geometry.OCCTargetUnit", "UM")
         # Use threads in open cascade
         set_gmsh_option("Geometry.OCCParallel", 1)
-        set_gmsh_option("General.NumThreads", 0)
+        # Default to no threads, as there appear to be race conditions within gmsh.
+        # If set to zero, Gmsh will look for OMP_NUM_THREADS environment variables;
+        # this needs to be >1 for HXT algorithm to use parallelism.
+        set_gmsh_option("General.NumThreads", 1)
 
         # Reasonable defaults for meshing.
         set_gmsh_option("Mesh.MeshSizeFromPoints", 0)
