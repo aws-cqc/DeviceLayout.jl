@@ -301,7 +301,6 @@
             test_component(poly, 3, true)
         end
     end
-
 end
 
 @testitem "Schematic + SolidModel + Paths and Bridges" setup = [CommonTestSetup] begin
