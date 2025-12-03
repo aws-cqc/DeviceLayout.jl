@@ -191,7 +191,9 @@ Return the coordinate type of the geometry.
 coordinatetype(::Type{S}) where {T, S <: AbstractGeometry{T}} = T
 coordinatetype(::S) where {T, S <: AbstractGeometry{T}} = T
 coordinatetype(::AbstractArray{S}) where {T, S <: AbstractGeometry{T}} = T
-coordinatetype(iterable) = promote_type(coordinatetype.(iterable))
+coordinatetype(iterable) = promote_type(coordinatetype.(iterable)...)
+coordinatetype(::Point{T}) where {T} = T
+coordinatetype(::Type{Point{T}}) where {T} = T
 
 # Entity interface
 include("entities.jl")
