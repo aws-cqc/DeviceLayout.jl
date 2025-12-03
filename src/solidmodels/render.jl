@@ -996,12 +996,6 @@ function gmsh_meshsize(
     lc::Cdouble
 )
     l = Inf64
-    s::Float64 = mesh_scale()
-    trees::Dict{
-        Tuple{Float64, Float64},
-        KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
-    } = mesh_control_trees()
-    # Explicit type tag here to remove hypothetical type instability.
     for ((h, α), tree) in mesh_control_trees()
         _, d::Float64 = nn(tree, SVector{3}(x, y, z))
         l = min(l, h * max(mesh_scale(), (d / h)^α))::Float64
