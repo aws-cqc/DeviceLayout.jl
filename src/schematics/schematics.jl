@@ -1348,7 +1348,7 @@ function build!(sch::Schematic, geometry_fn=geometry; strict=:error)
             # One of the node cs's references will be its Component
             for (i, subref) in pairs(refs(node_cs)) # Just check all of them
                 if structure(subref) isa AbstractCompositeComponent
-                    build!(schematic(structure(subref)))
+                    build!(schematic(structure(subref)); strict=strict)
                 end
                 if structure(subref) isa AbstractComponent
                     try
