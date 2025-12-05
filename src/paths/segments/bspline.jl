@@ -8,6 +8,40 @@ import QuadGK: quadgk
 import ForwardDiff: Dual, partials, value, Partials
 using LinearAlgebra
 
+# Patch in new boundary condition for Interpolations.jl allowing us to specify derivative
+struct NeumannBC{GT <: Interpolations.GridType, T} <: Interpolations.BoundaryCondition
+    gt::GT
+    g0::T
+    g1::T
+end
+NeumannBC(g0, g1) = NeumannBC(Interpolations.OnGrid(), g0, g1)
+
+# Concrete type of interpolation, only used in BSpline struct definition
+const LayoutBSplineItp{T} = Interpolations.ScaledInterpolation{
+    Point{T},
+    1,
+    Interpolations.BSplineInterpolation{
+        Point{T},
+        1,
+        Interpolations.OffsetArrays.OffsetVector{Point{T}, Vector{Point{T}}},
+        Interpolations.BSpline{
+            Interpolations.Cubic{NeumannBC{Interpolations.OnGrid, Point{T}}}
+        },
+        Tuple{Base.OneTo{Int64}}
+    },
+    Interpolations.BSpline{
+        Interpolations.Cubic{NeumannBC{Interpolations.OnGrid, Point{T}}}
+    },
+    Tuple{
+        StepRangeLen{
+            Float64,
+            Base.TwicePrecision{Float64},
+            Base.TwicePrecision{Float64},
+            Int64
+        }
+    }
+}
+
 """
     mutable struct BSpline{T} <: ContinuousSegment{T}
 
@@ -25,9 +59,9 @@ mutable struct BSpline{T} <: ContinuousSegment{T}
     p::Vector{Point{T}}
     t0::Point{T}
     t1::Point{T}
-    r::Paths.Interpolations.AbstractInterpolation{Point{T}} # function of t between 0 and 1
-    p0
-    p1
+    r::LayoutBSplineItp{T} # function of t between 0 and 1
+    p0::Point{T}
+    p1::Point{T}
     α0::typeof(1.0°)
     α1::typeof(1.0°)
     function BSpline{T}(p::Vector{Point{T}}, t0::Point{T}, t1::Point{T}) where {T}
@@ -387,14 +421,6 @@ function _bspline_tangents(scale, dir0, dir1, speed0::Coordinate, speed1=speed0)
     return t0, t1
 end
 
-# Patch in new boundary condition for Interpolations.jl allowing us to specify derivative
-struct NeumannBC{GT <: Interpolations.GridType} <: Interpolations.BoundaryCondition
-    gt::GT
-    g0
-    g1
-end
-NeumannBC(g0, g1) = NeumannBC(Interpolations.OnGrid(), g0, g1)
-
 """
 `Cubic{NeumannBC}` `OnGrid` amounts to setting `y_1'(x) = g0` at `x = 0`
 and  `y_n'(x) = g1` at `x = 1`.
@@ -407,7 +433,7 @@ function prefiltering_system(
     ::Type{T},
     ::Type{TC},
     n::Int,
-    degree::Cubic{NeumannBC{Interpolations.OnGrid}}
+    degree::Cubic{<:NeumannBC{Interpolations.OnGrid}}
 ) where {T, TC}
     dl, d, du = Interpolations.inner_system_diags(T, n, degree)
     d[1] = -oneunit(T) / 2
