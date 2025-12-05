@@ -655,7 +655,11 @@ end
 cornerindices(p, x) = cornerindices(points(p), x)
 cornerindices(p::Point, x) = cornerindices([p], x)
 cornerindices(p::Vector{<:Point}, p0::Point) = cornerindices(p, [p0])
-function cornerindices(p::Vector{<:Point}, p0::Vector{<:Point}; tol=DeviceLayout.coordinatetype(p)(Inf))
+function cornerindices(
+    p::Vector{<:Point},
+    p0::Vector{<:Point};
+    tol=DeviceLayout.coordinatetype(p)(Inf)
+)
     # Pick the closest to p0 satisfying tolerance.
     return filter!(x -> x > 0, map(p0) do px
         idx = findfirst(p_idx -> isapprox(px, p_idx), p)
