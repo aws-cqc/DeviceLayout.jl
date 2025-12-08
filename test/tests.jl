@@ -106,6 +106,8 @@
             typeof(Point(1.0 / nm2μm, 2.0 / nm2μm)),
             typeof(Point(1.0 / cm2μm, 1.0 / cm2μm))
         ) == Point{typeof(1.0 / μm2μm)}
+        @test coordinatetype([Point(1nm2μm, 1nm2μm), Point(1.0cm2μm, 1.0cm2μm)]) ==
+              coordinatetype(Point{typeof(1.0μm2μm)})
     end
 end
 
