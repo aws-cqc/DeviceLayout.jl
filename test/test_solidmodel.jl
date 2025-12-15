@@ -1304,5 +1304,138 @@
             "fragment_geom!(sm, [\"tile00\", \"foo\"], [\"tile01\", \"bar\"], 2, 2): invalid arguments ([\"bar\"], 2)"
         ) SolidModels.fragment_geom!(sm, ["tile00", "foo"], ["tile01", "bar"])) ==
               [(2, 1), (2, 2)]
+
+        # Use of MeshingParameters is deprecated.
+        sm = SolidModel("test", overwrite=true)
+        @test_logs (:warn, "Using `MeshingParameters` is deprecated!") render!(
+            sm,
+            CoordinateSystem("test", nm),
+            meshing_parameters=SolidModels.MeshingParameters()
+        )
+    end
+
+    @testset "Mesh size modifications" begin
+        using StaticArrays
+        SolidModels.gmsh.is_initialized() == 0 && SolidModels.gmsh.initialize()
+
+        SolidModels.reset_mesh_control!()
+        SolidModels.clear_mesh_control_points!()
+        SolidModels.finalize_size_fields!()
+
+        @test SolidModels.mesh_scale() == 1.0
+        @test SolidModels.mesh_grading_default() == 0.9
+        @test SolidModels.mesh_order() == 1
+        @test isempty(SolidModels.mesh_control_points())
+        @test isempty(SolidModels.mesh_control_trees())
+
+        SolidModels.mesh_scale(0.5)
+        SolidModels.mesh_grading_default(0.85)
+        SolidModels.mesh_order(2)
+
+        @test SolidModels.mesh_scale() == 0.5
+        @test SolidModels.mesh_grading_default() == 0.85
+        @test SolidModels.mesh_order() == 2
+
+        SolidModels.add_mesh_size_point([1.0, 2.0, 3.0]; h=0.5, α=0.75)
+        SolidModels.add_mesh_size_point([2.0, 3.0, 4.0]; h=0.75, α=-1)
+
+        @test !isempty(SolidModels.mesh_control_points())
+        @test isempty(SolidModels.mesh_control_trees())
+        SolidModels.finalize_size_fields!()
+        @test !isempty(SolidModels.mesh_control_trees())
+
+        @test all(
+            sort(collect(keys(SolidModels.mesh_control_points()))) .==
+            [(0.5, 0.75), (0.75, -1.0)]
+        )
+        @test all(
+            sort(collect(keys(SolidModels.mesh_control_trees()))) .==
+            [(0.5, 0.75), (0.75, 0.85)]
+        )
+
+        SolidModels.reset_mesh_control!()
+        SolidModels.clear_mesh_control_points!()
+        SolidModels.finalize_size_fields!()
+
+        @test SolidModels.mesh_scale() == 1.0
+        @test SolidModels.mesh_grading_default() == 0.9
+        @test SolidModels.mesh_order() == 1
+        @test isempty(SolidModels.mesh_control_points())
+        @test isempty(SolidModels.mesh_control_trees())
+
+        p = [SVector(1.0, 2.0, 3.0), SVector(2.0, 3.0, 4.0), SVector(3.0, 4.0, 5.0)]
+
+        SolidModels.add_mesh_size_point(p; h=0.5, α=-1)
+        @test all(sort(collect(keys(SolidModels.mesh_control_points()))) .== [(0.5, -1.0)])
+        SolidModels.finalize_size_fields!()
+        @test all(sort(collect(keys(SolidModels.mesh_control_trees()))) .== [(0.5, 0.9)])
+
+        SolidModels.clear_mesh_control_points!()
+        p = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
+
+        SolidModels.add_mesh_size_point(p; h=0.5, α=-1)
+        @test all(sort(collect(keys(SolidModels.mesh_control_points()))) .== [(0.5, -1.0)])
+        SolidModels.finalize_size_fields!()
+        @test all(sort(collect(keys(SolidModels.mesh_control_trees()))) .== [(0.5, 0.9)])
+
+        # Check that the KDTree implementation matches a brute force search
+        import Random: seed!, default_rng, rand
+        rng = seed!(default_rng(), 111)
+        SolidModels.clear_mesh_control_points!()
+
+        # Add 5 random (h,a) fields made up of 100 points.
+        for n = 1:5
+            SolidModels.add_mesh_size_point(
+                rand(rng, SVector{3, Float64}, 100);
+                h=rand(rng, Float64),
+                α=rand(rng, Float64)
+            )
+        end
+
+        SolidModels.finalize_size_fields!()
+        function bruteforce(x, y, z)
+            # Alternative implementation with brute force search for testing.
+            l = Inf64
+            # Explicit type tag here to remove hypothetical type instability.
+            for ((h, α), vs) in SolidModels.MESHSIZE_PARAMS[:cp]::Dict{
+                Tuple{Float64, Float64},
+                Vector{SVector{3, Float64}}
+            }
+                local_α = α < 0 ? SolidModels.MESHSIZE_PARAMS[:global_α] : α
+                for v in vs
+                    d = sqrt((x - v[1])^2 + (y - v[2])^2 + (z - v[3])^2)
+                    l = min(
+                        l,
+                        h * max(
+                            SolidModels.MESHSIZE_PARAMS[:mesh_scale]::Float64,
+                            (d / h)^local_α
+                        )
+                    )
+                end
+            end
+            return l
+        end
+
+        for p in rand(rng, SVector{3, Float64}, 100)
+            @test bruteforce(p...) ≈ SolidModels.gmsh_meshsize(
+                Cint(0),
+                Cint(0),
+                Cdouble(p[1]),
+                Cdouble(p[2]),
+                Cdouble(p[3]),
+                Cdouble(0.0)
+            )
+        end
+
+        # Checking option access
+        SolidModels.set_gmsh_option("Mesh.ElementOrder", 3)
+        SolidModels.set_gmsh_option("Geometry.OCCTargetUnit", "M")
+        @test SolidModels.get_gmsh_number("Mesh.ElementOrder") == 3
+        @test SolidModels.get_gmsh_string("Geometry.OCCTargetUnit") == "M"
+
+        dict = Dict("Mesh.ElementOrder" => 2, "Geometry.OCCTargetUnit" => "UM")
+        SolidModels.set_gmsh_option(dict)
+        @test SolidModels.get_gmsh_number("Mesh.ElementOrder") == 2
+        @test SolidModels.get_gmsh_string("Geometry.OCCTargetUnit") == "UM"
     end
 end

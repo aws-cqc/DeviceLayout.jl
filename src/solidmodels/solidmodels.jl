@@ -3,6 +3,32 @@ module SolidModels
 import Gmsh: gmsh, gmsh.model.occ
 export gmsh
 
+# Explicit callback dictionary, to overcome closure limitation on apple silicon.
+import StaticArrays: SVector
+import NearestNeighbors: KDTree
+import Distances: Euclidean
+const MESHSIZE_PARAMS = Dict{
+    Symbol,
+    Union{
+        Float64,
+        Int64,
+        Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}},
+        Dict{
+            Tuple{Float64, Float64},
+            KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
+        }
+    }
+}(
+    :mesh_scale => 1.0,
+    :mesh_order => 1,
+    :global_α => 0.9,
+    :cp => Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}(),
+    :ct => Dict{
+        Tuple{Float64, Float64},
+        KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
+    }()
+) # initial defaults
+
 import DeviceLayout
 import DeviceLayout:
     AbstractCoordinateSystem,
@@ -134,6 +160,8 @@ struct SolidModel{T <: SolidModelKernel}
         iszero(gmsh.is_initialized()) && gmsh.initialize()
         # SolidModel initiated gmsh uses μm
         gmsh.option.set_string("Geometry.OCCTargetUnit", "UM")
+        # Use threads in open cascade
+        gmsh.option.set_number("Geometry.OCCParallel", 1)
 
         # If a model with this name exists, throw error or delete it
         names = gmsh.model.list()

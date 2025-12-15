@@ -301,6 +301,13 @@
             test_component(poly, 3, true)
         end
     end
+end
+
+@testitem "Schematic + SolidModel + Paths and Bridges" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+
+    reset_uniquename!()
+    BASE_NEGATIVE = SemanticMeta(:base_negative)
 
     function test_bridge(; meander=false, bridges=false)
         # Helper to define an airbridge
@@ -403,9 +410,9 @@
 
         # Setup an optional "fine mesh" size field.
         refinement_style = OptionalStyle(
-            MeshSized(1.0μm, 0.9),
+            MeshSized(1.0μm, 0.8),
             :finemesh,
-            false_style=MeshSized(10.0μm, 1.0),
+            false_style=MeshSized(10.0μm, 0.9),
             default=false
         )
         sizing = [
@@ -509,6 +516,7 @@
         )
 
         sm = SolidModel("test", overwrite=true)
+        # SolidModels.set_gmsh_option("")
         render!(sm, floorplan, target)
 
         @test SolidModels.hasgroup(sm, "substrates", 3)
@@ -526,46 +534,24 @@
 
         # Reduce the noise in the REPL
         SolidModels.gmsh.option.setNumber("General.Verbosity", 0)
+        SolidModels.reset_mesh_control!()
         @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
 
         num_tri = SolidModels.gmsh.option.get_number("Mesh.NbTriangles")
 
-        # Smaller meshscale -- results in finer mesh attached to all sized entities
-        sm = SolidModel("test", overwrite=true)
-        render!(
-            sm,
-            floorplan,
-            target,
-            meshing_parameters=SolidModels.MeshingParameters(mesh_scale=0.5)
-        )
+        # Half the global scale, should be a finer mesh.
+        SolidModels.mesh_scale(0.5)
+        SolidModels.gmsh.model.mesh.clear() # Force gmsh to regenerate the mesh
         @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
         @test SolidModels.gmsh.option.get_number("Mesh.NbTriangles") > num_tri
 
         # Less aggressive grading -- results in slower mesh size growth away from sized entities
         # with default grading (nonstyled paths)
-        sm = SolidModel("test", overwrite=true)
-        render!(
-            sm,
-            floorplan,
-            target,
-            meshing_parameters=SolidModels.MeshingParameters(α_default=0.7)
-        )
+        SolidModels.mesh_scale(1.0)
+        SolidModels.mesh_grading_default(0.7)
+        SolidModels.gmsh.model.mesh.clear()
         @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
         @test SolidModels.gmsh.option.get_number("Mesh.NbTriangles") > num_tri
-
-        # Apply sizing field to surfaces -- measures the distance function from the whole
-        # surface of sized entities, rather than only the perimeter. Results in finer mesh
-        # interior to sized entities.
-        sm = SolidModel("test", overwrite=true)
-        render!(
-            sm,
-            floorplan,
-            target,
-            meshing_parameters=SolidModels.MeshingParameters(apply_size_to_surfaces=true)
-        )
-        @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
-        @test SolidModels.gmsh.option.get_number("Mesh.NbTriangles") > num_tri
-
         return sm
     end
 
@@ -612,6 +598,16 @@
             @test length(SolidModels.entitytags(sm["vacuum", 3])) == 3
         end
     end
+end
+
+@testitem "Schematic + SolidModel + Overlap Path" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+    import .SchematicDrivenLayout: AbstractComponent
+
+    reset_uniquename!()
+    BASE_NEGATIVE = SemanticMeta(:base_negative)
+
+    using LinearAlgebra
 
     function overlap_path(; path_style, turn_radius=50μm)
 
@@ -701,7 +697,7 @@
         )
 
         sm = SolidModel("test", overwrite=true)
-        render!(sm, floorplan, sm_target)
+        @test_nowarn render!(sm, floorplan, sm_target)
         return sm
     end
 
