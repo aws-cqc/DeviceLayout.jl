@@ -13,6 +13,16 @@ The format of this changelog is based on
     rendering and meshing thereby improving user experience.
   - Deprecate `SolidModels.MeshingParameters` in favour of new `mesh_scale`, `mesh_order`,
     `mesh_grading_default` accessed from `SolidModels`.
+  - Improvements to `SolidModels.render!` to improve stability and performance.
+    + Change `SolidModels.restrict_to_volume!` to perform a check if the simulation domain
+      already bounds all two and three dimensional objects, if so skips operation.
+    + Change `SolidModels.render!` to incorporate a two stage `_fragment_and_map!` operation,
+      reconciling vertices and segments before reconciling all entities. This improves the
+      robustness of the OpenCascade integration which can error in synchronization if too much
+      reconciliation is required all at once by `fragment`.
+    + These two operations in conjunction with the removal of `MeshSized` entities results in
+      a ~3x performance improvement in rendering the QPU17 example to `SolidModel`, and ~4.5x
+      reduction in time from schematic to mesh.
 
 ## 1.7.0 (2025-11-26)
 
