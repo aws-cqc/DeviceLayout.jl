@@ -91,7 +91,7 @@ achieved through addition of custom size fields like this, it is generally sugge
 incorporate this information back into the `MeshSized` style used on the original entities.
 
 !!! info
-
+    
     If [`SolidModels.mesh_control_points`](@ref) is modified, then it is important to call
     [`SolidModels.finalize_size_fields!`](@ref) in order to ensure that the `KDTree` are rebuilt.
     Additionally, to generate a new mesh `SolidModels.gmsh.model.mesh.clear()` must be called

@@ -446,13 +446,6 @@ sizeandgrading(e::GeometryEntity; kwargs...) =
     (float(meshsize(e; kwargs...)), float(meshgrading(e; kwargs...)))
 
 """
-    Global defaults for key meshing parameters.
-"""
-MESHSIZE_PARAMS[:mesh_scale] = 1.0
-MESHSIZE_PARAMS[:mesh_order] = 1
-MESHSIZE_PARAMS[:global_α] = 0.9
-
-"""
     set_gmsh_option(s, o::Number)
     set_gmsh_option(s, o::AbstractString)
     set_gmsh_option(s, d::Dict, default)
