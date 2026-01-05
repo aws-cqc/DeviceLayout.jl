@@ -11,6 +11,8 @@ import CoordinateTransformations: AffineMap, LinearMap, Translation, Transformat
 import Clipper
 import Clipper: children, contour
 import StaticArrays
+using SpatialIndexing
+import SpatialIndexing: mbr
 
 import DeviceLayout
 import DeviceLayout:
