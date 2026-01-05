@@ -4,26 +4,28 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Upcoming
+## 1.8.0 (2026-01-05)
 
   - Mesh size fields are no longer controlled via `PhysicalGroup` internally, this change
     allows for changing the size field associated to a `SolidModel` after `render!` via the
     global parameters accessed in `MeshSized`. This reduces the number of entities in any
     global boolean operations, improving performance, along with separating the concerns of
     rendering and meshing thereby improving user experience.
-  - Deprecate `SolidModels.MeshingParameters` in favour of new `mesh_scale`, `mesh_order`,
+
+  - Deprecated `SolidModels.MeshingParameters` in favour of new `mesh_scale`, `mesh_order`,
     `mesh_grading_default` accessed from `SolidModels`.
   - Improvements to `SolidModels.render!` to improve stability and performance.
     
-      + Change `SolidModels.restrict_to_volume!` to perform a check if the simulation domain
+      + Changed `SolidModels.restrict_to_volume!` to perform a check if the simulation domain
         already bounds all two and three dimensional objects, if so skips operation.
-      + Change `SolidModels.render!` to incorporate a two stage `_fragment_and_map!` operation,
+      + Changed `SolidModels.render!` to incorporate a two stage `_fragment_and_map!` operation,
         reconciling vertices and segments before reconciling all entities. This improves the
         robustness of the OpenCascade integration which can error in synchronization if too much
         reconciliation is required all at once by `fragment`.
       + These two operations in conjunction with the removal of `MeshSized` entities results in
         a ~3x performance improvement in rendering the QPU17 example to `SolidModel`, and ~4.5x
         reduction in time from schematic to mesh.
+  - Fixed Julia 1.11+ performance regression for B-spline optimization.
 
 ## 1.7.0 (2025-11-26)
 
@@ -35,7 +37,7 @@ The format of this changelog is based on
       + Added support for `LineSegment` in SolidModel
       + Added `add_wave_ports!` to automatically place wave port boundaries where specified paths/routes intersect the simulation area
       + Added option to use wave ports instead of lumped ports in the single transmon example
-  - Fix bug where `Rounded` might incorrectly not apply to a `ClippedPolygon` with a
+  - Fixed bug where `Rounded` might incorrectly not apply to a `ClippedPolygon` with a
     negative.
   - Introduced `selection_tolerance` for `Rounded` which allows a rounding style to not
     select a point unless it is within a tolerance of the target. This defaults to infinite,
