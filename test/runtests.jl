@@ -27,5 +27,3 @@ using TestItemRunner
 end
 
 @run_package_tests
-
-include("test_channels.jl")
