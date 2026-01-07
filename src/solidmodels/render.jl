@@ -397,31 +397,31 @@ meshsize(node::Paths.Node{<:Real}; kwargs...) = meshsize(node.seg, node.sty; kwa
 # Various path styles
 meshsize(seg::Paths.Segment, ::Paths.Style; kwargs...) = zero(eltype(seg))
 meshsize(::Paths.Segment, sty::Paths.SimpleTrace; kwargs...) = 2 * sty.width
-meshsize(::Paths.Segment, sty::Paths.SimpleCPW; kwargs...) = 2 * max(sty.trace, sty.gap)
+meshsize(::Paths.Segment, sty::Paths.SimpleCPW; kwargs...) = 2 * min(sty.trace, sty.gap)
 meshsize(::Paths.Segment, sty::Paths.TaperTrace; kwargs...) =
-    2 * max(sty.width_start, sty.width_end)
+    2 * min(sty.width_start, sty.width_end)
 meshsize(::Paths.Segment, sty::Paths.TaperCPW; kwargs...) =
-    2 * max(sty.trace_start, sty.trace_end, sty.gap_start, sty.gap_end)
+    2 * min(sty.trace_start, sty.trace_end, sty.gap_start, sty.gap_end)
 meshsize(::Paths.Segment, sty::Paths.TraceTermination; kwargs...) = 2 * sty.width
-meshsize(::Paths.Segment, sty::Paths.CPWOpenTermination; kwargs...) =
-    2 * max(sty.trace, sty.gap)
+meshsize(seg::Paths.Segment, sty::Paths.CPWOpenTermination; kwargs...) =
+    2 * min(sty.trace, sty.gap)
 meshsize(::Paths.Segment, sty::Paths.CPWShortTermination; kwargs...) =
-    2 * max(sty.trace, sty.gap)
+    2 * min(sty.trace, sty.gap)
 
 # For GeneralCPW and GeneralTrace, just sample.
 function meshsize(seg::Paths.Segment, sty::Paths.GeneralTrace; kwargs...)
     l = pathlength(seg)
-    return maximum(sty.width.(range(zero(l), l, length=11)))
+    return minimum(sty.width.(range(zero(l), l, length=11)))
 end
 function meshsize(seg::Paths.Segment, sty::Paths.GeneralCPW; kwargs...)
     l = pathlength(seg)
-    maxtrace = maximum(sty.trace.(range(zero(l), l, length=11)))
-    maxgap = maximum(sty.gap.(range(zero(l), l, length=11)))
-    return 2 * max(maxtrace, maxgap)
+    mintrace = minimum(sty.trace.(range(zero(l), l, length=11)))
+    mingap = minimum(sty.gap.(range(zero(l), l, length=11)))
+    return 2 * min(mintrace, mingap)
 end
 # Compound
 function meshsize(seg::Paths.CompoundSegment, sty::Paths.CompoundStyle; kwargs...)
-    return maximum(meshsize.(seg.segments, sty.styles))
+    return minimum(meshsize.(seg.segments, sty.styles))
 end
 # There should be no DecoratedStyles at SolidModel rendering
 meshgrading(::GeometryEntity{T}; kwargs...) where {T} = -1.0
@@ -675,21 +675,21 @@ end
 """
     reset_mesh_control!()
 
-Reset the mesh scaling and grading to the original defaults: `(s_g, α) ← (1.0, 0.9)`.
+Reset the mesh scaling and grading to the original defaults: `(s_g, α) ← (1.0, 0.75)`.
 
 See [`DeviceLayout.MeshSized`](@ref) for details and the explicit mesh sizing formula.
 """
 function reset_mesh_control!()
     set_gmsh_option("Mesh.ElementOrder", 1)
     mesh_scale(1.0)
-    return mesh_grading_default(0.9)
+    return mesh_grading_default(0.75)
 end
 
 """
     Base.@kwdef struct MeshingParameters
         mesh_scale::Float64 = 1.0
         mesh_order::Int = 1
-        α_default::Float64 = 0.9
+        α_default::Float64 = 0.75
         apply_size_to_surfaces::Bool = false
         high_order_optimize::Int = 1
         surface_mesh_algorithm::Int = 6
@@ -738,7 +738,7 @@ fields throughout the domain.
 Base.@kwdef struct MeshingParameters
     mesh_scale::Float64 = 1.0
     mesh_order::Int = 1
-    α_default::Float64 = 0.9
+    α_default::Float64 = 0.75
     apply_size_to_surfaces::Bool = false
     high_order_optimize::Int = 1
     surface_mesh_algorithm::Int = 6

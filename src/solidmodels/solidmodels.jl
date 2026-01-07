@@ -21,7 +21,7 @@ const MESHSIZE_PARAMS = Dict{
 }(
     :mesh_scale => 1.0,
     :mesh_order => 1,
-    :global_α => 0.9,
+    :global_α => 0.75,
     :cp => Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}(),
     :ct => Dict{
         Tuple{Float64, Float64},

@@ -4,6 +4,11 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Upcoming
+
+  - Changed default CPW mesh size to use `2 * min(trace, gap)` (higher element quality when trace and gap are very different)
+  - Changed default global mesh grading from `0.9` to `0.75` (more robust meshing for complex geometries, relatively small cost)
+
 ## 1.8.0 (2026-01-05)
 
   - Mesh size fields are no longer controlled via `PhysicalGroup` internally, this change
