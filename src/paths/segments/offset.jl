@@ -173,16 +173,29 @@ offset(seg::GeneralOffset, s::Coordinate) = offset(seg.seg, t -> s + seg.offset(
 offset(seg::GeneralOffset, s) = offset(seg.seg, t -> s(t) + seg.offset(t))
 
 # Define outer constructors for Turn and Straight from
-Straight(x::ConstantOffset{T, Straight{T}}) where {T} =
-    Straight{T}(x.seg.l, p0=p0(x), α0=α0(x))
+Straight(x::ConstantOffset{T, Straight{T}}) where {T} = Straight{T}(x.seg.l, p0(x), α0(x))
 function Turn(x::ConstantOffset{T, Turn{T}}) where {T}
-    return Turn(
-        x.seg.α,
-        x.seg.r + (abs(x.seg.α) > x.seg.α ? x.offset : -x.offset),
-        p0=p0(x),
-        α0=x.seg.α0
+    return Turn(x.seg.α, x.seg.r - sign(x.seg.α) * x.offset, p0(x), x.seg.α0)
+end
+
+# Note that resolving offsets changes pathlength, so this is unsafe on styled segments,
+# because styles that use lengths (compound and taper) will also need to be updated
+# This function (as with offset segments in general) should be considered internal
+resolve_offset(x::ConstantOffset{T, Straight{T}}) where {T} = Straight(x)
+resolve_offset(x::ConstantOffset{T, Turn{T}}) where {T} = Turn(x)
+resolve_offset(x::ConstantOffset{T, CompoundSegment{T}}) where {T} =
+    CompoundSegment(resolve_offset.(offset.(x.seg.segments, x.offset)))
+function resolve_offset(x::GeneralOffset{T, CompoundSegment{T}}) where {T}
+    s0s = [zero(T); cumsum(pathlength.(x.seg.segments))[1:(end - 1)]]
+    return CompoundSegment(
+        resolve_offset.([
+            offset(seg, s -> x.offset(s + s0)) for (seg, s0) in zip(x.seg.segments, s0s)
+        ])
     )
 end
+# Everything else gets BSpline approximation
+resolve_offset(x::OffsetSegment) = bspline_approximation(x)
+
 # Methods for true length of offset curves
 # Note that t parameterization is not necessarily arclength parameterization for BSplines
 # (Or for offsets of BSplines)
