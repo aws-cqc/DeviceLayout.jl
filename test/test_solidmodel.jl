@@ -843,15 +843,15 @@
     @test SolidModels.meshgrading(pa.nodes[1]) == -1.0
     pa = Path(0nm, 0nm)
     straight!(pa, 100μm, Paths.TaperTrace(10μm, 5μm))
-    @test SolidModels.meshsize(pa.nodes[1]) == Unitful.ustrip(STP_UNIT, 20.0μm)
+    @test SolidModels.meshsize(pa.nodes[1]) == Unitful.ustrip(STP_UNIT, 10.0μm)
     @test SolidModels.meshgrading(pa.nodes[1]) == -1.0
     pa = Path(0nm, 0nm)
     straight!(pa, 100μm, Paths.SimpleCPW(5μm, 2μm))
-    @test SolidModels.meshsize(pa.nodes[1]) == Unitful.ustrip(STP_UNIT, 10μm)
+    @test SolidModels.meshsize(pa.nodes[1]) == Unitful.ustrip(STP_UNIT, 4μm)
     @test SolidModels.meshgrading(pa.nodes[1]) == -1.0
     pa = Path(0nm, 0nm)
     straight!(pa, 100μm, Paths.TaperCPW(10μm, 5μm, 5μm, 2μm))
-    @test SolidModels.meshsize(pa.nodes[1]) == Unitful.ustrip(STP_UNIT, 20.0μm)
+    @test SolidModels.meshsize(pa.nodes[1]) == Unitful.ustrip(STP_UNIT, 4.0μm)
     @test SolidModels.meshgrading(pa.nodes[1]) == -1.0
 
     pa = Path(0nm, 0nm)
@@ -860,7 +860,7 @@
     straight!(pa, 100μm, Paths.SimpleCPW(5μm, 2μm))
     straight!(pa, 100μm, Paths.TaperCPW(5μm, 2μm, 10μm, 2μm))
     simplify!(pa)
-    @test SolidModels.meshsize(pa.nodes[1]) == Unitful.ustrip(STP_UNIT, 20.0μm)
+    @test SolidModels.meshsize(pa.nodes[1]) == Unitful.ustrip(STP_UNIT, 4.0μm)
     @test SolidModels.meshgrading(pa.nodes[1]) == -1.0
 
     function test_sm()
@@ -1323,7 +1323,7 @@
         SolidModels.finalize_size_fields!()
 
         @test SolidModels.mesh_scale() == 1.0
-        @test SolidModels.mesh_grading_default() == 0.9
+        @test SolidModels.mesh_grading_default() == 0.75
         @test SolidModels.mesh_order() == 1
         @test isempty(SolidModels.mesh_control_points())
         @test isempty(SolidModels.mesh_control_trees())
@@ -1358,7 +1358,7 @@
         SolidModels.finalize_size_fields!()
 
         @test SolidModels.mesh_scale() == 1.0
-        @test SolidModels.mesh_grading_default() == 0.9
+        @test SolidModels.mesh_grading_default() == 0.75
         @test SolidModels.mesh_order() == 1
         @test isempty(SolidModels.mesh_control_points())
         @test isempty(SolidModels.mesh_control_trees())
@@ -1368,7 +1368,7 @@
         SolidModels.add_mesh_size_point(p; h=0.5, α=-1)
         @test all(sort(collect(keys(SolidModels.mesh_control_points()))) .== [(0.5, -1.0)])
         SolidModels.finalize_size_fields!()
-        @test all(sort(collect(keys(SolidModels.mesh_control_trees()))) .== [(0.5, 0.9)])
+        @test all(sort(collect(keys(SolidModels.mesh_control_trees()))) .== [(0.5, 0.75)])
 
         SolidModels.clear_mesh_control_points!()
         p = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
@@ -1376,7 +1376,7 @@
         SolidModels.add_mesh_size_point(p; h=0.5, α=-1)
         @test all(sort(collect(keys(SolidModels.mesh_control_points()))) .== [(0.5, -1.0)])
         SolidModels.finalize_size_fields!()
-        @test all(sort(collect(keys(SolidModels.mesh_control_trees()))) .== [(0.5, 0.9)])
+        @test all(sort(collect(keys(SolidModels.mesh_control_trees()))) .== [(0.5, 0.75)])
 
         # Check that the KDTree implementation matches a brute force search
         import Random: seed!, default_rng, rand
