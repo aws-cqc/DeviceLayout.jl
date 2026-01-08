@@ -6,6 +6,7 @@ The format of this changelog is based on
 
 ## Upcoming
 
+  - Added `SingleChannelRouting`, which allows multiple paths to be routed in parallel in the same `Channel` (defined by a path with a trace style), entering and exiting the channel in different places
   - Changed default CPW mesh size to use `2 * min(trace, gap)` (higher element quality when trace and gap are very different)
   - Changed default global mesh grading from `0.9` to `0.75` (more robust meshing for complex geometries, relatively small cost)
 
