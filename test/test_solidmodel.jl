@@ -841,6 +841,8 @@
     straight!(pa, 100μm, Paths.SimpleTrace(10μm))
     @test SolidModels.meshsize(pa.nodes[1]) == Unitful.ustrip(STP_UNIT, 20μm)
     @test SolidModels.meshgrading(pa.nodes[1]) == -1.0
+    terminate!(pa, rounding=1μm)
+    @test SolidModels.meshsize(pa.nodes[2]) == Unitful.ustrip(STP_UNIT, 20μm)
     pa = Path(0nm, 0nm)
     straight!(pa, 100μm, Paths.TaperTrace(10μm, 5μm))
     @test SolidModels.meshsize(pa.nodes[1]) == Unitful.ustrip(STP_UNIT, 10.0μm)
@@ -849,10 +851,19 @@
     straight!(pa, 100μm, Paths.SimpleCPW(5μm, 2μm))
     @test SolidModels.meshsize(pa.nodes[1]) == Unitful.ustrip(STP_UNIT, 4μm)
     @test SolidModels.meshgrading(pa.nodes[1]) == -1.0
+    terminate!(pa, gap=0.0μm, rounding=1μm)
+    @test SolidModels.meshsize(pa.nodes[2]) == Unitful.ustrip(STP_UNIT, 4μm)
     pa = Path(0nm, 0nm)
     straight!(pa, 100μm, Paths.TaperCPW(10μm, 5μm, 5μm, 2μm))
     @test SolidModels.meshsize(pa.nodes[1]) == Unitful.ustrip(STP_UNIT, 4.0μm)
     @test SolidModels.meshgrading(pa.nodes[1]) == -1.0
+    # GeneralTrace and GeneralCPW are sampled, including endpoints
+    pa = Path(0nm, 0nm)
+    straight!(pa, 100μm, Paths.Trace(x -> 10.0μm + x))
+    @test SolidModels.meshsize(pa.nodes[1]) == Unitful.ustrip(STP_UNIT, 20.0μm)
+    pa = Path(0nm, 0nm)
+    straight!(pa, 100μm, Paths.CPW(x -> 10.0μm + x, x -> 6.0μm + (100μm - x)))
+    @test SolidModels.meshsize(pa.nodes[1]) == Unitful.ustrip(STP_UNIT, 12.0μm)
 
     pa = Path(0nm, 0nm)
     straight!(pa, 100μm, Paths.SimpleTrace(10μm))

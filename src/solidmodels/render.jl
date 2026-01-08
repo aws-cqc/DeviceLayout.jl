@@ -403,7 +403,7 @@ meshsize(::Paths.Segment, sty::Paths.TaperTrace; kwargs...) =
 meshsize(::Paths.Segment, sty::Paths.TaperCPW; kwargs...) =
     2 * min(sty.trace_start, sty.trace_end, sty.gap_start, sty.gap_end)
 meshsize(::Paths.Segment, sty::Paths.TraceTermination; kwargs...) = 2 * sty.width
-meshsize(seg::Paths.Segment, sty::Paths.CPWOpenTermination; kwargs...) =
+meshsize(::Paths.Segment, sty::Paths.CPWOpenTermination; kwargs...) =
     2 * min(sty.trace, sty.gap)
 meshsize(::Paths.Segment, sty::Paths.CPWShortTermination; kwargs...) =
     2 * min(sty.trace, sty.gap)
@@ -411,7 +411,7 @@ meshsize(::Paths.Segment, sty::Paths.CPWShortTermination; kwargs...) =
 # For GeneralCPW and GeneralTrace, just sample.
 function meshsize(seg::Paths.Segment, sty::Paths.GeneralTrace; kwargs...)
     l = pathlength(seg)
-    return minimum(sty.width.(range(zero(l), l, length=11)))
+    return 2 * minimum(sty.width.(range(zero(l), l, length=11)))
 end
 function meshsize(seg::Paths.Segment, sty::Paths.GeneralCPW; kwargs...)
     l = pathlength(seg)
