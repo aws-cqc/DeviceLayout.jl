@@ -174,8 +174,8 @@
     end
     rule = transition_rules[2] # BSpline rule for all-angle transitions
     for segtype in channel_segments[2:end]
-        @testset "$segtype channel" begin
-            for sty in channel_styles
+        for sty in channel_styles
+            @testset "$segtype, $sty channel" begin
                 test_single_channel_reversals(rule, segtype, sty)
             end
         end
@@ -193,6 +193,31 @@
     Paths.set_track!(rule, pa2, 1)
     route!(pa2, Point(0.1mm, 0.1mm), 0, rule, Paths.CPW(2nm, 2nm))
     @test length(pa2) == 1 # Channel segment turned into waypoint
+
+    # Pathlength is arclength
+    pa = Path(0.0nm, 0.0nm)
+    turn!(pa, 90°, 1mm, Paths.Trace(0.3mm))
+    ch = RouteChannel(pa)
+    pa2 = Path(-1mm, 0mm)
+    pa3 = Path(-1mm, 0mm)
+    rule = Paths.SingleChannelRouting(ch, Paths.StraightAnd90(5μm), 0μm)
+    Paths.set_track!(rule, pa2, 1)
+    Paths.set_track!(rule, pa3, 2)
+    route!(pa2, Point(1mm, 2mm), pi / 2, rule, Paths.CPW(2nm, 2nm))
+    route!(pa3, Point(1mm, 2mm), pi / 2, rule, Paths.CPW(2nm, 2nm))
+
+    @test pathlength(pa2[7]) == pi / 2 * (1mm - 0.05mm)
+    @test pathlength(pa3[7]) == pi / 2 * (1mm + 0.05mm)
+
+    # Unit test Compound GeneralOffset resolution
+    pa = Path(0, 0)
+    straight!(pa, 2, Paths.CPW(2, 2))
+    straight!(pa, 1, Paths.CPW(2, 2))
+    simplify!(pa)
+    pa[1].seg = Paths.offset(pa[1].seg, x -> x^2)
+    resolved = Paths.resolve_offset(pa[1].seg)
+    @test p1(resolved.segments[1]) == Point(2, 4)
+    @test p1(resolved.segments[2]) == Point(3, 9)
 
     ## Schematic-level routing
     test_schematic_single_channel()

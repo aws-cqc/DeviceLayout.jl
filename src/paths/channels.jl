@@ -167,7 +167,7 @@ function _route!(
                 sty;
                 waypoints
             )
-            push!(p, Node(track_path_seg, sty), reconcile=false) # p0, α0 reconciled by construction
+            push!(p, Node(resolve_offset(track_path_seg), sty), reconcile=false) # p0, α0 reconciled by construction
             p[end - 1].next = p[end]
             p[end].prev = p[end - 1]
             # Note `auto_curvature` BSpline uses curvature from end of previous segment
