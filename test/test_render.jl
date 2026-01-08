@@ -208,6 +208,9 @@ end
         pa = Path{Float64}()
         straight!(pa, 20.0, Paths.Trace(x -> 2.0 * x))
         render!(c, pa)
+        revsty = reverse(pa[1]).sty
+        @test Paths.width(revsty, 0) == Paths.trace(pa[1].sty, 20)
+        @test Paths.extent(revsty)(20) == 0.5 * Paths.width(pa[1].sty)(0)
     end
 
     @testset "Straight, SimpleCPW" begin
@@ -227,6 +230,9 @@ end
             p(20.082731241720513, 1.7128648145206729),
             p(0.5197792270443984, -2.4453690018345142)
         ]
+        revsty = reverse(pa[1]).sty
+        @test Paths.trace(revsty, 0) == Paths.trace(pa[1].sty, 20)
+        @test Paths.trace(revsty, 20) == Paths.trace(pa[1].sty, 0)
 
         c = Cell("main", pm2μm)
         pa = Path(μm2μm, α0=12°)
@@ -248,9 +254,16 @@ end
         ] * 10^6
     end
 
-    # @testset "Straight, GeneralCPW" begin
-    #
-    # end
+    @testset "Straight, GeneralCPW" begin
+        c = Cell{Float64}("main")
+        pa = Path(NoUnits, α0=12°)
+        straight!(pa, 20.0, Paths.CPW(x -> 2 * x, x -> 3 * x))
+        revsty = reverse(pa[1]).sty
+        @test Paths.trace(revsty, 0) == Paths.trace(pa[1].sty, 20)
+        @test Paths.trace(revsty, 20) == Paths.trace(pa[1].sty, 0)
+        @test Paths.extent(revsty)(5) ==
+              Paths.gap(pa[1].sty)(15) + Paths.trace(pa[1].sty)(15) / 2
+    end
 
     @testset "Turn, SimpleTrace" begin
         c = Cell{Float64}("main")
@@ -423,6 +436,9 @@ end
             p(50000.0nm, -4000.0nm),
             p(0.0nm, -5000.0nm)
         ]
+        revsty = reverse(pa[1]).sty
+        @test Paths.trace(revsty, 0.0μm) == Paths.trace(pa[1].sty, 50.0μm)
+        @test Paths.trace(revsty, 50.0μm) == Paths.trace(pa[1].sty, 0.0μm)
 
         @test_throws "length" split(Paths.TaperCPW(10.0μm, 6.0μm, 8.0μm, 2.0μm), 10μm)
 
@@ -446,6 +462,7 @@ end
         pa = Path(μm)
         turn!(pa, π / 2, 20μm, Paths.TaperTrace(10μm, 20μm))
         render!(c, pa, GDSMeta(0))
+        @test Paths.trace(pa[1].sty, 0μm) == 10μm
 
         @test (elements(c)[1]).p[1] ≈ p(0.0nm, -5000.0nm)
         @test (elements(c)[1]).p[end] ≈ p(0.0nm, 5000.0nm)
@@ -555,6 +572,10 @@ end
         straight!(pa, 20μm, Paths.Trace(15μm))
         straight!(pa, 20μm, Paths.Trace(20μm))
         simplify!(pa)
+        revsty = reverse(pa[1]).sty
+        @test Paths.trace(revsty, 55μm) == Paths.trace(pa[1].sty, 5μm)
+        @test Paths.trace(revsty)(5μm) == Paths.trace(pa[1].sty)(55μm)
+        @test Paths.extent(revsty)(5μm) == 0.5 * Paths.width(pa[1].sty)(55μm)
 
         pa2 = split(pa[1], 20μm)
         @test length(pa2) == 2
@@ -875,6 +896,42 @@ end
         render!(c, hp)
         flatten!(c)
         @test length(c.elements) == 15 # 3 rectangles + 10 traces + 2 terminations
+    end
+
+    @testset "OffsetSegments" begin
+        pa = Path(μm; α0=90°)
+        straight!(pa, 10μm, Paths.Trace(2.0μm))
+        pa1 = Path(
+            [Paths.Node(Paths.offset(pa[1].seg, 5000nm), pa[1].sty)],
+            metadata=GDSMeta()
+        )
+        @test p0(pa1) == Point(-5.0, 0.0)μm
+        c_dec = Cell("decoration", nm)
+        render!(c_dec, Rectangle(2μm, 2μm), GDSMeta(1))
+        attach!(pa1, sref(c_dec), 5μm)
+        cs1 = CoordinateSystem("test", nm)
+        pathref = sref(pa1, Point(5μm, 5μm), rot=pi / 2, xrefl=true)
+        addref!(cs1, pathref)
+        flatten!(cs1)
+        c1 = Cell(cs1)
+        c_path = Cell("pathonly", nm)
+        render!(c_path, pa1, GDSMeta())
+        @test bounds(c1) ≈ bounds(transformation(pathref)(c_path)) atol = 1e-6nm
+        # GeneralOffset
+        pa2 = Path(
+            [Paths.Node(Paths.offset(pa[1].seg, x -> 2μm + x), pa[1].sty)],
+            metadata=GDSMeta()
+        )
+        @test p0(pa2) == Point(-2.0, 0.0)μm
+        attach!(pa2, sref(c_dec), 10μm, location=-1)
+        cs2 = CoordinateSystem("test", nm)
+        pathref = sref(pa2, Point(5μm, 5μm), rot=pi / 2, xrefl=true)
+        addref!(cs2, pa2, Point(5μm, 5μm), rot=pi / 2, xrefl=true)
+        flatten!(cs2)
+        c2 = Cell(cs2)
+        c_path = Cell("pathonly", nm)
+        render!(c_path, pa2, GDSMeta())
+        @test bounds(c2) ≈ bounds(transformation(pathref)(c_path)) atol = 1e-6nm
     end
 
     @testset "ClippedPolygons" begin

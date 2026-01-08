@@ -18,7 +18,7 @@ abstract type OffsetSegment{T, S <: Segment{T}} <: ContinuousSegment{T} end
 """
     struct ConstantOffset{T,S} <: OffsetSegment{T,S}
 """
-struct ConstantOffset{T, S} <: OffsetSegment{T, S}
+mutable struct ConstantOffset{T, S} <: OffsetSegment{T, S}
     seg::S
     offset::T
 end
@@ -26,10 +26,20 @@ end
 """
     struct GeneralOffset{T,S} <: OffsetSegment{T,S}
 """
-struct GeneralOffset{T, S} <: OffsetSegment{T, S}
+mutable struct GeneralOffset{T, S} <: OffsetSegment{T, S}
     seg::S
     offset
 end
+
+convert(::Type{ConstantOffset{T}}, x::ConstantOffset) where {T} =
+    ConstantOffset(convert(Segment{T}, x.seg), convert(T, x.offset))
+convert(::Type{ConstantOffset{T}}, x::ConstantOffset{T}) where {T} = x
+convert(::Type{Segment{T}}, x::ConstantOffset) where {T} = convert(ConstantOffset{T}, x)
+
+convert(::Type{GeneralOffset{T}}, x::GeneralOffset) where {T} =
+    OffsetSegment(convert(Segment{T}, x.seg), x.offset)
+convert(::Type{GeneralOffset{T}}, x::GeneralOffset{T}) where {T} = x
+convert(::Type{Segment{T}}, x::GeneralOffset) where {T} = convert(GeneralOffset{T}, x)
 
 copy(s::OffsetSegment) = OffsetSegment(copy(s.seg), s.offset)
 getoffset(s::ConstantOffset, l...) = s.offset
@@ -63,6 +73,23 @@ p0(s::GeneralOffset{T}) where {T} =
 function direction(s::GeneralOffset{T}, t) where {T}
     tang = tangent(s, t)
     return uconvert(°, atan(tang.y, tang.x))
+end
+
+function setα0p0!(s::OffsetSegment, angle, p::Point)
+    rotation_angle = angle - α0(s)
+    rotated_offset = Rotation(rotation_angle)(p0(s) - p0(s.seg))
+    return setα0p0!(s.seg, α0(s.seg) + rotation_angle, p - rotated_offset)
+end
+
+function change_handedness!(x::ConstantOffset)
+    x.offset = -x.offset
+    return change_handedness!(x.seg)
+end
+
+function change_handedness!(x::GeneralOffset)
+    orig_offset = x.offset
+    x.offset = (t -> -orig_offset(t))
+    return change_handedness!(x.seg)
 end
 
 function tangent(s::OffsetSegment, t)
@@ -136,32 +163,39 @@ summary(s::OffsetSegment) = summary(s.seg) * " offset by $(s.offset)"
 
 # Methods for creating offset segments
 OffsetSegment(seg::S, offset::Coordinate) where {T, S <: Segment{T}} =
-    ConstantOffset{T, S}(seg, offset)
-OffsetSegment(seg::S, offset) where {T, S <: Segment{T}} = GeneralOffset{T, S}(seg, offset)
+    ConstantOffset{T, S}(copy(seg), offset)
+OffsetSegment(seg::S, offset) where {T, S <: Segment{T}} =
+    GeneralOffset{T, S}(copy(seg), offset)
 offset(seg::Segment, s) = OffsetSegment(seg, s)
 offset(seg::ConstantOffset, s::Coordinate) = offset(seg.seg, s + seg.offset)
 offset(seg::ConstantOffset, s) = offset(seg.seg, t -> s(t) + seg.offset)
 offset(seg::GeneralOffset, s::Coordinate) = offset(seg.seg, t -> s + seg.offset(t))
 offset(seg::GeneralOffset, s) = offset(seg.seg, t -> s(t) + seg.offset(t))
 
-function transform(x::ConstantOffset, f::Transformation)
-    y = deepcopy(x)
-    xrefl(f) && change_handedness!(y)
-    setα0p0!(y.seg, rotated_direction(α0(y.seg), f), f(p0(y.seg)))
-    return y
+# Define outer constructors for Turn and Straight from
+Straight(x::ConstantOffset{T, Straight{T}}) where {T} = Straight{T}(x.seg.l, p0(x), α0(x))
+function Turn(x::ConstantOffset{T, Turn{T}}) where {T}
+    return Turn(x.seg.α, x.seg.r - sign(x.seg.α) * x.offset, p0(x), x.seg.α0)
 end
 
-# Define outer constructors for Turn and Straight from
-Straight(x::ConstantOffset{T, Straight{T}}) where {T} =
-    Straight{T}(x.seg.l, p0=p0(x), α0=α0(x))
-function Turn(x::ConstantOffset{T, Turn{T}}) where {T}
-    return Turn(
-        x.seg.α,
-        x.seg.r + (abs(x.seg.α) > x.seg.α ? x.offset : -x.offset),
-        p0=p0(x),
-        α0=x.seg.α0
+# Note that resolving offsets changes pathlength, so this is unsafe on styled segments,
+# because styles that use lengths (compound and taper) will also need to be updated
+# This function (as with offset segments in general) should be considered internal
+resolve_offset(x::ConstantOffset{T, Straight{T}}) where {T} = Straight(x)
+resolve_offset(x::ConstantOffset{T, Turn{T}}) where {T} = Turn(x)
+resolve_offset(x::ConstantOffset{T, CompoundSegment{T}}) where {T} =
+    CompoundSegment(resolve_offset.(offset.(x.seg.segments, x.offset)))
+function resolve_offset(x::GeneralOffset{T, CompoundSegment{T}}) where {T}
+    s0s = [zero(T); cumsum(pathlength.(x.seg.segments))[1:(end - 1)]]
+    return CompoundSegment(
+        resolve_offset.([
+            offset(seg, s -> x.offset(s + s0)) for (seg, s0) in zip(x.seg.segments, s0s)
+        ])
     )
 end
+# Everything else gets BSpline approximation
+resolve_offset(x::OffsetSegment) = bspline_approximation(x)
+
 # Methods for true length of offset curves
 # Note that t parameterization is not necessarily arclength parameterization for BSplines
 # (Or for offsets of BSplines)

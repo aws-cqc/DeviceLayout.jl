@@ -26,7 +26,8 @@ import Base:
     intersect!,
     show,
     summary,
-    dims2string
+    dims2string,
+    reverse
 
 import Base.Iterators
 
@@ -48,6 +49,7 @@ import DeviceLayout:
     Hook,
     Meta,
     PointHook,
+    Polygon,
     Polygons,
     Reflection,
     Rotation,
@@ -350,7 +352,7 @@ Return `s` on `seg` that minimizes `norm(seg(s) - pt)`.
 """
 function pathlength_nearest(seg::Paths.Segment{T}, pt::Point) where {T}
     errfunc(s) = ustrip(unit(T), norm(seg(s * pathlength(seg)) - pt))
-    return Optim.minimizer(optimize(errfunc, 0.0, 1.0))[1] * oneunit(T)
+    return Optim.minimizer(optimize(errfunc, 0.0, 1.0))[1] * pathlength(seg)
 end
 
 """
@@ -507,15 +509,21 @@ end
 transform(x::Node, f::Transformation) = transform(x, ScaledIsometry(f))
 function transform(x::Node, f::ScaledIsometry)
     y = deepcopy(x)
+    new_p0 = f(p0(y.seg)) # Handedness change can change p0, α0 for offset segment
+    new_α0 = rotated_direction(α0(y.seg), f) # So calculate them in advance
+    # But handedness matters for offset setα0p0! calculation so we still do it first 
     xrefl(f) && change_handedness!(y)
-    setα0p0!(y.seg, rotated_direction(α0(y.seg), f), f(p0(y.seg)))
+    setα0p0!(y.seg, new_α0, new_p0)
     return y
 end
 
 function transform(x::Segment, f::Transformation)
     y = deepcopy(x)
+    new_p0 = f(p0(y)) # Handedness change can change p0, α0 for offset segment
+    new_α0 = rotated_direction(α0(y), f) # So calculate them in advance
+    # But handedness matters for offset setα0p0! calculation so we still do it first 
     xrefl(f) && change_handedness!(y)
-    setα0p0!(y, rotated_direction(α0(y), f), f(p0(y)))
+    setα0p0!(y, new_α0, new_p0)
     return y
 end
 
@@ -701,6 +709,8 @@ include("segments/bspline_approximation.jl")
 include("segments/bspline_optimization.jl")
 
 include("routes.jl")
+
+include("channels.jl")
 
 function change_handedness!(seg::Union{Turn, Corner})
     return seg.α = -seg.α
@@ -1320,7 +1330,7 @@ function split(seg::Segment, sty::Style, x)
 end
 
 function split(seg::ContinuousSegment, x)
-    if !(zero(x) < x < pathlength(seg))
+    if !(zero(x) <= x <= pathlength(seg))
         throw(ArgumentError("x must be between 0 and pathlength(seg)"))
     end
     return _split(seg, x)
