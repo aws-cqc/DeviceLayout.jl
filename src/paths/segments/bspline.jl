@@ -380,7 +380,7 @@ function curvatureradius(b::BSpline{T}, s) where {T}
 end
 
 """
-    bspline!(p::Path{T}, nextpoints, α_end, sty::Style=contstyle1(p);
+    bspline!(p::Path{T}, nextpoints, α_end, sty::Style=nextstyle(p);
         endpoints_speed=2500μm,
         endpoints_curvature=nothing,
         auto_speed=false,
@@ -413,7 +413,7 @@ function bspline!(
     p::Path{T},
     nextpoints,
     α_end,
-    sty::Style=contstyle1(p);
+    sty::Style=nextstyle(p);
     endpoints_speed=2500.0 * DeviceLayout.onemicron(T),
     endpoints_curvature=nothing,
     auto_speed=false,
