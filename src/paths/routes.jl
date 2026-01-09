@@ -9,7 +9,7 @@ of the following two methods:
 ```
 _route!(p::Path, p1::Point, α1, rule::MyRouteRule, sty, waypoints, waydirs)
 _route_leg!(p::Path, next::Point, rule::MyRouteRule,
-    sty::Paths.Style=Paths.contstyle1(p))
+    sty::Paths.Style=Paths.nextstyle(p))
 ```
 
 It may also implement
@@ -418,7 +418,7 @@ function Path(r::Route, sty)
 end
 
 """
-    function route!(path::Path{S}, p_end::Point, α_end, rule::RouteRule, sty=Paths.contstyle1(path);
+    function route!(path::Path{S}, p_end::Point, α_end, rule::RouteRule, sty=Paths.nextstyle(path);
                     waypoints=Point{S}[], waydirs=Vector{typeof(1.0°)}(undef, length(waypoints)))) where {S}
 
 Extend `path` to `p_end` with arrival angle `α_end` according to `RouteRule`. The default
@@ -436,7 +436,7 @@ function route!(
     p_end::Point,
     α_end,
     rule::RouteRule,
-    sty=Paths.contstyle1(path);
+    sty=Paths.nextstyle(path);
     waypoints=Point{S}[],
     waydirs=nothing,
     atol=1e-9 * DeviceLayout.onemicron(S)
@@ -509,7 +509,7 @@ function route!(
     p1::Point,
     α1,
     crr::CompoundRouteRule,
-    sty=fill(Paths.contstyle1(path), length(rules));
+    sty=fill(Paths.nextstyle(path), length(rules));
     waypoints=Point{S}[],
     waydirs=Vector{typeof(1.0°)}(undef, length(waypoints))
 ) where {S}
@@ -551,7 +551,7 @@ function _route_leg!(
     next::Point,
     nextdir,
     rule::StraightAnd90,
-    sty::Paths.Style=Paths.contstyle1(p)
+    sty::Paths.Style=Paths.nextstyle(p)
 ) where {S}
     dx = next.x - p1(p).x
     dy = next.y - p1(p).y
@@ -588,7 +588,7 @@ function _route_leg!(
     next::Point,
     nextdir,
     rule::StraightAnd45,
-    sty::Paths.Style=Paths.contstyle1(p)
+    sty::Paths.Style=Paths.nextstyle(p)
 ) where {S}
     dx = next.x - p1(p).x
     dy = next.y - p1(p).y

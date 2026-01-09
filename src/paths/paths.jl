@@ -97,6 +97,7 @@ export reconcile!,
     launch!,
     meander!,
     next,
+    nextstyle,
     nodes,
     overlay!,
     pathf,
@@ -390,6 +391,17 @@ end
 nodes(p::Path) = p.nodes
 name(p::Path) = p.name
 laststyle(p::Path) = isempty(nodes(p)) ? nothing : style1(p, ContinuousStyle)
+
+"""
+    nextstyle(p::Path)
+
+Return the style to be used if the path is extended without specifying a new style.
+
+In most cases this is the last continuous, non-virtual style. The exception is that
+a `PeriodicStyle` will start its periodicity where the last one ended.
+"""
+nextstyle(p::Path) = isempty(nodes(p)) ? nothing : nextstyle(p, laststyle(p))
+nextstyle(p::Path, sty::Style) = sty
 
 function DeviceLayout._geometry!(cs::CoordinateSystem, p::Path)
     return addref!(cs, p)
