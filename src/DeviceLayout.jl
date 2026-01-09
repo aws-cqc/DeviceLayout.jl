@@ -469,6 +469,7 @@ import .Paths:
     launch!,
     meander!,
     next,
+    nextstyle,
     nodes,
     overlay!,
     p0,
