@@ -63,12 +63,12 @@ setα0!(s::Straight, α0′) = s.α0 = α0′
 α1(s::Straight) = s.α0
 
 """
-    straight!(p::Path, l::Coordinate, sty::Style=contstyle1(p))
+    straight!(p::Path, l::Coordinate, sty::Style=nextstyle(p))
 
 Extend a path `p` straight by length `l` in the current direction. By default,
 we take the last continuous style in the path.
 """
-function straight!(p::Path, l::Coordinate, sty::Style=contstyle1(p))
+function straight!(p::Path, l::Coordinate, sty::Style=nextstyle(p))
     T = coordinatetype(p)
     dimension(T) != dimension(typeof(l)) && throw(DimensionError(T(1), l))
     l < zero(l) && throw(ArgumentError("Tried to go straight by a negative amount."))
