@@ -5,7 +5,7 @@
     sty2 = Paths.Trace(2μm)
 
     psty = PeriodicStyle([sty1, sty2], [20μm, 10μm], 5μm)
-    with_period = PeriodicStyle([sty1, sty2], 30μm; weights=[2, 1], l0=5μm)
+    with_period = PeriodicStyle([sty1, sty2]; period=30μm, weights=[2, 1], l0=5μm)
     @test with_period.lengths == psty.lengths
     @test psty(0μm) === (sty1, 5.0μm)
     @test psty(18μm) === (sty2, 3.0μm)
@@ -16,7 +16,7 @@
 
     # Various combinations work
     # Nested
-    psty_nested = PeriodicStyle([sty1, psty, sty2], 50μm; weights=[1, 3, 1])
+    psty_nested = PeriodicStyle([sty1, psty, sty2]; period=50μm, weights=[1, 3, 1])
     @test psty_nested(15μm) === (psty, 5.0μm)
     @test Paths.gap(psty_nested, 65μm) == 6.0μm
     @test Paths.trace(psty_nested, 75μm) == 2.0μm
@@ -34,7 +34,7 @@
     # General, Taper, NoRender, Termination
     pa = Path(0nm, 0nm)
     straight!(pa, 4μm, Paths.CPW(x -> 10μm, x -> 6μm))
-    turn!(pa, 90°, 10μm / (pi / 4), Paths.TaperCPW(10μm, 6μm, 2μm, 1μm))
+    turn!(pa, 90°, 10μm / (pi / 2), Paths.TaperCPW(10μm, 6μm, 2μm, 1μm))
     terminate!(pa; initial=true, rounding=3μm)
     terminate!(pa; rounding=0.5μm, gap=0μm)
     straight!(pa, 10μm, Paths.NoRender())
@@ -49,9 +49,9 @@
     # But constructor based on a path handles generic tapers
 
     # Termination, CPW straight, turn, termination; NoRender, Trace, Taper, Trace
-    @test psty_complex.lengths ≈ [9μm, 1μm, 19.5μm, 0.5μm, 10μm, 10μm, 10μm, 10μm]
+    @test psty_complex.lengths ≈ [9μm, 1μm, 9.5μm, 0.5μm, 10μm, 10μm, 10μm, 10μm]
     pa2 = Path(0nm, 0nm)
-    straight!(pa2, 9 * 70μm + 64μm, psty_complex) # Stop just before attachment in last segment
+    straight!(pa2, 9 * 60μm + 54μm, psty_complex) # Stop just before attachment in last segment
     straight!(pa2, 2μm)
     c = Cell("test")
     render!(c, pa2, GDSMeta(1)) # Runs without error
