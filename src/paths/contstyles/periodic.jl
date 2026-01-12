@@ -6,7 +6,8 @@ struct PeriodicStyle{T <: Coordinate} <: AbstractCompoundStyle
     lengths::Vector{T}
     l0::T
 end
-Base.copy(s::PeriodicStyle{T}) where {T} = PeriodicStyle{T}(copy(s.styles), copy(s.lengths), s.l0)
+Base.copy(s::PeriodicStyle{T}) where {T} =
+    PeriodicStyle{T}(copy(s.styles), copy(s.lengths), s.l0)
 summary(s::PeriodicStyle) = "Periodic style with $(length(s.styles)) substyles"
 
 function PeriodicStyle(styles, lengths::Vector{T}, l0=zero(T)) where {T}
