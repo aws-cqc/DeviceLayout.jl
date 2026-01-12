@@ -60,7 +60,7 @@ function (s::PeriodicStyle)(t)
         dt < l1 && return (s.styles[i], dt - l0)
         l0 = l1
     end
-    # Should be unreachable
+    # Unreachable
     return s.styles[end], dt - l0
 end
 
@@ -120,7 +120,6 @@ end
 
 function nextstyle(p::Path, sty::PeriodicStyle{T}) where {T}
     if sty !== p[end].sty # there is a virtual or non-continuous style, reset periodicity
-        @show sty
         return PeriodicStyle(sty.styles, sty.lengths, zero(T))
     end
     # Add last segment length to l0 so periodicity continues from there
