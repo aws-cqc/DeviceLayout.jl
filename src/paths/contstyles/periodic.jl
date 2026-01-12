@@ -1,5 +1,26 @@
 """
     struct PeriodicStyle{T <: Coordinate} <: AbstractCompoundStyle
+
+Continuous style repeating a series of underlying styles.
+
+When extending a path that ends in a `PeriodicStyle` without explicitly providing a new style,
+the periodicity will be resumed from where it ended on the final segment.
+
+    PeriodicStyle(styles::Vector{<:Style}, lengths::Vector{T}, l0=zero(T))
+
+Style for `Path` each style in `style` for the corresponding length in `lengths`, repeating
+after every `sum(lengths)`. Periodicity starts at `l0`.
+
+    PeriodicStyle(styles::Vector{<:Style}; period, weights=ones(length(styles)))
+
+Convenience constructor using a `period` keyword with `weights` rather than explicit `lengths`,
+such that the length for each style in a period is given by
+`lengths = period * weights/sum(weights)`.
+
+    PeriodicStyle(pa::Path)
+
+Convenience constructor for a periodic style cycling between the styles in `pa`, each for
+the length of the corresponding segment in `pa`.
 """
 struct PeriodicStyle{T <: Coordinate} <: AbstractCompoundStyle
     styles::Vector{Style}
@@ -11,7 +32,7 @@ Base.copy(s::PeriodicStyle{T}) where {T} =
 summary(s::PeriodicStyle) = "Periodic style with $(length(s.styles)) substyles"
 
 function PeriodicStyle(styles, lengths::Vector{T}, l0=zero(T)) where {T}
-    return new{float(T)}(styles, lengths, l0)
+    return PeriodicStyle{float(T)}(styles, lengths, l0)
 end
 
 function PeriodicStyle(styles; period, weights=ones(length(styles)), l0=zero(period))

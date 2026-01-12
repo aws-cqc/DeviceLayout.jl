@@ -374,4 +374,5 @@ nothing; # hide
     Paths.GeneralStrands
     Paths.CompoundStyle
     Paths.DecoratedStyle
+    Paths.PeriodicStyle
 ```
