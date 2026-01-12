@@ -1,5 +1,17 @@
+abstract type AbstractCompoundStyle <: ContinuousStyle{false} end
+
+for x in (:extent, :width, :trace, :gap)
+    @eval function ($x)(s::AbstractCompoundStyle, t)
+        sty, teff = s(t)
+        return ($x)(sty, teff)
+    end
+end
+
+isvirtual(s::AbstractCompoundStyle) = all(isvirtual.(s.styles))
+change_handedness!(sty::AbstractCompoundStyle) = change_handedness!.(sty.styles)
+
 """
-    struct CompoundStyle{T<:FloatCoordinate} <: ContinuousStyle{false}
+    struct CompoundStyle{T<:FloatCoordinate} <: AbstractCompoundStyle
         styles::Vector{Style}
         grid::Vector{T}
     end
@@ -10,7 +22,7 @@ Combines styles together, typically for use with a [`CompoundSegment`](@ref).
     constructor.
   - `grid`: An array of `t` values needed for rendering the parametric path.
 """
-struct CompoundStyle{T <: FloatCoordinate} <: ContinuousStyle{false}
+struct CompoundStyle{T <: FloatCoordinate} <: AbstractCompoundStyle
     styles::Vector{Style}
     grid::Vector{T}
     tag::Symbol
@@ -40,7 +52,6 @@ function _style1(s::CompoundStyle, T)
     i = findlast(x -> isa(x, T) && !isvirtual(x), s.styles)
     return _style1(undecorated(s.styles[i]), T)
 end
-isvirtual(s::CompoundStyle) = all(isvirtual.(s.styles))
 
 """
     makegrid(segments::AbstractVector{T}, styles) where {T<:Segment}
@@ -60,13 +71,6 @@ function makegrid(segments::AbstractVector{T}, styles) where {T <: Segment}
     return cumsum!(grid, grid)
 end
 
-for x in (:extent, :width, :trace, :gap)
-    @eval function ($x)(s::CompoundStyle, t)
-        sty, teff = s(t)
-        return ($x)(sty, teff)
-    end
-end
-
 summary(::CompoundStyle) = "Compound style"
 
 function translate(s::CompoundStyle, x, tag=gensym())
@@ -81,5 +85,3 @@ function pin(s::CompoundStyle; start=nothing, stop=nothing, tag=gensym())
     end
     return copy(s, tag)
 end
-
-change_handedness!(sty::CompoundStyle) = change_handedness!.(sty.styles)
