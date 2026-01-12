@@ -1,7 +1,6 @@
-@testset "Periodic Path styles" setup = [CommonTestSetup] begin
+@testitem "Periodic Path styles" setup = [CommonTestSetup] begin
     import .Paths: PeriodicStyle, Trace, CPW
 
-    pa = Path(0nm, 0nm)
     sty1 = Paths.CPW(10μm, 6μm)
     sty2 = Paths.Trace(2μm)
 
@@ -21,6 +20,16 @@
     @test psty_nested(15μm) === (psty, 5.0μm)
     @test Paths.gap(psty_nested, 65μm) == 6.0μm
     @test Paths.trace(psty_nested, 75μm) == 2.0μm
+
+    # Over compound segment
+    pa = Path(0nm, 0nm)
+    straight!(pa, 10μm, Paths.Trace(10μm))
+    turn!(pa, 90°, 10μm)
+    bspline!(pa, [Point(1, 1)mm], 90°)
+    simplify!(pa)
+    Paths.setstyle!(pa[1], psty)
+    c = Cell("test")
+    render!(c, pa, GDSMeta())
 
     # General, Taper, NoRender, Termination
     pa = Path(0nm, 0nm)
