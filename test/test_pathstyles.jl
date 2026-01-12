@@ -14,6 +14,17 @@
     @test Paths.extent(psty, 0μm) == 11μm
     @test Paths.width(psty, 18μm) == 2μm
 
+    # Unit tests
+    @test copy(psty).styles !== psty.styles
+    @test contains(Paths.summary(psty), "2 substyles")
+    pa = Path()
+    straight!(pa, 10μm, psty)
+    straight!(pa, 1μm, Paths.SimpleNoRender(10μm, virtual=true))
+    @test Paths.nextstyle(pa).l0 == 0μm # Same style, restarted periodicity l0 == 0
+    straight!(pa, 20μm) # Exact length of substyle
+    segs, stys = Paths.resolve_periodic(pa[end].seg, pa[end].sty)
+    @test length(segs) == 1
+
     # Various combinations work
     # Nested
     psty_nested = PeriodicStyle([sty1, psty, sty2]; period=50μm, weights=[1, 3, 1])
@@ -56,7 +67,7 @@
     c = Cell("test")
     render!(c, pa2, GDSMeta(1)) # Runs without error
     @test length(c.refs) == 10 # Attachment appears in second segment
-    @test length(c.elements) == 101 # 10 * (1 + 2 + 2 + 2 + 0 + 1 + 1 + 1) + 1
     # Note: Attachment will be duplicated if it's at the exact end and start of a segment!
+    @test length(c.elements) == 101 # 10 * (1 + 2 + 2 + 2 + 0 + 1 + 1 + 1) + 1
     @test split(pa2[1], 100μm)[2].sty.l0 == 100μm
 end
