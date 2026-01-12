@@ -708,6 +708,7 @@ include("contstyles/decorated.jl")
 include("contstyles/tapers.jl")
 include("contstyles/strands.jl")
 include("contstyles/termination.jl")
+include("contstyles/periodic.jl")
 include("discretestyles/simple.jl")
 include("norender.jl")
 
@@ -1322,7 +1323,7 @@ function split(n::Node, x::Coordinate)
 end
 
 function split(n::Node, x::AbstractVector{<:Coordinate}; issorted=false)
-    isempty(x) && throw(ArgumentError("List of positions to split at cannot be empty"))
+    isempty(x) && return Path([n])
     sortedx = issorted ? x : sort(x)
 
     i = 2
