@@ -280,6 +280,7 @@ nothing; # hide
     meander!
     overlay!
     reconcile!
+    Paths.round_trace_transitions!
     simplify
     simplify!
     straight!
