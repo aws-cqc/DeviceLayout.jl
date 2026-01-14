@@ -42,6 +42,16 @@
     c = Cell("test")
     render!(c, pa, GDSMeta())
 
+    # Compound style
+    pa = Path(0nm, 0nm)
+    straight!(pa, 1μm, Paths.Trace(1μm))
+    straight!(pa, 2μm, Paths.Trace(2μm))
+    simplify!(pa)
+    straight!(pa, 3μm, Paths.Trace(3μm))
+    psty_compound = PeriodicStyle(pa)
+    @test psty_compound.lengths ≈ [1.0μm, 2.0μm, 3.0μm]
+    @test Paths.trace.(psty_compound.styles) == [1μm, 2μm, 3μm]
+
     # General, Taper, NoRender, Termination
     pa = Path(0nm, 0nm)
     straight!(pa, 4μm, Paths.CPW(x -> 10μm, x -> 6μm))
@@ -70,4 +80,27 @@
     # Note: Attachment will be duplicated if it's at the exact end and start of a segment!
     @test length(c.elements) == 101 # 10 * (1 + 2 + 2 + 2 + 0 + 1 + 1 + 1) + 1
     @test split(pa2[1], 100μm)[2].sty.l0 == 100μm
+
+    # Overlays and decorations
+    pa3 = Path{Float64}()
+    straight!(pa3, 10, Trace(2.0))
+    overlay!(pa3, CPW(10.0, 10.0), GDSMeta(1))
+    cs = CoordinateSystem{Float64}("test")
+    place!(cs, Rectangle(10, 10), GDSMeta())
+    attach!(pa3, sref(cs), 5)
+    overlay_psty = PeriodicStyle(pa3, l0=4)
+    @test Paths._isuniform(overlay_psty)
+    pa4 = Path{Float64}()
+    turn!(pa4, 90°, 102 / (pi / 2), overlay_psty)
+    ts, _, _ = Paths._expand_periodic_decorations(pa4[1].seg, pa4[1].sty)
+    @test ts == 1.0:10:101
+    segs, stys = Paths.resolve_periodic(pa4[1].seg, pa4[1].sty)
+    @test length(segs) == 1
+    straight!(pa4, 10.0)
+    ts, _, _ = Paths._expand_periodic_decorations(pa4[2].seg, pa4[2].sty)
+    @test ts ≈ [9.0]
+    cf = Cell{Float64}("test")
+    render!(cf, pa4, GDSMeta(2))
+    @test length(elements(cf)) == 2 # Not broken into segments
+    @test length(cf.refs) == 14 # 2 overlays + 12 attachments
 end
