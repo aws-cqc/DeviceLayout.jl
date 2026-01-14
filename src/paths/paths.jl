@@ -97,6 +97,7 @@ export reconcile!,
     launch!,
     meander!,
     next,
+    nextstyle,
     nodes,
     overlay!,
     pathf,
@@ -391,6 +392,17 @@ nodes(p::Path) = p.nodes
 name(p::Path) = p.name
 laststyle(p::Path) = isempty(nodes(p)) ? nothing : style1(p, ContinuousStyle)
 
+"""
+    nextstyle(p::Path)
+
+Return the style to be used if the path is extended without specifying a new style.
+
+In most cases this is the last continuous, non-virtual style. The exception is that
+a `PeriodicStyle` will start its periodicity where the last one ended.
+"""
+nextstyle(p::Path) = isempty(nodes(p)) ? nothing : nextstyle(p, laststyle(p))
+nextstyle(p::Path, sty::Style) = sty
+
 function DeviceLayout._geometry!(cs::CoordinateSystem, p::Path)
     return addref!(cs, p)
 end
@@ -624,7 +636,7 @@ function style1(p::Path, T)
     if isnothing(i)
         error("No $T found in the path.")
     else
-        s = undecorated(style(A[i]))
+        s = without_attachments(style(A[i]))
         return _style1(s, T) # could be compound style
     end
 end
@@ -690,6 +702,7 @@ include("contstyles/strands.jl")
 include("contstyles/termination.jl")
 include("discretestyles/simple.jl")
 include("norender.jl")
+include("contstyles/periodic.jl")
 
 include("segments/straight.jl")
 include("segments/turn.jl")
@@ -1300,7 +1313,7 @@ function split(n::Node, x::Coordinate)
 end
 
 function split(n::Node, x::AbstractVector{<:Coordinate}; issorted=false)
-    isempty(x) && throw(ArgumentError("List of positions to split at cannot be empty"))
+    isempty(x) && return Path([n])
     sortedx = issorted ? x : sort(x)
 
     i = 2
