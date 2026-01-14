@@ -213,3 +213,38 @@ function restore_generic_tapers!(p, taper_inds)
         setstyle!(p[i], Paths.Taper())
     end
 end
+
+function rounded_transition(sty0::SimpleTrace, sty1::SimpleTrace)
+    return Trace(s -> rounded_transition_width(s, sty0.width, sty1.width))
+end
+
+function rounded_transition_width(s, w0, w1)
+    seglength = abs(w0 - w1)
+    radius = seglength/2
+    w_mid = (w0 + w1)/2
+    sgn = sign(w0 - w1)
+    s <= radius && return w_mid + sgn * sqrt(radius^2 - s^2)
+    return w_mid - sgn * sqrt(radius^2 - (seglength - s)^2)
+end
+
+function round_trace_transitions!(pa::Path)
+    simple_trace = [n.sty isa SimpleTrace for n in pa]
+    idx_increment = 0
+    for (orig_idx_0, orig_idx_1) in zip(1:(length(pa)-1), 2:length(pa))
+        if (simple_trace[orig_idx_0] && simple_trace[orig_idx_1])
+            idx_0 = orig_idx_0 + idx_increment
+            idx_1 = orig_idx_1 + idx_increment
+            dw = abs(pa[idx_0].sty.width - pa[idx_1].sty.width)
+            split0 = split(pa[idx_0], pathlength(pa[idx_0].seg) - dw/2)
+            split1 = split(pa[idx_1], dw/2)
+            new_n0 = split0[1]
+            new_n1 = split1[2]
+            transition = simplify(Path([split0[2], split1[1]]))
+            transition.sty = rounded_transition(new_n0.sty, new_n1.sty)
+            splice!(pa,
+                idx_0:idx_1,
+                Path([new_n0, transition, new_n1]))
+            idx_increment += 1
+        end
+    end
+end
