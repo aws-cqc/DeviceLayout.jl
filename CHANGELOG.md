@@ -12,6 +12,7 @@ The format of this changelog is based on
   - Changed default global mesh grading from `0.9` to `0.75` (more robust meshing for complex geometries, relatively small cost)
   - Changed threshold for GDSII layer/datatype number spec warning to 32767; added `GDSWriterOptions` to configure this
   - Added `PeriodicStyle`
+  - Added `Paths.round_trace_transitions!` for splicing rounded tapers between `Trace` styles
   - Fixed `SolidModel` rendering issue where some exterior boundaries might not be tagged
   - Fixed breaking error with `apply_size_to_surfaces=true` supplied via `MeshingParameters`; it is still deprecated as of 1.8.0 and has no effect, but no longer throws an error
 
