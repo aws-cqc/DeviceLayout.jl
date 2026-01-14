@@ -636,7 +636,7 @@ function style1(p::Path, T)
     if isnothing(i)
         error("No $T found in the path.")
     else
-        s = undecorated(style(A[i]))
+        s = without_attachments(style(A[i]))
         return _style1(s, T) # could be compound style
     end
 end
@@ -700,9 +700,9 @@ include("contstyles/decorated.jl")
 include("contstyles/tapers.jl")
 include("contstyles/strands.jl")
 include("contstyles/termination.jl")
-include("contstyles/periodic.jl")
 include("discretestyles/simple.jl")
 include("norender.jl")
+include("contstyles/periodic.jl")
 
 include("segments/straight.jl")
 include("segments/turn.jl")

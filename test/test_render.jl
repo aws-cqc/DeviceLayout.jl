@@ -555,6 +555,7 @@ end
         straight!(pa, 20μm, Paths.Trace(15μm))
         straight!(pa, 20μm, Paths.Trace(20μm))
         simplify!(pa)
+        @test Paths.nextstyle(pa) == Paths.Trace(20μm)
 
         pa2 = split(pa[1], 20μm)
         @test length(pa2) == 2
