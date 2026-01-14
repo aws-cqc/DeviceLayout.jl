@@ -104,3 +104,21 @@
     @test length(elements(cf)) == 2 # Not broken into segments
     @test length(cf.refs) == 14 # 2 overlays + 12 attachments
 end
+
+@testitem "Rounded transitions" setup = [CommonTestSetup] begin
+    pa = Path()
+    straight!(pa, 10μm, Paths.Trace(1μm))
+    turn!(pa, 90°, 10μm / (pi / 2), Paths.Trace(5μm))
+    straight!(pa, 10μm, Paths.Trace(3μm))
+    Paths.round_trace_transitions!(pa)
+    @test length(pa) == 7
+    @test pathlength(pa) ≈ 30μm
+    @test Paths.width(pa[2].sty, 0.5 * pathlength(pa[2])) < 3μm
+    @test Paths.width(pa[3].sty, 0μm) ≈ 3μm
+    @test Paths.width(pa[3].sty, 0.5 * pathlength(pa[3])) > 3μm
+    @test Paths.width(pa[5].sty, 0.6 * pathlength(pa[5])) > 4μm
+    @test Paths.width(pa[6].sty, 0.6 * pathlength(pa[6])) < 4μm
+    cs = CoordinateSystem("test")
+    sm = SolidModel("test", overwrite=true)
+    render!(sm, cs) # runs without error
+end
