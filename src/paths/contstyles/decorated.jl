@@ -26,6 +26,8 @@ Return the underlying, undecorated style if decorated; otherwise just return the
 """
 undecorated(s::Style) = s
 undecorated(s::AbstractDecoratedStyle) = undecorated(s.s)
+without_attachments(s::Style) = s
+without_attachments(s::DecoratedStyle) = s.s # Shallow and does not remove overlays
 # Nodes: Undecorating invalidates linked list (caller can reconcile if necessary), but
 # prev/next are still populated (!= n itself) so can still be used to check if node started/ended path
 function undecorated(n::Node{T}) where {T}
