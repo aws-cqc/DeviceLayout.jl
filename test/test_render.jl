@@ -578,6 +578,7 @@ end
         straight!(pa, 20μm, Paths.Trace(15μm))
         straight!(pa, 20μm, Paths.Trace(20μm))
         simplify!(pa)
+        @test Paths.nextstyle(pa) == Paths.Trace(20μm)
         revsty = reverse(pa[1]).sty
         @test Paths.trace(revsty, 55μm) == Paths.trace(pa[1].sty, 5μm)
         @test Paths.trace(revsty)(5μm) == Paths.trace(pa[1].sty)(55μm)

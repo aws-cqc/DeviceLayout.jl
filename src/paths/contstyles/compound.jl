@@ -58,7 +58,7 @@ function _style1(s::CompoundStyle, T)
     # But just in case the user is manually adding a virtual style then simplifying
     # Similarly simplifying compound or decorated nodes is risky, but just in case
     i = findlast(x -> isa(x, T) && !isvirtual(x), s.styles)
-    return _style1(undecorated(s.styles[i]), T)
+    return _style1(without_attachments(s.styles[i]), T)
 end
 
 """
