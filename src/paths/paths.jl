@@ -1232,7 +1232,7 @@ function terminate!(
     termsty = Termination(pa, rounding; initial=initial, cpwopen=(!iszero(gap)))
     # Nonzero rounding: splice and delete to make room for rounded part
     if !iszero(rounding)
-        orig_sty = initial ? undecorated(style0(pa)) : laststyle(pa)
+        orig_sty, l_into_style = terminal_style(pa, initial)
         round_gap = (orig_sty isa CPW && iszero(gap))
         split_idx = initial ? firstindex(pa) : lastindex(pa)
         split_node = pa[split_idx]
@@ -1244,15 +1244,19 @@ function terminate!(
         )
 
         split_len = initial ? rounding : len - rounding
+        # length into style may be different if orig_sty is a substyle
+        l_into_style = initial ? l_into_style + rounding : l_into_style - rounding
+
         !round_gap &&
-            (2 * rounding > trace(orig_sty, split_len)) &&
+            (2 * rounding > trace(orig_sty, l_into_style)) &&
             throw(
                 ArgumentError(
                     "`rounding` $rounding too large for previous segment trace width $(trace(orig_sty, split_len))."
                 )
             )
+        @show orig_sty, split_len
         round_gap &&
-            (2 * rounding > Paths.gap(orig_sty, split_len)) &&
+            (2 * rounding > Paths.gap(orig_sty, l_into_style)) &&
             throw(
                 ArgumentError(
                     "`rounding` $rounding too large for previous segment gap $(Paths.gap(orig_sty, split_len))."
@@ -1292,8 +1296,8 @@ function terminate!(
 end
 
 function terminationlength(pa::Path{T}, initial::Bool) where {T}
-    initial && return terminationlength(undecorated(style0(pa)), zero(T))
-    return terminationlength(laststyle(pa), pathlength(pa[end]))
+    sty, len = terminal_style(pa, initial)
+    return terminationlength(sty, len)
 end
 
 terminationlength(s, t) = zero(t)
