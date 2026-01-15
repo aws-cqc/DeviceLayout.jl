@@ -156,3 +156,32 @@ end
     @test Paths.width(pa[2].sty, 0.5 * pathlength(pa[2].seg)) ≈ w05
     @test Paths.width(pa[2].sty, 0.75 * pathlength(pa[2].seg)) > w075
 end
+
+@testitem "Path terminations" setup = [CommonTestSetup] begin
+    pa = Path(0nm, 0nm)
+    straight!(pa, 10μm, Paths.CPW(10μm, 6μm))
+    terminate!(pa; initial=true, rounding=2μm)
+    terminate!(pa; rounding=2μm, gap=0μm)
+    # Unit test splitting
+    @test Paths.split(pa[1].sty, pathlength(pa[1])/2)[1] isa Paths.SimpleNoRender
+    @test Paths.split(pa[1].sty, pathlength(pa[1])/2)[2] == pa[1].sty
+    @test Paths.split(pa[3].sty, pathlength(pa[3])/2)[1] == pa[3].sty
+    @test Paths.split(pa[3].sty, pathlength(pa[3])/2)[2] isa Paths.SimpleNoRender
+    # If segment with PeriodicStyle begins or ends in a termination, draw the whole termination
+    pa2 = Path(0nm, 0nm)
+    straight!(pa2, pathlength(pa) - 2μm, Paths.PeriodicStyle(pa; l0=1μm))
+    @test pathlength(pa2) == pathlength(pa) - 2μm
+    # Entire termination polygons are still drawn on both sides
+    polys = vcat(to_polygons.(pa2)...)
+    @test length(polys) == 5
+    @test width(bounds(polys)) == pathlength(pa)
+    @test lowerleft(bounds(polys)).x == -1μm
+    straight!(pa2, 2μm) # End of one termination and beginning of another
+    # No polygons added
+    @test vcat(to_polygons.(pa)...) == polys
+
+    # Terminate periodic
+    
+
+    # Terminate overlay
+end

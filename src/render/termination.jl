@@ -22,7 +22,7 @@
 # could result in gaps between the 1--6 line segment and the points on the previous segment
 # corresponding to 2 and 5.
 
-function _poly(f::Paths.Straight{T}, s::Paths.CPWOpenTermination) where {T}
+function __poly(f::Paths.Straight{T}, s::Paths.CPWOpenTermination) where {T}
     g = cpw_points(f, s)
 
     t0, tr, t1 = zero(T), s.rounding, pathlength(f)
@@ -111,7 +111,7 @@ end
 # |        |
 # 5--------6
 
-function _poly(f::Paths.Straight{T}, s::Paths.CPWShortTermination) where {T}
+function __poly(f::Paths.Straight{T}, s::Paths.CPWShortTermination) where {T}
     g = cpw_points(f, s)
 
     t0, tr, t1 = zero(T), s.rounding, pathlength(f)
@@ -146,7 +146,7 @@ function to_polygons(
     return to_polygons.(_poly(f, s); kwargs...)
 end
 
-function _poly(f::Paths.Straight{T}, s::Paths.TraceTermination) where {T}
+function __poly(f::Paths.Straight{T}, s::Paths.TraceTermination) where {T}
     iszero(s.rounding) && return Polygon{T}[]
     if !isapprox(s.rounding, pathlength(f))
         throw(ArgumentError("Termination rounding ≠ termination path length."))
@@ -171,16 +171,20 @@ function to_polygons(
     return to_polygons(_poly(f, s); kwargs...)
 end
 
-## Generic segments—just draw as though straight
+## Generic segments—just draw as though straight for length `_polylength`
 function _poly(
     f::Paths.Segment{T},
     s::Union{Paths.TraceTermination, Paths.CPWOpenTermination, Paths.CPWShortTermination}
 ) where {T}
     straight = if s.initial
-        p = p1(f) - pathlength(f) * Point(cos(α1(f)), sin(α1(f)))
-        Paths.Straight{T}(pathlength(f), p, α1(f))
+        p = p1(f) - _polylength(s) * Point(cos(α1(f)), sin(α1(f)))
+        Paths.Straight{T}(_polylength(s), p, α1(f))
     else
-        Paths.Straight{T}(pathlength(f), p0(f), α0(f))
+        Paths.Straight{T}(_polylength(s), p0(f), α0(f))
     end
-    return _poly(straight, s)
+    return __poly(straight, s)
 end
+
+_polylength(s::Paths.TraceTermination) = s.rounding
+_polylength(s::Paths.CPWOpenTermination) = s.rounding + s.gap
+_polylength(s::Paths.CPWShortTermination) = s.rounding
