@@ -194,7 +194,9 @@ end
     terminate!(pa3; initial=true, rounding=2μm)
     terminate!(pa3; rounding=0.5μm, gap=0μm)
     c = Cell("test")
-    render!(c, pa3, GDSMeta(3)) # no error
+    render!(c, pa3, GDSMeta(3))
+    @test length(c.elements) == 7
 
     # Terminate overlay
+    
 end
