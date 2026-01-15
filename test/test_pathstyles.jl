@@ -178,10 +178,23 @@ end
     @test lowerleft(bounds(polys)).x == -1μm
     straight!(pa2, 2μm) # End of one termination and beginning of another
     # No polygons added
-    @test vcat(to_polygons.(pa)...) == polys
+    @test vcat(to_polygons.(pa2)...) == polys
 
     # Terminate periodic
-    
+    pa3 = Path(0nm, 0nm)
+    tapersty = Paths.TaperCPW(10μm, 6μm, 2μm, 1μm)
+    straight!(pa3, 15μm, Paths.PeriodicStyle([tapersty], [10μm]))
+    sty, l = Paths.terminal_style(pa3, true)
+    @test Paths.trace(sty, l) == 10μm
+    @test Paths.gap(sty, l) == 6μm
+    sty, l = Paths.terminal_style(pa3, false)
+    @test Paths.trace(sty, l) == 6μm
+    @test Paths.gap(sty, l) == 3.5μm
+
+    terminate!(pa3; initial=true, rounding=2μm)
+    terminate!(pa3; rounding=0.5μm, gap=0μm)
+    c = Cell("test")
+    render!(c, pa3, GDSMeta(3)) # no error
 
     # Terminate overlay
 end

@@ -22,11 +22,7 @@ for (S, label) in zip((:CPWOpenTermination, :CPWShortTermination), ("Open", "Sho
                 return $(S){typeof(tt)}(tt, gg, rr, initial)
             end
             function $(S)(pa::Path{T}, rounding=zero(T); initial=false) where {T}
-                sty, len = if initial
-                    undecorated(style0(pa)), zero(T)
-                else
-                    laststyle(pa), pathlength(pa[end])
-                end
+                sty, len = terminal_style(pa, initial)
                 return $(S)(sty, len, rounding, initial=initial)
             end
             $(S)(s::CPW, t, rounding=zero(t); initial=false) =
@@ -69,11 +65,7 @@ function TraceTermination(t, r; initial=false)
     return TraceTermination{typeof(tt)}(tt, rr, initial)
 end
 function TraceTermination(pa::Path{T}, rounding=zero(T); initial=false) where {T}
-    sty, len = if initial
-        undecorated(style0(pa)), zero(T)
-    else
-        laststyle(pa), pathlength(pa[end])
-    end
+    sty, len = terminal_style(pa, initial)
     return TraceTermination(sty, len, rounding; initial=initial)
 end
 TraceTermination(s::Trace, t, rounding=zero(t); initial=false) =
@@ -87,13 +79,27 @@ width(s::TraceTermination, t...) = s.width
 summary(s::TraceTermination) =
     string("Termination of Trace with width ", s.width, " and rounding radius ", s.rounding)
 
-function Termination(pa::Path, rounding=zero(T); initial=false, cpwopen=true)
-    sty = initial ? undecorated(style0(pa)) : laststyle(pa)
-    sty isa Trace && return TraceTermination(pa, rounding; initial=initial)
-    if sty isa CPW
-        cpwopen && return CPWOpenTermination(pa, rounding; initial=initial)
-        return CPWShortTermination(pa, rounding; initial=initial)
+function terminal_style(pa::Path{T}, initial) where {T}
+    sty = initial ? undecorated(style(pa[begin])) : undecorated(style(pa[end]))
+    length_into_sty = initial ? zero(T) : pathlength(pa[end])
+    while sty isa AbstractCompoundStyle
+        sty, length_into_sty = sty(length_into_sty)
     end
+    return sty, length_into_sty
+end
+
+function Termination(pa::Path{T}, rounding=zero(T); initial=false, cpwopen=true) where {T}
+    sty, length_into_sty = terminal_style(pa, initial)
+    return Termination(sty, length_into_sty, rounding; initial=initial, cpwopen=cpwopen)
+end
+
+function Termination(sty, length_into_sty::T, rounding=zero(T); initial=false, cpwopen=true) where {T}
+    sty isa Trace && return TraceTermination(sty, length_into_sty, rounding; initial=initial)
+    if sty isa CPW
+        cpwopen && return CPWOpenTermination(sty, length_into_sty, rounding; initial=initial)
+        return CPWShortTermination(sty, length_into_sty, rounding; initial=initial)
+    end
+    return nothing
 end
 
 function pin(s::Union{TraceTermination, CPWOpenTermination, CPWShortTermination};
