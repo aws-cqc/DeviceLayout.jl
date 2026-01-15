@@ -54,12 +54,6 @@ function rounded_transition(sty0::SimpleTrace, sty1::SimpleTrace; α_max=60°)
     return Trace(s -> rounded_transition_width(s, sty0.width, sty1.width, α_max))
 end
 
-function rounded_transition(sty0::SimpleTrace, sty1::SimpleTrace, taper_length, radius)
-    return Trace(
-        s -> rounded_transition_width(s, sty0.width, sty1.width, taper_length, radius)
-    )
-end
-
 function rounded_transition_width(s, w0, w1, α_max)
     dw = abs(w0 - w1)
     taper_length = dw / 2 * (sin(α_max) / (1 - cos(α_max)))
