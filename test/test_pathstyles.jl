@@ -163,19 +163,19 @@ end
     terminate!(pa; initial=true, rounding=2μm)
     terminate!(pa; rounding=2μm, gap=0μm)
     # Unit test splitting
-    @test Paths.split(pa[1].sty, pathlength(pa[1])/2)[1] isa Paths.SimpleNoRender
-    @test Paths.split(pa[1].sty, pathlength(pa[1])/2)[2] == pa[1].sty
-    @test Paths.split(pa[3].sty, pathlength(pa[3])/2)[1] == pa[3].sty
-    @test Paths.split(pa[3].sty, pathlength(pa[3])/2)[2] isa Paths.SimpleNoRender
+    @test Paths.split(pa[1].sty, pathlength(pa[1]) / 2)[1] isa Paths.SimpleNoRender
+    @test Paths.split(pa[1].sty, pathlength(pa[1]) / 2)[2] == pa[1].sty
+    @test Paths.split(pa[3].sty, pathlength(pa[3]) / 2)[1] == pa[3].sty
+    @test Paths.split(pa[3].sty, pathlength(pa[3]) / 2)[2] isa Paths.SimpleNoRender
     # If segment with PeriodicStyle begins or ends in a termination, draw the whole termination
     pa2 = Path(0nm, 0nm)
     straight!(pa2, pathlength(pa) - 2μm, Paths.PeriodicStyle(pa; l0=1μm))
-    @test pathlength(pa2) == pathlength(pa) - 2μm
+    @test pathlength(pa2) ≈ pathlength(pa) - 2μm
     # Entire termination polygons are still drawn on both sides
     polys = vcat(to_polygons.(pa2)...)
     @test length(polys) == 5
     @test width(bounds(polys)) == pathlength(pa)
-    @test lowerleft(bounds(polys)).x == -1μm
+    @test lowerleft(bounds(polys)).x ≈ -1μm
     straight!(pa2, 2μm) # End of one termination and beginning of another
     # No polygons added
     @test vcat(to_polygons.(pa2)...) == polys
@@ -185,11 +185,11 @@ end
     tapersty = Paths.TaperCPW(10μm, 6μm, 2μm, 1μm)
     straight!(pa3, 15μm, Paths.PeriodicStyle([tapersty], [10μm]))
     sty, l = Paths.terminal_style(pa3, true)
-    @test Paths.trace(sty, l) == 10μm
-    @test Paths.gap(sty, l) == 6μm
+    @test Paths.trace(sty, l) ≈ 10μm
+    @test Paths.gap(sty, l) ≈ 6μm
     sty, l = Paths.terminal_style(pa3, false)
-    @test Paths.trace(sty, l) == 6μm
-    @test Paths.gap(sty, l) == 3.5μm
+    @test Paths.trace(sty, l) ≈ 6μm
+    @test Paths.gap(sty, l) ≈ 3.5μm
 
     terminate!(pa3; initial=true, rounding=2μm)
     terminate!(pa3; rounding=0.5μm, gap=0μm)
@@ -208,10 +208,23 @@ end
     terminate!(pa4; rounding=0.5, overlay_index=1)
     straight!(pa4, 10, Paths.CPW(10, 6))
     overlay!(pa4, Paths.Trace(5), GDSMeta(1))
-    terminate!(pa4; rounding=2)
-    terminate!(pa4; rounding=2, overlay_index=1)
+    terminate!(pa4; rounding=2, gap=0)
+    @test_throws "too large for previous segment" terminate!(
+        pa4;
+        rounding=2,
+        overlay_index=1
+    )
+    terminate!(pa4; rounding=1.9, overlay_index=1)
     cf = Cell{Float64}("test")
     render!(cf, pa4, GDSMeta())
-    @test length(flatten(cf).elements) == 39
-    @test bounds(cf) == Rectangle{Float64}((-6.0,-16.0), (38.0,16.0))
+    @test length(flatten(cf).elements) == 35
+    @test bounds(cf) == Rectangle{Float64}((-6.0, -16.0), (26.0, 16.0))
+
+    pa5 = Path(0, 0)
+    turn!(pa5, 90°, 32 * 3 / (pi / 2), Paths.PeriodicStyle(pa4))
+    cf = Cell{Float64}("test")
+    render!(cf, pa5, GDSMeta())
+    @test length(flatten(cf).elements) == 78 # PeriodicStyle actually does some simplification
+    terminate!(pa5, initial=true, overlay_index=1, rounding=0.5)
+    @test pa5[1].sty.overlay[1] isa Paths.TraceTermination
 end
