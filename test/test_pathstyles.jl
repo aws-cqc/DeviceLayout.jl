@@ -105,20 +105,54 @@
     @test length(cf.refs) == 14 # 2 overlays + 12 attachments
 end
 
-@testitem "Rounded transitions" setup = [CommonTestSetup] begin
+@testitem "Rounded trace tapers" setup = [CommonTestSetup] begin
+    # Basic usage
     pa = Path()
     straight!(pa, 10μm, Paths.Trace(1μm))
     turn!(pa, 90°, 10μm / (pi / 2), Paths.Trace(5μm))
     straight!(pa, 10μm, Paths.Trace(3μm))
     Paths.round_trace_transitions!(pa)
+
     @test length(pa) == 7
     @test pathlength(pa) ≈ 30μm
     @test Paths.width(pa[2].sty, 0.5 * pathlength(pa[2])) < 3μm
+    @test Paths.width(pa[2].sty, pathlength(pa[2])) ≈ 3μm
     @test Paths.width(pa[3].sty, 0μm) ≈ 3μm
     @test Paths.width(pa[3].sty, 0.5 * pathlength(pa[3])) > 3μm
     @test Paths.width(pa[5].sty, 0.6 * pathlength(pa[5])) > 4μm
     @test Paths.width(pa[6].sty, 0.6 * pathlength(pa[6])) < 4μm
+
     cs = CoordinateSystem("test")
     sm = SolidModel("test", overwrite=true)
     render!(sm, cs) # runs without error
+
+    @test_throws "taper angle" Paths.round_trace_transitions!(pa; α_max=90°)
+
+    # Explicit rounding radius
+    pa = Path()
+    straight!(pa, 10μm, Paths.Trace(1μm))
+    turn!(pa, 90°, 10μm / (pi / 2), Paths.Trace(5μm))
+    straight!(pa, 10μm, Paths.Trace(3μm))
+    straight!(pa, 10μm, Paths.Trace(27μm)) # too sharp
+    @test_warn "Skipping" Paths.round_trace_transitions!(pa, radius=3μm)
+    @test length(pa) == 8 # No rounding of last transition
+    @test pathlength(pa) ≈ 40μm
+
+    # Rounding of TaperTrace
+    pa = Path()
+    straight!(pa, 10μm, Paths.Trace(1μm))
+    turn!(pa, 90°, 10μm / (pi / 2), Paths.TaperTrace(1μm, 3μm))
+    straight!(pa, 10μm, Paths.Trace(3μm))
+    straight!(pa, 1μm, Paths.Taper())
+    straight!(pa, 9μm, Paths.Trace(30μm))
+
+    w025 = Paths.width(pa[2].sty, 0.25 * pathlength(pa[2].seg))
+    w05 = Paths.width(pa[2].sty, 0.5 * pathlength(pa[2].seg))
+    w075 = Paths.width(pa[2].sty, 0.75 * pathlength(pa[2].seg))
+    @test_warn "Skipping" Paths.round_trace_transitions!(pa)
+    @test length(pa) == 5
+    @test pathlength(pa) ≈ 40μm
+    @test Paths.width(pa[2].sty, 0.25 * pathlength(pa[2].seg)) < w025
+    @test Paths.width(pa[2].sty, 0.5 * pathlength(pa[2].seg)) ≈ w05
+    @test Paths.width(pa[2].sty, 0.75 * pathlength(pa[2].seg)) > w075
 end
