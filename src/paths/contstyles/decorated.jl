@@ -325,3 +325,9 @@ function _overlay!(sty0::DecoratedStyle, oversty::Style, metadata::DeviceLayout.
     sty0.s = _overlay!(sty0.s, oversty, metadata)
     return sty0
 end
+
+function nextstyle(pa::Path, sty::OverlayStyle)
+    return OverlayStyle(nextstyle(pa, sty.s),
+        nextstyle.(Ref(pa), sty.overlay),
+        sty.overlay_metadata)
+end
