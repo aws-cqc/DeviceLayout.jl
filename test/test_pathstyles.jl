@@ -198,5 +198,20 @@ end
     @test length(c.elements) == 7
 
     # Terminate overlay
-    
+    pa4 = Path(0, 0)
+    straight!(pa4, 10, Paths.CPW(10, 6))
+    overlay!(pa4, Paths.Trace(1), GDSMeta(2))
+    overlay!(pa4, Paths.CPW(20, 6), GDSMeta(3))
+    terminate!(pa4; rounding=5, initial=true)
+    terminate!(pa4; initial=true, rounding=2, gap=0, overlay_index=2)
+    terminate!(pa4; rounding=2, overlay_index=2)
+    terminate!(pa4; rounding=0.5, overlay_index=1)
+    straight!(pa4, 10, Paths.CPW(10, 6))
+    overlay!(pa4, Paths.Trace(5), GDSMeta(1))
+    terminate!(pa4; rounding=2)
+    terminate!(pa4; rounding=2, overlay_index=1)
+    cf = Cell{Float64}("test")
+    render!(cf, pa4, GDSMeta())
+    @test length(flatten(cf).elements) == 39
+    @test bounds(cf) == Rectangle{Float64}((-6.0,-16.0), (38.0,16.0))
 end
