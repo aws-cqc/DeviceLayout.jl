@@ -95,3 +95,14 @@ function Termination(pa::Path, rounding=zero(T); initial=false, cpwopen=true)
         return CPWShortTermination(pa, rounding; initial=initial)
     end
 end
+
+function pin(s::Union{TraceTermination, CPWOpenTermination, CPWShortTermination};
+        start=nothing, stop=nothing)
+    # Return termination for the part that connects to the path, SimpleNoRender otherwise
+    if !s.initial && isnothing(start)
+        return s
+    elseif s.initial && isnothing(stop)
+        return s
+    end
+    return SimpleNoRender(2*extent(s), virtual=true) # not a user-created NoRender => virtual
+end
