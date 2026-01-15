@@ -91,7 +91,7 @@ end
 
 function terminationlength(pa::Path{T}, initial::Bool; overlay_index=0) where {T}
     sty, len = terminal_style(pa, initial)
-    return terminationlength(sty, len; overlay_index=0)
+    return terminationlength(sty, len; overlay_index)
 end
 
 terminationlength(s, t; overlay_index=0) = zero(t)
@@ -101,7 +101,13 @@ function terminationlength(s::OverlayStyle, t; overlay_index=0)
     return terminationlength(s.overlay[overlay_index], t)
 end
 
-function Termination(pa::Path{T}, rounding=zero(T); initial=false, cpwopen=true, overlay_index=0) where {T}
+function Termination(
+    pa::Path{T},
+    rounding=zero(T);
+    initial=false,
+    cpwopen=true,
+    overlay_index=0
+) where {T}
     sty, length_into_sty = terminal_style(pa, initial, rounding)
     return Termination(sty, length_into_sty, rounding; initial, cpwopen, overlay_index)
 end
@@ -109,7 +115,14 @@ end
 is_termination(sty) = false
 is_termination(::Union{TraceTermination, CPWOpenTermination, CPWShortTermination}) = true
 
-function Termination(sty, length_into_sty::T, rounding=zero(T); initial=false, cpwopen=true, overlay_index=0) where {T}
+function Termination(
+    sty,
+    length_into_sty::T,
+    rounding=zero(T);
+    initial=false,
+    cpwopen=true,
+    overlay_index=0
+) where {T}
     if sty isa OverlayStyle
         # Terminate the indicated style
         if iszero(overlay_index)
@@ -133,31 +146,39 @@ function Termination(sty, length_into_sty::T, rounding=zero(T); initial=false, c
         for idx in eachindex(sty.overlay)
             idx == overlay_index && continue
             if initial
-                newsty.overlay[idx] = pin(newsty.s, stop=length_into_sty)
+                # Wrong if overlay is compound...
+                newsty.overlay[idx] = pin(newsty.overlay[idx], stop=length_into_sty)
             else
-                newsty.overlay[idx] = pin(newsty.s, start=length_into_sty)
+                newsty.overlay[idx] = pin(newsty.overlay[idx], start=length_into_sty)
             end
         end
         return newsty
     end
-    !iszero(overlay_index) && error("Terminal style must be an OverlayStyle to terminate with nonzero `overlay_index")
-    sty isa Trace && return TraceTermination(sty, length_into_sty, rounding; initial=initial)
+    !iszero(overlay_index) && error(
+        "Terminal style must be an OverlayStyle to terminate with nonzero `overlay_index"
+    )
+    sty isa Trace &&
+        return TraceTermination(sty, length_into_sty, rounding; initial=initial)
     if sty isa CPW
-        cpwopen && return CPWOpenTermination(sty, length_into_sty, rounding; initial=initial)
+        cpwopen &&
+            return CPWOpenTermination(sty, length_into_sty, rounding; initial=initial)
         return CPWShortTermination(sty, length_into_sty, rounding; initial=initial)
     end
-    return nothing
+    return NoRenderContinuous()
 end
 
-function pin(s::Union{TraceTermination, CPWOpenTermination, CPWShortTermination};
-        start=nothing, stop=nothing)
+function pin(
+    s::Union{TraceTermination, CPWOpenTermination, CPWShortTermination};
+    start=nothing,
+    stop=nothing
+)
     # Return termination for the part that connects to the path, SimpleNoRender otherwise
     if !s.initial && (isnothing(start) || iszero(start))
         return s
     elseif s.initial && (isnothing(stop) || stop == _termlength(s))
         return s
     end
-    return SimpleNoRender(2*extent(s), virtual=true) # not a user-created NoRender => virtual
+    return SimpleNoRender(2 * extent(s), virtual=true) # not a user-created NoRender => virtual
 end
 
 _termlength(s::Paths.TraceTermination) = s.rounding
@@ -165,7 +186,7 @@ _termlength(s::Paths.CPWOpenTermination) = s.rounding + s.gap
 _termlength(s::Paths.CPWShortTermination) = s.rounding
 
 """
-    terminate!(pa::Path{T}; gap=Paths.terminationlength(pa), rounding=zero(T), initial=false) where {T}
+    terminate!(pa::Path{T}; gap=Paths.terminationlength(pa), rounding=zero(T), initial=false, overlay_index=0) where {T}
 
 End a `Paths.Path` with a termination.
 
@@ -185,6 +206,9 @@ as exact circular arcs.
 If the preceding style is a trace, the termination only rounds the corners at the end of the
 segment or does nothing if `iszero(rounding)`.
 
+`overlay_index` can be used to indicate that the termination should be applied to an overlay
+layer in a path.
+
 If `initial`, the termination is appended before the beginning of the `Path`.
 """
 function terminate!(
@@ -196,7 +220,8 @@ function terminate!(
 ) where {T}
     termlen = gap + rounding
     iszero(termlen) && return
-    termsty = Termination(pa, rounding; initial=initial, cpwopen=(!iszero(gap)), overlay_index)
+    termsty =
+        Termination(pa, rounding; initial=initial, cpwopen=(!iszero(gap)), overlay_index)
     # Nonzero rounding: splice and delete to make room for rounded part
     if !iszero(rounding)
         orig_sty, l_into_style = terminal_style(pa, initial)
@@ -204,27 +229,8 @@ function terminate!(
         split_idx = initial ? firstindex(pa) : lastindex(pa)
         split_node = pa[split_idx]
         len = pathlength(split_node)
-        len > rounding || throw(
-            ArgumentError(
-                "`rounding` $rounding too large for previous segment path length $len."
-            )
-        )
-
+        _check_termination(termsty, len, rounding, round_gap, overlay_index)
         split_len = initial ? rounding : len - rounding
-        !round_gap &&
-            (2 * rounding > trace(orig_sty, l_into_style)) &&
-            throw(
-                ArgumentError(
-                    "`rounding` $rounding too large for previous segment trace width $(trace(orig_sty, split_len))."
-                )
-            )
-        round_gap &&
-            (2 * rounding > Paths.gap(orig_sty, l_into_style)) &&
-            throw(
-                ArgumentError(
-                    "`rounding` $rounding too large for previous segment gap $(Paths.gap(orig_sty, split_len))."
-                )
-            )
         splice!(pa, split_idx, split(split_node, split_len))
     end
 
@@ -248,6 +254,36 @@ function terminate!(
     end
 end
 
-function nextstyle(::Path, ::Union{TraceTermination, CPWOpenTermination, CPWShortTermination}) where {T}
+function _check_termination(termsty, len, rounding, round_gap, overlay_index=0)
+    len > rounding || throw(
+        ArgumentError(
+            "`rounding` $rounding too large for previous segment path length $len."
+        )
+    )
+    !round_gap &&
+        (2 * rounding > trace(termsty)) &&
+        throw(
+            ArgumentError(
+                "`rounding` $rounding too large for previous segment trace width $(trace(termsty)))."
+            )
+        )
+    return round_gap &&
+           (2 * rounding > Paths.gap(termsty)) &&
+           throw(
+               ArgumentError(
+                   "`rounding` $rounding too large for previous segment gap $(Paths.gap(termsty))."
+               )
+           )
+end
+
+function _check_termination(termsty::OverlayStyle, len, rounding, round_gap, overlay_index)
+    iszero(overlay_index) && return _check_termination(termsty.s, len, rounding, round_gap)
+    return _check_termination(termsty.overlay[overlay_index], len, rounding, round_gap)
+end
+
+function nextstyle(
+    ::Path,
+    ::Union{TraceTermination, CPWOpenTermination, CPWShortTermination}
+) where {T}
     return NoRenderContinuous()
 end
