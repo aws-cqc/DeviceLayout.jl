@@ -403,7 +403,7 @@ In most cases this is the last continuous, non-virtual style. The exception is t
 a `PeriodicStyle` will start its periodicity where the last one ended.
 """
 nextstyle(p::Path) = isempty(nodes(p)) ? nothing : nextstyle(p, laststyle(p))
-nextstyle(p::Path, sty::Style) = sty
+nextstyle(p::Path, laststy::Style) = laststy
 
 function DeviceLayout._geometry!(cs::CoordinateSystem, p::Path)
     return addref!(cs, p)
