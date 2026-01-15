@@ -334,4 +334,14 @@ end
         1e-15 / nm
     @test Paths.norm(Paths.Interpolations.gradient(pa6[1].seg.r, 0)[1]) ≈ 160μm
     @test Paths.norm(Paths.Interpolations.gradient(pa6[1].seg.r, 1)[1]) ≈ 120μm
+
+    ### Unbounded optimization (issue #135)
+    pa = Path(Point(-5.8, 3.9)mm, α0=-90°)
+    @test_warn "increasing speed without bound" bspline!(
+        pa,
+        [Point(-0.55, 1.8)mm],
+        180°,
+        Paths.Trace(1μm),
+        auto_speed=true
+    )
 end

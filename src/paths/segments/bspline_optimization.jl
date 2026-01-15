@@ -13,6 +13,8 @@ function _optimize_bspline!(b::BSpline; endpoints_curvature=nothing)
         b.t0 = p[1] * scale0
         b.t1 = p[2] * scale1
     end
+    sum(p) >= 9.9 &&
+        @warn "`auto_speed` optimization for BSpline from $(b.p[1]) to $(b.p[end]) is increasing speed without bound; arbitrary cutoff applied. Check that the endpoints and directions are correct and add waypoints if necessary."
     _set_endpoints_curvature!(b, endpoints_curvature)
     return _update_interpolation!(b)
 end
@@ -146,7 +148,7 @@ function _int_dκ2(b::BSpline{T}, scale) where {T}
     G = StaticArrays.@MVector [zero(Point{T})]
     H = StaticArrays.@MVector [zero(Point{T})]
     J = StaticArrays.@MVector [zero(Point{T})]
-
+    (norm(b.t0) + norm(b.t1)) / scale > 10 && return Inf
     return uconvert(
         NoUnits,
         quadgk(t -> scale^3 * (dκdt_scaled!(b, t, G, H, J))^2, 0.0, 1.0, rtol=1e-3)[1]
