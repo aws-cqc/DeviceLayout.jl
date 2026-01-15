@@ -33,6 +33,7 @@ struct PeriodicStyle{T <: Coordinate} <: AbstractCompoundStyle
             splice!(lengths, idx, diff(styles[idx].grid))
             splice!(styles, idx, styles[idx].styles)
         end
+        styles .= _withlength!.(styles, lengths)
         return new{T}(styles, lengths, l0)
     end
 end
