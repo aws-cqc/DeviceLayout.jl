@@ -45,6 +45,8 @@ function TaperTrace(width_start::Coordinate, width_end::Coordinate)
     return TaperTrace{typeof(w_s)}(w_s, w_e)
 end
 
+nextstyle(sty::TaperTrace) = Trace(sty.width_end)
+
 """
     struct TaperCPW{T<:Coordinate} <: CPW{true}
         trace_start::T
@@ -123,6 +125,8 @@ function pin(sty::TaperCPW{T}; start=nothing, stop=nothing) where {T}
         x1 - x0
     )
 end
+
+nextstyle(sty::TaperCPW) = CPW(sty.trace_end, sty.gap_end)
 
 summary(s::TaperTrace) = string(
     "Tapered trace with initial width ",
