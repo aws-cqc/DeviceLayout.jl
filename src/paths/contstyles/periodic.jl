@@ -59,6 +59,11 @@ function PeriodicStyle(pa::Path{T}; l0=zero(T)) where {T}
     return PeriodicStyle(simplify(pacopy).sty; l0)
 end
 
+same_cycle(sty0::PeriodicStyle, sty1::Style) = false
+function same_cycle(sty0::PeriodicStyle, sty1::PeriodicStyle)
+    return all(sty0.styles .== sty1.styles) && all(sty0.lengths .== sty1.lengths)
+end
+
 # Return style and length into style
 function (s::PeriodicStyle)(t)
     ls = s.lengths
@@ -187,14 +192,6 @@ function _refs(seg::Paths.Segment{T}, sty::PeriodicStyle) where {T}
     end
     base_sty = PeriodicStyle(without_attachments, sty.lengths, sty.l0)
     return _refs(seg, DecoratedStyle{T}(base_sty, ts, dirs, refs))
-end
-
-function nextstyle(p::Path, sty::PeriodicStyle{T}) where {T}
-    if sty !== p[end].sty # there is a virtual or non-continuous style, reset periodicity
-        return PeriodicStyle(sty.styles, sty.lengths, zero(T))
-    end
-    # Add last segment length to l0 so periodicity continues from there
-    return PeriodicStyle(sty.styles, sty.lengths, sty.l0 + pathlength(p[end].seg))
 end
 
 undecorated(sty::PeriodicStyle) =

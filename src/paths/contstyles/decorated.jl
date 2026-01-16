@@ -326,17 +326,10 @@ function _overlay!(sty0::DecoratedStyle, oversty::Style, metadata::DeviceLayout.
     return sty0
 end
 
-function nextstyle(pa::Path, sty::OverlayStyle)
-    newsty = OverlayStyle(
-        nextstyle(pa, sty.s),
-        nextstyle.(Ref(pa), sty.overlay),
+function nextstyle(sty::OverlayStyle)
+    return OverlayStyle(
+        nextstyle(sty.s),
+        nextstyle.(sty.overlay),
         sty.overlay_metadata
     )
-    for idx in eachindex(newsty.overlay)
-        oversty = newsty.overlay[idx]
-        if oversty isa PeriodicStyle
-            newsty.overlay[idx] = PeriodicStyle(oversty.styles, oversty.lengths, sty.overlay[idx].l0 + pathlength(pa[end]))
-        end
-    end
-    return newsty
 end
