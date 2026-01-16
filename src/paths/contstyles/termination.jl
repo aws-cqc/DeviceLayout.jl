@@ -123,6 +123,10 @@ function Termination(
     cpwopen=true,
     overlay_index=0
 ) where {T}
+    if sty isa AbstractCompoundStyle
+        sty, length_into_sty = sty(length_into_sty)
+        return Termination(sty, length_into_sty, rounding; initial, cpwopen, overlay_index)
+    end
     if sty isa OverlayStyle
         # Terminate the indicated style
         if iszero(overlay_index)
@@ -229,7 +233,8 @@ function terminate!(
         split_idx = initial ? firstindex(pa) : lastindex(pa)
         split_node = pa[split_idx]
         len = pathlength(split_node)
-        _check_termination(termsty, len, rounding, round_gap, overlay_index)
+        l_into_style = initial ? rounding : l_into_style - rounding
+        _check_termination(orig_sty, l_into_style, len, rounding, round_gap, overlay_index)
         split_len = initial ? rounding : len - rounding
         splice!(pa, split_idx, split(split_node, split_len))
     end
@@ -254,31 +259,32 @@ function terminate!(
     end
 end
 
-function _check_termination(termsty, len, rounding, round_gap, overlay_index=0)
+function _check_termination(termsty, l_into_style, len, rounding, round_gap, overlay_index=0)
     len > rounding || throw(
         ArgumentError(
             "`rounding` $rounding too large for previous segment path length $len."
         )
     )
     !round_gap &&
-        (2 * rounding > trace(termsty)) &&
+        (2 * rounding > trace(termsty, l_into_style)) &&
         throw(
             ArgumentError(
-                "`rounding` $rounding too large for previous segment trace width $(trace(termsty)))."
+                "`rounding` $rounding too large for previous segment trace width $(trace(termsty, l_into_style)))."
             )
         )
     return round_gap &&
-           (2 * rounding > Paths.gap(termsty)) &&
+           (2 * rounding > Paths.gap(termsty, l_into_style)) &&
            throw(
                ArgumentError(
-                   "`rounding` $rounding too large for previous segment gap $(Paths.gap(termsty))."
+                   "`rounding` $rounding too large for previous segment gap $(Paths.gap(termsty, l_into_style))."
                )
            )
 end
 
-function _check_termination(termsty::OverlayStyle, len, rounding, round_gap, overlay_index)
-    iszero(overlay_index) && return _check_termination(termsty.s, len, rounding, round_gap)
-    return _check_termination(termsty.overlay[overlay_index], len, rounding, round_gap)
+function _check_termination(termsty::OverlayStyle, l_into_style, len, rounding, round_gap, overlay_index)
+    @show termsty.overlay
+    iszero(overlay_index) && return _check_termination(termsty.s, l_into_style, len, rounding, round_gap)
+    return _check_termination(termsty.overlay[overlay_index], l_into_style, len, rounding, round_gap)
 end
 
 function nextstyle(
