@@ -402,8 +402,8 @@ Return the style to be used if the path is extended without specifying a new sty
 In most cases this is the last continuous, non-virtual style. The exception is that
 a `PeriodicStyle` will start its periodicity where the last one ended.
 """
-nextstyle(p::Path) = isempty(nodes(p)) ? nothing : nextstyle(p, laststyle(p))
-nextstyle(p::Path, laststy::Style) = laststy
+nextstyle(p::Path) = isempty(nodes(p)) ? nothing : nextstyle(laststyle(p))
+nextstyle(laststy::Style) = laststy
 
 function DeviceLayout._geometry!(cs::CoordinateSystem, p::Path)
     return addref!(cs, p)
@@ -781,14 +781,63 @@ Segments or styles can have fields that depend on the properties of neighbors. E
 
   - Corners need to know their extents based on previous/next styles.
   - Tapers need to know their length for `extent(s, t)` to work.
-    This function reconciles node `n` for consistency with neighbors in this regard.
+  - Periodic styles need to know if they are continuing the same style, and if so, from where in the period
+  - Decorated and overlay styles need to reconcile inner styles
+
+This function reconciles node `n` for consistency with neighbors in this regard.
 """
 function reconcilefields!(n::Node)
     seg, sty = segment(n), style(n)
     if isa(seg, Corner)
         seg.extent = extent(style(previous(n)), pathlength(segment(previous(n))))
     end
-    return n.sty = _withlength!(sty, pathlength(seg)) # may modify or create new style
+    n.sty = reconcilestyle!(sty, n) 
+end
+
+# May mutate sty or create new sty; does not mutate n
+reconcilestyle!(s::Style, n::Node) = s
+
+function reconcilestyle!(s::ContinuousStyle{true}, n::Node)
+    return _withlength!(s, pathlength(n))
+end
+
+function reconcilestyle!(s::DecoratedStyle, n::Node)
+    s.s = reconcilestyle!(s.s, n)
+    return s
+end
+
+function reconcilestyle!(s::OverlayStyle, n::Node)
+    prevsty = without_attachments(previous(n).sty)
+    if previous(n) == n || !(prevsty isa OverlayStyle)
+        s.s = reconcilestyle!(s.s, n)
+        return s
+    end
+    # Reconcile base style with previous overlay base style
+    base_dummy = Node(n.seg, prevsty.s)
+    s.s = reconcilestyle!(s.s, base_dummy)
+    for i in eachindex(s.overlay)
+        overlay_dummy = Node(n.seg, s.overlay[i])
+        # If previous has an overlay with the same index and metadata, use it to reconcile
+        if i <= length(prevsty.overlay) && prevsty.overlay_metadata[i] == s.overlay_metadata[i]
+            overlay_dummy.prev = Node(n.prev.seg, prevsty.overlay[i])
+        end
+        s.overlay[i] = reconcilestyle!(s.overlay[i], overlay_dummy)
+    end
+    return s
+end
+
+function reconcilestyle!(s::PeriodicStyle, n::Node)
+    previous(n) == n && return s
+    prevsty = without_attachments(previous(n).sty)
+    # No match => don't modify
+    !same_cycle(s, prevsty) && return s
+    new_cycle_start = prevsty.l0 + pathlength(previous(n))
+    # Don't modify if l0 already matches
+    if s.l0 == new_cycle_start
+        return s
+    end
+    # Update start
+    return PeriodicStyle(s.styles, s.lengths, new_cycle_start)
 end
 
 _withlength!(sty::Style, l) = sty
@@ -801,7 +850,7 @@ function _withlength!(sty::DecoratedStyle, l)
 end
 function _withlength!(sty::OverlayStyle, l)
     sty.s = _withlength!(sty.s, l)
-    sty.overlay .= _withlength!.(sty.overlay, Ref(l))
+    sty.overlay .= _withlength!.(sty.overlay, l)
     return sty
 end
 

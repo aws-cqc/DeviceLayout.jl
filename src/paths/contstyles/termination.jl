@@ -288,8 +288,7 @@ function _check_termination(termsty::OverlayStyle, l_into_style, len, rounding, 
 end
 
 function nextstyle(
-    ::Path,
     ::Union{TraceTermination, CPWOpenTermination, CPWShortTermination}
-) where {T}
+)
     return NoRenderContinuous()
 end
