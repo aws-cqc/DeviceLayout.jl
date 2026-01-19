@@ -791,7 +791,7 @@ function reconcilefields!(n::Node)
     if isa(seg, Corner)
         seg.extent = extent(style(previous(n)), pathlength(segment(previous(n))))
     end
-    n.sty = reconcilestyle!(sty, n) 
+    return n.sty = reconcilestyle!(sty, n)
 end
 
 # May mutate sty or create new sty; does not mutate n
@@ -818,7 +818,8 @@ function reconcilestyle!(s::OverlayStyle, n::Node)
     for i in eachindex(s.overlay)
         overlay_dummy = Node(n.seg, s.overlay[i])
         # If previous has an overlay with the same index and metadata, use it to reconcile
-        if i <= length(prevsty.overlay) && prevsty.overlay_metadata[i] == s.overlay_metadata[i]
+        if i <= length(prevsty.overlay) &&
+           prevsty.overlay_metadata[i] == s.overlay_metadata[i]
             overlay_dummy.prev = Node(n.prev.seg, prevsty.overlay[i])
         end
         s.overlay[i] = reconcilestyle!(s.overlay[i], overlay_dummy)

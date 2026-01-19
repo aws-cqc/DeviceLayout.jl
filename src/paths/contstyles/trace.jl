@@ -54,6 +54,10 @@ function rounded_transition(sty0::SimpleTrace, sty1::SimpleTrace; α_max=60°)
     return Trace(s -> rounded_transition_width(s, sty0.width, sty1.width, α_max))
 end
 
+function rounded_transition(sty0::SimpleTrace, sty1::SimpleTrace, dl, radius)
+    return Trace(s -> rounded_transition_width(s, sty0.width, sty1.width, dl, radius))
+end
+
 function rounded_transition_width(s, w0, w1, α_max)
     dw = abs(w0 - w1)
     taper_length = dw / 2 * (sin(α_max) / (1 - cos(α_max)))
@@ -64,10 +68,14 @@ end
 function rounded_transition_width(s, w0, w1, taper_length, radius)
     # x from midpoint
     x = s - taper_length / 2
-    if x < zero(x) || (iszero(x) && w1 > w0)
-        return w0 - sign(w0 - w1) * 2 * (radius - sqrt(radius^2 - s^2))
+    isapprox(x, zero(x), atol=DeviceLayout.onenanometer(x)) && (x = zero(x))
+    if x < zero(x) || (iszero(x) && w0 < w1) # Wider section duplicates the narrow points
+        return w0 - sign(w0 - w1) * 2 * (radius - sqrt(radius^2 - min(radius^2, s^2)))
     else
-        return w1 + sign(w0 - w1) * 2 * (radius - sqrt(radius^2 - (taper_length - s)^2))
+        return w1 +
+               sign(w0 - w1) *
+               2 *
+               (radius - sqrt(radius^2 - min(radius^2, (taper_length - s)^2)))
     end
 end
 
@@ -97,6 +105,7 @@ function round_trace_transitions!(pa::Path; α_max=60°, radius=nothing)
 
     handle_generic_tapers!(pa)
 
+    warned = false
     # Replace linear tapers with rounded tapers
     for node in pa
         if node.sty isa Paths.TaperTrace
@@ -107,14 +116,20 @@ function round_trace_transitions!(pa::Path; α_max=60°, radius=nothing)
             taper_length = pathlength(node.seg)
             taper_α_max = 2 * acot(2 * taper_length / dw)
             if taper_α_max >= 90°
-                @warn "Skipping taper rounding: Taper length $taper_length must be greater than `abs(width_start - width_end) = $dw`"
-                continue
+                !warned &&
+                    @warn """Rounded trace transition at $(p0(node.seg)) has discontinuous trace width (90° taper angle), 
+             which can cause numerical issues in some operations, including SolidModel rendering. 
+             To avoid this, taper length $taper_length must be strictly greater than `abs(width_start - width_end) = $dw`.
+             Further warnings on this path will be suppressed."""
+                warned = true
+                node.sty = rounded_transition(sty0, sty1, taper_length, taper_length / 2)
             else
                 node.sty = rounded_transition(sty0, sty1; α_max=taper_α_max)
             end
         end
     end
 
+    warned = false
     # Splice rounded tapers between discrete jumps
     simple_trace = [n.sty isa SimpleTrace for n in pa]
     idx_increment = 0 # For updating index as we splice in additional taper segments
@@ -131,8 +146,14 @@ function round_trace_transitions!(pa::Path; α_max=60°, radius=nothing)
             rndsty = rounded_transition(sty0, sty1; α_max)
             if !isnothing(radius) # Explicitly specified radius overrides α_max
                 if radius <= dw / 4 # Radius is too sharp
-                    @warn "Skipping transition rounding: Radius $radius must be greater than `abs(width_start - width_end)/4 = $dw`"
-                    continue
+                    !warned &&
+                        @warn """Rounded trace transition at $(p0(pa[idx_1].seg)) has discontinuous trace width (90° taper angle), 
+                 which can cause numerical issues in some operations, including SolidModel rendering. 
+                 To avoid this, `radius` ($radius) must be strictly greater than `abs(width_start - width_end)/4 = $(dw/4)`.
+                 Further warnings on this path will be suppressed."""
+                    warned = true
+                    dl = radius
+                    rndsty = rounded_transition(sty0, sty1, 2 * dl, radius)
                 else
                     α = acos(1 - dw / (4 * radius))
                     dl = dw / 4 * (sin(α) / (1 - cos(α)))

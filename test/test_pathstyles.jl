@@ -20,8 +20,8 @@
     pa = Path()
     straight!(pa, 10μm, psty)
     straight!(pa, 1μm, Paths.SimpleNoRender(10μm, virtual=true))
-    @test Paths.nextstyle(pa).l0 == 0μm # Same style, restarted periodicity l0 == 0
-    straight!(pa, 20μm) # Exact length of substyle
+    @test Paths.nextstyle(pa).l0 == 5μm # Same style, same initial offset periodicity (not continued from end)
+    straight!(pa, 15μm) # Exact length to end of substyle
     segs, stys = Paths.resolve_periodic(pa[end].seg, pa[end].sty)
     @test length(segs) == 1
 
@@ -126,6 +126,11 @@ end
     sm = SolidModel("test", overwrite=true)
     render!(sm, cs) # runs without error
 
+    # Sharp corners
+    pa = Path()
+    straight!(pa, 10μm, Paths.Trace(1μm))
+    turn!(pa, 90°, 10μm / (pi / 2), Paths.Trace(5μm))
+    straight!(pa, 10μm, Paths.Trace(3μm))
     @test_throws "taper angle" Paths.round_trace_transitions!(pa; α_max=90°)
 
     # Explicit rounding radius
@@ -134,8 +139,8 @@ end
     turn!(pa, 90°, 10μm / (pi / 2), Paths.Trace(5μm))
     straight!(pa, 10μm, Paths.Trace(3μm))
     straight!(pa, 10μm, Paths.Trace(27μm)) # too sharp
-    @test_warn "Skipping" Paths.round_trace_transitions!(pa, radius=3μm)
-    @test length(pa) == 8 # No rounding of last transition
+    @test_warn "discontinuous" Paths.round_trace_transitions!(pa, radius=3μm)
+    @test length(pa) == 10 # All transitions rounded, adding 2 nodes each
     @test pathlength(pa) ≈ 40μm
 
     # Rounding of TaperTrace
@@ -149,7 +154,7 @@ end
     w025 = Paths.width(pa[2].sty, 0.25 * pathlength(pa[2].seg))
     w05 = Paths.width(pa[2].sty, 0.5 * pathlength(pa[2].seg))
     w075 = Paths.width(pa[2].sty, 0.75 * pathlength(pa[2].seg))
-    @test_warn "Skipping" Paths.round_trace_transitions!(pa)
+    @test_warn "discontinuous" Paths.round_trace_transitions!(pa)
     @test length(pa) == 5
     @test pathlength(pa) ≈ 40μm
     @test Paths.width(pa[2].sty, 0.25 * pathlength(pa[2].seg)) < w025
