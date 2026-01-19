@@ -259,7 +259,14 @@ function terminate!(
     end
 end
 
-function _check_termination(termsty, l_into_style, len, rounding, round_gap, overlay_index=0)
+function _check_termination(
+    termsty,
+    l_into_style,
+    len,
+    rounding,
+    round_gap,
+    overlay_index=0
+)
     len > rounding || throw(
         ArgumentError(
             "`rounding` $rounding too large for previous segment path length $len."
@@ -281,14 +288,25 @@ function _check_termination(termsty, l_into_style, len, rounding, round_gap, ove
            )
 end
 
-function _check_termination(termsty::OverlayStyle, l_into_style, len, rounding, round_gap, overlay_index)
-    @show termsty.overlay
-    iszero(overlay_index) && return _check_termination(termsty.s, l_into_style, len, rounding, round_gap)
-    return _check_termination(termsty.overlay[overlay_index], l_into_style, len, rounding, round_gap)
+function _check_termination(
+    termsty::OverlayStyle,
+    l_into_style,
+    len,
+    rounding,
+    round_gap,
+    overlay_index
+)
+    iszero(overlay_index) &&
+        return _check_termination(termsty.s, l_into_style, len, rounding, round_gap)
+    return _check_termination(
+        termsty.overlay[overlay_index],
+        l_into_style,
+        len,
+        rounding,
+        round_gap
+    )
 end
 
-function nextstyle(
-    ::Union{TraceTermination, CPWOpenTermination, CPWShortTermination}
-)
+function nextstyle(::Union{TraceTermination, CPWOpenTermination, CPWShortTermination})
     return NoRenderContinuous()
 end
