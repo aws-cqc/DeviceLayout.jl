@@ -236,7 +236,10 @@ function terminate!(
         l_into_style = initial ? rounding : l_into_style - rounding
         _check_termination(orig_sty, l_into_style, len, rounding, round_gap, overlay_index)
         split_len = initial ? rounding : len - rounding
-        splice!(pa, split_idx, split(split_node, split_len))
+        if split_len > zero(split_len) && split_len < len
+            # If rounding doesn't eat the whole node, split off the part that gets eaten
+            splice!(pa, split_idx, split(split_node, split_len))
+        end
     end
 
     if initial
@@ -267,7 +270,7 @@ function _check_termination(
     round_gap,
     overlay_index=0
 )
-    len > rounding || throw(
+    len >= rounding || throw(
         ArgumentError(
             "`rounding` $rounding too large for previous segment path length $len."
         )
