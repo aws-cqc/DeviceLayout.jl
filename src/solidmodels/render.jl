@@ -365,6 +365,26 @@ function to_primitives(
     return vcat(to_primitives.(sm, f.segments, s.styles; kwargs...)...)
 end
 
+function to_primitives(
+    sm::SolidModel,
+    f::Paths.CompoundSegment{T},
+    s::Paths.PeriodicStyle;
+    kwargs...
+) where {T}
+    subsegs, substys = Paths.resolve_periodic(f, s)
+    return vcat(to_primitives.(sm, subsegs, substys; kwargs...)...)
+end
+
+function to_primitives(
+    sm::SolidModel,
+    f::Paths.Segment{T},
+    s::Paths.PeriodicStyle;
+    kwargs...
+) where {T}
+    subsegs, substys = Paths.resolve_periodic(f, s)
+    return vcat(to_primitives.(sm, subsegs, substys; kwargs...)...)
+end
+
 # Terminations generate up to two [Rounded] Polygons
 function to_primitives(
     sm::SolidModel,

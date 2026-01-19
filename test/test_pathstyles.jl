@@ -216,7 +216,7 @@ end
     terminate!(pa4; rounding=2, gap=0)
     @test_throws "too large for previous segment" terminate!(
         pa4;
-        rounding=2,
+        rounding=2.01,
         overlay_index=1
     )
     terminate!(pa4; rounding=1.9, overlay_index=1)
