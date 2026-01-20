@@ -191,9 +191,6 @@ end
     terminate!(pa; initial=true, rounding=2μm)
     terminate!(pa; rounding=2μm, gap=0μm)
     @test_throws "Cannot terminate" terminate!(pa; rounding=2μm, gap=0μm)
-    # Terminated path continues as NoRender
-    straight!(pa, 10μm)
-    @test pa[end].sty isa Paths.NoRenderContinuous
     # Unit test splitting
     @test Paths.split(pa[1].sty, pathlength(pa[1]) / 2)[1] isa Paths.SimpleNoRender
     @test Paths.split(pa[1].sty, pathlength(pa[1]) / 2)[2] == pa[1].sty
@@ -211,6 +208,10 @@ end
     straight!(pa2, 2μm) # End of one termination and beginning of another
     # No polygons added
     @test vcat(to_polygons.(pa2)...) == polys
+
+    # Terminated path continues as NoRender
+    straight!(pa, 10μm)
+    @test pa[end].sty isa Paths.NoRenderContinuous
 
     # Terminate periodic
     pa3 = Path(0nm, 0nm)
