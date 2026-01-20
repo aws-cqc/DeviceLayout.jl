@@ -68,14 +68,12 @@ end
 function rounded_transition_width(s, w0, w1, taper_length, radius)
     # x from midpoint
     x = s - taper_length / 2
-    isapprox(x, zero(x), atol=DeviceLayout.onenanometer(x)) && (x = zero(x))
-    if x < zero(x) || (iszero(x) && w0 < w1) # Wider section duplicates the narrow points
-        return w0 - sign(w0 - w1) * 2 * (radius - sqrt(radius^2 - min(radius^2, s^2)))
+    epsilon = DeviceLayout.onenanometer(x)
+    if x < zero(x) || (abs(x) < epsilon && w0 < w1) # Wider section duplicates the narrow points
+        return w0 -
+               sign(w0 - w1) * 2 * (radius + epsilon - sqrt((radius + epsilon)^2 - s^2))
     else
-        return w1 +
-               sign(w0 - w1) *
-               2 *
-               (radius - sqrt(radius^2 - min(radius^2, (taper_length - s)^2)))
+        return w1 + sign(w0 - w1) * 2 * (radius - sqrt(radius^2 - (taper_length - s)^2))
     end
 end
 
