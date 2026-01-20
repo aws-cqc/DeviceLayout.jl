@@ -171,20 +171,16 @@ function to_polygons(
     return to_polygons(_poly(f, s); kwargs...)
 end
 
-## Generic segments—just draw as though straight for length `_polylength`
+# Generic segments—just draw as though straight for length `_termlength` (either gap or rounding + gap)
 function _poly(
     f::Paths.Segment{T},
     s::Union{Paths.TraceTermination, Paths.CPWOpenTermination, Paths.CPWShortTermination}
 ) where {T}
     straight = if s.initial
-        p = p1(f) - _polylength(s) * Point(cos(α1(f)), sin(α1(f)))
-        Paths.Straight{T}(_polylength(s), p, α1(f))
+        p = p1(f) - Paths._termlength(s) * Point(cos(α1(f)), sin(α1(f)))
+        Paths.Straight{T}(Paths._termlength(s), p, α1(f))
     else
-        Paths.Straight{T}(_polylength(s), p0(f), α0(f))
+        Paths.Straight{T}(Paths._termlength(s), p0(f), α0(f))
     end
     return __poly(straight, s)
 end
-
-_polylength(s::Paths.TraceTermination) = s.rounding
-_polylength(s::Paths.CPWOpenTermination) = s.rounding + s.gap
-_polylength(s::Paths.CPWShortTermination) = s.rounding
