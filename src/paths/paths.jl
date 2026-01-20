@@ -810,10 +810,14 @@ function reconcilestyle!(s::OverlayStyle, n::Node)
     prevsty = without_attachments(previous(n).sty)
     if previous(n) == n || !(prevsty isa OverlayStyle)
         s.s = reconcilestyle!(s.s, n)
+        for i in eachindex(s.overlay)
+            s.overlay[i] = reconcilestyle!(s.overlay[i], n)
+        end
         return s
     end
     # Reconcile base style with previous overlay base style
-    base_dummy = Node(n.seg, prevsty.s)
+    base_dummy = Node(n.seg, s.s)
+    base_dummy.prev = Node(previous(n).seg, prevsty.s)
     s.s = reconcilestyle!(s.s, base_dummy)
     for i in eachindex(s.overlay)
         overlay_dummy = Node(n.seg, s.overlay[i])

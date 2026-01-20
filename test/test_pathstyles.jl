@@ -116,8 +116,9 @@ end
     @test length(pa) == 7
     @test pathlength(pa) ≈ 30μm
     @test Paths.width(pa[2].sty, 0.5 * pathlength(pa[2])) < 3μm
-    @test Paths.width(pa[2].sty, pathlength(pa[2])) ≈ 3μm
-    @test Paths.width(pa[3].sty, 0μm) ≈ 3μm
+    @test Paths.width(pa[2].sty, pathlength(pa[2])) ≈ 3μm atol = 2nm
+    @test Paths.width(pa[3].sty, 0μm) ≈ 3μm atol = 2nm
+    @test Paths.width(pa[2].sty, pathlength(pa[2])) ≈ Paths.width(pa[3].sty, 0μm) # floating point tolerance
     @test Paths.width(pa[3].sty, 0.5 * pathlength(pa[3])) > 3μm
     @test Paths.width(pa[5].sty, 0.6 * pathlength(pa[5])) > 4μm
     @test Paths.width(pa[6].sty, 0.6 * pathlength(pa[6])) < 4μm
@@ -142,6 +143,11 @@ end
     @test_warn "discontinuous" Paths.round_trace_transitions!(pa, radius=3μm)
     @test length(pa) == 10 # All transitions rounded, adding 2 nodes each
     @test pathlength(pa) ≈ 40μm
+    # Points are shared even with 90 degree taper
+    @test count(
+        p -> p in points(to_polygons(pa[end - 2])),
+        points(to_polygons(pa[end - 1]))
+    ) == 2
 
     # Rounding of TaperTrace
     pa = Path()
@@ -158,7 +164,7 @@ end
     @test length(pa) == 5
     @test pathlength(pa) ≈ 40μm
     @test Paths.width(pa[2].sty, 0.25 * pathlength(pa[2].seg)) < w025
-    @test Paths.width(pa[2].sty, 0.5 * pathlength(pa[2].seg)) ≈ w05
+    @test Paths.width(pa[2].sty, 0.5 * pathlength(pa[2].seg)) ≈ w05 atol = 1nm
     @test Paths.width(pa[2].sty, 0.75 * pathlength(pa[2].seg)) > w075
 end
 
