@@ -21,10 +21,6 @@ for (S, label) in zip((:CPWOpenTermination, :CPWShortTermination), ("Open", "Sho
                 tt, gg, rr = promote(t, g, r)
                 return $(S){typeof(tt)}(tt, gg, rr, initial)
             end
-            function $(S)(pa::Path{T}, rounding=zero(T); initial=false) where {T}
-                sty, len = terminal_style(pa, initial)
-                return $(S)(sty, len, rounding, initial=initial)
-            end
             $(S)(s::CPW, t, rounding=zero(t); initial=false) =
                 $(S)(trace(s, t), gap(s, t), rounding; initial=initial)
 
@@ -64,10 +60,6 @@ function TraceTermination(t, r; initial=false)
     tt, rr = promote(t, r)
     return TraceTermination{typeof(tt)}(tt, rr, initial)
 end
-function TraceTermination(pa::Path{T}, rounding=zero(T); initial=false) where {T}
-    sty, len = terminal_style(pa, initial)
-    return TraceTermination(sty, len, rounding; initial=initial)
-end
 TraceTermination(s::Trace, t, rounding=zero(t); initial=false) =
     TraceTermination(trace(s, t), rounding; initial=initial)
 
@@ -79,6 +71,7 @@ width(s::TraceTermination, t...) = s.width
 summary(s::TraceTermination) =
     string("Termination of Trace with width ", s.width, " and rounding radius ", s.rounding)
 
+# Return actual style (inside any compound styles) and length into that style at the end of the path [+/- rounding]
 function terminal_style(pa::Path{T}, initial, rounding=zero(T)) where {T}
     idx = initial ? firstindex(pa) : lastindex(pa)
     sty = without_attachments(style(pa[idx]))
@@ -109,13 +102,10 @@ function Termination(
     overlay_index=0
 ) where {T}
     sty, length_into_sty = terminal_style(pa, initial, rounding)
-    return Termination(sty, length_into_sty, rounding; initial, cpwopen, overlay_index)
+    return _termination(sty, length_into_sty, rounding; initial, cpwopen, overlay_index)
 end
 
-is_termination(sty) = false
-is_termination(::Union{TraceTermination, CPWOpenTermination, CPWShortTermination}) = true
-
-function Termination(
+function _termination(
     sty,
     length_into_sty::T,
     rounding=zero(T);
@@ -123,19 +113,15 @@ function Termination(
     cpwopen=true,
     overlay_index=0
 ) where {T}
-    if sty isa AbstractCompoundStyle
-        sty, length_into_sty = sty(length_into_sty)
-        return Termination(sty, length_into_sty, rounding; initial, cpwopen, overlay_index)
-    end
     if sty isa OverlayStyle
         # Terminate the indicated style
         if iszero(overlay_index)
-            termsty = Termination(sty.s, length_into_sty, rounding; initial, cpwopen)
+            termsty = _termination(sty.s, length_into_sty, rounding; initial, cpwopen)
             newsty = copy(sty)
             newsty.s = termsty
         else
             oversty = sty.overlay[overlay_index]
-            termsty = Termination(oversty, length_into_sty, rounding; initial, cpwopen)
+            termsty = _termination(oversty, length_into_sty, rounding; initial, cpwopen)
             newsty = copy(sty)
             newsty.overlay[overlay_index] = termsty
         end
@@ -168,7 +154,7 @@ function Termination(
             return CPWOpenTermination(sty, length_into_sty, rounding; initial=initial)
         return CPWShortTermination(sty, length_into_sty, rounding; initial=initial)
     end
-    return NoRenderContinuous()
+    return error("Cannot terminate style '$sty': Path must end in Trace or CPW style")
 end
 
 function pin(

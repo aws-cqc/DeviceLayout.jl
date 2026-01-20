@@ -42,6 +42,10 @@
     c = Cell("test")
     render!(c, pa, GDSMeta())
 
+    cs = CoordinateSystem("test")
+    sm = SolidModel("test", overwrite=true)
+    render!(sm, cs) # runs without error
+
     # Compound style
     pa = Path(0nm, 0nm)
     straight!(pa, 1μm, Paths.Trace(1μm))
@@ -81,7 +85,12 @@
     @test length(c.elements) == 101 # 10 * (1 + 2 + 2 + 2 + 0 + 1 + 1 + 1) + 1
     @test split(pa2[1], 100μm)[2].sty.l0 == 100μm
 
+    cs = CoordinateSystem("test")
+    sm = SolidModel("test", overwrite=true)
+    render!(sm, cs) # runs without error
+
     # Overlays and decorations
+    # Overlay inside periodic
     pa3 = Path{Float64}()
     straight!(pa3, 10, Trace(2.0))
     overlay!(pa3, CPW(10.0, 10.0), GDSMeta(1))
@@ -103,6 +112,13 @@
     render!(cf, pa4, GDSMeta(2))
     @test length(elements(cf)) == 2 # Not broken into segments
     @test length(cf.refs) == 14 # 2 overlays + 12 attachments
+    # Periodic inside overlay
+    pa5 = Path()
+    straight!(pa5, 10μm, Trace(2.0μm))
+    psty_inner = PeriodicStyle(pa5)
+    overlay!(pa5, psty_inner, GDSMeta())
+    straight!(pa5, 5μm)
+    @test pa5[end].sty.overlay[1].l0 == 10μm
 end
 
 @testitem "Rounded trace tapers" setup = [CommonTestSetup] begin
@@ -153,7 +169,8 @@ end
     pa = Path()
     straight!(pa, 10μm, Paths.Trace(1μm))
     turn!(pa, 90°, 10μm / (pi / 2), Paths.TaperTrace(1μm, 3μm))
-    straight!(pa, 10μm, Paths.Trace(3μm))
+    straight!(pa, 10μm)
+    @test pa[end].sty == Paths.Trace(3μm)
     straight!(pa, 1μm, Paths.Taper())
     straight!(pa, 9μm, Paths.Trace(30μm))
 
@@ -173,6 +190,10 @@ end
     straight!(pa, 10μm, Paths.CPW(10μm, 6μm))
     terminate!(pa; initial=true, rounding=2μm)
     terminate!(pa; rounding=2μm, gap=0μm)
+    @test_throws "Cannot terminate" terminate!(pa; rounding=2μm, gap=0μm)
+    # Terminated path continues as NoRender
+    straight!(pa, 10μm)
+    @test pa[end].sty isa Paths.NoRenderContinuous
     # Unit test splitting
     @test Paths.split(pa[1].sty, pathlength(pa[1]) / 2)[1] isa Paths.SimpleNoRender
     @test Paths.split(pa[1].sty, pathlength(pa[1]) / 2)[2] == pa[1].sty
@@ -194,6 +215,7 @@ end
     # Terminate periodic
     pa3 = Path(0nm, 0nm)
     tapersty = Paths.TaperCPW(10μm, 6μm, 2μm, 1μm)
+    @test Paths.nextstyle(tapersty) == Paths.CPW(2.0μm, 1.0μm)
     straight!(pa3, 15μm, Paths.PeriodicStyle([tapersty], [10μm]))
     sty, l = Paths.terminal_style(pa3, true)
     @test Paths.trace(sty, l) ≈ 10μm
