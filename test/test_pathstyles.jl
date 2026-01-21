@@ -43,6 +43,7 @@
     render!(c, pa, GDSMeta())
 
     cs = CoordinateSystem("test")
+    place!(cs, pa)
     sm = SolidModel("test", overwrite=true)
     render!(sm, cs) # runs without error
 
@@ -86,6 +87,7 @@
     @test split(pa2[1], 100μm)[2].sty.l0 == 100μm
 
     cs = CoordinateSystem("test")
+    place!(cs, pa2)
     sm = SolidModel("test", overwrite=true)
     render!(sm, cs) # runs without error
 
