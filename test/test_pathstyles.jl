@@ -35,12 +35,12 @@
     # Over compound segment
     pa = Path(0nm, 0nm)
     straight!(pa, 10μm, Paths.Trace(10μm))
-    turn!(pa, 90°, 10μm)
+    turn!(pa, 90°, 20μm)
     bspline!(pa, [Point(1, 1)mm], 90°)
     simplify!(pa)
     Paths.setstyle!(pa[1], psty)
     c = Cell("test")
-    render!(c, pa, GDSMeta())
+    render!(c, pa, GDSMeta()) # runs without error
 
     cs = CoordinateSystem("test")
     place!(cs, pa)
