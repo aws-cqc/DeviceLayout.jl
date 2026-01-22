@@ -368,6 +368,22 @@ end
 function to_primitives(
     sm::SolidModel,
     f::Paths.CompoundSegment{T},
+    s::Paths.Style;
+    kwargs...
+) where {T}
+    p = Union{CurvilinearPolygon{T}, CurvilinearRegion{T}}[]
+    l0 = zero(T)
+    for seg in f.segments
+        l = l0 + pathlength(seg)
+        p = vcat(p, to_primitives(sm, seg, Paths.pin(s; start=l0, stop=l); kwargs...))
+        l0 = l
+    end
+    return p
+end
+
+function to_primitives(
+    sm::SolidModel,
+    f::Paths.CompoundSegment{T},
     s::Paths.PeriodicStyle;
     kwargs...
 ) where {T}
