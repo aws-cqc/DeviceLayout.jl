@@ -355,7 +355,6 @@ function to_primitives(
     return pathtopolys(f, s; kwargs...)
 end
 
-# Need this so we don't send `Rounded` from termination to `pathtopolys`
 function to_primitives(
     sm::SolidModel,
     f::Paths.CompoundSegment{T},
@@ -405,6 +404,15 @@ end
 function to_primitives(
     sm::SolidModel,
     seg::Paths.Segment{T},
+    sty::Union{Paths.TraceTermination, Paths.CPWOpenTermination, Paths.CPWShortTermination};
+    kwargs...
+) where {T}
+    return to_primitives(sm, DeviceLayout._poly(seg, sty); kwargs...)
+end
+
+function to_primitives(
+    sm::SolidModel,
+    seg::Paths.CompoundSegment{T},
     sty::Union{Paths.TraceTermination, Paths.CPWOpenTermination, Paths.CPWShortTermination};
     kwargs...
 ) where {T}
