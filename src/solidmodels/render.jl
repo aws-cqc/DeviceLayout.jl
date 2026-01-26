@@ -352,6 +352,8 @@ function to_primitives(
     s::Paths.Style;
     kwargs...
 ) where {T}
+    iszero(Paths.pathlength(f)) &&
+        return Union{CurvilinearPolygon{T}, CurvilinearRegion{T}}[]
     return pathtopolys(f, s; kwargs...)
 end
 
