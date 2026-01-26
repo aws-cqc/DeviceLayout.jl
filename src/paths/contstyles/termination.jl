@@ -78,9 +78,13 @@ function terminal_style(pa::Path{T}, initial, rounding=zero(T)) where {T}
     idx = initial ? firstindex(pa) : lastindex(pa)
     sty = without_attachments(style(pa[idx]))
     length_into_sty = initial ? rounding : pathlength(pa[end]) - rounding
-    while sty isa AbstractCompoundStyle
-        sty, length_into_sty = sty(length_into_sty)
-    end
+    return terminal_style(sty, length_into_sty)
+end
+
+function terminal_style(sty::Paths.AbstractCompoundStyle, length_into_sty)
+    return sty(length_into_sty)
+end
+function terminal_style(sty::Paths.Style, length_into_sty)
     return sty, length_into_sty
 end
 
@@ -123,6 +127,7 @@ function _termination(
     overlay_index=0,
     open_gap=zero(T)
 ) where {T}
+    sty, length_into_sty = terminal_style(sty, length_into_sty)
     if sty isa OverlayStyle
         # Terminate the indicated style
         if iszero(overlay_index)
