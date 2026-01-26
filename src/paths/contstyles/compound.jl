@@ -1,3 +1,11 @@
+"""
+    abstract type AbstractCompoundStyle <: ContinuousStyle{false} end
+
+Abstract Path style composing substyles in sequence. Subtypes are `CompoundStyle` and `PeriodicStyle`.
+
+Abstract compound styles implement `(s::CompoundStyle(t))`, returning the tuple `(style, length_into_style)`
+for the substyle of `s` at pathlength `t` into a segment with that style.
+"""
 abstract type AbstractCompoundStyle <: ContinuousStyle{false} end
 
 for x in (:extent, :width, :trace, :gap)

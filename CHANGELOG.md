@@ -9,8 +9,12 @@ The format of this changelog is based on
   - Added `SingleChannelRouting`, which allows multiple paths to be routed in parallel in the same `Channel` (defined by a path with a trace style), entering and exiting the channel in different places
   - Changed default CPW mesh size to use `2 * min(trace, gap)` (higher element quality when trace and gap are very different)
   - Changed default global mesh grading from `0.9` to `0.75` (more robust meshing for complex geometries, relatively small cost)
-  - Added `PeriodicStyle`
+  - Added `Paths.PeriodicStyle`, which cycles between substyles in a repeating sequence
   - Added `Paths.round_trace_transitions!` for splicing rounded tapers between `Trace` styles
+  - Added `overlay_index` keyword to `terminate!` to allow applying terminations to overlay styles
+  - Fixed incorrect behavior when extending `Paths`: overlay styles continue as overlays, while terminations continue as `NoRenderContinuous`
+  - Fixed interactions between compound, decorated, overlay, and termination styles
+  - Fixed bug where zero-length path segments could cause SolidModel rendering to fail
 
 ## 1.8.0 (2026-01-05)
 
