@@ -3,6 +3,7 @@ for (S, label) in zip((:CPWOpenTermination, :CPWShortTermination), ("Open", "Sho
     struct $(S){T <: Coordinate} <: ContinuousStyle{false}
         trace::T
         gap::T
+        open_gap::T
         rounding::T
         initial::Bool
     end
@@ -14,17 +15,18 @@ for (S, label) in zip((:CPWOpenTermination, :CPWShortTermination), ("Open", "Sho
             @doc $doc struct $(S){T <: Coordinate} <: ContinuousStyle{false}
                 trace::T
                 gap::T
+                open_gap::T
                 rounding::T
                 initial::Bool
             end
-            function $(S)(t, g, r; initial=false)
-                tt, gg, rr = promote(t, g, r)
-                return $(S){typeof(tt)}(tt, gg, rr, initial)
+            function $(S)(t, g, r, o=g; initial=false)
+                tt, gg, rr, oo = promote(t, g, r, o)
+                return $(S){typeof(tt)}(tt, gg, oo, rr, initial)
             end
-            $(S)(s::CPW, t, rounding=zero(t); initial=false) =
-                $(S)(trace(s, t), gap(s, t), rounding; initial=initial)
+            $(S)(s::CPW, t, rounding=zero(t), o=gap(s, t); initial=false) =
+                $(S)(trace(s, t), gap(s, t), rounding, o; initial=initial)
 
-            copy(s::$S) = $(S)(s.trace, s.gap, s.rounding, s.initial)
+            copy(s::$S) = $(S)(s.trace, s.gap, s.open_gap, s.rounding, s.initial)
             extent(s::$S, t...) = trace(s, t) / 2 + gap(s, t)
             trace(s::$S, t...) = s.trace
             gap(s::$S, t...) = s.gap
@@ -82,6 +84,7 @@ function terminal_style(pa::Path{T}, initial, rounding=zero(T)) where {T}
     return sty, length_into_sty
 end
 
+# Default length of non-rounded termination segment
 function terminationlength(pa::Path{T}, initial::Bool; overlay_index=0) where {T}
     sty, len = terminal_style(pa, initial)
     return terminationlength(sty, len; overlay_index)
@@ -98,11 +101,18 @@ function Termination(
     pa::Path{T},
     rounding=zero(T);
     initial=false,
-    cpwopen=true,
-    overlay_index=0
+    overlay_index=0,
+    gap=terminationlength(pa, initial; overlay_index)
 ) where {T}
     sty, length_into_sty = terminal_style(pa, initial, rounding)
-    return _termination(sty, length_into_sty, rounding; initial, cpwopen, overlay_index)
+    return _termination(
+        sty,
+        length_into_sty,
+        rounding;
+        initial,
+        overlay_index,
+        open_gap=gap
+    )
 end
 
 function _termination(
@@ -110,18 +120,18 @@ function _termination(
     length_into_sty::T,
     rounding=zero(T);
     initial=false,
-    cpwopen=true,
-    overlay_index=0
+    overlay_index=0,
+    open_gap=zero(T)
 ) where {T}
     if sty isa OverlayStyle
         # Terminate the indicated style
         if iszero(overlay_index)
-            termsty = _termination(sty.s, length_into_sty, rounding; initial, cpwopen)
+            termsty = _termination(sty.s, length_into_sty, rounding; initial, open_gap)
             newsty = copy(sty)
             newsty.s = termsty
         else
             oversty = sty.overlay[overlay_index]
-            termsty = _termination(oversty, length_into_sty, rounding; initial, cpwopen)
+            termsty = _termination(oversty, length_into_sty, rounding; initial, open_gap)
             newsty = copy(sty)
             newsty.overlay[overlay_index] = termsty
         end
@@ -150,8 +160,13 @@ function _termination(
     sty isa Trace &&
         return TraceTermination(sty, length_into_sty, rounding; initial=initial)
     if sty isa CPW
-        cpwopen &&
-            return CPWOpenTermination(sty, length_into_sty, rounding; initial=initial)
+        !iszero(open_gap) && return CPWOpenTermination(
+            sty,
+            length_into_sty,
+            rounding,
+            open_gap;
+            initial=initial
+        )
         return CPWShortTermination(sty, length_into_sty, rounding; initial=initial)
     end
     return error("Cannot terminate style '$sty': Path must end in Trace or CPW style")
@@ -171,8 +186,9 @@ function pin(
     return SimpleNoRender(2 * extent(s), virtual=true) # not a user-created NoRender => virtual
 end
 
+# Actual length of termination polygon
 _termlength(s::Paths.TraceTermination) = s.rounding
-_termlength(s::Paths.CPWOpenTermination) = s.rounding + s.gap
+_termlength(s::Paths.CPWOpenTermination) = s.rounding + s.open_gap
 _termlength(s::Paths.CPWShortTermination) = s.rounding
 
 """
@@ -210,8 +226,7 @@ function terminate!(
 ) where {T}
     termlen = gap + rounding
     iszero(termlen) && return
-    termsty =
-        Termination(pa, rounding; initial=initial, cpwopen=(!iszero(gap)), overlay_index)
+    termsty = Termination(pa, rounding; initial, gap, overlay_index)
     # Nonzero rounding: splice and delete to make room for rounded part
     if !iszero(rounding)
         orig_sty, l_into_style = terminal_style(pa, initial)

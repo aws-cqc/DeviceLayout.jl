@@ -263,4 +263,10 @@ end
     @test length(flatten(cf).elements) == 78 # PeriodicStyle actually does some simplification
     terminate!(pa5, initial=true, overlay_index=1, rounding=0.5)
     @test pa5[1].sty.overlay[1] isa Paths.TraceTermination
+
+    # Terminate with custom open gap
+    pa6 = Path()
+    straight!(pa6, 10μm, Paths.CPW(10μm, 6μm))
+    terminate!(pa6; gap=10μm) # Normally would be 6um open gap
+    @test bounds(pa6) == Rectangle(Point(0μm, -11μm), Point(20μm, 11μm))
 end

@@ -106,8 +106,6 @@ function save(file::File{format"DXF"}, c::Cell, python::String)
         end
         println(f, "doc.saveas(\"$(escape_string(filename(file)))\")")
         close(f)
-        @show path
-        @show f
         return run(`$python $path`)
     end
 end

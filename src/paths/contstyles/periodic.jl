@@ -1,23 +1,22 @@
 """
     struct PeriodicStyle{T <: Coordinate} <: AbstractCompoundStyle
 
-Continuous style repeating a series of underlying styles.
+Continuous style cycling through a series of underlying styles, each for a fixed length.
 
-When extending a path that ends in a `PeriodicStyle` without explicitly providing a new style,
-the periodicity will be resumed from where it ended on the final segment.
+If a path has two consecutive segments with the same periodic style, then
+the second will continue the cycle from where the first ended.
 
     PeriodicStyle(styles::Vector{<:Style}, lengths::Vector{T}, l0=zero(T))
 
-Style for `Path` each style in `style` for the corresponding length in `lengths`, repeating
+Style cycling through each style in `style` for the corresponding length in `lengths`, repeating
 after every `sum(lengths)`. Periodicity starts at `l0`.
 
-    PeriodicStyle(styles::Vector{<:Style}; period, weights=ones(length(styles)))
+    PeriodicStyle(styles::Vector{<:Style}; period::T, weights=ones(length(styles)), l0=zero(T))
 
 Convenience constructor using a `period` keyword with `weights` rather than explicit `lengths`,
-such that the length for each style in a period is given by
-`lengths = period * weights/sum(weights)`.
+such that the length for each style in a period is given by `lengths = period * weights/sum(weights)`.
 
-    PeriodicStyle(pa::Path)
+    PeriodicStyle(pa::Path{T}; l0=zero(T))
 
 Convenience constructor for a periodic style cycling between the styles in `pa`, each for
 the length of the corresponding segment in `pa`.
@@ -64,7 +63,7 @@ function same_cycle(sty0::PeriodicStyle, sty1::PeriodicStyle)
     return all(sty0.styles .== sty1.styles) && all(sty0.lengths .== sty1.lengths)
 end
 
-# Return style and length into style
+# AbstractCompoundStyle interface: Return style and length into style
 function (s::PeriodicStyle)(t)
     ls = s.lengths
     dt = (t + s.l0) % sum(ls)

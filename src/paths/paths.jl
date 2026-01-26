@@ -399,8 +399,17 @@ laststyle(p::Path) = isempty(nodes(p)) ? nothing : style1(p, ContinuousStyle)
 
 Return the style to be used if the path is extended without specifying a new style.
 
-In most cases this is the last continuous, non-virtual style. The exception is that
-a `PeriodicStyle` will start its periodicity where the last one ended.
+In most cases this is the last continuous, non-virtual style, but there are some special cases:
+
+  - Attachments (from `attach!`) are not part of the next style
+  - A `TaperTrace` is followed by a `SimpleTrace` with its final width
+  - A `TaperCPW` is followed by a `SimpleCPW` with its final trace and gap
+  - A `CompoundStyle` (from `simplify!`) is followed by its last style
+  - An `OverlayStyle` (from `overlay!`) is followed by an `OverlayStyle` using the `nextstyle` for each overlay and base style
+  - A termination is followed by `NoRenderContinuous`
+
+For a path ending in a `PeriodicStyle`, `nextstyle` will return that same style, but when
+the path is actually extended, it will continue its periodicity from where it ended in the last segment.
 """
 nextstyle(p::Path) = isempty(nodes(p)) ? nothing : nextstyle(laststyle(p))
 nextstyle(laststy::Style) = laststy
