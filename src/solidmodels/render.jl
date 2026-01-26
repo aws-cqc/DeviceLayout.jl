@@ -382,17 +382,17 @@ end
 
 function to_primitives(
     sm::SolidModel,
-    f::Paths.CompoundSegment{T},
+    f::Paths.Segment{T},
     s::Paths.PeriodicStyle;
     kwargs...
 ) where {T}
     subsegs, substys = Paths.resolve_periodic(f, s)
     return vcat(to_primitives.(sm, subsegs, substys; kwargs...)...)
 end
-
+# Disambiguate
 function to_primitives(
     sm::SolidModel,
-    f::Paths.Segment{T},
+    f::Paths.CompoundSegment{T},
     s::Paths.PeriodicStyle;
     kwargs...
 ) where {T}
@@ -409,7 +409,7 @@ function to_primitives(
 ) where {T}
     return to_primitives(sm, DeviceLayout._poly(seg, sty); kwargs...)
 end
-
+# Disambiguate
 function to_primitives(
     sm::SolidModel,
     seg::Paths.CompoundSegment{T},
