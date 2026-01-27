@@ -4,7 +4,6 @@
 Contains information describing how one component can attach to others.
 """
 abstract type Hook{T} <: AbstractGeometry{T} end
-getp(h::Hook) = h.p
 
 """
     PointHook(p::Point, in_direction)

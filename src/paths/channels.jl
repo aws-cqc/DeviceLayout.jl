@@ -215,9 +215,8 @@ A `RouteRule` for guiding routed paths along tracks in a [`Paths.RouteChannel`](
 
 "Tracks" are offsets of the channel's path, with equal spacing between each other
 and the extents of the channel's trace width. Tracks are ordered from left to right
-when facing along the channel. For example, track 1 is the top track
-(most positive offset) for a channel directed along the positive x axis, while
-the highest track index is its bottom track.
+when facing along the channel. For example, for a channel directed along the positive x axis,
+track 1 is the top track (most positive offset), while the highest track index is its bottom track.
 
 The user manually assigns tracks to paths that will be routed with
 `rule::SingleChannelRouting` using `Paths.set_track!(rule, path, track_idx)` for each path,

@@ -241,4 +241,8 @@
     )
     sty = Paths.Trace(4)
     pa = Path(r7, sty)
+
+    # Convenience constructor for fixed turn radius
+    @test Paths.StraightAnd45(10.0).min_bend_radius ==
+          Paths.StraightAnd45(10.0).max_bend_radius
 end

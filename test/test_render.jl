@@ -210,6 +210,7 @@ end
         render!(c, pa)
         revsty = reverse(pa[1]).sty
         @test Paths.width(revsty, 0) == Paths.trace(pa[1].sty, 20)
+        @test Paths.trace(pa[1].sty, 20) == Paths.trace(pa[1].sty)(20)
         @test Paths.extent(revsty)(20) == 0.5 * Paths.width(pa[1].sty)(0)
     end
 
@@ -406,6 +407,8 @@ end
         pa2 = split(pa[1], 10μm)
         let s1 = style(pa2[1]), s2 = style(pa2[2])
             @test Paths.width(s1, 0μm) ≈ 10.0μm
+            @test Paths.trace(s1, 5μm) == Paths.trace(s1)(5μm)
+            @test Paths.extent(s1, 5μm) == Paths.extent(s1)(5μm)
             @test Paths.width(s1, 10μm) ≈ 9.2μm
             @test s1.length == 10μm
             @test Paths.width(s2, 0μm) ≈ 9.2μm
@@ -448,6 +451,9 @@ end
             @test Paths.trace(s1, 10μm) ≈ 9.6μm
             @test Paths.gap(s1, 0μm) ≈ 6.0μm
             @test Paths.gap(s1, 10μm) ≈ 5.2μm
+            @test Paths.trace(s1, 5μm) == Paths.trace(s1)(5μm)
+            @test Paths.extent(s1, 5μm) == Paths.extent(s1)(5μm)
+            @test Paths.gap(s1, 5μm) == Paths.gap(s1)(5μm)
             @test s1.length == 10μm
             @test Paths.trace(s2, 0μm) ≈ 9.6μm
             @test Paths.trace(s2, 40μm) ≈ 8.0μm
