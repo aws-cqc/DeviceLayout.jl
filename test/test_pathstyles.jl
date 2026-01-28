@@ -269,4 +269,12 @@ end
     straight!(pa6, 10μm, Paths.CPW(10μm, 6μm))
     terminate!(pa6; gap=10μm) # Normally would be 6um open gap
     @test bounds(pa6) == Rectangle(Point(0μm, -11μm), Point(20μm, 11μm))
+
+    # Terminate with margin
+    pa7 = Path()
+    straight!(pa7, 10μm, Paths.CPW(10μm, 6μm))
+    terminate!(pa7; gap=10μm, margin=1μm) # Normally would be 6um open gap
+    @test bounds(pa7) == Rectangle(Point(0μm, -11μm), Point(19μm, 11μm))
+    terminate!(pa7; initial=true, gap=0μm, margin=1μm)
+    @test bounds(pa7) == Rectangle(Point(1μm, -11μm), Point(19μm, 11μm))
 end
