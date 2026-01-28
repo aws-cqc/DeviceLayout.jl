@@ -12,6 +12,7 @@ The format of this changelog is based on
   - Added `Paths.PeriodicStyle`, which cycles between substyles in a repeating sequence
   - Added `Paths.round_trace_transitions!` for splicing rounded tapers between `Trace` styles
   - Added `overlay_index` keyword to `terminate!` to allow applying terminations to overlay styles
+  - Added `margin` keyword to `terminate!` to allow terminating a specified distance before the end of the path
   - Fixed incorrect behavior when extending `Paths`: overlay styles continue as overlays, while terminations continue as `NoRenderContinuous`
   - Fixed interactions between compound, decorated, overlay, and termination styles
   - Fixed bug where zero-length path segments could cause SolidModel rendering to fail
