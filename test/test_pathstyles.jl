@@ -273,8 +273,19 @@ end
     # Terminate with margin
     pa7 = Path()
     straight!(pa7, 10μm, Paths.CPW(10μm, 6μm))
-    terminate!(pa7; gap=10μm, margin=1μm) # Normally would be 6um open gap
+    terminate!(pa7; gap=10μm, margin=2μm) # Normally would be 6um open gap
+    @test bounds(pa7) == Rectangle(Point(0μm, -11μm), Point(18μm, 11μm))
+    terminate!(pa7; initial=true, gap=0μm, margin=2μm)
+    @test bounds(pa7) == Rectangle(Point(2μm, -11μm), Point(18μm, 11μm))
+    ## Doesn't change endpoints relative to what they would have been with no margin
+    @test p0(pa7) == Point(0, 0)μm
+    @test p1(pa7) == Point(20, 0)μm
+    ## Same thing with Trace (overlay on same path)
+    overlay!(pa7, Paths.Trace(22μm), GDSMeta(1), i=1)
+    overlay!(pa7, Paths.Trace(22μm), GDSMeta(1), i=2)
+    overlay!(pa7, Paths.Trace(22μm), GDSMeta(1), i=3)
+    terminate!(pa7; margin=1μm, overlay_index=1)
     @test bounds(pa7) == Rectangle(Point(0μm, -11μm), Point(19μm, 11μm))
-    terminate!(pa7; initial=true, gap=0μm, margin=1μm)
+    terminate!(pa7; initial=true, gap=0μm, margin=1μm, overlay_index=1)
     @test bounds(pa7) == Rectangle(Point(1μm, -11μm), Point(19μm, 11μm))
 end
