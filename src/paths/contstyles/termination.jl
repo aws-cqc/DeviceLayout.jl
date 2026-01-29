@@ -161,7 +161,7 @@ function _termination(
         return newsty
     end
     !iszero(overlay_index) && error(
-        "Terminal style must be an OverlayStyle to terminate with nonzero `overlay_index"
+        "Terminal style must be an OverlayStyle to terminate with nonzero `overlay_index`"
     )
     sty isa Trace &&
         return TraceTermination(sty, length_into_sty, rounding; initial=initial)
@@ -251,16 +251,16 @@ function terminate!(
 
     if initial
         α = α0(pa)
-        p = p0(pa) - (gap + margin) * Point(cos(α), sin(α))
+        p = p0(pa) - (gap) * Point(cos(α), sin(α))
         pa.p0 = p
-        pushfirst!(pa, Straight{T}(gap + margin, p, α), termsty)
+        pushfirst!(pa, Straight{T}(gap, p, α), termsty)
         if !iszero(backtracking)
             # merge first two segments and apply termsty
             simplify!(pa, 1:2)
             setstyle!(pa[1], termsty)
         end
     else
-        straight!(pa, gap + margin, termsty)
+        straight!(pa, gap, termsty)
         if !iszero(backtracking)
             # merge last two segments and apply termsty
             simplify!(pa, (length(pa) - 1):length(pa))
