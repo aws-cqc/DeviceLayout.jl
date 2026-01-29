@@ -139,7 +139,7 @@ function single_transmon(;
     substrate_y = 3.7mm
 
     center_xyz = DeviceLayout.center(floorplan)
-    chip = centered(Rectangle(substrate_x, substrate_y), on_pt=center_xyz)
+    chip = centered(Rectangle(substrate_x + 10μm, substrate_y + 10μm), on_pt=center_xyz)
     sim_area = centered(Rectangle(substrate_x, substrate_y), on_pt=center_xyz)
 
     # Define bounds for bounding simulation box

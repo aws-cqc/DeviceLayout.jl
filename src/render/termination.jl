@@ -147,7 +147,6 @@ function to_polygons(
 end
 
 function __poly(f::Paths.Straight{T}, s::Paths.TraceTermination) where {T}
-    iszero(s.rounding) && return Polygon{T}[]
     if !isapprox(s.rounding, pathlength(f))
         throw(ArgumentError("Termination rounding ≠ termination path length."))
     end
