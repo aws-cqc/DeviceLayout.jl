@@ -225,6 +225,20 @@ end
         auto_speed=true,
         auto_curvature=true
     )
+    b1 = pa3[1].seg
+    # Same thing again
+    pa3 = Path() # auto_speed, auto_curvature
+    bspline!(
+        pa3,
+        [Point(100μm, 100μm)],
+        90°,
+        Paths.Trace(1μm);
+        auto_speed=true,
+        auto_curvature=true
+    )
+    b2 = pa3[1].seg
+    @test b1 == b2
+
     pa_turn = Path() # For comparison
     turn!(pa_turn, 90°, 100μm, Paths.Trace(1μm))
     # auto_speed is close to a circle (about 140nm max distance)
