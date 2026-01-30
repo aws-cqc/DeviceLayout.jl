@@ -238,6 +238,7 @@ end
     )
     b2 = pa3[1].seg
     @test b1 == b2
+    @test hash(b1) == hash(b2)
 
     pa_turn = Path() # For comparison
     turn!(pa_turn, 90°, 100μm, Paths.Trace(1μm))
