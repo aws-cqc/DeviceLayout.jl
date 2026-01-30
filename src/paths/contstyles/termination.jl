@@ -243,7 +243,8 @@ function terminate!(
         l_into_style = initial ? backtracking : l_into_style - backtracking
         _check_termination(orig_sty, l_into_style, len, rounding, round_gap, overlay_index)
         split_len = initial ? backtracking : len - backtracking
-        if split_len > zero(split_len) && split_len < len
+        epsilon = 1e-6 * DeviceLayout.onenanometer(T)
+        if split_len > epsilon && split_len < len - epsilon
             # If rounding doesn't eat the whole node, split off the part that gets eaten
             splice!(pa, split_idx, split(split_node, split_len))
         end
