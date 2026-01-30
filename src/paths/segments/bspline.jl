@@ -98,7 +98,6 @@ function Base.:(==)(b1::BSpline, b2::BSpline)
     return b1.p == b2.p &&
            b1.t0 == b2.t0 &&
            b1.t1 == b2.t1 &&
-           b1.r == b2.r &&
            b1.p0 == b2.p0 &&
            b1.α0 == b2.α0 &&
            b1.α1 == b2.α1
