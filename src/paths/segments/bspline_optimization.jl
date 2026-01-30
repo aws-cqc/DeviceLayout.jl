@@ -1,22 +1,34 @@
+using ThreadSafeDicts
+using Memoization
 
 function _optimize_bspline!(b::BSpline; endpoints_curvature=nothing)
+    t0, t1, growth = _optimized_tangents(copy(b), endpoints_curvature) # Unchanging copy is cache key
+    b.t0 = t0
+    b.t1 = t1
+    growth >= 9.9 &&
+        @warn "`auto_speed` optimization for BSpline from $(b.p[1]) to $(b.p[end]) is increasing speed without bound; arbitrary cutoff applied. Check that the endpoints and directions are correct and add waypoints if necessary."
+    _set_endpoints_curvature!(b, endpoints_curvature)
+    return _update_interpolation!(b)
+end
+
+@memoize ThreadSafeDict function _optimized_tangents(b::BSpline, endpoints_curvature)
+    b = copy(b) # Copy again so modifications don't mess up memoization
     scale0 = Point(cos(α0(b)), sin(α0(b))) * norm(b.p[2] - b.p[1])
     scale1 = Point(cos(α1(b)), sin(α1(b))) * norm(b.p[end] - b.p[end - 1])
     if _symmetric_optimization(b)
         errfunc_sym(p) = _int_dκ2(b, p[1], scale0, scale1; endpoints_curvature)
         p = Optim.minimizer(optimize(errfunc_sym, [1.0]))
-        b.t0 = p[1] * scale0
-        b.t1 = p[1] * scale1
+        t0 = p[1] * scale0
+        t1 = p[1] * scale1
+        growth = 2 * p[1]
     else
         errfunc_asym(p) = _int_dκ2(b, p[1], p[2], scale0, scale1; endpoints_curvature)
         p = Optim.minimizer(optimize(errfunc_asym, [1.0, 1.0]))
-        b.t0 = p[1] * scale0
-        b.t1 = p[2] * scale1
+        t0 = p[1] * scale0
+        t1 = p[2] * scale1
+        growth = sum(p)
     end
-    sum(p) >= 9.9 &&
-        @warn "`auto_speed` optimization for BSpline from $(b.p[1]) to $(b.p[end]) is increasing speed without bound; arbitrary cutoff applied. Check that the endpoints and directions are correct and add waypoints if necessary."
-    _set_endpoints_curvature!(b, endpoints_curvature)
-    return _update_interpolation!(b)
+    return t0, t1, growth
 end
 
 function _set_endpoints_curvature!(::BSpline, ::Nothing; add_points=false) end
