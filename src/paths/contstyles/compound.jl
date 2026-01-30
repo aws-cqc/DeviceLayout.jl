@@ -1,5 +1,33 @@
 """
-    struct CompoundStyle{T<:FloatCoordinate} <: ContinuousStyle{false}
+    abstract type AbstractCompoundStyle <: ContinuousStyle{false} end
+
+Abstract Path style composing substyles in sequence. Subtypes are `CompoundStyle` and `PeriodicStyle`.
+
+Abstract compound styles implement `(s::CompoundStyle(t))`, returning the tuple `(style, length_into_style)`
+for the substyle of `s` at pathlength `t` into a segment with that style.
+"""
+abstract type AbstractCompoundStyle <: ContinuousStyle{false} end
+
+for x in (:extent, :width, :trace, :gap)
+    @eval function ($x)(s::AbstractCompoundStyle, t)
+        sty, teff = s(t)
+        return ($x)(sty, teff)
+    end
+    @eval function ($x)(s::AbstractCompoundStyle)
+        # If all the xs are the same constant we can just return the constant
+        uniquexs = unique(($x).(s.styles))
+        if length(uniquexs) == 1 && only(uniquexs) isa Coordinate
+            return only(uniquexs)
+        end
+        return Base.Fix1(($x), s)
+    end
+end
+
+isvirtual(s::AbstractCompoundStyle) = all(isvirtual.(s.styles))
+change_handedness!(sty::AbstractCompoundStyle) = change_handedness!.(sty.styles)
+
+"""
+    struct CompoundStyle{T<:FloatCoordinate} <: AbstractCompoundStyle
         styles::Vector{Style}
         grid::Vector{T}
     end
@@ -10,7 +38,7 @@ Combines styles together, typically for use with a [`CompoundSegment`](@ref).
     constructor.
   - `grid`: An array of `t` values needed for rendering the parametric path.
 """
-struct CompoundStyle{T <: FloatCoordinate} <: ContinuousStyle{false}
+struct CompoundStyle{T <: FloatCoordinate} <: AbstractCompoundStyle
     styles::Vector{Style}
     grid::Vector{T}
     tag::Symbol
@@ -38,9 +66,8 @@ function _style1(s::CompoundStyle, T)
     # But just in case the user is manually adding a virtual style then simplifying
     # Similarly simplifying compound or decorated nodes is risky, but just in case
     i = findlast(x -> isa(x, T) && !isvirtual(x), s.styles)
-    return _style1(undecorated(s.styles[i]), T)
+    return _style1(without_attachments(s.styles[i]), T)
 end
-isvirtual(s::CompoundStyle) = all(isvirtual.(s.styles))
 
 """
     makegrid(segments::AbstractVector{T}, styles) where {T<:Segment}
@@ -59,22 +86,6 @@ function makegrid(segments::AbstractVector{T}, styles) where {T <: Segment}
     v .= pathlength.(segments)
     return cumsum!(grid, grid)
 end
-
-for x in (:extent, :width, :trace, :gap)
-    @eval function ($x)(s::CompoundStyle, t)
-        sty, teff = s(t)
-        return ($x)(sty, teff)
-    end
-    @eval function ($x)(s::CompoundStyle)
-        # If all the xs are the same constant we can just return the constant
-        uniquexs = unique(($x).(s.styles))
-        if length(uniquexs) == 1 && only(uniquexs) isa Coordinate
-            return only(uniquexs)
-        end
-        return Base.Fix1(($x), s)
-    end
-end
-
 summary(::CompoundStyle) = "Compound style"
 
 function translate(s::CompoundStyle, x, tag=gensym())
@@ -89,5 +100,3 @@ function pin(s::CompoundStyle; start=nothing, stop=nothing, tag=gensym())
     end
     return copy(s, tag)
 end
-
-change_handedness!(sty::CompoundStyle) = change_handedness!.(sty.styles)
