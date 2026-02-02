@@ -678,15 +678,23 @@ function discretization(seg::Paths.Segment; kwargs...)
 end
 
 function DeviceLayout.map_metadata!(path::Path, map_meta)
+    visited = Set{Any}()
+    return map_metadata!(path, map_meta, visited)
+end
+
+function DeviceLayout.map_metadata!(path::Path, map_meta, visited::Set{Any})
+    path in visited && return nothing
+    push!(visited, path)
     path.metadata = map_meta(path.metadata)
     for s in structure.(refs(path))
-        map_metadata!(s, map_meta)
+        map_metadata!(s, map_meta, visited)
     end
     # Overlay styles store their own metadata
     overlay_inds = findall(x -> isa(style(x), Paths.OverlayStyle), path.nodes)
     for i in overlay_inds
         path[i].sty.overlay_metadata .= map_meta.(path[i].sty.overlay_metadata)
     end
+    return nothing
 end
 
 include("contstyles/trace.jl")

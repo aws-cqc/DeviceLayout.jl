@@ -397,5 +397,18 @@
         new_pa = structure(refs(cs2)[1])
         @test all(element_metadata(new_pa) .== GDSMeta(8))
         @test element_metadata(structure(refs(new_pa)[1]))[1] == GDSMeta(4)
+
+        # Test that multiply-referenced structures are only mapped once
+        cs_shared = CoordinateSystem("shared", nm)
+        place!(cs_shared, Rectangle(5μm, 5μm), GDSMeta(10))
+        cs_top = CoordinateSystem("top", nm)
+        place!(cs_top, Rectangle(1μm, 1μm), GDSMeta(20))
+        # Add the same structure as a reference twice (different positions)
+        addref!(cs_top, sref(cs_shared, Point(0μm, 0μm)))
+        addref!(cs_top, sref(cs_shared, Point(100μm, 0μm)))
+        # Map metadata - should only increment once, not twice
+        map_metadata!(cs_top, m -> GDSMeta(gdslayer(m) + 1))
+        @test element_metadata(cs_top)[1] == GDSMeta(21)  # top-level: 20 -> 21
+        @test element_metadata(cs_shared)[1] == GDSMeta(11)  # shared: 10 -> 11 (not 12)
     end
 end
