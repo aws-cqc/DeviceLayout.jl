@@ -98,7 +98,9 @@ function Base.:(==)(b1::BSpline, b2::BSpline)
     return b1.p == b2.p &&
            b1.t0 == b2.t0 &&
            b1.t1 == b2.t1 &&
+           b1.r == b2.r &&
            b1.p0 == b2.p0 &&
+           b1.p1 == b2.p1 &&
            b1.α0 == b2.α0 &&
            b1.α1 == b2.α1
 end
@@ -108,9 +110,14 @@ function Base.hash(b::BSpline, h::UInt)
     h = hash(b.p, h)
     h = hash(b.t0, h)
     h = hash(b.t1, h)
-    # h = hash(b.r, h) # Hashes are different even when b1.r == b2.r
+    # h = hash(b.r, h) # Hashes for AbstractInterpolation are different even when b1.r == b2.r
     # But b.r follows from everything else, including scaling which is captured in p0, p1
     # ... as long as _update_interpolation! has been called
+    # So we hash the parts of r that can vary
+    h = hash(b.r.ranges, h)
+    h = hash(b.r.itp.it, h)
+    h = hash(b.r.itp.coefs, h)
+    h = hash(b.r.itp.parentaxes, h)
     h = hash(b.p0, h)
     h = hash(b.p1, h)
     h = hash(b.α0, h)

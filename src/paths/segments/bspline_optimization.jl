@@ -3,7 +3,7 @@ using Memoization
 
 function _optimize_bspline!(b::BSpline; endpoints_curvature=nothing)
     t0, t1, growth = _optimized_tangents(
-        copy(b.p),
+        copy(b.p), # Copy because `b.p` will change in the future
         b.r.ranges[1][1],
         b.r.ranges[1][end],
         b.p0,
@@ -30,7 +30,7 @@ end
     α1,
     endpoints_curvature
 )
-    points = copy(points) # Copy that's never modified, to satisfy memoization dict
+    points = copy(points) # Copy of copy so original (key) is never modified inside or outside this function
     t0 = Point(cos(α0), sin(α0)) * norm(points[2] - points[1])
     t1 = Point(cos(α1), sin(α1)) * norm(points[end] - points[end - 1])
     r = Interpolations.scale(
