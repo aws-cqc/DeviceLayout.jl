@@ -677,12 +677,7 @@ function discretization(seg::Paths.Segment; kwargs...)
     return DeviceLayout.adapted_grid(t -> Paths.direction(seg, t), bnds)
 end
 
-function DeviceLayout.map_metadata!(path::Path, map_meta)
-    visited = Set{Any}()
-    return map_metadata!(path, map_meta, visited)
-end
-
-function DeviceLayout.map_metadata!(path::Path, map_meta, visited::Set{Any})
+function DeviceLayout.map_metadata!(path::Path, map_meta, visited::Set{Any}=Set{Any}())
     path in visited && return nothing
     push!(visited, path)
     path.metadata = map_meta(path.metadata)

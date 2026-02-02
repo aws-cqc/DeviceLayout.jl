@@ -195,12 +195,7 @@ multiply-referenced structures are not mapped multiple times.
 
 The `visited` argument is used internally to track structures already processed.
 """
-function map_metadata!(geom::GeometryStructure, map_meta)
-    visited = Set{Any}()
-    return map_metadata!(geom, map_meta, visited)
-end
-
-function map_metadata!(geom::GeometryStructure, map_meta, visited::Set{Any})
+function map_metadata!(geom::GeometryStructure, map_meta, visited::Set{Any}=Set{Any}())
     geom in visited && return nothing
     push!(visited, geom)
     geom.element_metadata .= map_meta.(geom.element_metadata)

@@ -101,8 +101,11 @@ For every element in `geometry(comp)` with original meta `m`, set its metadata t
 
 Recursive on referenced structures.
 """
-DeviceLayout.map_metadata!(comp::AbstractComponent, map_meta) =
-    map_metadata!(geometry(comp), map_meta)
+DeviceLayout.map_metadata!(
+    comp::AbstractComponent,
+    map_meta,
+    visited::Set{Any}=Set{Any}()
+) = map_metadata!(geometry(comp), map_meta, visited)
 
 """
     flipchip!(geom::GeometryStructure)
