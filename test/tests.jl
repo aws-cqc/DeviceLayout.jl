@@ -825,15 +825,37 @@ end
             @test_nowarn save(path, main; spec_warnings=false) # w/ GDS spec warnings disabled
         end
 
-        # Warns against layers not in [0, 63]
-        bad_layers = [GDSMeta(-1, 0), GDSMeta(64, 0)]
-        for l in bad_layers
-            main = Cell("main", nm)
-            render!(main, Rectangle(10μm, 10μm), l)
-            path = joinpath(tdir, "bad_layer.gds")
-            @test_logs (:warn, r"spec only permits layers from 0 to 63") save(path, main)
-            @test_nowarn save(path, main; spec_warnings=false) # w/ GDS spec warnings disabled
-        end
+        # Warns against layers outside configured range
+        # By default max_layer=65535, so layer 64 is valid
+        # Layer -1 is always invalid (negative)
+        main = Cell("main", nm)
+        render!(main, Rectangle(10μm, 10μm), GDSMeta(-1, 0))
+        path = joinpath(tdir, "bad_layer.gds")
+        @test_logs (:warn, r"Layer -1 exceeds configured maximum") save(path, main)
+        @test_nowarn save(path, main; spec_warnings=false) # w/ spec warnings disabled
+
+        # Layer 64 with strict GDSII spec limits should warn
+        main = Cell("main", nm)
+        render!(main, Rectangle(10μm, 10μm), GDSMeta(64, 0))
+        strict_opts = GDSWriterOptions(max_layer=63, max_datatype=63)
+        @test_logs (:warn, r"Layer 64 exceeds configured maximum \(63\)") save(
+            path,
+            main;
+            options=strict_opts
+        )
+        @test_nowarn save(path, main) # default max_layer=65535, so layer 64 is OK
+        @test_nowarn save(path, main; spec_warnings=false)
+
+        # Test datatype checking too
+        main = Cell("main", nm)
+        render!(main, Rectangle(10μm, 10μm), GDSMeta(0, 100))
+        strict_opts = GDSWriterOptions(max_layer=63, max_datatype=63)
+        @test_logs (:warn, r"Datatype 100 exceeds configured maximum \(63\)") save(
+            path,
+            main;
+            options=strict_opts
+        )
+        @test_nowarn save(path, main) # default max_datatype=65535
 
         # Corrupt file tests: records
         @test_logs (:warn, r"unknown record type 0xffff") load(

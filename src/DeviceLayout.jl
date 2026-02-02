@@ -583,6 +583,9 @@ import .Autofill: autofill!, make_halo
 export Autofill, autofill!, make_halo
 
 include("backends/gds.jl")
+import .GDS: GDSWriterOptions
+export GDSWriterOptions
+
 include("backends/graphics.jl")
 include("backends/dxf.jl")
 
