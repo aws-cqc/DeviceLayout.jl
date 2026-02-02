@@ -69,8 +69,8 @@ Options controlling warnings and validation during GDS file writing.
 
 # Fields
 
-  - `max_layer::Int = 65535`: Maximum allowed layer number. Modern tools support 0-65535.
-  - `max_datatype::Int = 65535`: Maximum allowed datatype number. Modern tools support 0-65535.
+  - `max_layer::Int = 32767`: Maximum allowed layer number. Modern tools commonly support 0-65535, but 32767 is the maximum if the layer number is read as a two-byte signed integer.
+  - `max_datatype::Int = 32767`: Maximum allowed datatype number. Modern tools commonly support 0-65535, but 32767 is the maximum if the layer number is read as a two-byte signed integer.
   - `warn_invalid_names::Bool = true`: Whether to warn about cell/text names that violate
     the GDSII spec (must be ≤32 chars, only A-Z, a-z, 0-9, '_', '?', '\$').
 
@@ -85,15 +85,15 @@ opts = GDSWriterOptions(max_layer=63, max_datatype=63)
 
 # No warnings at all
 opts = GDSWriterOptions(
-    max_layer=typemax(Int),
-    max_datatype=typemax(Int),
+    max_layer=typemax(UInt16),
+    max_datatype=typemax(UInt16),
     warn_invalid_names=false
 )
 ```
 """
 @kwdef struct GDSWriterOptions
-    max_layer::Int = 65535
-    max_datatype::Int = 65535
+    max_layer::Int = 32767
+    max_datatype::Int = 32767
     warn_invalid_names::Bool = true
 end
 
@@ -285,7 +285,11 @@ gdswrite(io::IO, x::UInt16, y::AbstractFloat...) = gdswrite(io, x, convert.(GDS6
 function gdswrite(io::IO, x::UInt16, y::Int...)
     datatype = x & 0x00ff
     if datatype == 0x0002
-        gdswrite(io, x, map(Int16, y)...)
+        if GDSTokens[x] == "LAYER" || GDSTokens[x] == "DATATYPE"
+            gdswrite(io, x, map(UInt16, y)...) # Allow for GDSII extension that interprets as unsigned integer
+        else
+            gdswrite(io, x, map(Int16, y)...)
+        end
     elseif datatype == 0x0003
         gdswrite(io, x, map(Int32, y)...)
     elseif datatype == 0x0005
@@ -624,7 +628,7 @@ function save(
     verbose=false
 )
     if !spec_warnings
-        options = GDSWriterOptions(typemax(Int), typemax(Int), false)
+        options = GDSWriterOptions(typemax(UInt16), typemax(UInt16), false)
     else
         options = GDSWriterOptions(
             isnothing(max_layer) ? options.max_layer : max_layer,
@@ -951,12 +955,12 @@ function boundary(s, dbs, verbose, nounits)
         elseif token == LAYER
             verbose && @info(string(infostr, " (LAYER)"))
             haslayer && error("Already read LAYER tag for this BOUNDARY tag.")
-            lyr = Int(ntoh(read(s, Int16)))
+            lyr = Int(ntoh(read(s, UInt16)))
             haslayer = true
         elseif token == DATATYPE
             verbose && @info(string(infostr, " (DATATYPE)"))
             hasdt && error("Already read DATATYPE tag for this BOUNDARY tag.")
-            dt = Int(ntoh(read(s, Int16)))
+            dt = Int(ntoh(read(s, UInt16)))
             hasdt = true
         elseif token == XY
             verbose && @info(string(infostr, " (XY)"))

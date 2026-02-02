@@ -826,13 +826,12 @@ end
         end
 
         # Warns against layers outside configured range
-        # By default max_layer=65535, so layer 64 is valid
+        # By default max_layer=32767, so layer 64 is valid
         # Layer -1 is always invalid (negative)
         main = Cell("main", nm)
         render!(main, Rectangle(10μm, 10μm), GDSMeta(-1, 0))
         path = joinpath(tdir, "bad_layer.gds")
-        @test_logs (:warn, r"Layer -1 exceeds configured maximum") save(path, main)
-        @test_nowarn save(path, main; spec_warnings=false) # w/ spec warnings disabled
+        @test_throws CapturedException save(path, main)
 
         # Layer 64 with strict GDSII spec limits should warn
         main = Cell("main", nm)
@@ -843,7 +842,12 @@ end
             main;
             options=strict_opts
         )
-        @test_nowarn save(path, main) # default max_layer=65535, so layer 64 is OK
+        @test_nowarn save(path, main) # default max_layer=32767, so layer 64 is OK
+
+        # Layer 65535 is allowed but gets warning by default
+        main = Cell("main", nm)
+        render!(main, Rectangle(10μm, 10μm), GDSMeta(65535, 0))
+        @test_logs (:warn, r"exceeds configured maximum") save(path, main)
         @test_nowarn save(path, main; spec_warnings=false)
 
         # Test datatype checking too
@@ -855,7 +859,7 @@ end
             main;
             options=strict_opts
         )
-        @test_nowarn save(path, main) # default max_datatype=65535
+        @test_nowarn save(path, main) # default max_datatype=32767
 
         # Corrupt file tests: records
         @test_logs (:warn, r"unknown record type 0xffff") load(

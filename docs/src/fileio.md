@@ -14,6 +14,7 @@ systems. In the future it may be useful to implement machine-specific pattern fo
 force fracturing or dosing in an explicit manner.
 
 ```@docs
+    DeviceLayout.GDSWriterOptions
     DeviceLayout.save
 ```
 
