@@ -10,6 +10,7 @@ The format of this changelog is based on
   - Changed default CPW mesh size to use `2 * min(trace, gap)` (higher element quality when trace and gap are very different)
   - Changed default global mesh grading from `0.9` to `0.75` (more robust meshing for complex geometries, relatively small cost)
   - Fixed bug where `map_metadata!` would map multiply-referenced structures multiple times
+  - Fixed bug where `@composite_variant` would not forward `map_hooks` to base variant when defined with component instance rather than type
 
 ## 1.8.0 (2026-01-05)
 

@@ -118,6 +118,7 @@ function composite_variant_expr(
         SchematicDrivenLayout.base_variant(::$esctype) = $T
         # Hook map is the same
         SchematicDrivenLayout.map_hooks(::$esctype) = map_hooks($T)
+        SchematicDrivenLayout.map_hooks(comp::$escname) = map_hooks(base_variant(comp))
         # Subcomponents are the same
         SchematicDrivenLayout._build_subcomponents(comp::$escname) =
             _build_subcomponents(base_variant(comp))

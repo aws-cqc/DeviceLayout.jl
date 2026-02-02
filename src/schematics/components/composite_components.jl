@@ -174,18 +174,19 @@ function hooks(cc::T) where {T <: AbstractCompositeComponent}
         !isempty(cc._hooks) && return (; pairs(cc._hooks)...)
     end
     floorplan = schematic(cc)
-    hooknames = [keys(hooks(floorplan, node)) for node in nodes(graph(cc))]
-    cc_names = [
-        compose_hookname(cc, i, hookname) for (i, hnames) in enumerate(hooknames) for
-        hookname in hnames
+    hooknames_cc_hooks_pairs = [pairs(hooks(floorplan, node)) for node in nodes(graph(cc))]
+    cc_hook_pairs = [
+        compose_hookname(cc, i, hookname) => h for
+        (i, hpairs) in enumerate(hooknames_cc_hooks_pairs) for (hookname, h) in hpairs
     ]
-    cc_hooks = [values(hooks(floorplan, node)) for node in nodes(graph(cc))]
     if hasfield(T, :_hooks)
-        for (name, hook) in zip(cc_names, Iterators.flatten(cc_hooks))
+        for (name, hook) in cc_hook_pairs
             cc._hooks[name] = hook
         end
     end
-    return NamedTuple{(cc_names...,)}(Iterators.flatten(cc_hooks))
+    cc_names = first.(cc_hook_pairs)
+    cc_hooks = last.(cc_hook_pairs)
+    return NamedTuple{(cc_names...,)}(cc_hooks)
 end
 
 """
