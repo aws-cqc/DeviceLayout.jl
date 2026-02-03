@@ -1004,7 +1004,7 @@ end
 # excluded_physical_groups are physical groups not to be included in the fragmentation.
 function _fragment_and_map!(
     sm::SolidModel,
-    frag_dims=[0, 1, 2, 3];
+    frag_dims;
     excluded_physical_groups=PhysicalGroup[]
 )
     gmsh.model.set_current(name(sm))
