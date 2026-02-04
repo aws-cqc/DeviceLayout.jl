@@ -1,21 +1,6 @@
 # Functions useful for ExamplePDK but not suitable/ready for base DeviceLayout/SchematicDrivenLayout
 
 """
-    filter_params(subcomp, comp::AbstractComponent; except=Symbol[])
-
-Return the parameters of `comp` that share a name with parameters of `subcomp`.
-
-Intended as a utility for passing parameters down to subcomponents.
-`subcomp` can be an `AbstractComponent` instance or subtype.
-"""
-function filter_params(subcomp, comp; except=Symbol[])
-    return filter(
-        kv -> first(kv) in parameter_names(subcomp) && !(first(kv) in except),
-        pairs(parameters(comp))
-    )
-end
-
-"""
     tap!(path::Path, sty::Paths.SimpleCPW=laststyle(path); location=1)
 
 Generate a new path branching off from an initial path.
@@ -243,3 +228,6 @@ function path_intersections(path::Path, trans, bounding_box::Rectangle)
     end
     return out
 end
+
+const filter_params = filter_parameters # For backward compatibility
+# (No one should be using methods from ExamplePDK but just in case)

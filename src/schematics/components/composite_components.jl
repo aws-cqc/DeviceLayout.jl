@@ -324,3 +324,81 @@ function _flatten(g::SchematicGraph, depth)
     end
     return g2
 end
+
+"""
+    filter_parameters(subcomp::AbstractComponent, comp::AbstractComponent; prefix=name(subcomp) * "_", except=Symbol[])
+    filter_parameters(subcomp::Type{<:AbstractComponent}, comp::AbstractComponent; prefix="", except=Symbol[])
+
+Return the parameters of `comp` that match `prefix * param` where `param` is the name of a parameter of `subcomp`, as a collection of `param => value` pairs.
+
+Ignores any parameters of `comp` whose name matches a `Symbol` in `except`. Also ignores the `name` parameter if `prefix` is empty.
+
+Intended as a utility for passing parameters down to subcomponents.
+
+`subcomp` can be an `AbstractComponent` instance or subtype. If it is an instance, the prefix defaults to
+the subcomponent name followed by an underscore. If it is a type, the default prefix is empty.
+
+```julia
+@compdef struct MyCompositeComponent <: CompositeComponent
+    templates = (;
+        subcomp1=MySubComponent(; name="subcomp1"),
+        subcomp2=MySubComponent(; name="subcomp2")
+    )
+    subcomp1_width = 2mm
+    length = 2mm
+end
+
+@compdef struct MySubComponent <: Component
+    width = 1mm
+    length = 1mm
+end
+
+function SchematicDrivenLayout._build_subcomponents(cc::MyCompositeComponent)
+    shared_params = filter_parameters(MySubComponent, cc) # Matching with no prefix: (; length=...)
+    subcomp1_overrides = filter_parameters(cc.templates.subcomp1, cc) # Matching with prefix: (; width=...)
+    @component subcomp1 = cc.templates.subcomp1(; subcomp1_overrides..., shared_params...)
+    @component subcomp2 = cc.templates.subcomp2(; shared_params...)
+    return (subcomp1, subcomp2)
+end
+```
+"""
+function filter_parameters(
+    subcomp::AbstractComponent,
+    comp;
+    prefix=name(subcomp) * "_",
+    except=Symbol[]
+)
+    return _filter_parameters(subcomp, comp, prefix, except)
+end
+
+function filter_parameters(
+    subcomp::Type{<:AbstractComponent},
+    comp;
+    prefix="",
+    except=Symbol[]
+)
+    return _filter_parameters(subcomp, comp, prefix, except)
+end
+
+function _filter_parameters(subcomp, comp, prefix, except)
+    if isempty(prefix)
+        return filter(
+            kv ->
+                first(kv) in parameter_names(subcomp) &&
+                    !(first(kv) in except) &&
+                    !(first(kv) == :name),
+            pairs(parameters(comp))
+        )
+    end
+
+    prefixed_params = filter(
+        kv -> startswith(string(first(kv)), prefix) && !(first(kv) in except),
+        pairs(parameters(comp))
+    )
+    unprefixed_params = map(collect(pairs(prefixed_params))) do (prefixed_name, value)
+        unprefixed_name =
+            Symbol(only(split(string(prefixed_name), prefix; limit=2, keepempty=false)))
+        return unprefixed_name => value
+    end
+    return filter(kv -> first(kv) in parameter_names(subcomp), Dict(unprefixed_params))
+end

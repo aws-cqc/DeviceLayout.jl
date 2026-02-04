@@ -949,6 +949,58 @@
         @test sch.graph[3].component isa Path # was replaced with concrete Path in crossovers!
     end
 
+    @testset "Filter params" begin
+        @compdef struct MyCompositeComponent <: CompositeComponent
+            templates = (;
+                subcomp1=MySubComponent(; name="subcomp1"),
+                subcomp2=MySubComponent(; name="subcomp2")
+            )
+            subcomp1_width = 2mm
+            length = 2mm
+        end
+
+        @compdef struct MySubComponent <: Component
+            width = 1mm
+            length = 1mm
+        end
+
+        function SchematicDrivenLayout._build_subcomponents(cc::MyCompositeComponent)
+            shared_params = filter_parameters(MySubComponent, cc) # Matching with no prefix: (; length=...)
+            subcomp1_overrides = filter_parameters(cc.templates.subcomp1, cc) # Matching with prefix: (; width=...)
+            @component subcomp1 =
+                cc.templates.subcomp1(; subcomp1_overrides..., shared_params...)
+            @component subcomp2 = cc.templates.subcomp2(; shared_params...)
+            return (subcomp1, subcomp2)
+        end
+
+        function SchematicDrivenLayout._graph!(
+            g::SchematicGraph,
+            cc::MyCompositeComponent,
+            subcomps::NamedTuple
+        )
+            add_node!(g, subcomps.subcomp1)
+            return add_node!(g, subcomps.subcomp2)
+        end
+
+        @component subcomp1 = MySubComponent(; width=3mm, length=3mm) # Both overridden
+        @component subcomp2 = MySubComponent(; width=3mm, length=3mm) # Only length overridden
+
+        cc = MyCompositeComponent(; templates=(; subcomp1, subcomp2))
+        @test SchematicDrivenLayout.filter_parameters(MySubComponent, cc) ==
+              Dict(:length => 2mm)
+        @test SchematicDrivenLayout.filter_parameters(
+            MySubComponent,
+            cc,
+            except=[:length]
+        ) == Dict()
+        @test SchematicDrivenLayout.filter_parameters(subcomp1, cc) == Dict(:width => 2mm)
+
+        @test SchematicDrivenLayout.subcomponents(cc).subcomp1.width == 2mm
+        @test SchematicDrivenLayout.subcomponents(cc).subcomp2.width == 3mm
+        @test SchematicDrivenLayout.subcomponents(cc).subcomp1.length == 2mm
+        @test SchematicDrivenLayout.subcomponents(cc).subcomp2.length == 2mm
+    end
+
     @testset "SolidModels" begin
         @test SchematicDrivenLayout.level_z.(0:3) == [-525μm, 0μm, 5μm, 530μm]
         @test SchematicDrivenLayout.level_z.(
