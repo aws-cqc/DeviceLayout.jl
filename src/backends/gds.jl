@@ -69,10 +69,18 @@ Options controlling warnings and validation during GDS file writing.
 
 # Fields
 
-  - `max_layer::Int = 32767`: Maximum allowed layer number. Modern tools commonly support 0-65535, but 32767 is the maximum if the layer number is read as a two-byte signed integer.
-  - `max_datatype::Int = 32767`: Maximum allowed datatype number. Modern tools commonly support 0-65535, but 32767 is the maximum if the layer number is read as a two-byte signed integer.
+  - `max_layer::Int = 32767`: Maximum layer number that will not throw a warning.
+  - `max_datatype::Int = 32767`: Maximum datatype number that will not throw a warning.
   - `warn_invalid_names::Bool = true`: Whether to warn about cell/text names that violate
     the GDSII spec (must be ≤32 chars, only A-Z, a-z, 0-9, '_', '?', '\$').
+
+Warnings for layer number and datatype are configurable because different tools may have
+different limits. In the GDSII specification, layer and datatype must be in the range 0 to 63,
+but modern tools are rarely so strict. The hard limit is that the layer and datatype records
+are each two bytes. In the specification, they are two-byte signed integers, and for tools
+that conform in that regard, the maximum value is 32767. For that reason, larger values will
+cause a warning to be shown by default. However, a common extension of the format interprets
+these records as unsigned integers, allowing values up to 65535.
 
 # Examples
 
@@ -590,8 +598,7 @@ gdsend(io::IO) = gdswrite(io, ENDLIB)
     save(::Union{AbstractString,IO}, cell0::Cell{T}, cell::Cell...)
     save(f::File{format"GDS"}, cell0::Cell, cell::Cell...;
         name="GDSIILIB", userunit=1μm, modify=now(), acc=now(),
-        options=GDSWriterOptions(), spec_warnings=nothing, verbose=false,
-        max_layer=nothing, max_datatype=nothing, warn_invalid_names=nothing)
+        options=GDSWriterOptions(), spec_warnings=nothing, verbose=false)
 
 This bottom method is implicitly called when you use the convenient syntax of
 the top method: `save("/path/to/my.gds", cells_i_want_to_save...)`
@@ -604,11 +611,9 @@ Keyword arguments include:
     with inferior unit support.
   - `modify`: date of last modification.
   - `acc`: date of last accession. It would be unusual to have this differ from `now()`.
-  - `options`: a [`GDSWriterOptions`](@ref) controlling validation and warnings.
-  - `max_layer`: if specified, overrides `options.max_layer`
-  - `max_datatype`: if specified, overrides `options.max_datatype`
-  - `warn_invalid_names`: if specified, overrides `options.warn_invalid_names`
-  - `spec_warnings`: if `false`, disables warnings for max layer/datatype and invalid names
+  - `options`: a [`GDSWriterOptions`](@ref) controlling validation of `Cell` names and warnings
+    for maximum layer/datatype numbers.
+  - `spec_warnings`: if `false`, disables all warnings for max layer/datatype and invalid names
   - `verbose`: monitor the output of [`traverse!`](@ref) and [`order!`](@ref) to see if
     something funny is happening while saving.
 """
@@ -621,20 +626,11 @@ function save(
     modify=now(),
     acc=now(),
     options::GDSWriterOptions=GDSWriterOptions(),
-    max_layer=nothing,
-    max_datatype=nothing,
-    warn_invalid_names=nothing,
     spec_warnings::Bool=true,
     verbose=false
 )
     if !spec_warnings
         options = GDSWriterOptions(typemax(UInt16), typemax(UInt16), false)
-    else
-        options = GDSWriterOptions(
-            isnothing(max_layer) ? options.max_layer : max_layer,
-            isnothing(max_datatype) ? options.max_datatype : max_datatype,
-            isnothing(warn_invalid_names) ? options.warn_invalid_names : warn_invalid_names
-        )
     end
     dbs = dbscale(cell0, cell...)
     pad = mod(length(name), 2) == 1 ? "\0" : ""

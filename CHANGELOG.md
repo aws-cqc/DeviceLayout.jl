@@ -10,7 +10,7 @@ The format of this changelog is based on
   - Changed default CPW mesh size to use `2 * min(trace, gap)` (higher element quality when trace and gap are very different)
   - Changed default global mesh grading from `0.9` to `0.75` (more robust meshing for complex geometries, relatively small cost)
   - Fixed `SolidModel` rendering issue where some exterior boundaries might not be tagged
-  - Changed threshold for GDSII layer/datatype number spec warning to 32767; added keyword options and `GDSWriterOptions` to configure this
+  - Changed threshold for GDSII layer/datatype number spec warning to 32767; added `GDSWriterOptions` to configure this
 
 ## 1.8.0 (2026-01-05)
 
