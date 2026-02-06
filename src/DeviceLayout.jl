@@ -18,6 +18,8 @@ import Unitful: Length, LengthUnits, DimensionlessQuantity, NoUnits, DimensionEr
 import Unitful: ustrip, unit, inch
 Unitful.@derived_dimension InverseLength inv(Unitful.𝐋)
 
+import SpatialIndexing
+
 function render! end
 export render!
 
@@ -194,6 +196,7 @@ coordinatetype(::AbstractArray{S}) where {T, S <: AbstractGeometry{T}} = T
 coordinatetype(iterable) = promote_type(coordinatetype.(iterable)...)
 coordinatetype(::Point{T}) where {T} = T
 coordinatetype(::Type{Point{T}}) where {T} = T
+coordinatetype(::Pair{<:AbstractGeometry{T}}) where {T} = T
 
 # Entity interface
 include("entities.jl")
@@ -203,8 +206,10 @@ export GeometryEntity,
     center,
     centered,
     coordinatetype,
+    findbox,
     footprint,
     halo,
+    mbr_spatial_index,
     offset,
     to_polygons,
     lowerleft,
