@@ -11,7 +11,7 @@ import CoordinateTransformations: AffineMap, LinearMap, Translation, Transformat
 import Clipper
 import Clipper: children, contour
 import StaticArrays
-using SpatialIndexing
+import SpatialIndexing
 import SpatialIndexing: mbr
 
 import DeviceLayout
@@ -84,6 +84,9 @@ export circle,
     unfold,
     union2d,
     xor2d
+
+export difference2d_layerwise,
+    intersect2d_layerwise, union2d_layerwise, xor2d_layerwise, clip_tiled
 
 const USCALE = 1.0 * Unitful.fm
 const SCALE  = 10.0^9
@@ -537,6 +540,20 @@ function perimeter(e::Ellipse)
     b = minimum(e.radii)
     return π * ((a + b) + 3 * (a - b)^2 / (10 * (a + b) + sqrt(a^2 + 14 * a * b + b^2)))
 end
+
+function signed_area(p::Polygon) # Can be negative
+    return sum(
+        (gety.(p.p) + gety.(circshift(p.p, -1))) .*
+        (getx.(p.p) - getx.(circshift(p.p, -1)))
+    ) / 2
+end
+
+"""
+    area(poly::Polygon)
+
+Area of a non-self-intersecting polygon. Always positive.
+"""
+area(p::Polygon) = abs(signed_area(p))
 
 """
     circle_polygon(r, Δθ=10°)

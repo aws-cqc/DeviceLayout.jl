@@ -33,6 +33,8 @@
     lowerleft(::DeviceLayout.GeometryEntity)
     upperright(::DeviceLayout.GeometryEntity)
     transform
+    findbox
+    mbr_spatial_index
 ```
 
 ### [GeometryEntity](@id api-geometryentity)
@@ -158,6 +160,7 @@
     Polygon(::AbstractVector{Point{T}}) where {T}
     Polygon(::Point, ::Point, ::Point, ::Point...)
     Rectangle
+    Polygons.area
     bounds
     circle_polygon
     gridpoints_in_polygon
@@ -174,10 +177,15 @@
 ```@docs
     Polygons.ClippedPolygon
     difference2d
+    difference2d_layerwise
     intersect2d
+    intersect2d_layerwise
     union2d
+    union2d_layerwise
     xor2d
+    xor2d_layerwise
     clip
+    clip_tiled
     Polygons.StyleDict
 ```
 

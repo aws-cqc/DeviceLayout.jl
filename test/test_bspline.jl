@@ -180,13 +180,8 @@ end
     approx = Paths.bspline_approximation(c, atol=100.0nm)
     pts = DeviceLayout.discretize_curve(c, 100.0nm)
     pts_approx = vcat(DeviceLayout.discretize_curve.(approx.segments, 100.0nm)...)
-    area(p) =
-        sum(
-            (gety.(p.p) + gety.(circshift(p.p, -1))) .*
-            (getx.(p.p) - getx.(circshift(p.p, -1)))
-        ) / 2
     poly = Polygon([pts; reverse(pts_approx)])
-    @test abs(area(poly) / perimeter(poly)) < 100nm # It's actually ~25nm but the guarantee is ~< tolerance
+    @test abs(Polygons.area(poly) / perimeter(poly)) < 100nm # It's actually ~25nm but the guarantee is ~< tolerance
     c = curv[8].curves[1] # ConstantOffset Turn
     @test Paths.curvatureradius(c, 10μm) == sign(c.seg.α) * c.seg.r - c.offset
     @test curvatureradius_fd(c, 10μm) ≈ Paths.curvatureradius(c, 10μm) atol = 1nm

@@ -403,3 +403,53 @@ lowerleft(aent::ArrayEntity) = lowerleft(aent.a)
 upperright(aent::ArrayEntity) = upperright(aent.a)
 halo(aent::ArrayEntity, outer_delta, inner_delta=nothing) =
     ArrayEntity(halo(aent.a, outer_delta, inner_delta))
+
+######## Entity selection
+function SpatialIndexing.mbr(ent::AbstractGeometry{T}) where {T}
+    r = bounds(ent)
+    return SpatialIndexing.Rect(
+        (ustrip(unit(onemicron(T)), float.(r.ll))...,),
+        (ustrip(unit(onemicron(T)), float.(r.ur))...,)
+    )
+end
+
+"""
+    mbr_spatial_index(geoms)
+
+An `RTree` of minimum bounding rectangles for `geoms`, with indices in `geoms` as values.
+
+See also [`findbox`](@ref).
+"""
+function mbr_spatial_index(geoms)
+    tree = SpatialIndexing.RTree{Float64, 2}(Int)
+    function convertel(enum_ent)
+        idx, ent = enum_ent
+        return SpatialIndexing.SpatialElem(SpatialIndexing.mbr(ent), nothing, idx)
+    end
+    SpatialIndexing.load!(tree, enumerate(geoms), convertel=convertel)
+    return tree
+end
+
+"""
+    findbox(box, geoms; intersects=false)
+    findbox(box, tree::SpatialIndexing.RTree; intersects=false)
+
+Return `indices` such that `geoms[indices]` gives all elements of `geoms` with minimum bounding rectangle contained in `bounds(box)`.
+
+A spatial index created with [`mbr_spatial_index(geoms)`](@ref) can be supplied explicitly to avoid re-indexing for multiple `findbox` operations.
+
+By default, `findbox` will find only entities with bounds contained in `bounds(box)`. If `intersects` is `true`,
+it also includes entities with bounds intersecting `bounds(box)` (including those only touching edge-to-edge).
+"""
+function findbox(box, geoms; intersects=false)
+    tree = mbr_spatial_index(geoms)
+    return findbox(box, tree; intersects)
+end
+
+function findbox(box, tree::SpatialIndexing.RTree; intersects=false)
+    intersects && return map(
+        x -> x.val,
+        SpatialIndexing.intersects_with(tree, SpatialIndexing.mbr(box))
+    )
+    return map(x -> x.val, SpatialIndexing.contained_in(tree, SpatialIndexing.mbr(box)))
+end
