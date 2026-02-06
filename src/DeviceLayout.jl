@@ -18,6 +18,8 @@ import Unitful: Length, LengthUnits, DimensionlessQuantity, NoUnits, DimensionEr
 import Unitful: ustrip, unit, inch
 Unitful.@derived_dimension InverseLength inv(Unitful.𝐋)
 
+import SpatialIndexing
+
 function render! end
 export render!
 
@@ -204,8 +206,10 @@ export GeometryEntity,
     center,
     centered,
     coordinatetype,
+    findbox,
     footprint,
     halo,
+    mbr_spatial_index,
     offset,
     to_polygons,
     lowerleft,
