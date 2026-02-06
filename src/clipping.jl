@@ -665,11 +665,15 @@ end
 
 ### cutting algorithm
 
-abstract type D1{T} end
+abstract type D1{T} <: GeometryEntity{T} end
 Δy(d1::D1) = d1.p1.y - d1.p0.y
 Δx(d1::D1) = d1.p1.x - d1.p0.x
 
 ab(p0, p1) = Point(gety(p1) - gety(p0), getx(p0) - getx(p1))
+
+to_polygons(::D1{T}) where {T} = Polygon{T}[]
+
+transform(d1::T, f::Transformation) where {T <: D1} = T(f(d1.p0), f(d1.p1))
 
 """
     LineSegment{T} <: D1{T}
@@ -1315,8 +1319,8 @@ end
 
 function clip_tiled(
     op,
-    ents1::AbstractArray{Polygon{T}},
-    ents2::AbstractArray{Polygon{T}},
+    ents1::AbstractArray{GeometryEntity{T}},
+    ents2::AbstractArray{GeometryEntity{T}},
     max_tile_size=1000 * DeviceLayout.onemicron(T);
     pfs=Clipper.PolyFillTypeEvenOdd,
     pfc=Clipper.PolyFillTypeEvenOdd
