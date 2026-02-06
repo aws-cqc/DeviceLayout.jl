@@ -194,6 +194,7 @@ coordinatetype(::AbstractArray{S}) where {T, S <: AbstractGeometry{T}} = T
 coordinatetype(iterable) = promote_type(coordinatetype.(iterable)...)
 coordinatetype(::Point{T}) where {T} = T
 coordinatetype(::Type{Point{T}}) where {T} = T
+coordinatetype(::Pair{<:AbstractGeometry{T}}) where {T} = T
 
 # Entity interface
 include("entities.jl")
