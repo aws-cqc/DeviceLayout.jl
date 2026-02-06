@@ -1,6 +1,6 @@
 import DeviceLayout: flushtop, flushleft, flushright, below, above
 
-import .ExamplePDK: filter_params, tap!
+import .ExamplePDK: tap!
 import .ExamplePDK.Transmons: ExampleRectangleTransmon
 
 """
