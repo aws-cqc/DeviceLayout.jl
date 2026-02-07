@@ -1,22 +1,57 @@
+using ThreadSafeDicts
+using Memoization
 
 function _optimize_bspline!(b::BSpline; endpoints_curvature=nothing)
-    scale0 = Point(cos(α0(b)), sin(α0(b))) * norm(b.p[2] - b.p[1])
-    scale1 = Point(cos(α1(b)), sin(α1(b))) * norm(b.p[end] - b.p[end - 1])
-    if _symmetric_optimization(b)
-        errfunc_sym(p) = _int_dκ2(b, p[1], scale0, scale1; endpoints_curvature)
-        p = Optim.minimizer(optimize(errfunc_sym, [1.0]))
-        b.t0 = p[1] * scale0
-        b.t1 = p[1] * scale1
-    else
-        errfunc_asym(p) = _int_dκ2(b, p[1], p[2], scale0, scale1; endpoints_curvature)
-        p = Optim.minimizer(optimize(errfunc_asym, [1.0, 1.0]))
-        b.t0 = p[1] * scale0
-        b.t1 = p[2] * scale1
-    end
-    sum(p) >= 9.9 &&
+    t0, t1, growth = _optimized_tangents(
+        copy(b.p), # Copy because `b.p` will change in the future
+        b.r.ranges[1][1],
+        b.r.ranges[1][end],
+        b.p0,
+        b.p1,
+        b.α0,
+        b.α1,
+        endpoints_curvature
+    )
+    b.t0 = t0
+    b.t1 = t1
+    growth >= 9.9 &&
         @warn "`auto_speed` optimization for BSpline from $(b.p[1]) to $(b.p[end]) is increasing speed without bound; arbitrary cutoff applied. Check that the endpoints and directions are correct and add waypoints if necessary."
     _set_endpoints_curvature!(b, endpoints_curvature)
     return _update_interpolation!(b)
+end
+
+@memoize ThreadSafeDict function _optimized_tangents(
+    points,
+    tmin,
+    tmax,
+    p0,
+    p1,
+    α0,
+    α1,
+    endpoints_curvature
+)
+    points = copy(points) # Copy of copy so original (key) is never modified inside or outside this function
+    t0 = Point(cos(α0), sin(α0)) * norm(points[2] - points[1])
+    t1 = Point(cos(α1), sin(α1)) * norm(points[end] - points[end - 1])
+    r = Interpolations.scale(
+        interpolate(points, Interpolations.BSpline(Cubic(NeumannBC(t0, t1)))),
+        range(tmin, stop=tmax, length=length(points))
+    )
+    b = BSpline(points, t0, t1, r, p0, p1, α0, α1)
+    if _symmetric_optimization(b)
+        errfunc_sym(p) = _int_dκ2(b, p[1], t0, t1; endpoints_curvature)
+        p = Optim.minimizer(optimize(errfunc_sym, [1.0]))
+        t0 = p[1] * t0
+        t1 = p[1] * t1
+        growth = 2 * p[1]
+    else
+        errfunc_asym(p) = _int_dκ2(b, p[1], p[2], t0, t1; endpoints_curvature)
+        p = Optim.minimizer(optimize(errfunc_asym, [1.0, 1.0]))
+        t0 = p[1] * t0
+        t1 = p[2] * t1
+        growth = sum(p)
+    end
+    return t0, t1, growth
 end
 
 function _set_endpoints_curvature!(::BSpline, ::Nothing; add_points=false) end
