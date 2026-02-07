@@ -239,6 +239,12 @@ end
     b2 = pa3[1].seg
     @test b1 == b2
     @test hash(b1) == hash(b2)
+    # Different result without auto_curvature
+    pa3_nocurv = Path() # auto_speed, auto_curvature
+    bspline!(pa3_nocurv, [Point(100μm, 100μm)], 90°, Paths.Trace(1μm); auto_speed=true)
+    b3 = pa3_nocurv[1].seg
+    @test b3 != b1
+    @test hash(b3) != hash(b1)
 
     pa_turn = Path() # For comparison
     turn!(pa_turn, 90°, 100μm, Paths.Trace(1μm))
