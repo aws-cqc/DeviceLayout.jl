@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Single-Transmon Simulation · DeviceLayout.jl</title><meta name="title" content="Single-Transmon Simulation · DeviceLayout.jl"/><meta property="og:title" content="Single-Transmon Simulation · DeviceLayout.jl"/><meta property="twitter:title" content="Single-Transmon Simulation · DeviceLayout.jl"/><meta name="description" content="Documentation for DeviceLayout.jl."/><meta property="og:description" content="Documentation for DeviceLayout.jl."/><meta property="twitter:description" content="Documentation for DeviceLayout.jl."/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script><link href="../../assets/favicon.ico" rel="icon" type="image/x-icon"/></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">DeviceLayout.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><span class="tocitem">Geometry-Level Layout</span><ul><li><a class="tocitem" href="../../geometrylevel/">Overview</a></li><li><a class="tocitem" href="../../units/">Units</a></li><li><a class="tocitem" href="../../points/">Points</a></li><li><a class="tocitem" href="../../geometry/">Geometry</a></li><li><a class="tocitem" href="../../transformations/">Transformations</a></li><li><a class="tocitem" href="../../entitystyles/">Entity Styles</a></li><li><a class="tocitem" href="../../polygons/">Polygons</a></li><li><a class="tocitem" href="../../coordinate_systems/">Coordinate Systems</a></li><li><a class="tocitem" href="../../texts/">Texts</a></li><li><a class="tocitem" href="../../paths/">Paths</a></li><li><a class="tocitem" href="../../routes/">Routes</a></li><li><a class="tocitem" href="../../shapes/">Shape library</a></li><li><a class="tocitem" href="../../autofill/">Autofill</a></li><li><a class="tocitem" href="../../render/">Rendering</a></li><li><a class="tocitem" href="../../solidmodels/">Solid Models (3D Geometry)</a></li><li><a class="tocitem" href="../../fileio/">File Formats</a></li><li><a class="tocitem" href="../../faq/">Troubleshooting/FAQ</a></li></ul></li><li><span class="tocitem">Schematic-Driven Layout</span><ul><li><a class="tocitem" href="../../schematicdriven/">Overview</a></li><li><a class="tocitem" href="../../schematicdriven/components/">Components</a></li><li><a class="tocitem" href="../../schematicdriven/hooks/">Hooks</a></li><li><a class="tocitem" href="../../schematicdriven/schematics/">Schematics</a></li><li><a class="tocitem" href="../../schematicdriven/technologies/">Technologies</a></li><li><a class="tocitem" href="../../schematicdriven/targets/">Targets</a></li><li><a class="tocitem" href="../../schematicdriven/solidmodels/">Solid Models</a></li><li><a class="tocitem" href="../../schematicdriven/pdks/">PDKs</a></li><li><a class="tocitem" href="../../schematicdriven/faq/">Troubleshooting/FAQ</a></li></ul></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../examplepdk/">ExamplePDK</a></li><li><a class="tocitem" href="../qpu17/">Quantum Processor</a></li><li class="is-active"><a class="tocitem" href>Single-Transmon Simulation</a><ul class="internal"><li><a class="tocitem" href="#Overview"><span>Overview</span></a></li><li><a class="tocitem" href="#SolidModel-construction"><span>SolidModel construction</span></a></li><li><a class="tocitem" href="#Configuration"><span>Configuration</span></a></li><li><a class="tocitem" href="#*Palace*"><span><em>Palace</em></span></a></li></ul></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Single-Transmon Simulation</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Single-Transmon Simulation</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/aws-cqc/DeviceLayout.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/aws-cqc/DeviceLayout.jl/blob/main/docs/src/examples/singletransmon.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Single-transmon-with-readout-resonator"><a class="docs-heading-anchor" href="#Single-transmon-with-readout-resonator">Single transmon with readout resonator</a><a id="Single-transmon-with-readout-resonator-1"></a><a class="docs-heading-anchor-permalink" href="#Single-transmon-with-readout-resonator" title="Permalink"></a></h1><p>In this example, we demonstrate the layout and solid model generation of a single transmon coupled to a readout resonator. In particular, this example demonstrates the additional steps necessary to generate a mesh suitable for electromagnetic simulation using external applications, such as the <a href="https://github.com/awslabs/palace"><em>Palace</em></a> solver. This example constructs the geometry used in <a href="https://aws.amazon.com/blogs/quantum-computing/aws-releases-open-source-software-palace-for-cloud-based-electromagnetics-simulations-of-quantum-computing-hardware/">the <em>Palace</em> release documentation</a> and is aimed at demonstrating the power of the <a href="../../schematicdriven/solidmodels/"><code>SolidModels</code></a> capability.</p><p>The full code for this example can be found <a href="https://github.com/aws-cqc/DeviceLayout.jl/blob/main/examples/SingleTransmon/SingleTransmon.jl">in <code>examples/SingleTransmon/SingleTransmon.jl</code> in the <code>DeviceLayout.jl</code> repository</a>. Components and process technology are drawn from the <a href="../examplepdk/">ExamplePDK</a>.</p><h2 id="Overview"><a class="docs-heading-anchor" href="#Overview">Overview</a><a id="Overview-1"></a><a class="docs-heading-anchor-permalink" href="#Overview" title="Permalink"></a></h2><p>The single transmon schematic design is simple, consisting of three components: an <a href="../examplepdk/#Transmons"><code>ExampleRectangleTransmon</code></a>, an <a href="../examplepdk/#ReadoutResonators"><code>ExampleClawedMeanderReadout</code></a>, and a coplanar waveguide path. The path additionally demonstrates how to terminate a path using lumped ports.</p><p>Once the mesh has been generated, <code>configfile(sm::SolidModel; palace_build=nothing)</code> will ingest the <code>SolidModel</code> and return a dictionary representing a <em>Palace</em> configuration. If the optional <code>palace_build</code> directory is also passed then the configuration file will be validated using the <em>Palace</em> provided JSON schema.</p><p>The generated configuration and mesh files can then be run directly from within <code>julia</code> using the <code>palace_job(config::Dict; palace_build, np=0, nt=1)</code> which will write the <code>config</code> to <code>config.json</code> and if <code>np &gt; 0</code> attempt to run the <em>Palace</em> job from within the <code>julia</code> shell mode. If <code>np&gt;0</code> the configuration file will be written to disk ready for a manual call to <em>Palace</em> outside of <code>julia</code>.</p><p>These three functions are all wrapped together in <code>main(palace_build, np=0)</code> which will build the <code>SolidModel</code>, and write the mesh and configuration file to disk, before optionally attempting to run <em>Palace</em>.</p><h2 id="SolidModel-construction"><a class="docs-heading-anchor" href="#SolidModel-construction">SolidModel construction</a><a id="SolidModel-construction-1"></a><a class="docs-heading-anchor-permalink" href="#SolidModel-construction" title="Permalink"></a></h2><p>To run the example we <code>include</code> the <code>example/SingleTransmon/SingleTransmon.jl</code> file and then call <code>single_transmon()</code>. This will construct the schematic and render the design to <code>SolidModel</code>. To visualize the resulting model in <code>Gmsh</code>, we then call <code>SolidModels.gmsh.fltk.run()</code>.</p><pre><code class="language-julia hljs">using DeviceLayout
+include(&quot;examples/SingleTransmon/SingleTransmon.jl&quot;)
+sm = SingleTransmon.single_transmon()
+SolidModels.gmsh.fltk.run() # Opens Gmsh GUI</code></pre><p>Below, we show the mesh for the metal surfaces. You can also (barely) see the lumped ports at the ends of the readout line in red.</p><img src="../../assets/single_transmon_mesh.png"/><p>The function exposes a number of parameters for the definition of the transmon and readout resonator, demonstrating how the kernel for an automated parameter search might be established. Aside from the design parameters there are two processing arguments: <code>save_mesh::Bool</code>, which performs the meshing of the <code>SolidModel</code> and writes the resulting mesh to disk as <code>single_transmon.msh2</code> in the Gmsh 2.2 mesh format, and <code>save_gds::Bool</code>, which generates a GDS of the schematic and writes the resulting design to <code>single_transmon.gds</code>.</p><p>The schematic design is significantly simplied compared to that of the <a href="../qpu17/">quantum processor example</a>, but has the same general structure: the three components are added to the schematic graph and attached to each other before being placed by <code>plan</code> into a floorplan, which is then furnished with air bridges.</p><p>What differs from the processor example is the construction of the <code>SolidModel</code>. When we <code>render!</code> the floorplan to a <code>SolidModel</code>, instead of a <code>LayoutTarget</code> we provide a <a href="../../schematicdriven/solidmodels/#DeviceLayout.SchematicDrivenLayout.SolidModelTarget"><code>SolidModelTarget</code></a> containing information about how to generate the 3D model. The <code>SolidModelTarget</code> is based on this definition from <code>ExamplePDK</code>:</p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    const SINGLECHIP_SOLIDMODEL_TARGET::SolidModelTarget
+
+A `Target` for rendering to a `SolidModel` using the `ExamplePDK`&#39;s process technology.
+
+Contains rendering options and postrendering operations to create a solid model suitable
+for simulation of a single-chip device (as opposed to a flipchip device).
+&quot;&quot;&quot;
+const SINGLECHIP_SOLIDMODEL_TARGET = SolidModelTarget(
+    EXAMPLE_SINGLECHIP_TECHNOLOGY; # Thickness and height define z-height and extrusions
+    simulation=true, # Optional simulation-only geometry entities will be rendered
+    bounding_layers=[:simulated_area], # SIMULATED_AREA defines the simulation bounds
+    substrate_layers=[:chip_area], # CHIP_AREA will be extruded downward
+    indexed_layers=[:port, :lumped_element, :integration], # Automatically index these layers
+    postrender_ops=[ # Manual definition of operations to run after 2D rendering
+        (   # Get metal ground plane by subtracting negative from writeable area
+            &quot;metal&quot;, # Output group name
+            SolidModels.difference_geom!, # Operation
+            (&quot;writeable_area&quot;, &quot;metal_negative&quot;, 2, 2), # (object, tool, object_dim, tool_dim)
+            :remove_object =&gt; true # Remove &quot;writeable_area&quot; group after operation
+        ),
+        (   # Then add any positive back in
+            &quot;metal&quot;,
+            SolidModels.union_geom!,
+            (&quot;metal&quot;, &quot;metal_positive&quot;, 2, 2),
+            :remove_tool =&gt; true
+        ),
+        (   # Define a bulk physical group for all the substrates in the domain.
+            &quot;substrate&quot;,
+            SolidModels.union_geom!,
+            (&quot;chip_area_extrusion&quot;, &quot;chip_area_extrusion&quot;, 3, 3),
+            :remove_object =&gt; true,
+            :remove_tool =&gt; true
+        ),
+        (   # Define the vacuum domain as the remainder of the simulation domain.
+            &quot;vacuum&quot;,
+            SolidModels.difference_geom!,
+            (&quot;simulated_area_extrusion&quot;, &quot;substrate&quot;, 3, 3)
+        ),
+        # Generate staple bridges in &quot;bridge_metal&quot; group
+        SolidModels.staple_bridge_postrendering(;
+            base=&quot;bridge_base&quot;,
+            bridge=&quot;bridge&quot;,
+            bridge_height=10μm # Exaggerated, for visualization
+        )...,
+        (   # Union of all physical metal
+            &quot;metal&quot;,
+            SolidModels.union_geom!,
+            (&quot;metal&quot;, &quot;bridge_metal&quot;),
+            :remove_object =&gt; true,
+            :remove_tool =&gt; true
+        ),
+        ((&quot;metal&quot;, SolidModels.difference_geom!, (&quot;metal&quot;, &quot;port&quot;)))
+    ],
+    # We only want to retain physical groups that we will need for specifying boundary
+    # conditions in the physical domain.
+    retained_physical_groups=[
+        (&quot;vacuum&quot;, 3),
+        (&quot;substrate&quot;, 3),
+        (&quot;metal&quot;, 2),
+        (&quot;exterior_boundary&quot;, 2)
+    ]
+)</code></pre><p>We modify it slightly to retain <code>port_1</code>, <code>port_2</code>, and <code>lumped_element</code> physical groups in order to use those in the simulation configuration.</p><h2 id="Configuration"><a class="docs-heading-anchor" href="#Configuration">Configuration</a><a id="Configuration-1"></a><a class="docs-heading-anchor-permalink" href="#Configuration" title="Permalink"></a></h2><p>Next, we generate a dictionary defining a <em>Palace</em> configuration, specifying the problem type, model, materials, boundary conditions, and solver settings. We can also validate the configuration if we have a path to a <em>Palace</em> build, which contains the schema for validation. For more details on configuration, see <a href="https://awslabs.github.io/palace/stable/config/config/">the <em>Palace</em> documentation</a>.</p><p>For this example, we define most of the configuration by hand. However, we need to identify which materials and boundary conditions apply to which volumes and surfaces in the model.</p><p>By construction, the <code>SolidModel</code> contains physical groups identifying the volumes and surfaces we&#39;re interested in. Using <code>SolidModels.attributes</code>, we can get a dictionary mapping the names of the physical groups to the integer &quot;attribute&quot; identifying the corresponding entities in the mesh. We can then use this dictionary to populate the configuration automatically according to the physical intent behind the model, without having to worry about whether the underlying geometry or attribute numbering might change.</p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    configfile(sm::SolidModel; palace_build=nothing)
+
+Given a `SolidModel`, assemble a dictionary defining a configuration file for use within
+Palace.
+
+  - `sm`: The `SolidModel`from which to construct the configuration file
+  - `palace_build = nothing`: Path to a Palace build directory, used to perform validation of
+    the configuration file. If not present, no validation is performed.
+&quot;&quot;&quot;
+function configfile(sm::SolidModel; palace_build=nothing)
+    attributes = SolidModels.attributes(sm)
+
+    config = Dict(
+        &quot;Problem&quot; =&gt; Dict(
+            &quot;Type&quot; =&gt; &quot;Eigenmode&quot;,
+            &quot;Verbose&quot; =&gt; 2,
+            &quot;Output&quot; =&gt; joinpath(@__DIR__, &quot;postpro/single-transmon&quot;)
+        ),
+        &quot;Model&quot; =&gt; Dict(
+            &quot;Mesh&quot; =&gt; joinpath(@__DIR__, &quot;single_transmon.msh2&quot;),
+            &quot;L0&quot; =&gt; DeviceLayout.ustrip(m, 1SolidModels.STP_UNIT), # um is Palace default; record it anyway
+            &quot;Refinement&quot; =&gt; Dict(
+                &quot;MaxIts&quot; =&gt; 0 # Increase to enable AMR
+            )
+        ),
+        &quot;Domains&quot; =&gt; Dict(
+            &quot;Materials&quot; =&gt; [
+                Dict(
+                    # Vaccuum
+                    &quot;Attributes&quot; =&gt; [attributes[&quot;vacuum&quot;]],
+                    &quot;Permeability&quot; =&gt; 1.0,
+                    &quot;Permittivity&quot; =&gt; 1.0
+                ),
+                Dict(
+                    # Sapphire
+                    &quot;Attributes&quot; =&gt; [attributes[&quot;substrate&quot;]],
+                    &quot;Permeability&quot; =&gt; [0.99999975, 0.99999975, 0.99999979],
+                    &quot;Permittivity&quot; =&gt; [9.3, 9.3, 11.5],
+                    &quot;LossTan&quot; =&gt; [3.0e-5, 3.0e-5, 8.6e-5],
+                    &quot;MaterialAxes&quot; =&gt;
+                        [[0.8, 0.6, 0.0], [-0.6, 0.8, 0.0], [0.0, 0.0, 1.0]]
+                )
+            ],
+            &quot;Postprocessing&quot; =&gt; Dict(
+                &quot;Energy&quot; =&gt; [Dict(&quot;Index&quot; =&gt; 1, &quot;Attributes&quot; =&gt; [attributes[&quot;substrate&quot;]])]
+            )
+        ),
+        &quot;Boundaries&quot; =&gt; Dict(
+            &quot;PEC&quot; =&gt; Dict(&quot;Attributes&quot; =&gt; [attributes[&quot;metal&quot;]]),
+            &quot;Absorbing&quot; =&gt; Dict(
+                &quot;Attributes&quot; =&gt; [attributes[&quot;exterior_boundary&quot;]],
+                &quot;Order&quot; =&gt; 1
+            ),
+            &quot;LumpedPort&quot; =&gt; [
+                Dict(
+                    &quot;Index&quot; =&gt; 1,
+                    &quot;Attributes&quot; =&gt; [attributes[&quot;port_1&quot;]],
+                    &quot;R&quot; =&gt; 50,
+                    &quot;Direction&quot; =&gt; &quot;+X&quot;
+                ),
+                Dict(
+                    &quot;Index&quot; =&gt; 2,
+                    &quot;Attributes&quot; =&gt; [attributes[&quot;port_2&quot;]],
+                    &quot;R&quot; =&gt; 50,
+                    &quot;Direction&quot; =&gt; &quot;+X&quot;
+                ),
+                Dict(
+                    &quot;Index&quot; =&gt; 3,
+                    &quot;Attributes&quot; =&gt; [attributes[&quot;lumped_element&quot;]],
+                    &quot;L&quot; =&gt; 14.860e-9,
+                    &quot;C&quot; =&gt; 5.5e-15,
+                    &quot;Direction&quot; =&gt; &quot;+Y&quot;
+                )
+            ]
+        ),
+        &quot;Solver&quot; =&gt; Dict(
+            &quot;Order&quot; =&gt; 1,
+            &quot;Eigenmode&quot; =&gt; Dict(&quot;N&quot; =&gt; 2, &quot;Tol&quot; =&gt; 1.0e-6, &quot;Target&quot; =&gt; 2, &quot;Save&quot; =&gt; 2),
+            &quot;Linear&quot; =&gt; Dict(&quot;Type&quot; =&gt; &quot;Default&quot;, &quot;Tol&quot; =&gt; 1.0e-7, &quot;MaxIts&quot; =&gt; 500)
+        )
+    )
+
+    if !isnothing(palace_build)
+        # Load the json schema and validate the configuration
+        schema_dir = joinpath(palace_build, &quot;bin&quot;, &quot;schema&quot;)
+        schema = Schema(
+            JSON.parsefile(joinpath(schema_dir, &quot;config-schema.json&quot;));
+            parent_dir=schema_dir
+        )
+        validate(schema, config)
+    end
+
+    return config
+end</code></pre><p>The output should look like this:</p><pre><code class="language-jl hljs">Configuration: 0.000082 seconds (327 allocations: 31.391 KiB)
+Dict{String, Dict{String, Any}} with 5 entries:
+  &quot;Problem&quot;    =&gt; Dict(&quot;Verbose&quot;=&gt;...)
+  &quot;Boundaries&quot; =&gt; Dict(&quot;LumpedPort&quot;=&gt;...)
+  &quot;Model&quot;      =&gt; Dict(&quot;Refinement&quot;=&gt;...)
+  &quot;Domains&quot;    =&gt; Dict(&quot;Postprocessing&quot;=&gt;...)
+  &quot;Solver&quot;     =&gt; Dict(&quot;Eigenmode&quot;=&gt;...)</code></pre><h2 id="*Palace*"><a class="docs-heading-anchor" href="#*Palace*"><em>Palace</em></a><a id="*Palace*-1"></a><a class="docs-heading-anchor-permalink" href="#*Palace*" title="Permalink"></a></h2><p>Finally, we write the configuration to a file, call <em>Palace</em>, and parse the computed eigenfrequencies from its output:</p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    palace_job(config::Dict; palace_build, np=0, nt=1)
+
+Given a configuration dictionary, write and optionally run the Palace simulation.
+
+Writes `config.json` to `@__DIR__` in order to pass the configuration into Palace.
+
+  - `config` - A configuration file defining the required fields for a Palace configuration file
+  - `palace_build` - Path to a Palace build.
+  - `np = 0` - Number of MPI processes to use in the call to Palace. If greater than 0 attempts
+    to call palace from within the Julia shell. Requires correct specification of `ENV[PATH]`.
+  - `nt = 1` - Number of OpenMp threads to use in the call to Palace (requires Palace built with
+    OpenMp)
+&quot;&quot;&quot;
+function palace_job(config::Dict; palace_build, np=0, nt=1)
+    # Write the configuration file to json, ready for Palace ingestion
+    println(&quot;Writing configuration file to $(joinpath(@__DIR__, &quot;config.json&quot;))&quot;)
+    open(joinpath(@__DIR__, &quot;config.json&quot;), &quot;w&quot;) do f
+        return JSON.print(f, config)
+    end
+
+    if np &gt; 0
+        # Call Palace using the generated configuration file.
+        # Record the terminal output and any error to files.
+        println(&quot;Running Palace: stdout sent to log.out, stderr sent to err.out&quot;)
+        withenv(&quot;PATH&quot; =&gt; &quot;$(ENV[&quot;PATH&quot;]):$palace_build/bin&quot;) do
+            return run(
+                pipeline(
+                    ignorestatus(
+                        `palace -np $np -nt $nt $(joinpath(@__DIR__,&quot;config.json&quot;))`
+                    ),
+                    stdout=joinpath(@__DIR__, &quot;log.out&quot;),
+                    stderr=joinpath(@__DIR__, &quot;err.out&quot;)
+                )
+            )
+        end
+        println(&quot;Complete.&quot;)
+
+        # Extract the computed frequencies
+        postprodir = joinpath(@__DIR__, config[&quot;Problem&quot;][&quot;Output&quot;])
+        freq = CSV.File(joinpath(postprodir, &quot;eig.csv&quot;); header=1) |&gt; DataFrame
+
+        println(&quot;Eigenmode Frequencies (GHz): &quot;, freq[:, 2])
+    end
+    return nothing
+end</code></pre><p>The output should look like this:</p><pre><code class="language-jl hljs">Writing configuration file to /path/to/your/config.json
+Running Palace: stdout sent to log.out, stderr sent to err.out
+Complete.
+Eigenmode Frequencies (GHz): [3.161773657, 4.878135762]
+Palace: 52.914418 seconds (669 allocations: 46.422 KiB)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../qpu17/">« Quantum Processor</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.8.1 on <span class="colophon-date" title="Friday 28 February 2025 18:49">Friday 28 February 2025</span>. Using Julia version 1.10.8.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
