@@ -806,7 +806,8 @@ function render!(
         mesh_scale(meshing_parameters.mesh_scale)
         mesh_order(meshing_parameters.mesh_order, meshing_parameters.high_order_optimize)
         mesh_grading_default(meshing_parameters.α_default)
-        @assert meshing_parameters.apply_size_to_surfaces == false
+        meshing_parameters.apply_size_to_surfaces &&
+            @warn "`apply_size_to_surfaces` is deprecated and has no effect"
         gmsh_options["Mesh.Algorithm"] = meshing_parameters.surface_mesh_algorithm
         gmsh_options["Mesh.Algorithm3D"] = meshing_parameters.volume_mesh_algorithm
         merge!(gmsh_options, meshing_parameters.options)

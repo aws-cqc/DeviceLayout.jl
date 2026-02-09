@@ -4,7 +4,7 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Upcoming
+## 1.9.0 (2026-02-09)
 
   - Added `SingleChannelRouting`, which allows multiple paths to be routed in parallel in the same `Channel` (defined by a path with a trace style), entering and exiting the channel in different places
   - Added memoization for B-spline optimization (`auto_speed`), so a given curve only needs `auto_speed` to do any computation once per Julia session
@@ -12,6 +12,7 @@ The format of this changelog is based on
   - Changed default global mesh grading from `0.9` to `0.75` (more robust meshing for complex geometries, relatively small cost)
   - Changed threshold for GDSII layer/datatype number spec warning to 32767; added `GDSWriterOptions` to configure this
   - Fixed `SolidModel` rendering issue where some exterior boundaries might not be tagged
+  - Fixed breaking error with `apply_size_to_surfaces=true` supplied via `MeshingParameters`; it is still deprecated as of 1.8.0 and has no effect, but no longer throws an error
 
 ## 1.8.0 (2026-01-05)
 
@@ -22,7 +23,7 @@ The format of this changelog is based on
     rendering and meshing thereby improving user experience.
 
   - Deprecated `SolidModels.MeshingParameters` in favour of new `mesh_scale`, `mesh_order`,
-    `mesh_grading_default` accessed from `SolidModels`.
+    `mesh_grading_default` accessed from `SolidModels`. Removed `apply_size_to_surfaces`.
   - Improvements to `SolidModels.render!` to improve stability and performance.
     
       + Changed `SolidModels.restrict_to_volume!` to perform a check if the simulation domain
