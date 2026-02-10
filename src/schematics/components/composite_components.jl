@@ -354,8 +354,10 @@ end
 end
 
 function SchematicDrivenLayout._build_subcomponents(cc::MyCompositeComponent)
-    shared_params = filter_parameters(MySubComponent, cc) # Matching with no prefix: (; length=...)
-    subcomp1_overrides = filter_parameters(cc.templates.subcomp1, cc) # Matching with prefix: (; width=...)
+    # Matching with no prefix: (; length=...)
+    shared_params = filter_parameters(MySubComponent, cc)
+    # Matching with prefix: (; width=...)
+    subcomp1_overrides = filter_parameters(cc.templates.subcomp1, cc)
     @component subcomp1 = cc.templates.subcomp1(; subcomp1_overrides..., shared_params...)
     @component subcomp2 = cc.templates.subcomp2(; shared_params...)
     return (subcomp1, subcomp2)

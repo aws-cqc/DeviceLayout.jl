@@ -1,19 +1,19 @@
 # Component Style Guide
 
-This is a style guide for users creating their own DeviceLayout.jl components. The ExamplePDK is meant to demonstrate good style in this sense.
+This is a style guide for users creating their own DeviceLayout.jl components.
 
-For basic Julia style, see [the style guide in the Julia manual](https://docs.julialang.org/en/v1/manual/style-guide/). Broader style questions should follow either [Blue](https://github.com/JuliaDiff/BlueStyle) or [SciML style](https://github.com/SciML/SciMLStyle?tab=readme-ov-file). All contributions to Julia projects should be formatted using [JuliaFormatter.jl](https://github.com/domluna/JuliaFormatter.jl/), with `.JuliaFormatter.toml` settings appropriate to the project's choice of broader style guide. Restricting the JuliaFormatter major version with `] addJuliaFormatter@1` is recommended. For example, DeviceLayout.jl generally follows Blue style, with simple conventions enforced using [a `julia-format` job in GitHub CI](https://github.com/aws-cqc/DeviceLayout.jl/blob/main/.github/workflows/CI.yml) together with the script in [`scripts/format.jl`](https://github.com/aws-cqc/DeviceLayout.jl/blob/main/scripts/format.jl).
+For basic Julia style, see [the style guide in the Julia manual](https://docs.julialang.org/en/v1/manual/style-guide/). Contributions to Julia projects should conform to local conventions, which are often established by a choice of either [Blue](https://github.com/JuliaDiff/BlueStyle) or [SciML style](https://github.com/SciML/SciMLStyle?tab=readme-ov-file). A good way for projects to short-circuit basic style questions is automatic formatting using [Runic.jl](https://github.com/fredrikekre/Runic.jl) or [JuliaFormatter.jl](https://github.com/domluna/JuliaFormatter.jl/). For example, DeviceLayout.jl generally follows Blue style, with simple conventions enforced via JuliaFormatter using [a `julia-format` job in GitHub CI](https://github.com/aws-cqc/DeviceLayout.jl/blob/main/.github/workflows/CI.yml) together with the script in [`scripts/format.jl`](https://github.com/aws-cqc/DeviceLayout.jl/blob/main/scripts/format.jl).
 
-Some topics below, like parameter naming conventions, are important for creating a predictable codebase that can be understood without reading code. Other topics, like how to choose parameterization for components, can have direct benefits in device design.
+Some topics below, like parameter naming conventions, are important for creating a predictable codebase that can be understood without reading code or inspecting GDSII files. Other topics, like how to choose parameterization for components, can have direct benefits in device design. The ExamplePDK is meant to demonstrate good style in this sense, but it does not yet follow all recommendations here.
 
 ## Parameter naming
 
-  - **Use descriptive and meaningful names** that clearly communicate the parameter’s purpose and function. Parameters should be self-documenting, allowing developers to understand their role without examining implementation details.
+  - **Use descriptive and meaningful names** that clearly communicate a parameter’s purpose and function. Parameters should be self-documenting, allowing developers to understand their role without examining implementation details.
     
       + Good: `claw_trace`
       + Bad: `d2` (not descriptive), `claw_width` (which width?)
 
-  - **Maintain consistency** with your team's standards. If there is no established team style convention, maintain consistency in your own contributions throughout your component, project, package, and/or PDK. Once you establish a naming pattern, apply it uniformly to create a predictable and maintainable codebase.
+  - **Maintain consistency** with local standards. If there is no established style convention for your project or team, maintain consistency in your own contributions throughout your component, project, package, and/or PDK. Once you establish a naming pattern, apply it uniformly to create a predictable and maintainable codebase.
   - **Prioritize readability** over brevity. Choose names that are pronounceable and immediately understandable, even if they’re longer. Autocomplete makes length matter less.
     
       + Good: `island_width`
@@ -27,7 +27,7 @@ Some topics below, like parameter naming conventions, are important for creating
 
 ### Hierarchical naming
 
-Use hierarchical naming with underscores to group related parameters and establish clear relationships
+Use hierarchical naming with underscores to group related parameters and establish clear relationships.
 
   - Parameters should be in `snake_case`
 
@@ -39,7 +39,7 @@ Use hierarchical naming with underscores to group related parameters and establi
       + Autocomplete friendly: Typing the feature name shows related parameters
       + Hierarchical clarity: The feature is the primary concept, with dimension as a qualifier
 
-```
+```julia
 # Good: Clear hierarchy and relationships
 island_outer_radius = 135μm
 island_inner_radius = [80, 80, 80, 80, 80]μm
@@ -78,19 +78,23 @@ When naming a feature, ask:
 
 ### Dimensional suffixes in 2D
 
-  - Use suffixes rather than prefixes to indicate dimension: `feature_width` rather than `width_feature`
+Use suffixes rather than prefixes to indicate dimension: `feature_width` rather than `width_feature`. Reach for the following common suffixes first:
 
-  - Reach for the following common suffixes first
-    
-      + `_width`, `_length`, `_x_length`, `_y_length`
-      + `_radius`
-      + `_offset`, `_pitch`, `_gap`, `_spacing`
+  - For **rectangular features**, use `_x_length` and `_y_length`
+  - For **linear features**, use `_length` (primary/extensible dimension) and `_width` (cross-sectional thickness along length)
+  - For **circular features**, use `_radius`
+  - For **CPW-like features**, use `_trace` and `_gap` or (especially if you’re actually drawing it as a Path) `feature_style = Paths.CPW(trace, gap)`
+
+In more detail:
+
   - `_length`:  The primary dimensional extent, as in the longest dimension, the length of a `Path`, the dimension along which the feature would be “extended” from one end, or the dimension along the feature’s “main” axis (e.g., a symmetry axis)
-  - `_width`:The dimension perpendicular to `_length`
+
+  - `_width`: The dimension perpendicular to `_length`
   - `_x_length` or `_y_length`: For rectangular or non-Path-like features, extent along the x axis or y axis in the reference frame of the component
   - `_radius`: The radius of a curve or circle
-  - `_offset`: Linear displacement from a reference position (e.g., centered/aligned: `Align.above(feature_polygon, reference; offset=feature_offset))`)
+  - `_offset`: Linear displacement from a reference position (e.g., centered or aligned)
     
+      + `Align.above(feature_polygon, reference; offset=feature_offset))`
       + If offsetting in both dimensions, use a `Point`
   - `_bias`: Distance to grow a positive shape from each edge (e.g., for `offset(feature_polygon, feature_bias)`)
   - `_pitch`: Center-center distance of repeated features (e.g. bridges on a CPW)
@@ -98,13 +102,10 @@ When naming a feature, ask:
   - `_spacing`: Edge-edge distance in contexts with more than two features (e.g., spacing between edges of bump bonds)
   - `_trace`: The width of a metal strip
   - `_overlap`: How far something extends into another feature/region
-  - For **rectangular features**, use `_x_length` and `_y_length`
-  - For **linear features**, use `_length` (primary/extensible dimension) and `_width` (cross-sectional thickness along length)
-  - For **circular features**, use `_radius`
-  - For **rounded features**, `_rounding` for rounding radius (relative or absolute is determined by unitless/unitful; components should use a type annotation to require one or the other)
+  - `_rounding`: Rounding radius of a corner
     
+      + relative or absolute is determined by unitless/unitful; components should use a type annotation to require one or the other
       + Example: `island_rounding::Float64` if the component is designed to use rounding relative to edge length, or `island_rounding::DeviceLayout.Length` for an absolute rounding radius
-  - For **CPW-like features**, use `_trace` and `_gap` or (especially if you’re actually drawing it as a Path) `feature_style = Paths.CPW(trace, gap)`
   - Rotational suffixes:
     
       + `_direction`: Direction of a path or similar feature, counterclockwise from the positive x axis
@@ -115,31 +116,35 @@ When naming a feature, ask:
       + `_thickness, _height, _depth` (more appropriate for 3D)
       + `_distance` (ambiguous without additional qualifiers like `_center_center` or `_edge_edge`, but acceptable if offset, pitch, gap, spacing don’t apply)
       + `_extent` with respect to Paths: usually you want trace, gap, and length, but if you do use extent, it must be the distance from center line to outer edge of style; that is, `trace/2` for `Paths.Trace` and `trace/2 + gap` for `Paths.CPW` (corresponds to `Paths.extent()` function)
-      + `_extent` in other contexts: Use sparingly to describe dimensions not well captured by the above terms, for example bounding box dimensions of a feature with radial symmetry like the star island (e.g.,  `island_x_extent` feels more natural than `island_width`) — but usually that’s not going to be a parameter unless it’s specifically subject to a design constraint
+      + `_extent` in other contexts: Use sparingly to describe dimensions not well captured by the above terms, for example bounding box dimensions of a feature with radial symmetry like the star island (e.g.,  `island_x_extent` feels more natural than `island_x_length`) — but usually that’s not going to be a parameter unless it’s specifically subject to design intent or constraints
       + `_shift` (prefer `_offset` for linear displacement, unless it can be confused with curve or polygon offsetting)
       + `_diameter` (prefer `_radius`)
 
 ### Suffixes in 3D
 
-  - `_height` — height above a substrate surface
-  - `_thickness` — thickness of an extrusion
-  - `_depth` — e.g. etch/trench depth (thickness of a subtracted extrusion)
-  - `_flipchip_gap` — distance between substrate surfaces on chips facing each other
+  - `_height`: Height above a substrate surface
+  - `_thickness`: Thickness of an extrusion
+  - `_depth`: Thickness of a subtracted or downward extrusion (etch/trench depth)
+  - `_flipchip_gap`: Distance between substrate surfaces on chips facing each other
 
 ### Composite components
 
-  - For parameters passed through to subcomponents
+  - For parameters passed through to subcomponents:
     
       + If the parameter is inherited by multiple subcomponents, use the same name as in the subcomponents
       + If the parameter is used for one specific subcomponent, add prefix for the subcomponent
-      + Use [`SchematicDrivenLayout.filter_parameters`](@ref) to get either a collection of kind of shared parameters
+      + Use [`SchematicDrivenLayout.filter_parameters`](@ref) to get either a collection of kind of
+        shared parameters
 
-  - If you have a large number of parameters to pass through to a subcomponent, or want to maintain flexibility over parameters that are not usually important, use a `templates` NamedTuple parameter
+  - If you have a large number of parameters to pass through to a subcomponent, or want to maintain
+    flexibility over parameters that are not usually important, use a `templates` NamedTuple parameter
     
-      + For each subcomponent, the `templates` NamedTuple contains an instance of the subcomponent type (with the subcomponent name as the key) that provides defaults
-      + Parameters you’d often want to override or reconcile with other parameters are set at the CompositeComponent parameter level
+      + For each subcomponent, the `templates` NamedTuple contains an instance of the subcomponent type
+        (with the subcomponent name as the key) that provides defaults
+      + Parameters you’d often want to override or reconcile with other parameters are set at
+        the CompositeComponent parameter level
 
-Example of template usage in `_build_subcomponents`
+Example of template usage in `_build_subcomponents`:
 
 ```julia
 @component jj = comp.templates.jj begin
@@ -157,17 +162,19 @@ Example with both filtering and templates:
         subcomp2=MySubComponent(; name="subcomp2")
     )
     subcomp1_width = 2mm
-    length = 2mm
+    length = 5mm
 end
 
 @compdef struct MySubComponent <: Component
     width = 1mm
-    length = 1mm
+    length = 5mm
 end
 
 function SchematicDrivenLayout._build_subcomponents(cc::MyCompositeComponent)
-    shared_params = filter_parameters(MySubComponent, cc) # Matching with no prefix: (; length=...)
-    subcomp1_overrides = filter_parameters(cc.templates.subcomp1, cc) # Matching with prefix: (; width=...)
+    # Matching with no prefix: (; length=...)
+    shared_params = filter_parameters(MySubComponent, cc)
+    # Matching with prefix: (; width=...)
+    subcomp1_overrides = filter_parameters(cc.templates.subcomp1, cc)
     @component subcomp1 = cc.templates.subcomp1(; subcomp1_overrides..., shared_params...)
     @component subcomp2 = cc.templates.subcomp2(; shared_params...)
     return (subcomp1, subcomp2)
@@ -178,13 +185,13 @@ end
 
   - Boolean parameters: use past participles or adjectives, e.g. `rounded` instead of `round`, `rounding`, or `is_rounded`
     
-      + (although for rounding specifically you would just set `feature_rounding = 0.0` to turn it off [with or without units depending on whether the component uses relative or absolute rounding])
+      + (although for rounding specifically you would just set `feature_rounding = 0.0` to turn it off, with or without units depending on whether the component uses relative or absolute rounding)
 
   - Angles:
     
       + Use degrees for the default
       + Positive angles are counterclockwise
-  - Arrays/counting
+  - Arrays/counting:
     
       + Count starting with 1
     
@@ -193,9 +200,9 @@ end
         
           * **Generic circular arrangement**: Counterclockwise from the x-axis
         
-          * **Chip ports**: Conform to your packaging convention based on how the chip is placed in a package (IC packages are usually numbered counterclockwise from left end of bottom edge; `ExamplePDK.ChipTemplates` uses clockwise from left end of top edge)
+          * **Chip ports**: Conform to your packaging convention based on how the chip is placed in a package (IC packages are usually numbered counterclockwise from left end of bottom edge; `ExamplePDK.ChipTemplates` ports are numbered clockwise from left end of top edge)
           * **Grids**: Matrix with [Row, Column] starting with [1, 1] in the upper left (maps to Julia matrix literal)
-          * **Pairs** (input/output, start/end): `input_` and `output_` or other verbal descriptors if applicable (even if it’s arbitrary which is which); `_0_` and `_1_` if they correspond to `p0` and `p1` as in the start and end points of a Path; tuple otherwise
+          * **Pairs** (input/output, start/end): `input_` and `output_` or similar descriptors even if it’s arbitrary which is which; `_0_` and `_1_` if they correspond to `p0` and `p1` as in the start and end points of a Path; tuple otherwise
             
               - For two or three things that aren’t input/output pairs, you can use an array/tuple or `_1_, _2_, _3_`, but don’t use the latter if you have multiple numbered collections with unrelated counts
 
@@ -215,19 +222,19 @@ What parameters should you use to describe the component in the first place? The
       + Good: `coupling_length` and `total_length`, such that increasing the coupling length only affects resonator frequency by increasing external loading
       + This can conflict with geometric independence, which takes priority:
         
-          * Bad: `coupling_pad_width` and `effective_length` parameter taking into account estimated capacitive loading of coupling pad, so that `coupling_pad_width` changes the total physical length in order to leave frequency roughly fixed
+          * Bad: `coupling_pad_width` and `effective_length` parameter taking into account estimated capacitive loading of coupling pad, so that `coupling_pad_width` changes the total path length in order to leave frequency roughly fixed (this differs from the `total_length` example above because `effective_length` is not a single, distinct geometric property)
           * Good: Separate parameters for transmission line resonator length and coupling pad size, even though both affect resonant frequency
   - **Design intent preservation**: Parameters should reflect engineering requirements rather than arbitrary geometric relationships — they should capture the “why” behind dimensional choices, not just the “what”
     
       + Bad: A meander parameterized by segment lengths and number of turns
     
       + Good: A meander parameterized by total length and available footprint
-      + Parameters should still describe geometric properties, not physical properties:
+      + Parameters should still describe geometric properties, not functional properties:
         
-          * Bad: Meander `delay` that controls total physical path length based on wave propagation delay (calculated how?)
-          * Good: Meander `total_length` that controls length of physical path directly
-          * Bad: Split resonator length into two degenerate parameters — “total effective length”, which is varied to control the frequency, and “assumed extra effective length” that accounts for bends, bridges, and coupling capacitances, so that you can have a parameter approximately inversely proportional to frequency with as little offset as possible
-          * Good: Make target frequency a device-level parameter rather than a component parameter, from which you compute the required physical length based on tuneup data
+          * Bad: Meander `delay` that controls total path length based on wave propagation delay (calculated how?)
+          * Good: Meander `total_length` that controls length of path directly
+          * Bad: Two degenerate parameters — “total effective length”, which is varied to control the frequency, and “assumed extra effective length” that accounts for bends, bridges, and coupling capacitances — so that you can have a parameter approximately inversely proportional to frequency with as little offset as possible
+          * Good: Make target frequency a device-level parameter rather than a component parameter, from which you compute the required path length based on data
   - **Constraint expression**: It should be easy and natural to describe design rules or constraints on parameters
     
       + Bad: Two features overlap if some complex combination of parameters is negative, creating an invalid geometry
@@ -308,28 +315,25 @@ Docstrings should follow the templates in `Component.jlt` or `CompositeComponent
 
 For a non-composite Component, the docstring looks like this:
 
-```
+```julia
 """
     struct {{{compname}}} <: Component
 
 <One-line description of component.>
-
 <Optional: Longer description of component>
-
 <Optional: Annotated ASCII illustration>
-
 # Parameters
-
   - `name`: Name of component
   - `<p>`: <Parameter description>
   - ...
-
 # Hooks
 
   - `<hook1>`: Description
   - ...
 """
 @compdef struct {{{compname}}} <: Component
+    # ... parameters...
+end
 ```
 
 A CompositeComponent docstring also enumerates its subcomponents with links to their docstrings.
@@ -338,7 +342,7 @@ Any ambiguous parameters or hooks should be documented well enough that they can
 
 ### HTML docs
 
-Docs should at minimum use the template [`Component.mdt` in `DeviceLayout.jl/templates`](https://github.com/aws-cqc/DeviceLayout.jl/blob/main/templates/Component.mdt). You can customize this for your PDK by adding a modified copies to a `templates/` subfolder of your PDK root folder.  This template is automatically used by [`SchematicDrivenLayout.generate_component_package`](@ref).
+Docs should start with the template [`Component.mdt` in `DeviceLayout.jl/templates`](https://github.com/aws-cqc/DeviceLayout.jl/blob/main/templates/Component.mdt). You can customize this for your PDK by adding a modified copy to a `templates/` subfolder of your PDK root folder.  This template is automatically used by [`SchematicDrivenLayout.generate_component_package`](@ref).
 
 The template shows all docstrings in the component package, then runs an `@example` block that creates a default component instance (with hooks shown as labeled arrows), saves it to SVG, and displays it. Additional components added to a package should add a similar example.
 
@@ -358,23 +362,23 @@ Additionally, if there is no ASCII drawing in the docstring, add an image of the
 
 Organize `_geometry!` methods with clear sections and consistent patterns. For example:
 
-```
+```julia
 function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, comp::MyComponent)
     # 1. Extract parameters used in this method body (use destructuring for readability)
     (; param1, param2, param3) = comp
-    
+
     # 2. Create primary geometry
     main_shape = _create_main_geometry(comp)
-    
+
     # 3. Create secondary features
     cutouts = _create_cutouts(comp)
-    
+
     # 4. Apply operations (boolean, rounding, etc.)
     final_shape = _apply_operations(main_shape, cutouts)
-    
+
     # 5. Place geometry with appropriate layers and mesh sizing
-    place!(cs, MeshSized(2*critical_dimension(comp))(final_shape), METAL_NEGATIVE)
-    
+    place!(cs, MeshSized(2 * critical_dimension(comp))(final_shape), METAL_NEGATIVE)
+
     return cs
 end
 ```
@@ -437,7 +441,7 @@ See [the page on Process Design Kits (PDKs)](pdks.md) for general recommendation
     
       + Components go in the same package if and only if they should always be versioned together
     
-      + Example: shunt and series interdigital capacitors both go in InterdigitalCapacitors — they have identical dependencies, share most of their code, and no one should ever have a reason to use v1.1 of the series capacitor with v1.2 of the shunt capacitor
+      + Example: Shunt and series interdigital capacitors both go in InterdigitalCapacitors — they have identical dependencies, share most of their code, and no one should ever have a reason to use v1.1 of the series capacitor with v1.2 of the shunt capacitor
       + Example: A parallel plate capacitor would **not** go in the same package as interdigital capacitors
       + Example: A lumped element resonator that combines an interdigital capacitor with some lumped inductor would **not** go in the same package as either interdigital capacitor (or inductor), since it has more dependencies than either alone
         
@@ -455,7 +459,7 @@ See [the page on Process Design Kits (PDKs)](pdks.md) for general recommendation
   - Component package names should usually be plural
     
       + Examples: `StarTransmons`, `ClawCapacitors`, `ChipTemplates`
-      + Rare exceptions: `MultiChipIntegration` (a package with various components that are part of a "system")
+      + Rare exceptions: `FlipChipIntegration` (a package with various components that are part of a "system")
   - Component packages can contain multiple components if those components should always be versioned together (e.g., they share code or always form a composite component together)
     
       + Bad: `Capacitors` package containing both interdigital and claw capacitors
@@ -463,7 +467,7 @@ See [the page on Process Design Kits (PDKs)](pdks.md) for general recommendation
   - Names should avoid obscure abbreviations, numbers, and subjective descriptions
     
       + Abbreviations that any quantum or electrical engineer should know are acceptable (“CPW”)
-      + Bad: `LongSideSpGapNegative`
+      + Bad: `LongSideSp80GapNegative`
       + Good: `ImpedanceMatchedCPWLauncher`
   - Components should not be named greedily—don’t call a component “Qubit,” because the name is too valuable. Examples:
     
@@ -486,9 +490,9 @@ See [the page on Process Design Kits (PDKs)](pdks.md) for general recommendation
 
 ## Component composition
 
-What do you choose to be a component in the first place? Where do you draw the boundaries of composite components?
+What do you choose to be a component in the first place? Where do you draw the boundaries between parts of composite components?
 
-As a layout abstraction, `AbstractComponent` is a parameterized geometry with default parameters and special attachment points (hooks). The interface also provides a couple other conveniences, like the `default_parameters` function, the ability to use a component instance as a template constructor (e.g., to locally customize defaults), and (if defined with `@compdef`) storing the geometry after it is first computed.
+As a layout abstraction, `AbstractComponent` is a parameterized geometry with default parameters and special attachment points (hooks). The interface also provides a few other conveniences, like the `default_parameters` function, the ability to use a component instance as a template constructor (e.g., to locally customize defaults), and (if defined with `@compdef`) storing the geometry after it is first computed.
 
 Meanwhile, `AbstractComponent` does not have necessarily satisfy any functional/physical contract — for example, hooks do not have to be electrical "pins" or "ports". However, a component will be used as a schematic-level abstraction, allowing us to assign meaning to its presence in a device and to its connections to other components.
 
@@ -500,12 +504,14 @@ You should not create a `Component` for every unit of reusable parameterized geo
   - It has no special attachment/alignment points ([bounding-box alignment methods](../transformations.md#Alignment) are sufficient)
   - It has no independent physical meaning
 
-Anything more complicated or semantically rich is a candidate for a `Component`.
+Anything more complicated or meaningful is a candidate for a `Component`.
 
-Meanwhile, to take advantage of the schematic level of abstraction, aim to delineate components or composite components such that they are meaningful at that level. For example, you might want to be able to build simulation models for individual components or small groups of components based on subgraphs of your schematic graph. In that case, at least for components at the top level in a schematic, something like one of the following should be approximately true:
+Choose definitions for components or composite components that help you take advantage of the schematic level of abstraction. For example, you may have different small elements that can be swapped in and out of a larger structure, like junction types in a transmon; in that case, you would organize the transmon as a composite component with an island subcomponent and a choice of junction subcomponents. The [ExamplePDK transmons](../examples/examplepdk.md#Transmons) accomplish this with a template parameter that can be either a single junction or a SQUID component.
+
+As another example, you might want to be able to build simulation models for individual components or small groups of components based on subgraphs of your schematic graph. In that case, at least for components at the top level in a schematic, something like one of the following should be approximately true:
 
   - It has some independent physical or functional meaning
-  - It is a minimal unit that can be meaningfully simulated
+  - It is a minimal unit for a useful simulation
   - It can be associated with an RF network with ports, which could be cascaded with other components' RF networks based on schematic connections
   - It can be associated with a netlist, such that netlist nodes could be identified and elements (like capacitances and inductances) quantified, and then composed with other components' netlists based on schematic connections
 
