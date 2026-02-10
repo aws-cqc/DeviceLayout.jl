@@ -132,10 +132,10 @@ function resolve_periodic(seg::Paths.Segment{T}, sty::PeriodicStyle) where {T}
         # Handle nonzero l_into_next_cycle (e.g., started midcycle and is too short for one segment)
         start = iszero(l_into_next_style) ? nothing : l_into_next_style
         substy = sty.styles[next_style_idx]
-        if remaining_length < next_style_length
+        if remaining_length ≈ next_style_length
+            substy = pin(substy, start=start) # no stop
+        else # stop early
             substy = pin(substy, start=start, stop=l_into_next_style + remaining_length)
-        else
-            substy = pin(substy, start=start)
         end
         push!(subsegs, remainder)
         push!(substys, substy)
@@ -185,11 +185,7 @@ function _refs(seg::Paths.Segment{T}, sty::PeriodicStyle) where {T}
     # Expand periodic references to allow calculation without splitting `seg`
     ts, dirs, refs = _expand_periodic_decorations(seg, sty)
     # Base style unwraps DecoratedStyle but doesn't use `undecorated` because that removes overlays
-    without_attachments = map(sty.styles) do substy # without attachments but with overlays
-        substy isa DecoratedStyle && return substy.s
-        return substy
-    end
-    base_sty = PeriodicStyle(without_attachments, sty.lengths, sty.l0)
+    base_sty = PeriodicStyle(without_attachments.(sty.styles), sty.lengths, sty.l0)
     return _refs(seg, DecoratedStyle{T}(base_sty, ts, dirs, refs))
 end
 
