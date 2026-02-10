@@ -1346,7 +1346,6 @@ function _add_curve!(endpoints, seg::Paths.Turn, k::OpenCascade, z; kwargs...)
         return k.add_circle_arc.(tags[1:(end - 1)], cen, tags[2:end], -1)
     end
 
-    @show seg
     return k.add_circle_arc(endpoints[1], cen, endpoints[2], -1)
 end
 

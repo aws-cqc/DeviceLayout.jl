@@ -68,6 +68,16 @@ end
 function rounded_transition_width(s, w0, w1, taper_length, radius)
     # x from midpoint
     x = s - taper_length / 2
+    # Because the rounded transition can be constructed from two segments,
+    # we have to make sure that the two segments are drawn so that they each have
+    # identical points where they connect, to avoid 1nm gaps.
+    # But when the taper is ~90°, there is a discontinuous jump in width right where
+    # the segments meet.
+    # To avoid slivers, we want the wider section to end with points that
+    # match the narrow section. If we start with the wider section, then we end on `x==0`
+    # and take the narrow (`else`) branch as desired. If we start with the narrow section (`w0 < w1`)
+    # we ensure that the wider section starts with those coordinates by having the
+    # wider section start at `epsilon` rather than `0`.
     epsilon = DeviceLayout.onenanometer(x)
     if x < zero(x) || (abs(x) < epsilon && w0 < w1) # Wider section duplicates the narrow points
         return w0 -
@@ -115,8 +125,8 @@ function round_trace_transitions!(pa::Path; α_max=60°, radius=nothing)
             taper_α_max = 2 * acot(2 * taper_length / dw)
             if taper_α_max >= 90°
                 !warned &&
-                    @warn """Rounded trace transition at $(p0(node.seg)) has discontinuous trace width (90° taper angle), 
-             which can cause numerical issues in some operations, including SolidModel rendering. 
+                    @warn """Rounded trace transition at $(p0(node.seg)) on $(pa.name) has discontinuous trace width (90° taper angle),
+             which can cause numerical issues in some operations, including SolidModel rendering.
              To avoid this, taper length $taper_length must be strictly greater than `abs(width_start - width_end) = $dw`.
              Further warnings on this path will be suppressed."""
                 warned = true
@@ -145,7 +155,7 @@ function round_trace_transitions!(pa::Path; α_max=60°, radius=nothing)
             if !isnothing(radius) # Explicitly specified radius overrides α_max
                 if radius <= dw / 4 # Radius is too sharp
                     !warned &&
-                        @warn """Rounded trace transition at $(p0(pa[idx_1].seg)) has discontinuous trace width (90° taper angle), 
+                        @warn """Rounded trace transition at $(p0(pa[idx_1].seg)) on $(pa.name) has discontinuous trace width (90° taper angle),
                  which can cause numerical issues in some operations, including SolidModel rendering. 
                  To avoid this, `radius` ($radius) must be strictly greater than `abs(width_start - width_end)/4 = $(dw/4)`.
                  Further warnings on this path will be suppressed."""
