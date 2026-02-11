@@ -595,7 +595,7 @@ end
 function bounds(
     ref::ArrayReference{S, U}
 ) where {T, S <: Coordinate, U <: GeometryStructure{T}}
-    b = bounds(structure(ref))::Rectangle{S}
+    b = bounds(structure(ref))
     a = transformation(ref)
     bb = bounds(a(b))
 
