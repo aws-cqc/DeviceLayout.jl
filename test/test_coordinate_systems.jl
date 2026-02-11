@@ -318,6 +318,12 @@
             [(XReflection() ∘ Translation(5μm, 2μm))(refs(cs2)[end])]
         )
         @test bounds(flatten(Cell(cs5))) == XReflection()(Rectangle(50μm, 4μm))
+
+        # Mismatch structure and reference coordinate types
+        c = Cell{typeof(1.0nm)}("test")
+        render!(c, centered(Rectangle(2mm, 2mm)))
+        ref = aref(c, (-5:5)mm, (0:0)mm)
+        @test bounds(ref) == Rectangle(Point(-6, -1)mm, Point(6, 1)mm)
     end
 
     @testset "Flattening" begin
