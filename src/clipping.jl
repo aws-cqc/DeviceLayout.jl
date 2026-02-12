@@ -1166,7 +1166,7 @@ for func in ("union2d", "difference2d", "intersect2d", "xor2d")
 
     Entities in references up to a depth of `depth` are included, where `depth=0` uses only top-level entities in `obj` and `tool`.
     Depth is unlimited by default.
-    
+
     See also [`$(func)`](@ref).
 
     # Tiling
