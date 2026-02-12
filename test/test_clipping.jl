@@ -955,14 +955,14 @@ end
     place!(c2, r1, lyr_b)
     place!(c2, r2, lyr_a)
 
-    @test isempty(to_polygons(xor2d_layerwise(c1, c1)[lyr_a]))
-    @test isempty(to_polygons(xor2d_layerwise(c1, c1)[lyr_b]))
-    @test xor2d_layerwise(c1, c2)[lyr_a] == x
-    @test xor2d_layerwise(c1, c2)[lyr_b] == x
-    @test difference2d_layerwise(c1, c2)[lyr_a] == d1
-    @test difference2d_layerwise(c1, c2)[lyr_b] == d2
-    @test union2d_layerwise(c1, c2)[lyr_a] == uni
-    @test intersect2d_layerwise(c1, c2)[lyr_b] == overlap
+    @test isempty(to_polygons(xor2d_layerwise(c1, c1)[lyr_a][1]))
+    @test isempty(to_polygons(xor2d_layerwise(c1, c1)[lyr_b][1]))
+    @test xor2d_layerwise(c1, c2)[lyr_a][1] == x
+    @test xor2d_layerwise(c1, c2)[lyr_b][1] == x
+    @test difference2d_layerwise(c1, c2)[lyr_a][1] == d1
+    @test difference2d_layerwise(c1, c2)[lyr_b][1] == d2
+    @test union2d_layerwise(c1, c2)[lyr_a][1] == uni
+    @test intersect2d_layerwise(c1, c2)[lyr_b][1] == overlap
 
     # Findbox
     @test findbox(r1, [r1, r2]) == [1]
@@ -976,7 +976,7 @@ end
     addref!(ca_1, aref(c1, 100μm * (-1:1), 100μm * (-1:1)))
     addref!(ca_2, aref(c2, 100μm * (-1:1), 100μm * (-1:1)))
     xa = xor2d_layerwise(ca_1, ca_2)
-    xa_tiled = xor2d_layerwise(ca_1, ca_2, max_tile_size=100μm)
+    xa_tiled = xor2d_layerwise(ca_1, ca_2, tile_size=99μm)
     @test length(xa_tiled[lyr_a]) == 3 * 3
     @test length(xa_tiled[lyr_b]) == 3 * 3
     @test length(vcat(to_polygons.(xa_tiled[lyr_a])...)) == 3 * 3 * 2
