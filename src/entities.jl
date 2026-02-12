@@ -434,12 +434,12 @@ end
     findbox(box, geoms; intersects=false)
     findbox(box, tree::SpatialIndexing.RTree; intersects=false)
 
-Return `indices` such that `geoms[indices]` gives all elements of `geoms` with minimum bounding rectangle intersecting `bounds(box)`.
+Return `indices` such that `geoms[indices]` gives all elements of `geoms` with minimum bounding rectangle contained in `bounds(box)`.
 
 A spatial index created with [`mbr_spatial_index(geoms)`](@ref) can be supplied explicitly to avoid re-indexing for multiple `findbox` operations.
 
 By default, `findbox` will find only entities with bounds contained in `bounds(box)`. If `intersects` is `true`,
-it also includes entities with bounds intersecting `bounds(box)`.
+it also includes entities with bounds intersecting `bounds(box)` (including those only touching edge-to-edge).
 """
 function findbox(box, geoms; intersects=false)
     tree = mbr_spatial_index(geoms)
