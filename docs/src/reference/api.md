@@ -33,6 +33,8 @@
     lowerleft(::DeviceLayout.GeometryEntity)
     upperright(::DeviceLayout.GeometryEntity)
     transform
+    findbox
+    mbr_spatial_index
 ```
 
 ### [GeometryEntity](@id api-geometryentity)
@@ -158,9 +160,11 @@
     Polygon(::AbstractVector{Point{T}}) where {T}
     Polygon(::Point, ::Point, ::Point, ::Point...)
     Rectangle
+    Polygons.area
     bounds
     circle_polygon
     gridpoints_in_polygon
+    Polygons.is_sliver
     offset
     perimeter
     points
