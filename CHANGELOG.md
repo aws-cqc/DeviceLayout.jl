@@ -17,6 +17,7 @@ The format of this changelog is based on
     associated with an array of geometries, which can be used directly with `findbox` to avoid re-indexing for multiple `findbox` calls
   - Fixed bug where `map_metadata!` would map multiply-referenced structures multiple times
   - Fixed bug where `@composite_variant` would not forward `map_hooks` to base variant when defined with component instance rather than type
+  - Fixed overly-strict argument types for polygon clipping methods
 
 ## 1.9.0 (2026-02-09)
 
