@@ -1257,8 +1257,8 @@ function clip_layerwise(
     end
     obj_flat = DeviceLayout.flatten(obj; metadata_filter, depth)
     tool_flat = DeviceLayout.flatten(tool; metadata_filter, depth)
-    obj_metas = unique(DeviceLayout.element_metadata(obj))
-    tool_metas = unique(DeviceLayout.element_metadata(tool))
+    obj_metas = unique(DeviceLayout.element_metadata(obj_flat))
+    tool_metas = unique(DeviceLayout.element_metadata(tool_flat))
     all_metas = unique([obj_metas; tool_metas])
     if isnothing(max_tile_size)
         res = Dict(
@@ -1284,7 +1284,7 @@ function clip_layerwise(
                 DeviceLayout.elements(tool_flat)[DeviceLayout.element_metadata(
                     tool_flat
                 ) .== meta],
-                max_tile_size=max_tile_size,
+                max_tile_size,
                 pfs=pfs,
                 pfc=pfc
             ) for meta in all_metas
@@ -1319,8 +1319,8 @@ end
 
 function clip_tiled(
     op,
-    ents1::AbstractArray{GeometryEntity{T}},
-    ents2::AbstractArray{GeometryEntity{T}},
+    ents1::AbstractArray{<:GeometryEntity{T}},
+    ents2::AbstractArray{<:GeometryEntity{T}},
     max_tile_size=1000 * DeviceLayout.onemicron(T);
     pfs=Clipper.PolyFillTypeEvenOdd,
     pfc=Clipper.PolyFillTypeEvenOdd

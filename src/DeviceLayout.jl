@@ -385,8 +385,10 @@ import .Polygons:
     clip,
     cliptree,
     difference2d,
+    difference2d_layerwise,
     gridpoints_in_polygon,
     intersect2d,
+    intersect2d_layerwise,
     offset,
     perimeter,
     points,
@@ -395,7 +397,9 @@ import .Polygons:
     sweep_poly,
     unfold,
     union2d,
-    xor2d
+    union2d_layerwise,
+    xor2d,
+    xor2d_layerwise
 export Polygons,
     Polygon,
     Ellipse,
@@ -411,8 +415,10 @@ export Polygons,
     clip,
     cliptree,
     difference2d,
+    difference2d_layerwise,
     gridpoints_in_polygon,
     intersect2d,
+    intersect2d_layerwise,
     offset,
     perimeter,
     points,
@@ -421,7 +427,9 @@ export Polygons,
     sweep_poly,
     unfold,
     union2d,
-    xor2d
+    union2d_layerwise,
+    xor2d,
+    xor2d_layerwise
 
 include("align.jl")
 using .Align
