@@ -920,3 +920,42 @@ end
     # Ensure the curve_start_idx are sorted absolutely
     @test issorted(abs.(rcp.curve_start_idx))
 end
+
+@testitem "Layerwise clipping" setup = [CommonTestSetup] begin
+    c1 = CoordinateSystem("test1")
+    c2 = CoordinateSystem("test2")
+    r1 = Rectangle(10μm, 10μm)
+    r2 = r1 + Point(5μm, 5μm)
+    overlap = intersect2d(r1, r2)
+    x = xor2d(r1, r2)
+    d1 = difference2d(r1, r2)
+    d2 = difference2d(r2, r1)
+    uni = union2d(r1, r2)
+    lyr_a = SemanticMeta(:a)
+    lyr_b = SemanticMeta(:b)
+    place!(c1, r1, lyr_a)
+    place!(c1, r2, lyr_b)
+    place!(c2, r1, lyr_b)
+    place!(c2, r2, lyr_a)
+
+    @test isempty(to_polygons(xor2d_layerwise(c1, c1)[lyr_a]))
+    @test isempty(to_polygons(xor2d_layerwise(c1, c1)[lyr_b]))
+    @test xor2d_layerwise(c1, c2)[lyr_a] == x
+    @test xor2d_layerwise(c1, c2)[lyr_b] == x
+    @test difference2d_layerwise(c1, c2)[lyr_a] == d1
+    @test difference2d_layerwise(c1, c2)[lyr_b] == d2
+    @test union2d_layerwise(c1, c2)[lyr_a] == uni
+    @test intersect2d_layerwise(c1, c2)[lyr_b] == overlap
+
+    # Tiling
+    ca_1 = CoordinateSystem("array1")
+    ca_2 = CoordinateSystem("array2")
+    addref!(ca_1, aref(c1, 100μm * (-1:1), 100μm * (-1:1)))
+    addref!(ca_2, aref(c2, 100μm * (-1:1), 100μm * (-1:1)))
+    xa = xor2d_layerwise(ca_1, ca_2)
+    xa_tiled = xor2d_layerwise(ca_1, ca_2, max_tile_size=100μm)
+    @test length(xa_tiled[lyr_a]) == 3 * 3
+    @test length(xa_tiled[lyr_b]) == 3 * 3
+    @test length(vcat(to_polygons.(xa_tiled[lyr_a])...)) == 3 * 3 * 2
+    @test isempty(to_polygons(xor2d(vcat(xa_tiled[lyr_a]...), xa[lyr_a])))
+end

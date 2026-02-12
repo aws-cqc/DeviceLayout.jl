@@ -594,14 +594,9 @@ end
     @test length(points(circ_default)) == length(circular_arc(2pi, 1.0μm, 1.0nm)) - 1 # last pt duplicated
 
     # Make sure error is as small as tolerance says
-    area(p) =
-        sum(
-            (gety.(p.p) + gety.(circshift(p.p, -1))) .*
-            (getx.(p.p) - getx.(circshift(p.p, -1)))
-        ) / 2
     e_fine = to_polygons(e; atol=0.1nm)
     poly = to_polygons(difference2d(e_fine, e_default))[1]
-    @test abs(area(poly) / perimeter(poly)) < 1nm # on average better than 1nm
+    @test Polygons.is_sliver(poly; atol=1nm) # on average better than 1nm (area/perimeter)
 
     # Last two points are not too close together
     poly = points(to_polygons(e, atol=60nm))

@@ -85,6 +85,8 @@ export circle,
     union2d,
     xor2d
 
+export difference2d_layerwise, intersect2d_layerwise, union2d_layerwise, xor2d_layerwise
+
 const USCALE = 1.0 * Unitful.fm
 const SCALE  = 10.0^9
 
@@ -521,6 +523,18 @@ function perimeter(e::Ellipse)
     a = maximum(e.radii)
     b = minimum(e.radii)
     return π * ((a + b) + 3 * (a - b)^2 / (10 * (a + b) + sqrt(a^2 + 14 * a * b + b^2)))
+end
+
+function signed_area(p::Polygon) # Can be negative
+    return sum(
+        (gety.(p.p) + gety.(circshift(p.p, -1))) .*
+        (getx.(p.p) - getx.(circshift(p.p, -1)))
+    ) / 2
+end
+area(p::Polygon) = abs(signed_area(p))
+
+function is_sliver(p::Polygon{T}; atol=DeviceLayout.onenanometer(T)) where {T}
+    return area(p) / perimeter(p) < atol
 end
 
 """

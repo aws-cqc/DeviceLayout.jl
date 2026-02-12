@@ -986,6 +986,14 @@ end
         @test Polygons.orientation(halo(dr1, 0.1μm)[2]) == -1 # still has a hole
         @test footprint(union2d(r1, r1 + Point(40, 0)μm)) isa Rectangle # multipolygon => use bounds
         @test halo(union2d(r3), 1μm, -0.5μm) == dr1 # ClippedPolygon halo with inner delta
+
+        @test Polygons.area(to_polygons(difference2d(r3, r4))[1]) ==
+              Polygons.area(to_polygons(r3)) - Polygons.area(to_polygons(r4))
+        @test Polygons.is_sliver(
+            to_polygons(difference2d(r3, r3 + Point(5, 5)nm))[1];
+            atol=10nm
+        )
+        @test !Polygons.is_sliver(to_polygons(difference2d(r3, r3 + Point(5, 5)nm))[1]) # default 1nm
     end
 end
 
