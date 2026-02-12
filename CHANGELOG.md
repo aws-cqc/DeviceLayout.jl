@@ -11,6 +11,7 @@ The format of this changelog is based on
   - Added `findbox(box, geoms; intersects=false)` for finding all elements of `geoms` whose bounding box is contained in or intersects `bounds(box)`
   - Added `mbr_spatial_index` for creating an R-tree of minimum bounding rectangles
     associated with an array of geometries, which can be used directly with `findbox` to avoid re-indexing for multiple `findbox` calls
+  - Fixed overly-strict argument types for polygon clipping methods
 
 ## 1.9.0 (2026-02-09)
 
