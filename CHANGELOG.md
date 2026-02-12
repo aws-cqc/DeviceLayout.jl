@@ -10,6 +10,11 @@ The format of this changelog is based on
   - Added component style guide to docs
   - Added `rename_duplicates` option to `GDSWriterOptions`
   - Added experimental Text entity support to graphics backend
+  - Added layerwise Booleans `union2d_layerwise`, `difference2d_layerwise`, `intersect2d_layerwise`, and `xor2d_layerwise`
+  - Added `Polygons.area` and `Polygons.is_sliver`
+  - Added `findbox(box, geoms; intersects=false)` for finding all elements of `geoms` whose bounding box is contained in or intersects `bounds(box)`
+  - Added `mbr_spatial_index` for creating an R-tree of minimum bounding rectangles
+    associated with an array of geometries, which can be used directly with `findbox` to avoid re-indexing for multiple `findbox` calls
   - Fixed bug where `map_metadata!` would map multiply-referenced structures multiple times
   - Fixed bug where `@composite_variant` would not forward `map_hooks` to base variant when defined with component instance rather than type
 

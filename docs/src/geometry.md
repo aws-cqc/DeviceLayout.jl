@@ -10,6 +10,8 @@ Any `AbstractGeometry` subtype will have a bounding box and associated methods. 
     lowerleft
     upperright
     footprint
+    findbox
+    mbr_spatial_index
 ```
 
 There are three important subtypes of `AbstractGeometry`: `GeometryEntity`, `GeometryStructure`, and `GeometryReference`.
