@@ -531,8 +531,19 @@ function signed_area(p::Polygon) # Can be negative
         (getx.(p.p) - getx.(circshift(p.p, -1)))
     ) / 2
 end
+
+"""
+    area(poly::Polygon)
+
+Area of a non-self-intersecting polygon. Always positive.
+"""
 area(p::Polygon) = abs(signed_area(p))
 
+"""
+    is_sliver(p::Polygon{T}; atol=DeviceLayout.onenanometer(T))
+
+Return `true` if `area(p) / perimeter(p) < atol`, and `false` otherwise.
+"""
 function is_sliver(p::Polygon{T}; atol=DeviceLayout.onenanometer(T)) where {T}
     return area(p) / perimeter(p) < atol
 end
