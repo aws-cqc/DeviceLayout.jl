@@ -408,8 +408,8 @@ halo(aent::ArrayEntity, outer_delta, inner_delta=nothing) =
 function SpatialIndexing.mbr(ent::AbstractGeometry{T}) where {T}
     r = bounds(ent)
     return SpatialIndexing.Rect(
-        (ustrip(unit(onemicron(T)), r.ll)...,),
-        (ustrip(unit(onemicron(T)), r.ur)...,)
+        (ustrip(unit(onemicron(T)), float.(r.ll))...,),
+        (ustrip(unit(onemicron(T)), float.(r.ur))...,)
     )
 end
 

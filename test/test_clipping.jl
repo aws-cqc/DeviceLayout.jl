@@ -941,7 +941,7 @@ end
 @testitem "Layerwise clipping" setup = [CommonTestSetup] begin
     c1 = CoordinateSystem("test1")
     c2 = CoordinateSystem("test2")
-    r1 = Rectangle(10.0μm, 10.0μm)
+    r1 = Rectangle(10μm, 10μm)
     r2 = r1 + Point(5μm, 5μm)
     overlap = intersect2d(r1, r2)
     x = xor2d(r1, r2)
