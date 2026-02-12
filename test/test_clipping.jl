@@ -479,6 +479,23 @@
         pp = Point.([(185.0, -100.0), (300.0, -215.0), (300.0, -185.0), (215.0, -100.0)])
         @test Polygons.orientation(Polygon(pp)) == 1
     end
+
+    @testset "> Mixed argument types" begin
+        p1 = Rectangle(1mm, 1mm)
+        p2 = centered(Rectangle(1µm, 1µm))
+        # Clipped polygons with mixed units
+        p1_clip = union2d(p1)
+        p2_clip = union2d(p2)
+        @test union2d([p1_clip, p2_clip]) == union2d([p1, p2])
+        # add in a GeometryStructure
+        cs = CoordinateSystem("test")
+        place!(cs, p2, :test)
+        @test coordinatetype(cs => :test) == coordinatetype(cs)
+        @test union2d(cs => :test) == p2_clip
+        @test union2d([p1, cs => :test]) == union2d([p1, p2])
+        @test union2d(p1, cs => :test) == union2d([p1, p2])
+        @test union2d(p1, [cs => :test]) == union2d([p1, p2])
+    end
 end
 
 @testitem "Polygon offsetting" setup = [CommonTestSetup] begin
@@ -924,7 +941,7 @@ end
 @testitem "Layerwise clipping" setup = [CommonTestSetup] begin
     c1 = CoordinateSystem("test1")
     c2 = CoordinateSystem("test2")
-    r1 = Rectangle(10μm, 10μm)
+    r1 = Rectangle(10.0μm, 10.0μm)
     r2 = r1 + Point(5μm, 5μm)
     overlap = intersect2d(r1, r2)
     x = xor2d(r1, r2)
@@ -946,6 +963,12 @@ end
     @test difference2d_layerwise(c1, c2)[lyr_b] == d2
     @test union2d_layerwise(c1, c2)[lyr_a] == uni
     @test intersect2d_layerwise(c1, c2)[lyr_b] == overlap
+
+    # Findbox
+    @test findbox(r1, [r1, r2]) == [1]
+    @test findbox(r1, [r1, r2]; intersects=true) == [1, 2]
+    @test findbox(r1, [c1]) == []
+    @test findbox(r1, [r1, c1], intersects=true) == [1, 2]
 
     # Tiling
     ca_1 = CoordinateSystem("array1")
