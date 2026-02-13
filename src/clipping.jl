@@ -88,15 +88,10 @@ function clip(
     s::AbstractVector{Polygon{T}},
     c::AbstractVector{Polygon{T}};
     pfs::Clipper.PolyFillType=Clipper.PolyFillTypeEvenOdd,
-    pfc::Clipper.PolyFillType=Clipper.PolyFillTypeEvenOdd,
-    tiled=false
+    pfc::Clipper.PolyFillType=Clipper.PolyFillTypeEvenOdd
 ) where {T}
     sc, cc = clipperize(s), clipperize(c)
-    polys = if !tiled
-        _clip(op, sc, cc; pfs, pfc)
-    else
-        _clip_tiled(op, sc, cc; pfs, pfc)
-    end
+    polys = _clip(op, sc, cc; pfs, pfc)
     return declipperize(polys, T)
 end
 
@@ -1258,7 +1253,7 @@ function tiles_and_edges(r::Rectangle, tile_size)
         Rectangle(
             Point(r.ll.x, r.ll.y + (i - 1) * tile_size),
             Point(r.ur.x, r.ll.y + (i - 1) * tile_size)
-        ) for i = 2:nx
+        ) for i = 2:ny
     ]
     v_edges = [
         Rectangle(
