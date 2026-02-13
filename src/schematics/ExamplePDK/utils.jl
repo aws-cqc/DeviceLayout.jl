@@ -229,5 +229,5 @@ function path_intersections(path::Path, trans, bounding_box::Rectangle)
     return out
 end
 
-const filter_params = filter_parameters # For backward compatibility
+@deprecate filter_params filter_parameters # For backward compatibility
 # (No one should be using methods from ExamplePDK but just in case)

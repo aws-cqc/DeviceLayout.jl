@@ -384,19 +384,23 @@ end
 
 function _filter_parameters(subcomp, comp, prefix, except)
     if isempty(prefix)
-        return filter(
+        result = filter(
             kv ->
                 first(kv) in parameter_names(subcomp) &&
                     !(first(kv) in except) &&
                     !(first(kv) == :name),
             pairs(parameters(comp))
         )
+        isempty(result) && @warn "No shared parameters found in $(typeof(subcomp)) and $(typeof(comp))"
+        return result
     end
 
     prefixed_params = filter(
         kv -> startswith(string(first(kv)), prefix) && !(first(kv) in except),
         pairs(parameters(comp))
     )
+    isempty(prefixed_params) && @warn "No parameters of $(typeof(subcomp)) found with prefix '$prefix' in $(typeof(comp))"
+
     unprefixed_params = map(collect(pairs(prefixed_params))) do (prefixed_name, value)
         unprefixed_name =
             Symbol(only(split(string(prefixed_name), prefix; limit=2, keepempty=false)))

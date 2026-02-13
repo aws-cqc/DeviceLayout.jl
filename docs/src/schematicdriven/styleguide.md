@@ -161,12 +161,12 @@ Example with both filtering and templates:
         subcomp2=MySubComponent(; name="subcomp2")
     )
     subcomp1_width = 2mm
-    length = 5mm
+    length = 2mm
 end
 
 @compdef struct MySubComponent <: Component
     width = 1mm
-    length = 5mm
+    length = 2mm
 end
 
 function SchematicDrivenLayout._build_subcomponents(cc::MyCompositeComponent)
