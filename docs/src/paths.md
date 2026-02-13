@@ -280,6 +280,7 @@ nothing; # hide
     meander!
     overlay!
     reconcile!
+    Paths.round_trace_transitions!
     simplify
     simplify!
     straight!
@@ -374,4 +375,5 @@ nothing; # hide
     Paths.GeneralStrands
     Paths.CompoundStyle
     Paths.DecoratedStyle
+    Paths.PeriodicStyle
 ```

@@ -352,10 +352,11 @@ function to_primitives(
     s::Paths.Style;
     kwargs...
 ) where {T}
+    iszero(Paths.pathlength(f)) &&
+        return Union{CurvilinearPolygon{T}, CurvilinearRegion{T}}[]
     return pathtopolys(f, s; kwargs...)
 end
 
-# Need this so we don't send `Rounded` from termination to `pathtopolys`
 function to_primitives(
     sm::SolidModel,
     f::Paths.CompoundSegment{T},
@@ -365,10 +366,55 @@ function to_primitives(
     return vcat(to_primitives.(sm, f.segments, s.styles; kwargs...)...)
 end
 
+function to_primitives(
+    sm::SolidModel,
+    f::Paths.CompoundSegment{T},
+    s::Paths.Style;
+    kwargs...
+) where {T}
+    p = Union{CurvilinearPolygon{T}, CurvilinearRegion{T}}[]
+    l0 = zero(T)
+    for seg in f.segments
+        l = l0 + pathlength(seg)
+        p = vcat(p, to_primitives(sm, seg, Paths.pin(s; start=l0, stop=l); kwargs...))
+        l0 = l
+    end
+    return p
+end
+
+function to_primitives(
+    sm::SolidModel,
+    f::Paths.Segment{T},
+    s::Paths.PeriodicStyle;
+    kwargs...
+) where {T}
+    subsegs, substys = Paths.resolve_periodic(f, s)
+    return vcat(to_primitives.(sm, subsegs, substys; kwargs...)...)
+end
+# Disambiguate
+function to_primitives(
+    sm::SolidModel,
+    f::Paths.CompoundSegment{T},
+    s::Paths.PeriodicStyle;
+    kwargs...
+) where {T}
+    subsegs, substys = Paths.resolve_periodic(f, s)
+    return vcat(to_primitives.(sm, subsegs, substys; kwargs...)...)
+end
+
 # Terminations generate up to two [Rounded] Polygons
 function to_primitives(
     sm::SolidModel,
     seg::Paths.Segment{T},
+    sty::Union{Paths.TraceTermination, Paths.CPWOpenTermination, Paths.CPWShortTermination};
+    kwargs...
+) where {T}
+    return to_primitives(sm, DeviceLayout._poly(seg, sty); kwargs...)
+end
+# Disambiguate
+function to_primitives(
+    sm::SolidModel,
+    seg::Paths.CompoundSegment{T},
     sty::Union{Paths.TraceTermination, Paths.CPWOpenTermination, Paths.CPWShortTermination};
     kwargs...
 ) where {T}
@@ -1299,6 +1345,7 @@ function _add_curve!(endpoints, seg::Paths.Turn, k::OpenCascade, z; kwargs...)
         tags = [endpoints[1]; middle_tags; endpoints[2]]
         return k.add_circle_arc.(tags[1:(end - 1)], cen, tags[2:end], -1)
     end
+
     return k.add_circle_arc(endpoints[1], cen, endpoints[2], -1)
 end
 
