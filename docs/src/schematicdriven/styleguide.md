@@ -4,7 +4,7 @@ This is a style guide for users creating their own DeviceLayout.jl components.
 
 For basic Julia style, see [the style guide in the Julia manual](https://docs.julialang.org/en/v1/manual/style-guide/). Contributions to Julia projects should conform to local conventions, which are often established by a choice of either [Blue](https://github.com/JuliaDiff/BlueStyle) or [SciML style](https://github.com/SciML/SciMLStyle?tab=readme-ov-file). A good way for projects to short-circuit basic style questions is automatic formatting using [Runic.jl](https://github.com/fredrikekre/Runic.jl) or [JuliaFormatter.jl](https://github.com/domluna/JuliaFormatter.jl/). For example, DeviceLayout.jl generally follows Blue style, with simple conventions enforced via JuliaFormatter using [a `julia-format` job in GitHub CI](https://github.com/aws-cqc/DeviceLayout.jl/blob/main/.github/workflows/CI.yml) together with the script in [`scripts/format.jl`](https://github.com/aws-cqc/DeviceLayout.jl/blob/main/scripts/format.jl).
 
-Some topics below, like parameter naming conventions, are important for creating a predictable codebase that can be understood without reading code or inspecting GDSII files. Other topics, like how to choose parameterization for components, can have direct benefits in device design. The ExamplePDK is meant to demonstrate good style in this sense, but it does not yet follow all recommendations here.
+Many topics below, like parameter naming conventions, are important for creating a predictable codebase that can be understood without reading code or inspecting GDSII files. Other topics, like how to choose parameterization for components, can also have direct benefits in device design. The ExamplePDK is meant to demonstrate good style in this sense, but it does not yet follow all recommendations here.
 
 ## Parameter naming
 
@@ -116,7 +116,7 @@ In more detail:
       + `_thickness, _height, _depth` (more appropriate for 3D)
       + `_distance` (ambiguous without additional qualifiers like `_center_center` or `_edge_edge`, but acceptable if offset, pitch, gap, spacing don’t apply)
       + `_extent` with respect to Paths: usually you want trace, gap, and length, but if you do use extent, it must be the distance from center line to outer edge of style; that is, `trace/2` for `Paths.Trace` and `trace/2 + gap` for `Paths.CPW` (corresponds to `Paths.extent()` function)
-      + `_extent` in other contexts: Use sparingly to describe dimensions not well captured by the above terms, for example bounding box dimensions of a feature with radial symmetry like the star island (e.g.,  `island_x_extent` feels more natural than `island_x_length`) — but usually that’s not going to be a parameter unless it’s specifically subject to design intent or constraints
+      + `_extent` in other contexts: Use sparingly to describe dimensions not well captured by the above terms, for example bounding box dimensions of a feature with radial symmetry like the star island (e.g.,  `island_x_extent` feels more natural than `island_x_length`)—but usually that’s not going to be a parameter unless it’s specifically subject to design intent or constraints
       + `_shift` (prefer `_offset` for linear displacement, unless it can be confused with curve or polygon offsetting)
       + `_diameter` (prefer `_radius`)
 
@@ -133,8 +133,7 @@ In more detail:
     
       + If the parameter is inherited by multiple subcomponents, use the same name as in the subcomponents
       + If the parameter is used for one specific subcomponent, add prefix for the subcomponent
-      + Use [`SchematicDrivenLayout.filter_parameters`](@ref) to get either a collection of kind of
-        shared parameters
+      + Use [`SchematicDrivenLayout.filter_parameters`](@ref) to get a collection of either kind of shared parameters
 
   - If you have a large number of parameters to pass through to a subcomponent, or want to maintain
     flexibility over parameters that are not usually important, use a `templates` NamedTuple parameter
@@ -208,14 +207,18 @@ end
 
 ## Parameterization
 
-What parameters should you use to describe the component in the first place? The guiding considerations are, in order of priority:
+What parameters should you use to describe the component in the first place? The guiding considerations, in order of priority:
 
   - **Geometric independence**: Each parameter should control a single, distinct geometric property without creating unintended dependencies
     
       + Good: `island_width`, `island_ground_gap`
-      + Bad: `island_width_gap_ratio`, `transmon_total_width` (more natural geometric properties like width and gap are not independent)
+      + Bad: `island_width`, `transmon_total_width`, deriving `island_ground_gap = (transmon_total_width - island_width)/2`
+            * Explanation: `transmon_total_width` now controls the gap, but the gap also appears at the end of the transmon length
+      + Good: `total_pathlength`, `feature_position` describing how far along a component's path a feature is placed
+      + Bad: `total_pathlength`, `feature_position_pathlength_ratio` specifying the ratio of position to total path length
+            * Explanation: Changing the total pathlength changes the position of the feature, which may be physically motivated but will cause headaches (especially if there is a hook on the feature)
 
-  - **Design independence**: “Tuning parameters” — the set of parameters that are varied in practice to obtain target design properties — should each approximately independently affect one design property
+  - **Design independence**: “Tuning parameters”—the set of parameters that are varied in practice to obtain target design properties—should each approximately independently affect one design property
     
       + Bad: `coupling_length` and `meander_length` for an inductively-coupled transmission line resonator, such that increasing the coupling length lowers the frequency directly by increasing the total length
     
@@ -224,7 +227,7 @@ What parameters should you use to describe the component in the first place? The
         
           * Bad: `coupling_pad_width` and `effective_length` parameter taking into account estimated capacitive loading of coupling pad, so that `coupling_pad_width` changes the total path length in order to leave frequency roughly fixed (this differs from the `total_length` example above because `effective_length` is not a single, distinct geometric property)
           * Good: Separate parameters for transmission line resonator length and coupling pad size, even though both affect resonant frequency
-  - **Design intent preservation**: Parameters should reflect engineering requirements rather than arbitrary geometric relationships — they should capture the “why” behind dimensional choices, not just the “what”
+  - **Design intent preservation**: Parameters should reflect engineering requirements rather than arbitrary geometric relationships—they should capture the “why” behind dimensional choices, not just the “what”
     
       + Bad: A meander parameterized by segment lengths and number of turns
     
@@ -233,7 +236,7 @@ What parameters should you use to describe the component in the first place? The
         
           * Bad: Meander `delay` that controls total path length based on wave propagation delay (calculated how?)
           * Good: Meander `total_length` that controls length of path directly
-          * Bad: Two degenerate parameters — “total effective length”, which is varied to control the frequency, and “assumed extra effective length” that accounts for bends, bridges, and coupling capacitances — so that you can have a parameter approximately inversely proportional to frequency with as little offset as possible
+          * Bad: Two degenerate parameters—“total effective length”, which is varied to control the frequency, and “assumed extra effective length” that accounts for bends, bridges, and coupling capacitances—so that you can have a parameter approximately inversely proportional to frequency with as little offset as possible
           * Good: Make target frequency a device-level parameter rather than a component parameter, from which you compute the required path length based on data
   - **Constraint expression**: It should be easy and natural to describe design rules or constraints on parameters
     
@@ -252,37 +255,37 @@ What parameters should you use to describe the component in the first place? The
             ```julia
             # Good: Clear constraint with documented intent
             @compdef struct ExampleMeanderResonator <: Component
-                meander_bbox = Rectangle(1.25mm, 1.25mm) # Bounding box of meander feature (path enters at origin along x axis)
-                meander_bend_radius = 0.05mm             # Bend radius of meander feature
+                bbox_x_length = 1.25mm # Bounding box width (path enters at origin along x axis)
+                bend_radius = 0.05mm   # Bend radius
                 # ... other parameters...
             end
             
             # Must be positive
             function _straight_segment_length(res::ExampleMeanderResonator)
-                return res.meander_bbox.width - 2 * res.meander_bend_radius
+                return res.bbox_x_length - 2 * res.bend_radius
             end
             ```
 
 Some specific guidelines:
 
-  - Components are parameterized by geometry, not physical properties — trace and gap, not impedance
+  - Components are parameterized by geometry, not physical properties—trace and gap, not impedance
     
-      + The relationship between geometry and target property is not necessarily fixed — you might change a material, get new data, or improve your simulations
+      + The relationship between geometry and target property is not necessarily fixed—you might change a material, get new data, or improve your simulations
       + If you know a relationship between geometry and target property, use the property as a device-level parameter from which you derive the geometric component parameter based on a documented data source (like Josephson energy to junction width)
 
-  - Geometries should not have any “magic numbers” (literal numeric lengths that appear in geometry code) — these should be made into parameters with descriptive names
-  - Don’t be shy about adding parameters, but don’t prematurely create additional control knobs you’re not sure you’ll need — once you can describe your desired geometries without magic numbers, stop
+  - Geometries should not have any “magic numbers” (literal numeric lengths that appear in geometry code)—these should be made into parameters with descriptive names
+  - Don’t be shy about adding parameters, but don’t prematurely create additional control knobs you’re not sure you’ll need—once you can describe your desired geometries without magic numbers, stop
   - Bridges/crossovers/other "decorations": Make a `MyDecoration` component type and use an instance as a parameter, with components across the device with the same decoration using the same instance
     
       + Ensures fabrication requirements are consistently met and updated across the device, and also reduces redundant rendering/memory usage
-      + The decoration Component doesn’t have to go in a schematic — it can be attached to a path like any coordinate system
+      + The decoration Component doesn’t have to go in a schematic—it can be attached to a path like any coordinate system
       + The default should be `nothing`, to encourage defining decorations at the device level and sharing them across components
   - Choose parameters so that there are as few parameters that affect hook position as possible
     
       + The hook should be easy to find directly from parameters, without building complex geometry first
       + In particular, “tuning parameters” should not change hook positions
       + If changing one hook position can’t be avoided, consider whether another hook position should change along with it to more easily express a simple “distance between hooks” constraint and to keep the entire floorplan from shifting when the parameter is tuned
-  - Avoid “flags” that change how the component is rendered for different purposes like simulation or artwork — use `OptionalStyle` (e.g., with the helper functions `not_simulated`, `only_simulated`, `only_solidmodel`) or metadata together with your [rendering target](./targets.md) to customize behavior
+  - Avoid “flags” that change how the component is rendered for different purposes like simulation or artwork—use `OptionalStyle` (e.g., with the helper functions `not_simulated`, `only_simulated`, `only_solidmodel`) or metadata together with your [rendering target](./targets.md) to customize behavior
   - Orientation/reference frames
     
       + If components always have a particular global orientation on chip, the local orientation should be the same
@@ -295,9 +298,9 @@ Some specific guidelines:
     
       + For a `Path`-based feature, use `feature_style=Paths.CPW(trace, gap)` rather than `feature_trace` and `feature_gap`
     
-      + Optimization should work with transformed parameters
+      + Optimization should use transformed parameters anyway
         
-          * Example: In the [single transmon optimization example](../examples/singletransmon.md), we optimize over `x` with `cap_length = (1 / x[1]^2) * 620μm` and `total_length=(1 / x[2]) * 5000μm`, so that frequency is approximately linear in `x` and both entries are around 1
+          * Example: In the [single transmon optimization example](../examples/singletransmon.md), we optimize over `x` with `cap_length = (1 / x[1]^2) * 620μm` and `total_length=(1 / x[2]) * 5000μm`, so that frequencies are approximately linear in `x` and both elements are around 1
           * Example: When optimizing `feature1_feature2_offset::Point` with a scale of 1μm, optimize over `x` with `feature1_feature2_offset = Point(x[1], x[2]) * 1μm`
 
 ## Component documentation
@@ -320,8 +323,11 @@ For a non-composite Component, the docstring looks like this:
     struct {{{compname}}} <: Component
 
 <One-line description of component.>
+
 <Optional: Longer description of component>
+
 <Optional: Annotated ASCII illustration>
+
 # Parameters
   - `name`: Name of component
   - `<p>`: <Parameter description>
@@ -399,7 +405,7 @@ end
 
   - Use descriptive names that indicate connection purpose or geometry:
     
-      + Hooks should usually be named after the component that gets attached there — a qubit would have a `readout` hook and a readout resonator a `qubit` hook
+      + Hooks should usually be named after the component that gets attached there—a qubit would have a `readout` hook and a readout resonator a `qubit` hook
       + Hooks can also be named after the geometric feature they mark, for example if it’s used more in the sense of geometric alignment than for circuit/schematic connectivity, or if multiple kinds of components can be attached
       + Use `p0` and `p1` for start/end or in/out (consistent with `Paths`)
 
@@ -409,7 +415,7 @@ end
       + Incorrect: `return (claw = clawhook)` assigns the value `clawhook` to the variable `claw` and returns it
       + Correct: `return (; claw = clawhook)` returns the NamedTuple you want
       + Do this even when you have multiple hooks, for safety against copying the code and deleting all but one
-  - Avoid doing heavy computation inside `hooks` — it is a sign that your parameterization needs improvement
+  - Avoid doing heavy computation inside `hooks`—it is a sign that your parameterization needs improvement
   - For components using hooks based on paths, derive hooks from path geometry:
     
     ```julia
@@ -441,7 +447,7 @@ See [the page on Process Design Kits (PDKs)](pdks.md) for general recommendation
     
       + Components go in the same package if and only if they should always be versioned together
     
-      + Example: Shunt and series interdigital capacitors both go in InterdigitalCapacitors — they have identical dependencies, share most of their code, and no one should ever have a reason to use v1.1 of the series capacitor with v1.2 of the shunt capacitor
+      + Example: Shunt and series interdigital capacitors both go in InterdigitalCapacitors—they have identical dependencies, share most of their code, and no one should ever have a reason to use v1.1 of the series capacitor with v1.2 of the shunt capacitor
       + Example: A parallel plate capacitor would **not** go in the same package as interdigital capacitors
       + Example: A lumped element resonator that combines an interdigital capacitor with some lumped inductor would **not** go in the same package as either interdigital capacitor (or inductor), since it has more dependencies than either alone
         
@@ -472,7 +478,7 @@ See [the page on Process Design Kits (PDKs)](pdks.md) for general recommendation
   - Components should not be named greedily—don’t call a component “Qubit,” because the name is too valuable. Examples:
     
       + Bad: `RoundQubit` is a bad name (is it a circle? an ellipse? did you mean concentric?)
-      + Bad: `PurcellReadout` is too generic — is it the readout resonator, filter, or both? Is the physical structure a meander, hairpin, hanger, spiral?
+      + Bad: `PurcellReadout` is too generic—is it the readout resonator, filter, or both? Is the physical structure a meander, hairpin, hanger, spiral?
       + Better: `MeanderPurcellReadoutResonator` and `MeanderPurcellFilter`
       + Better: Define one component type `BareMeanderResonator` without external coupling elements, then define a `MeanderFilteredReadoutResonator` composite component combining two of those with additional components for coupling
   - If a name has more than three "parts" (component class, shape, and one modifier) then there is likely a problem with the scope of the component
@@ -494,7 +500,7 @@ What do you choose to be a component in the first place? Where do you draw the b
 
 As a layout abstraction, `AbstractComponent` is a parameterized geometry with default parameters and special attachment points (hooks). The interface also provides a few other conveniences, like the `default_parameters` function, the ability to use a component instance as a template constructor (e.g., to locally customize defaults), and (if defined with `@compdef`) storing the geometry after it is first computed.
 
-Meanwhile, `AbstractComponent` does not have necessarily satisfy any functional/physical contract — for example, hooks do not have to be electrical "pins" or "ports". However, a component will be used as a schematic-level abstraction, allowing us to assign meaning to its presence in a device and to its connections to other components.
+Meanwhile, `AbstractComponent` does not have necessarily satisfy any functional/physical contract—for example, hooks do not have to be electrical "pins" or "ports". However, a component will be used as a schematic-level abstraction, allowing us to assign meaning to its presence in a device and to its connections to other components.
 
 You should not create a `Component` for every unit of reusable parameterized geometry. You should instead create a function that returns a `GeometryEntity` or two or places them in a coordinate system (for examples, see the [shape library](../shapes.md)) when most of the following are true of your parameterized geometry:
 
