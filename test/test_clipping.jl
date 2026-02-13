@@ -479,6 +479,23 @@
         pp = Point.([(185.0, -100.0), (300.0, -215.0), (300.0, -185.0), (215.0, -100.0)])
         @test Polygons.orientation(Polygon(pp)) == 1
     end
+
+    @testset "> Mixed argument types" begin
+        p1 = Rectangle(1mm, 1mm)
+        p2 = centered(Rectangle(1µm, 1µm))
+        # Clipped polygons with mixed units
+        p1_clip = union2d(p1)
+        p2_clip = union2d(p2)
+        @test union2d([p1_clip, p2_clip]) == union2d([p1, p2])
+        # add in a GeometryStructure
+        cs = CoordinateSystem("test")
+        place!(cs, p2, :test)
+        @test coordinatetype(cs => :test) == coordinatetype(cs)
+        @test union2d(cs => :test) == p2_clip
+        @test union2d([p1, cs => :test]) == union2d([p1, p2])
+        @test union2d(p1, cs => :test) == union2d([p1, p2])
+        @test union2d(p1, [cs => :test]) == union2d([p1, p2])
+    end
 end
 
 @testitem "Polygon offsetting" setup = [CommonTestSetup] begin
@@ -919,4 +936,49 @@ end
 
     # Ensure the curve_start_idx are sorted absolutely
     @test issorted(abs.(rcp.curve_start_idx))
+end
+
+@testitem "Layerwise clipping" setup = [CommonTestSetup] begin
+    c1 = CoordinateSystem("test1")
+    c2 = CoordinateSystem("test2")
+    r1 = Rectangle(10μm, 10μm)
+    r2 = r1 + Point(5μm, 5μm)
+    overlap = intersect2d(r1, r2)
+    x = xor2d(r1, r2)
+    d1 = difference2d(r1, r2)
+    d2 = difference2d(r2, r1)
+    uni = union2d(r1, r2)
+    lyr_a = SemanticMeta(:a)
+    lyr_b = SemanticMeta(:b)
+    place!(c1, r1, lyr_a)
+    place!(c1, r2, lyr_b)
+    place!(c2, r1, lyr_b)
+    place!(c2, r2, lyr_a)
+
+    @test isempty(to_polygons(xor2d_layerwise(c1, c1)[lyr_a][1]))
+    @test isempty(to_polygons(xor2d_layerwise(c1, c1)[lyr_b][1]))
+    @test xor2d_layerwise(c1, c2)[lyr_a][1] == x
+    @test xor2d_layerwise(c1, c2)[lyr_b][1] == x
+    @test difference2d_layerwise(c1, c2)[lyr_a][1] == d1
+    @test difference2d_layerwise(c1, c2)[lyr_b][1] == d2
+    @test union2d_layerwise(c1, c2)[lyr_a][1] == uni
+    @test intersect2d_layerwise(c1, c2)[lyr_b][1] == overlap
+
+    # Findbox
+    @test findbox(r1, [r1, r2]) == [1]
+    @test findbox(r1, [r1, r2]; intersects=true) == [1, 2]
+    @test findbox(r1, [c1]) == []
+    @test findbox(r1, [r1, c1], intersects=true) == [1, 2]
+
+    # Tiling
+    ca_1 = CoordinateSystem("array1")
+    ca_2 = CoordinateSystem("array2")
+    addref!(ca_1, aref(c1, 100μm * (-1:1), 100μm * (-1:1)))
+    addref!(ca_2, aref(c2, 100μm * (-1:1), 100μm * (-1:1)))
+    xa = xor2d_layerwise(ca_1, ca_2)
+    xa_tiled = xor2d_layerwise(ca_1, ca_2, tile_size=99μm)
+    @test length(xa_tiled[lyr_a]) == 3 * 3
+    @test length(xa_tiled[lyr_b]) == 3 * 3
+    @test length(vcat(to_polygons.(xa_tiled[lyr_a])...)) == 3 * 3 * 2
+    @test isempty(to_polygons(xor2d(vcat(xa_tiled[lyr_a]...), xa[lyr_a])))
 end

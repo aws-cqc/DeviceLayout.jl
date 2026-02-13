@@ -74,6 +74,8 @@ In addition to other generic [entity styles](entitystyles.md) like `NoRender`, `
     Polygon
     Polygon(::AbstractVector{Point{T}}) where {T}
     Polygon(::Point, ::Point, ::Point, ::Point...)
+    Polygons.area
+    Polygons.is_sliver
     perimeter
     points
     sweep_poly

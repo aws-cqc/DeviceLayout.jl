@@ -4,6 +4,15 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Upcoming
+
+  - Added layerwise Booleans `union2d_layerwise`, `difference2d_layerwise`, `intersect2d_layerwise`, and `xor2d_layerwise`
+  - Added `Polygons.area` and `Polygons.is_sliver`
+  - Added `findbox(box, geoms; intersects=false)` for finding all elements of `geoms` whose bounding box is contained in or intersects `bounds(box)`
+  - Added `mbr_spatial_index` for creating an R-tree of minimum bounding rectangles
+    associated with an array of geometries, which can be used directly with `findbox` to avoid re-indexing for multiple `findbox` calls
+  - Fixed overly-strict argument types for polygon clipping methods
+
 ## 1.9.0 (2026-02-09)
 
   - Added `SingleChannelRouting`, which allows multiple paths to be routed in parallel in the same `Channel` (defined by a path with a trace style), entering and exiting the channel in different places
