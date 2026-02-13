@@ -213,10 +213,10 @@ What parameters should you use to describe the component in the first place? The
     
       + Good: `island_width`, `island_ground_gap`
       + Bad: `island_width`, `transmon_total_width`, deriving `island_ground_gap = (transmon_total_width - island_width)/2`
-            * Explanation: `transmon_total_width` now controls the gap, but the gap also appears at the end of the transmon length
+        * Explanation: `transmon_total_width` now controls the gap, but the gap also appears at the end of the transmon length
       + Good: `total_pathlength`, `feature_position` describing how far along a component's path a feature is placed
       + Bad: `total_pathlength`, `feature_position_pathlength_ratio` specifying the ratio of position to total path length
-            * Explanation: Changing the total pathlength changes the position of the feature, which may be physically motivated but will cause headaches (especially if there is a hook on the feature)
+        * Explanation: Changing the total pathlength changes the position of the feature, which may be physically motivated but will cause headaches (especially if there is a hook on the feature)
 
   - **Design independence**: “Tuning parameters”—the set of parameters that are varied in practice to obtain target design properties—should each approximately independently affect one design property
     
@@ -323,15 +323,16 @@ For a non-composite Component, the docstring looks like this:
     struct {{{compname}}} <: Component
 
 <One-line description of component.>
-
 <Optional: Longer description of component>
 
 <Optional: Annotated ASCII illustration>
 
 # Parameters
+
   - `name`: Name of component
   - `<p>`: <Parameter description>
   - ...
+
 # Hooks
 
   - `<hook1>`: Description

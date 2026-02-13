@@ -994,8 +994,14 @@
             except=[:length]
         ) == Dict()
         @test SchematicDrivenLayout.filter_parameters(subcomp1, cc) == Dict(:width => 2mm)
-        @test_logs (:warn, r"No shared parameters") SchematicDrivenLayout.filter_parameters(Spacer, cc)
-        @test_logs (:warn, r"No parameters") SchematicDrivenLayout.filter_parameters(Spacer(), cc)
+        @test_logs (:warn, r"No shared parameters") SchematicDrivenLayout.filter_parameters(
+            Spacer,
+            cc
+        )
+        @test_logs (:warn, r"No parameters") SchematicDrivenLayout.filter_parameters(
+            Spacer(),
+            cc
+        )
 
         @test SchematicDrivenLayout.subcomponents(cc).subcomp1.width == 2mm
         @test SchematicDrivenLayout.subcomponents(cc).subcomp2.width == 3mm
