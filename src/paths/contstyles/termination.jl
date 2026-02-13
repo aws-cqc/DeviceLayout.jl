@@ -241,7 +241,15 @@ function terminate!(
         split_node = pa[split_idx]
         len = pathlength(split_node)
         l_into_style = initial ? backtracking : l_into_style - backtracking
-        _check_termination(orig_sty, l_into_style, len, rounding, round_gap, overlay_index)
+        _check_termination(
+            orig_sty,
+            l_into_style,
+            len,
+            rounding,
+            round_gap,
+            margin,
+            overlay_index
+        )
         split_len = initial ? backtracking : len - backtracking
         epsilon = 1e-6 * DeviceLayout.onenanometer(T)
         if split_len > epsilon && split_len < len - epsilon
@@ -276,11 +284,12 @@ function _check_termination(
     len,
     rounding,
     round_gap,
+    margin,
     overlay_index=0
 )
-    len >= rounding || throw(
+    len >= rounding + margin || throw(
         ArgumentError(
-            "`rounding` $rounding too large for previous segment path length $len."
+            "Backtracking (`rounding + margin`) $(rounding + margin) too large for previous segment path length $len."
         )
     )
     !round_gap &&
@@ -305,16 +314,18 @@ function _check_termination(
     len,
     rounding,
     round_gap,
+    margin,
     overlay_index
 )
     iszero(overlay_index) &&
-        return _check_termination(termsty.s, l_into_style, len, rounding, round_gap)
+        return _check_termination(termsty.s, l_into_style, len, rounding, round_gap, margin)
     return _check_termination(
         termsty.overlay[overlay_index],
         l_into_style,
         len,
         rounding,
-        round_gap
+        round_gap,
+        margin
     )
 end
 
