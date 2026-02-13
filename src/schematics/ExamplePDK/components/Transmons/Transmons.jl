@@ -17,7 +17,7 @@ using .SchematicDrivenLayout.ExamplePDK, .ExamplePDK.LayerVocabulary
 
 import Unitful: uconvert, NoUnits
 
-import .ExamplePDK: add_bridges!, filter_params
+import .ExamplePDK: add_bridges!
 import .ExamplePDK.SimpleJunctions: ExampleSimpleSQUID, ExampleSimpleJunction
 export ExampleStarTransmon, ExampleRectangleTransmon
 
@@ -117,7 +117,7 @@ This component is intended for use in demonstrations.
 end
 
 function SchematicDrivenLayout._build_subcomponents(tr::ExampleStarTransmon)
-    island_params = filter_params(ExampleStarIsland, tr)
+    island_params = filter_parameters(ExampleStarIsland, tr)
     @component island = ExampleStarIsland(; island_params...)
     @component junction = tr.jj_template begin
         h_ground_island = tr.island_ground_gap
@@ -128,10 +128,10 @@ function SchematicDrivenLayout._build_subcomponents(tr::ExampleStarTransmon)
     straight!(readout_coupler, 50μm, Paths.TaperCPW(tr.coupler_style, tr.resonator_style))
     !isnothing(tr.coupler_bridge) && attach!(readout_coupler, sref(tr.coupler_bridge), 25μm)
     turn!(readout_coupler, π / 4 - π / 5, 50μm, tr.resonator_style)
-    @component xy = ExampleXYTermination(; filter_params(ExampleXYTermination, tr)...) begin
+    @component xy = ExampleXYTermination(; filter_parameters(ExampleXYTermination, tr)...) begin
         bridge = tr.control_bridge
     end
-    @component z = ExampleZTermination(; filter_params(ExampleZTermination, tr)...) begin
+    @component z = ExampleZTermination(; filter_parameters(ExampleZTermination, tr)...) begin
         bridge = tr.control_bridge
     end
     return (island, junction, readout_coupler, couplers..., xy, z)
@@ -242,7 +242,7 @@ end
 island(tr::ExampleRectangleTransmon) = component(tr[1])
 
 function SchematicDrivenLayout._build_subcomponents(tr::ExampleRectangleTransmon)
-    island_params = filter_params(ExampleRectangleIsland, tr)
+    island_params = filter_parameters(ExampleRectangleIsland, tr)
     @component island = ExampleRectangleIsland(; island_params...)
 
     @component junction = tr.jj_template begin

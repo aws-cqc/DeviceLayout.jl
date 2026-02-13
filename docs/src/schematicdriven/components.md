@@ -120,6 +120,7 @@ SchematicDrivenLayout.AbstractCompositeComponent
 SchematicDrivenLayout.CompositeComponent
 SchematicDrivenLayout.BasicCompositeComponent
 SchematicDrivenLayout.components(::SchematicDrivenLayout.CompositeComponent)
+SchematicDrivenLayout.filter_parameters
 SchematicDrivenLayout.flatten(::SchematicDrivenLayout.SchematicGraph)
 SchematicDrivenLayout.graph
 SchematicDrivenLayout.map_hooks

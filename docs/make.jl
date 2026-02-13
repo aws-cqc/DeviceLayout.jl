@@ -62,6 +62,7 @@ makedocs(
             "Targets" => "schematicdriven/targets.md",
             "Solid Models" => "schematicdriven/solidmodels.md",
             "PDKs" => "schematicdriven/pdks.md",
+            "Style Guide" => "schematicdriven/styleguide.md",
             "Troubleshooting/FAQ" => "schematicdriven/faq.md"
         ],
         "Examples" => [

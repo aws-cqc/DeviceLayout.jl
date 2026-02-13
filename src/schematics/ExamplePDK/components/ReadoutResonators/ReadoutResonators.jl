@@ -14,7 +14,7 @@ module ReadoutResonators
 using DeviceLayout, DeviceLayout.SchematicDrivenLayout, DeviceLayout.PreferredUnits
 using .SchematicDrivenLayout.ExamplePDK, .ExamplePDK.LayerVocabulary
 
-import .ExamplePDK: add_bridges!, filter_params, tap!
+import .ExamplePDK: add_bridges!, tap!
 import .ExamplePDK.ClawCapacitors: ExampleShuntClawCapacitor
 
 export ExampleTappedHairpin, ExampleFilteredHairpinReadout, ExampleClawedMeanderReadout
@@ -135,7 +135,7 @@ end
 
 function SchematicDrivenLayout._build_subcomponents(fr::ExampleFilteredHairpinReadout)
     ### Claw
-    claw_params = filter_params(ExampleShuntClawCapacitor, fr) # Params shared by claw
+    claw_params = filter_parameters(ExampleShuntClawCapacitor, fr) # Params shared by claw
     @component claw = ExampleShuntClawCapacitor(; claw_params...) begin
         # Params with different names in `fr` and `claw`
         input_length = fr.feedline_tap_length
@@ -156,7 +156,7 @@ function SchematicDrivenLayout._build_subcomponents(fr::ExampleFilteredHairpinRe
     extra_effective_length = pathlength(efp) # Will modify `assumed_extra_length` in filter
 
     ### Hairpins
-    hairpin_params = filter_params(ExampleTappedHairpin, fr) # Params shared by hairpin
+    hairpin_params = filter_parameters(ExampleTappedHairpin, fr) # Params shared by hairpin
     @component purcell = ExampleTappedHairpin(; hairpin_params...) begin
         # Params with different names / reparameterization
         style = fr.resonator_style

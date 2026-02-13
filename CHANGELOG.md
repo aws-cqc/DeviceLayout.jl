@@ -4,6 +4,11 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Upcoming
+
+  - Added `SchematicDrivenLayout.filter_parameters` for sharing parameters between composite components and subcomponents
+  - Added component style guide to docs
+
 ## 1.9.0 (2026-02-09)
 
   - Added `SingleChannelRouting`, which allows multiple paths to be routed in parallel in the same `Channel` (defined by a path with a trace style), entering and exiting the channel in different places
