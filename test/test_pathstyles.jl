@@ -182,7 +182,7 @@ end
     w025 = Paths.width(pa[2].sty, 0.25 * pathlength(pa[2].seg))
     w05 = Paths.width(pa[2].sty, 0.5 * pathlength(pa[2].seg))
     w075 = Paths.width(pa[2].sty, 0.75 * pathlength(pa[2].seg))
-    @test_warn "steep" Paths.round_trace_transitions!(pa)
+    Paths.round_trace_transitions!(pa)
     @test length(pa) == 5
     @test pathlength(pa) ≈ 40μm
     @test Paths.width(pa[2].sty, 0.25 * pathlength(pa[2].seg)) < w025

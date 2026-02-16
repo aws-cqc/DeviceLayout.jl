@@ -127,6 +127,7 @@ function __poly(f::Paths.Straight{T}, s::Paths.CPWShortTermination) where {T}
     ])
 
     poly2 = Polygon([g(t0, -1, 1), g(t1, -1, 1), g(t1, -1, -1), g(t0, -1, -1)])
+    iszero(tr) && return [poly1, poly2]
     round_idx = s.initial ? [1, 4] : [2, 3]
     round1 = Polygons.Rounded(tr; p0=points(poly1)[round_idx], min_side_len=zero(T))
     round2 = Polygons.Rounded(tr; p0=points(poly2)[round_idx], min_side_len=zero(T))
@@ -151,6 +152,7 @@ function __poly(f::Paths.Straight{T}, s::Paths.TraceTermination) where {T}
         throw(ArgumentError("Termination rounding ≠ termination path length."))
     end
     poly = to_polygons(f, Paths.SimpleTrace(s.width))
+    iszero(s.rounding) && return poly
     round_idx = s.initial ? [1, 4] : [2, 3]
     return Polygons.Rounded(s.rounding; p0=points(poly)[round_idx], min_side_len=zero(T))(
         poly

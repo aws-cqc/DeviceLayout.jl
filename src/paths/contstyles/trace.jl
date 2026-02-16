@@ -106,20 +106,11 @@ function round_trace_transitions!(pa::Path; α_max=60°, radius=nothing, side=:b
 end
 
 function round_existing_tapers!(pa::Path)
-    warned = false
     for node in pa
         node.sty isa Paths.TaperTrace || continue
         dw = abs(node.sty.width_start - node.sty.width_end)
         iszero(dw) && continue
         L = pathlength(node.seg)
-        # Warn if the taper is very steep (max edge angle > 80°)
-        if !warned && atan(15 * dw / (16 * L)) >= 80°
-            @warn """Rounded trace transition at $(p0(node.seg)) on path \"$(pa.name)\" has a \
-            very steep taper (taper length $L for width change $dw). This may cause issues \
-            with some renderers. Consider increasing the taper length. \
-            Further warnings on this path will be suppressed."""
-            warned = true
-        end
         sty0 = Trace(node.sty.width_start)
         sty1 = Trace(node.sty.width_end)
         node.sty = rounded_transition(sty0, sty1, L)
