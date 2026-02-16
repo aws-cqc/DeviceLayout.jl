@@ -124,28 +124,31 @@
 end
 
 @testitem "Rounded trace tapers" setup = [CommonTestSetup] begin
-    # Basic usage
+    # Basic usage: single-side taper, quintic S-curve
     pa = Path()
     straight!(pa, 10μm, Paths.Trace(1μm))
     turn!(pa, 90°, 10μm / (pi / 2), Paths.Trace(5μm))
     straight!(pa, 10μm, Paths.Trace(3μm))
     Paths.round_trace_transitions!(pa)
 
-    @test length(pa) == 7
+    @test length(pa) == 5 # 3 original + 1 extra node per transition
     @test pathlength(pa) ≈ 30μm
-    @test Paths.width(pa[2].sty, 0.5 * pathlength(pa[2])) < 3μm
-    @test Paths.width(pa[2].sty, pathlength(pa[2])) ≈ 3μm atol = 2nm
-    @test Paths.width(pa[3].sty, 0μm) ≈ 3μm atol = 2nm
-    @test Paths.width(pa[2].sty, pathlength(pa[2])) ≈ Paths.width(pa[3].sty, 0μm) # floating point tolerance
-    @test Paths.width(pa[3].sty, 0.5 * pathlength(pa[3])) > 3μm
-    @test Paths.width(pa[5].sty, 0.6 * pathlength(pa[5])) > 4μm
-    @test Paths.width(pa[6].sty, 0.6 * pathlength(pa[6])) < 4μm
+    # Quintic S-curve: lags linear at 25%, matches at 50%, leads at 75%
+    L2 = pathlength(pa[2].seg)
+    @test Paths.width(pa[2].sty, 0.0μm) ≈ 1μm
+    @test Paths.width(pa[2].sty, 0.25 * L2) < 3μm
+    @test Paths.width(pa[2].sty, 0.5 * L2) ≈ 3μm
+    @test Paths.width(pa[2].sty, 0.75 * L2) > 3μm
+    @test Paths.width(pa[2].sty, L2) ≈ 5μm atol = 2nm
+    # Width continuity at boundary
+    @test Paths.width(pa[2].sty, L2) ≈ Paths.width(pa[3].sty, 0μm) atol = 2nm
 
     cs = CoordinateSystem("test")
+    place!(cs, pa)
     sm = SolidModel("test", overwrite=true)
     render!(sm, cs) # runs without error
 
-    # Sharp corners
+    # Invalid α_max
     pa = Path()
     straight!(pa, 10μm, Paths.Trace(1μm))
     turn!(pa, 90°, 10μm / (pi / 2), Paths.Trace(5μm))
@@ -157,15 +160,15 @@ end
     straight!(pa, 10μm, Paths.Trace(1μm))
     turn!(pa, 90°, 10μm / (pi / 2), Paths.Trace(5μm))
     straight!(pa, 10μm, Paths.Trace(3μm))
-    straight!(pa, 10μm, Paths.Trace(27μm)) # too sharp
-    @test_warn "discontinuous" Paths.round_trace_transitions!(pa, radius=3μm)
-    @test length(pa) == 10 # All transitions rounded, adding 2 nodes each
-    @test pathlength(pa) ≈ 40μm
-    # Points are shared even with 90 degree taper
-    @test count(
-        p -> p in points(to_polygons(pa[end - 2])),
-        points(to_polygons(pa[end - 1]))
-    ) == 2
+    Paths.round_trace_transitions!(pa; radius=3μm)
+    @test length(pa) == 5
+    @test pathlength(pa) ≈ 30μm
+
+    # Segment too short for taper
+    pa = Path()
+    straight!(pa, 10μm, Paths.Trace(1μm))
+    straight!(pa, 10μm, Paths.Trace(27μm))
+    @test_warn "taper length" Paths.round_trace_transitions!(pa; radius=10μm)
 
     # Rounding of TaperTrace
     pa = Path()
@@ -179,7 +182,7 @@ end
     w025 = Paths.width(pa[2].sty, 0.25 * pathlength(pa[2].seg))
     w05 = Paths.width(pa[2].sty, 0.5 * pathlength(pa[2].seg))
     w075 = Paths.width(pa[2].sty, 0.75 * pathlength(pa[2].seg))
-    @test_warn "discontinuous" Paths.round_trace_transitions!(pa)
+    @test_warn "steep" Paths.round_trace_transitions!(pa)
     @test length(pa) == 5
     @test pathlength(pa) ≈ 40μm
     @test Paths.width(pa[2].sty, 0.25 * pathlength(pa[2].seg)) < w025
