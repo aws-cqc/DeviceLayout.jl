@@ -261,7 +261,8 @@ function _refs(segment::Paths.Segment{T}, s::OverlayStyle) where {T}
         # Add dummy neighbors so halo doesn't append/prepend to it
         # Ideally we could track actual neighbors but that gets complicated
         dummy = Node{T}(Straight(zero(T)), NoRenderContinuous())
-        DeviceLayout.place!(cs, Node{T}(segment, oversty, dummy, dummy), meta)
+        DeviceLayout.place!(cs, Node{T}(segment, undecorated(oversty), dummy, dummy), meta)
+        DeviceLayout.addref!.(cs, _refs(segment, oversty))
     end
     return vcat(_refs(segment, s.s), sref(cs))
 end
