@@ -8,6 +8,7 @@ include("compound.jl")
 include("tapers.jl")
 include("strands.jl")
 include("termination.jl")
+include("periodic.jl")
 
 function uniquepoints(pts)
     return pts[.![i == 1 ? false : (pts[i] ≈ pts[max(1, i - 1)]) for i = 1:size(pts, 1)]]

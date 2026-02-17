@@ -45,6 +45,8 @@ function TaperTrace(width_start::Coordinate, width_end::Coordinate)
     return TaperTrace{typeof(w_s)}(w_s, w_e)
 end
 
+nextstyle(sty::TaperTrace) = Trace(sty.width_end)
+
 """
     struct TaperCPW{T<:Coordinate} <: CPW{true}
         trace_start::T
@@ -124,6 +126,8 @@ function pin(sty::TaperCPW{T}; start=nothing, stop=nothing) where {T}
     )
 end
 
+nextstyle(sty::TaperCPW) = CPW(sty.trace_end, sty.gap_end)
+
 summary(s::TaperTrace) = string(
     "Tapered trace with initial width ",
     s.width_start,
@@ -152,9 +156,9 @@ copy(::Taper) = Taper()
 
 summary(::Taper) = string("Generic linear taper between neighboring segments in a path")
 
-function handle_generic_tapers!(p)
+function handle_generic_tapers!(p, inds::UnitRange=firstindex(p):lastindex(p))
     # Adjust the path so generic tapers render correctly
-    generic_taper_inds = findall(x -> isa(style(x), Paths.Taper), nodes(p))
+    generic_taper_inds = inds ∩ findall(x -> isa(style(x), Paths.Taper), nodes(p))
     for i in generic_taper_inds
         tapernode = p[i]
         prevnode = previous(tapernode)
@@ -170,15 +174,15 @@ function handle_generic_tapers!(p)
 end
 
 function get_taper_style(prevnode, nextnode)
-    prevstyle = style(prevnode)
-    nextstyle = style(nextnode)
+    prevstyle = undecorated(style(prevnode))
+    nextstyle = undecorated(style(nextnode))
     beginof_next = zero(pathlength(segment(nextnode)))
     endof_prev = pathlength(segment(prevnode))
     # handle case of compound style (#39)
-    if prevstyle isa Paths.CompoundStyle
+    if prevstyle isa Paths.AbstractCompoundStyle
         prevstyle, endof_prev = prevstyle(endof_prev)
     end
-    if nextstyle isa Paths.CompoundStyle
+    if nextstyle isa Paths.AbstractCompoundStyle
         nextstyle, beginof_next = nextstyle(beginof_next)
     end
 

@@ -578,6 +578,7 @@ end
         straight!(pa, 20μm, Paths.Trace(15μm))
         straight!(pa, 20μm, Paths.Trace(20μm))
         simplify!(pa)
+        @test Paths.nextstyle(pa) == Paths.Trace(20μm)
         revsty = reverse(pa[1]).sty
         @test Paths.trace(revsty, 55μm) == Paths.trace(pa[1].sty, 5μm)
         @test Paths.trace(revsty)(5μm) == Paths.trace(pa[1].sty)(55μm)
@@ -709,6 +710,15 @@ end
             p(300.0nm, 10.0nm),
             p(200.0nm, 5.0nm)
         ]
+
+        # Auto-taper handled by `simplify`
+        p2 = Path()
+        straight!(p2, 100nm, Paths.Trace(10nm))
+        straight!(p2, 100nm, Paths.Taper())
+        straight!(p2, 100nm, Paths.Trace(20nm))
+        node = simplify(p2, 2:3)
+        @test node.sty.styles[1] isa Paths.TaperTrace
+        @test p2[2].sty isa Paths.Taper # unchanged
     end
 
     @testset "Terminations" begin
@@ -870,7 +880,7 @@ end
         # Attach then overlay, Straight, CPW
         straight!(path, 100μm, Paths.CPW(10μm, 6μm))
         attach!(path, sref(cs), 10μm)
-        Paths.overlay!(path, halo(path[end].sty, 2μm), GDSMeta(2))
+        Paths.overlay!(path, halo(path[end].sty, 2μm), GDSMeta(2)) # Adds halo of attachment too
         # Overlay then attach, Turn, TaperCPW
         turn!(path, 90°, 100μm, Paths.TaperCPW(10μm, 6μm, 2μm, 2μm))
         Paths.overlay!(path, halo(path[end].sty, 2μm), GDSMeta(2))
@@ -878,7 +888,7 @@ end
         # Multiple overlays, BSpline, TaperCPW
         bspline!(path, [Point(1000μm, 1000μm)], 90°, Paths.TaperCPW(2μm, 2μm, 10μm, 6μm))
         Paths.overlay!(path, halo(path[end].sty, 2μm), GDSMeta(2))
-        Paths.overlay!(path, halo(path[end].sty, 4μm), GDSMeta(3))
+        Paths.overlay!(path, halo(path[end].sty, 4μm), GDSMeta(3)) # includes halo of overlay by reference
         # Overlay and attach after simplifying
         simplify!(path)
         attach!(path, sref(cs), pathlength(path) - 200μm, location=1)
@@ -891,17 +901,23 @@ end
 
         # Halos
         hp = halo(path, 2μm; only_layers=[GDSMeta(1), GDSMeta(3)])
+        # Note: because entire path is excluded, does not ignore attachment on first GDSMeta(2) overlay
         c = Cell("halo", nm)
         render!(c, hp)
         flatten!(c)
-        @test length(c.elements) == 4 # 3 rectangles and one overlay + 0 terminations
+        @test length(c.elements) == 5 # 3 rectangles + 1 double halo rectangle + one overlay + 0 terminations
         # Overlay halos currently don't get terminations, normally a final segment gets 1
         # Not ideal but they don't track neighbors in this implementation
         hp = halo(path, 2μm)
         c = Cell("halo", nm)
         render!(c, hp)
         flatten!(c)
-        @test length(c.elements) == 15 # 3 rectangles + 10 traces + 2 terminations
+        @test length(c.elements) == 17 # 4 rectangles + 11 traces + 2 terminations
+        @test count(c.element_metadata .== GDSMeta(0)) == 5 # original path + terminations
+        @test count(c.element_metadata .== GDSMeta(1)) == 4 # rectangles
+        @test count(c.element_metadata .== GDSMeta(2)) == 4 # 3 overlays + halo overlay reference
+        @test count(c.element_metadata .== GDSMeta(3)) == 1 # 1 overlay
+        @test count(c.element_metadata .== GDSMeta(4)) == 3 # final overlay
     end
 
     @testset "OffsetSegments" begin

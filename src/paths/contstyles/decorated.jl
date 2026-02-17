@@ -26,6 +26,8 @@ Return the underlying, undecorated style if decorated; otherwise just return the
 """
 undecorated(s::Style) = s
 undecorated(s::AbstractDecoratedStyle) = undecorated(s.s)
+without_attachments(s::Style) = s
+without_attachments(s::DecoratedStyle) = s.s # Shallow and does not remove overlays
 # Nodes: Undecorating invalidates linked list (caller can reconcile if necessary), but
 # prev/next are still populated (!= n itself) so can still be used to check if node started/ended path
 function undecorated(n::Node{T}) where {T}
@@ -259,7 +261,8 @@ function _refs(segment::Paths.Segment{T}, s::OverlayStyle) where {T}
         # Add dummy neighbors so halo doesn't append/prepend to it
         # Ideally we could track actual neighbors but that gets complicated
         dummy = Node{T}(Straight(zero(T)), NoRenderContinuous())
-        DeviceLayout.place!(cs, Node{T}(segment, oversty, dummy, dummy), meta)
+        DeviceLayout.place!(cs, Node{T}(segment, undecorated(oversty), dummy, dummy), meta)
+        DeviceLayout.addref!.(cs, _refs(segment, oversty)) # oversty may be compound with decorations
     end
     return vcat(_refs(segment, s.s), sref(cs))
 end
@@ -322,4 +325,8 @@ end
 function _overlay!(sty0::DecoratedStyle, oversty::Style, metadata::DeviceLayout.Meta)
     sty0.s = _overlay!(sty0.s, oversty, metadata)
     return sty0
+end
+
+function nextstyle(sty::OverlayStyle)
+    return OverlayStyle(nextstyle(sty.s), nextstyle.(sty.overlay), sty.overlay_metadata)
 end

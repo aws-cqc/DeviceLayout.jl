@@ -79,12 +79,12 @@ setα0!(s::Turn, α0′) = s.α0 = α0′
 α1(s::Turn) = s.α0 + s.α
 
 """
-    turn!(p::Path, α, r::Coordinate, sty::Style=contstyle1(p))
+    turn!(p::Path, α, r::Coordinate, sty::Style=nextstyle(p))
 
 Turn a path `p` by angle `α` with a turning radius `r` in the current direction.
 Positive angle turns left. By default, we take the last continuous style in the path.
 """
-function turn!(p::Path, α, r::Coordinate, sty::Style=contstyle1(p))
+function turn!(p::Path, α, r::Coordinate, sty::Style=nextstyle(p))
     T = coordinatetype(p)
     dimension(T) != dimension(typeof(r)) && throw(DimensionError(T(1), r))
     !isempty(p) &&
@@ -96,7 +96,7 @@ function turn!(p::Path, α, r::Coordinate, sty::Style=contstyle1(p))
 end
 
 """
-    turn!(p::Path, str::String, r::Coordinate, sty::Style=contstyle1(p))
+    turn!(p::Path, str::String, r::Coordinate, sty::Style=nextstyle(p))
 
 Turn a path `p` with direction coded by string `str`:
 
@@ -106,7 +106,7 @@ Turn a path `p` with direction coded by string `str`:
 
 By default, we take the last continuous style in the path.
 """
-function turn!(p::Path, str::String, r::Coordinate, sty::Style=contstyle1(p))
+function turn!(p::Path, str::String, r::Coordinate, sty::Style=nextstyle(p))
     T = coordinatetype(p)
     dimension(T) != dimension(typeof(r)) && throw(DimensionError(T(1), r))
     !isempty(p) &&

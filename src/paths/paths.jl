@@ -99,6 +99,7 @@ export reconcile!,
     launch!,
     meander!,
     next,
+    nextstyle,
     nodes,
     overlay!,
     pathf,
@@ -393,6 +394,26 @@ nodes(p::Path) = p.nodes
 name(p::Path) = p.name
 laststyle(p::Path) = isempty(nodes(p)) ? nothing : style1(p, ContinuousStyle)
 
+"""
+    nextstyle(p::Path)
+
+Return the style to be used if the path is extended without specifying a new style.
+
+In most cases this is the last continuous, non-virtual style, but there are some special cases:
+
+  - Attachments (from `attach!`) are not part of the next style
+  - A `TaperTrace` is followed by a `SimpleTrace` with its final width
+  - A `TaperCPW` is followed by a `SimpleCPW` with its final trace and gap
+  - A `CompoundStyle` (from `simplify!`) is followed by its last style
+  - An `OverlayStyle` (from `overlay!`) is followed by an `OverlayStyle` using the `nextstyle` for each overlay and base style
+  - A termination is followed by `NoRenderContinuous`
+
+For a path ending in a `PeriodicStyle`, `nextstyle` will return that same style, but when
+the path is actually extended, it will continue its periodicity from where it ended in the last segment.
+"""
+nextstyle(p::Path) = isempty(nodes(p)) ? nothing : nextstyle(laststyle(p))
+nextstyle(laststy::Style) = laststy
+
 function DeviceLayout._geometry!(cs::CoordinateSystem, p::Path)
     return addref!(cs, p)
 end
@@ -632,7 +653,7 @@ function style1(p::Path, T)
     if isnothing(i)
         error("No $T found in the path.")
     else
-        s = undecorated(style(A[i]))
+        s = without_attachments(style(A[i]))
         return _style1(s, T) # could be compound style
     end
 end
@@ -698,6 +719,7 @@ include("contstyles/strands.jl")
 include("contstyles/termination.jl")
 include("discretestyles/simple.jl")
 include("norender.jl")
+include("contstyles/periodic.jl")
 
 include("segments/straight.jl")
 include("segments/turn.jl")
@@ -768,14 +790,68 @@ Segments or styles can have fields that depend on the properties of neighbors. E
 
   - Corners need to know their extents based on previous/next styles.
   - Tapers need to know their length for `extent(s, t)` to work.
-    This function reconciles node `n` for consistency with neighbors in this regard.
+  - Periodic styles need to know if they are continuing the same style, and if so, from where in the period
+  - Decorated and overlay styles need to reconcile inner styles
+
+This function reconciles node `n` for consistency with neighbors in this regard.
 """
 function reconcilefields!(n::Node)
     seg, sty = segment(n), style(n)
     if isa(seg, Corner)
         seg.extent = extent(style(previous(n)), pathlength(segment(previous(n))))
     end
-    return n.sty = _withlength!(sty, pathlength(seg)) # may modify or create new style
+    return n.sty = reconcilestyle!(sty, n)
+end
+
+# May mutate sty or create new sty; does not mutate n
+reconcilestyle!(s::Style, n::Node) = s
+
+function reconcilestyle!(s::ContinuousStyle{true}, n::Node)
+    return _withlength!(s, pathlength(n))
+end
+
+function reconcilestyle!(s::DecoratedStyle, n::Node)
+    s.s = reconcilestyle!(s.s, n)
+    return s
+end
+
+function reconcilestyle!(s::OverlayStyle, n::Node)
+    prevsty = without_attachments(previous(n).sty)
+    if previous(n) == n || !(prevsty isa OverlayStyle)
+        s.s = reconcilestyle!(s.s, n)
+        for i in eachindex(s.overlay)
+            s.overlay[i] = reconcilestyle!(s.overlay[i], n)
+        end
+        return s
+    end
+    # Reconcile base style with previous overlay base style
+    base_dummy = Node(n.seg, s.s)
+    base_dummy.prev = Node(previous(n).seg, prevsty.s)
+    s.s = reconcilestyle!(s.s, base_dummy)
+    for i in eachindex(s.overlay)
+        overlay_dummy = Node(n.seg, s.overlay[i])
+        # If previous has an overlay with the same index and metadata, use it to reconcile
+        if i <= length(prevsty.overlay) &&
+           prevsty.overlay_metadata[i] == s.overlay_metadata[i]
+            overlay_dummy.prev = Node(n.prev.seg, prevsty.overlay[i])
+        end
+        s.overlay[i] = reconcilestyle!(s.overlay[i], overlay_dummy)
+    end
+    return s
+end
+
+function reconcilestyle!(s::PeriodicStyle, n::Node)
+    previous(n) == n && return s
+    prevsty = without_attachments(previous(n).sty)
+    # No match => don't modify
+    !same_cycle(s, prevsty) && return s
+    new_cycle_start = prevsty.l0 + pathlength(previous(n))
+    # Don't modify if l0 already matches
+    if s.l0 == new_cycle_start
+        return s
+    end
+    # Update start
+    return PeriodicStyle(s.styles, s.lengths, new_cycle_start)
 end
 
 _withlength!(sty::Style, l) = sty
@@ -788,7 +864,7 @@ function _withlength!(sty::DecoratedStyle, l)
 end
 function _withlength!(sty::OverlayStyle, l)
     sty.s = _withlength!(sty.s, l)
-    sty.overlay .= _withlength!.(sty.overlay, Ref(l))
+    sty.overlay .= _withlength!.(sty.overlay, l)
     return sty
 end
 
@@ -959,8 +1035,10 @@ styles of a path are turned into a `CompoundStyle`. The method returns a `Paths.
 """
 function simplify(p::Path, inds::UnitRange=firstindex(p):lastindex(p))
     tag = gensym()
+    taper_inds = handle_generic_tapers!(p, inds)
     cseg = CompoundSegment(nodes(p)[inds], tag)
     csty = CompoundStyle(cseg.segments, map(style, nodes(p)[inds]), tag)
+    restore_generic_tapers!(p, taper_inds)
     return Node(cseg, csty)
 end
 
@@ -1186,107 +1264,6 @@ function _launch!(p::Path{T}; kwargs...) where {T <: Coordinate}
 end
 
 """
-    terminate!(pa::Path{T}; gap=Paths.terminationlength(pa), rounding=zero(T), initial=false) where {T}
-
-End a `Paths.Path` with a termination.
-
-If the preceding style is a CPW, this is a "short termination" if `iszero(gap)` and is an
-"open termination" with a gap of `gap` otherwise, defaulting to the gap of the preceding CPW.
-
-Rounding of corners may be specified with radius given by `rounding`. Rounding keeps the
-trace length constant by removing some length from the preceding segment and adding a
-rounded section of equivalent maximum length.
-
-Terminations can be applied on curves without changing the underlying curve. If you add a
-segment after a termination, it will start a straight distance `gap` away from where the original
-curve ended. However, rounded terminations are always drawn as though straight from the point where
-rounding starts, slightly before the end of the curve. This allows the rounded corners to be represented
-as exact circular arcs.
-
-If the preceding style is a trace, the termination only rounds the corners at the end of the
-segment or does nothing if `iszero(rounding)`.
-
-If `initial`, the termination is appended before the beginning of the `Path`.
-"""
-function terminate!(
-    pa::Path{T};
-    rounding=zero(T),
-    initial=false,
-    gap=terminationlength(pa, initial)
-) where {T}
-    termlen = gap + rounding
-    iszero(termlen) && return
-    termsty = Termination(pa, rounding; initial=initial, cpwopen=(!iszero(gap)))
-    # Nonzero rounding: splice and delete to make room for rounded part
-    if !iszero(rounding)
-        orig_sty = initial ? undecorated(style0(pa)) : laststyle(pa)
-        round_gap = (orig_sty isa CPW && iszero(gap))
-        split_idx = initial ? firstindex(pa) : lastindex(pa)
-        split_node = pa[split_idx]
-        len = pathlength(split_node)
-        len > rounding || throw(
-            ArgumentError(
-                "`rounding` $rounding too large for previous segment path length $len."
-            )
-        )
-
-        split_len = initial ? rounding : len - rounding
-        !round_gap &&
-            (2 * rounding > trace(orig_sty, split_len)) &&
-            throw(
-                ArgumentError(
-                    "`rounding` $rounding too large for previous segment trace width $(trace(orig_sty, split_len))."
-                )
-            )
-        round_gap &&
-            (2 * rounding > Paths.gap(orig_sty, split_len)) &&
-            throw(
-                ArgumentError(
-                    "`rounding` $rounding too large for previous segment gap $(Paths.gap(orig_sty, split_len))."
-                )
-            )
-        splice!(pa, split_idx, split(split_node, split_len))
-        termsty = if initial
-            Termination(Path(pa[2:end]), rounding; initial=initial, cpwopen=(!iszero(gap)))
-        else
-            Termination(
-                Path(pa[1:(end - 1)]),
-                rounding;
-                initial=initial,
-                cpwopen=(!iszero(gap))
-            )
-        end
-    end
-
-    if initial
-        α = α0(pa)
-        p = p0(pa) - gap * Point(cos(α), sin(α))
-        pa.p0 = p
-        pushfirst!(pa, Straight{T}(gap, p, α), termsty)
-        if !iszero(rounding)
-            # merge first two segments and apply termsty
-            simplify!(pa, 1:2)
-            setstyle!(pa[1], termsty)
-        end
-    else
-        straight!(pa, gap, termsty)
-        if !iszero(rounding)
-            # merge last two segments and apply termsty
-            simplify!(pa, (length(pa) - 1):length(pa))
-            setstyle!(pa[end], termsty)
-        end
-    end
-end
-
-function terminationlength(pa::Path{T}, initial::Bool) where {T}
-    initial && return terminationlength(undecorated(style0(pa)), zero(T))
-    return terminationlength(laststyle(pa), pathlength(pa[end]))
-end
-
-terminationlength(s, t) = zero(t)
-terminationlength(s::CPW, t) = gap(s, t)
-
-"""
     split(n::Node, x::Coordinate)
     split(n::Node, x::AbstractVector{<:Coordinate}; issorted=false)
 
@@ -1310,7 +1287,7 @@ function split(n::Node, x::Coordinate)
 end
 
 function split(n::Node, x::AbstractVector{<:Coordinate}; issorted=false)
-    isempty(x) && throw(ArgumentError("List of positions to split at cannot be empty"))
+    isempty(x) && return Path([n])
     sortedx = issorted ? x : sort(x)
 
     i = 2
@@ -1591,7 +1568,8 @@ function halo(
             sty.overlay_metadata,
             Ref(only_layers),
             Ref(ignore_layers)
-        )
+        ) # Attachments to ignored layers will be lost
+    # (e.g., overlay is AbstractCompoundStyle with attachment)
     return OverlayStyle(
         halo(sty.s, outer_delta, inner_delta; only_layers, ignore_layers, kwargs...),
         halo.(

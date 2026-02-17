@@ -22,7 +22,7 @@
 # could result in gaps between the 1--6 line segment and the points on the previous segment
 # corresponding to 2 and 5.
 
-function _poly(f::Paths.Straight{T}, s::Paths.CPWOpenTermination) where {T}
+function __poly(f::Paths.Straight{T}, s::Paths.CPWOpenTermination) where {T}
     g = cpw_points(f, s)
 
     t0, tr, t1 = zero(T), s.rounding, pathlength(f)
@@ -111,7 +111,7 @@ end
 # |        |
 # 5--------6
 
-function _poly(f::Paths.Straight{T}, s::Paths.CPWShortTermination) where {T}
+function __poly(f::Paths.Straight{T}, s::Paths.CPWShortTermination) where {T}
     g = cpw_points(f, s)
 
     t0, tr, t1 = zero(T), s.rounding, pathlength(f)
@@ -127,6 +127,7 @@ function _poly(f::Paths.Straight{T}, s::Paths.CPWShortTermination) where {T}
     ])
 
     poly2 = Polygon([g(t0, -1, 1), g(t1, -1, 1), g(t1, -1, -1), g(t0, -1, -1)])
+    iszero(tr) && return [poly1, poly2]
     round_idx = s.initial ? [1, 4] : [2, 3]
     round1 = Polygons.Rounded(tr; p0=points(poly1)[round_idx], min_side_len=zero(T))
     round2 = Polygons.Rounded(tr; p0=points(poly2)[round_idx], min_side_len=zero(T))
@@ -146,12 +147,12 @@ function to_polygons(
     return to_polygons.(_poly(f, s); kwargs...)
 end
 
-function _poly(f::Paths.Straight{T}, s::Paths.TraceTermination) where {T}
-    iszero(s.rounding) && return Polygon{T}[]
+function __poly(f::Paths.Straight{T}, s::Paths.TraceTermination) where {T}
     if !isapprox(s.rounding, pathlength(f))
         throw(ArgumentError("Termination rounding ≠ termination path length."))
     end
     poly = to_polygons(f, Paths.SimpleTrace(s.width))
+    iszero(s.rounding) && return poly
     round_idx = s.initial ? [1, 4] : [2, 3]
     return Polygons.Rounded(s.rounding; p0=points(poly)[round_idx], min_side_len=zero(T))(
         poly
@@ -171,16 +172,16 @@ function to_polygons(
     return to_polygons(_poly(f, s); kwargs...)
 end
 
-## Generic segments—just draw as though straight
+# Generic segments—just draw as though straight for length `_termlength` (either gap or rounding + gap)
 function _poly(
     f::Paths.Segment{T},
     s::Union{Paths.TraceTermination, Paths.CPWOpenTermination, Paths.CPWShortTermination}
 ) where {T}
     straight = if s.initial
-        p = p1(f) - pathlength(f) * Point(cos(α1(f)), sin(α1(f)))
-        Paths.Straight{T}(pathlength(f), p, α1(f))
+        p = p1(f) - Paths._termlength(s) * Point(cos(α1(f)), sin(α1(f)))
+        Paths.Straight{T}(Paths._termlength(s), p, α1(f))
     else
-        Paths.Straight{T}(pathlength(f), p0(f), α0(f))
+        Paths.Straight{T}(Paths._termlength(s), p0(f), α0(f))
     end
-    return _poly(straight, s)
+    return __poly(straight, s)
 end
