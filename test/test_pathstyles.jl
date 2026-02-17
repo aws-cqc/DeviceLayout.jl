@@ -133,6 +133,8 @@ end
 
     @test length(pa) == 5 # 3 original + 1 extra node per transition
     @test pathlength(pa) ≈ 30μm
+    @test pathlength(pa[1]) < 10μm # split before transition
+    @test pathlength(pa[end]) == 10μm
     # Quintic S-curve: lags linear at 25%, matches at 50%, leads at 75%
     L2 = pathlength(pa[2].seg)
     @test Paths.width(pa[2].sty, 0.0μm) ≈ 1μm
@@ -147,6 +149,17 @@ end
     place!(cs, pa)
     sm = SolidModel("test", overwrite=true)
     render!(sm, cs) # runs without error
+
+    # Add tapers after
+    pa = Path()
+    straight!(pa, 10μm, Paths.Trace(1μm))
+    turn!(pa, 90°, 10μm / (pi / 2), Paths.Trace(5μm))
+    straight!(pa, 10μm, Paths.Trace(3μm))
+    Paths.round_trace_transitions!(pa, side=:after)
+    @test length(pa) == 5 # 3 original + 1 extra node per transition
+    @test pathlength(pa) ≈ 30μm
+    @test pathlength(pa[1]) == 10μm
+    @test pathlength(pa[end]) < 10μm
 
     # Invalid α_max
     pa = Path()
