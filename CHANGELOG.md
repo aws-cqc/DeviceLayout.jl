@@ -4,20 +4,25 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Upcoming
+
+  - Added `margin` keyword to `terminate!` to allow terminating a specified distance before the end of the path
+  - Added `Paths.PeriodicStyle`, which cycles between substyles in a repeating sequence
+  - Added `Paths.round_trace_transitions!` for splicing rounded tapers between `Trace` styles
+  - Added `overlay_index` keyword to `terminate!` to allow applying terminations to overlay styles
+  - Fixed incorrect behaviors when extending certain `Paths`: overlay styles continue as overlays, while terminations continue as `NoRenderContinuous`
+  - Fixed incompatibility issues for combinations of compound, decorated, overlay, and termination styles
+  - Fixed bug where zero-length path segments could cause SolidModel rendering to fail
+  - Fixed bug where a generic taper inside a `simplify`-ed path would lead to an error thrown in rendering
+  - Fixed bug where references in a decorated style applied as an overlay would be ignored by `halo`
+
 ## 1.9.0 (2026-02-09)
 
   - Added `SingleChannelRouting`, which allows multiple paths to be routed in parallel in the same `Channel` (defined by a path with a trace style), entering and exiting the channel in different places
   - Added memoization for B-spline optimization (`auto_speed`), so a given curve only needs `auto_speed` to do any computation once per Julia session
-  - Changed threshold for GDSII layer/datatype number spec warning to 32767; added `GDSWriterOptions` to configure this
-  - Added `Paths.PeriodicStyle`, which cycles between substyles in a repeating sequence
-  - Added `Paths.round_trace_transitions!` for splicing rounded tapers between `Trace` styles
-  - Added `overlay_index` keyword to `terminate!` to allow applying terminations to overlay styles
   - Changed default CPW mesh size to use `2 * min(trace, gap)` (higher element quality when trace and gap are very different)
   - Changed default global mesh grading from `0.9` to `0.75` (more robust meshing for complex geometries, relatively small cost)
-  - Added `margin` keyword to `terminate!` to allow terminating a specified distance before the end of the path
-  - Fixed incorrect behaviors when extending certain `Paths`: overlay styles continue as overlays, while terminations continue as `NoRenderContinuous`
-  - Fixed incompatibility issues for combinations of compound, decorated, overlay, and termination styles
-  - Fixed bug where zero-length path segments could cause SolidModel rendering to fail
+  - Changed threshold for GDSII layer/datatype number spec warning to 32767; added `GDSWriterOptions` to configure this
   - Fixed `SolidModel` rendering issue where some exterior boundaries might not be tagged
   - Fixed breaking error with `apply_size_to_surfaces=true` supplied via `MeshingParameters`; it is still deprecated as of 1.8.0 and has no effect, but no longer throws an error
 
