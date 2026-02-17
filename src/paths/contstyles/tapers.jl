@@ -156,9 +156,9 @@ copy(::Taper) = Taper()
 
 summary(::Taper) = string("Generic linear taper between neighboring segments in a path")
 
-function handle_generic_tapers!(p)
+function handle_generic_tapers!(p, inds::UnitRange=firstindex(p):lastindex(p))
     # Adjust the path so generic tapers render correctly
-    generic_taper_inds = findall(x -> isa(style(x), Paths.Taper), nodes(p))
+    generic_taper_inds = inds ∩ findall(x -> isa(style(x), Paths.Taper), nodes(p))
     for i in generic_taper_inds
         tapernode = p[i]
         prevnode = previous(tapernode)

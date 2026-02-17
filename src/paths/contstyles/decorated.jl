@@ -262,7 +262,7 @@ function _refs(segment::Paths.Segment{T}, s::OverlayStyle) where {T}
         # Ideally we could track actual neighbors but that gets complicated
         dummy = Node{T}(Straight(zero(T)), NoRenderContinuous())
         DeviceLayout.place!(cs, Node{T}(segment, undecorated(oversty), dummy, dummy), meta)
-        DeviceLayout.addref!.(cs, _refs(segment, oversty))
+        DeviceLayout.addref!.(cs, _refs(segment, oversty)) # oversty may be compound with decorations
     end
     return vcat(_refs(segment, s.s), sref(cs))
 end

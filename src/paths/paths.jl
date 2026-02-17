@@ -1038,8 +1038,10 @@ styles of a path are turned into a `CompoundStyle`. The method returns a `Paths.
 """
 function simplify(p::Path, inds::UnitRange=firstindex(p):lastindex(p))
     tag = gensym()
+    taper_inds = handle_generic_tapers!(p, inds)
     cseg = CompoundSegment(nodes(p)[inds], tag)
     csty = CompoundStyle(cseg.segments, map(style, nodes(p)[inds]), tag)
+    restore_generic_tapers!(p, taper_inds)
     return Node(cseg, csty)
 end
 
@@ -1569,7 +1571,8 @@ function halo(
             sty.overlay_metadata,
             Ref(only_layers),
             Ref(ignore_layers)
-        )
+        ) # Attachments to ignored layers will be lost
+    # (e.g., overlay is AbstractCompoundStyle with attachment)
     return OverlayStyle(
         halo(sty.s, outer_delta, inner_delta; only_layers, ignore_layers, kwargs...),
         halo.(
