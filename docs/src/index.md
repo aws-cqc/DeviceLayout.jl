@@ -19,12 +19,12 @@ DeviceLayout.jl is a [Julia](http://julialang.org) package for computer-aided de
 |--------------|----------|
 | Install DeviceLayout.jl | [Installation](tutorials/getting_started.md#Installation) |
 | Set up my workflow | [Workflow Tips](tutorials/getting_started.md#Workflow-tips) |
-| Create my first layout | [Quick Start](getting_started/quickstart.md) |
+| Create my first layout | [First Layout](tutorials/first_layout.md) |
 | Learn through guided tutorials | [Tutorials](tutorials/index.md) |
 | Solve a specific problem | [How-To Guides](how_to/index.md) |
 | Understand key concepts | [Concepts](concepts/index.md) |
 | Look up API details | [Reference](reference/index.md) |
-| See full working examples | [Examples](examples/qpu17.md) |
+| See full working examples | [Examples](#Examples) |
 
 ## Why DeviceLayout.jl?
 
@@ -74,15 +74,14 @@ save("hello.gds", cell)
 
 See [Getting Started](tutorials/getting_started.md) for a more complete introduction, including workflow setup.
 
-## Documentation Structure
+## What should I read next?
 
-- **[Getting Started](tutorials/getting_started.md)** - Installation and workflow setup
-- **[Tutorials](tutorials/index.md)** - Learning-oriented lessons for beginners
-- **[How-To Guides](how_to/index.md)** - Problem-oriented recipes for specific tasks
-- **[Concepts](concepts/index.md)** - Understanding-oriented explanations of key ideas
-- **[Reference](reference/index.md)** - Information-oriented API documentation
-- **[Examples](examples/qpu17.md)** - Complete working examples
-- **[Developer Guide](developer/index.md)** - For contributors to DeviceLayout.jl
+- **New to DeviceLayout.jl?** Continue with [Getting Started](tutorials/getting_started.md) to set up your environment and workflow.
+- **Want to learn systematically?** Head to the [Tutorials](@ref tutorials-index).
+- **Have a specific task in mind?** Check the [How-To Guides](@ref how-to-index).
+- **Want to understand the concepts?** Read the [Concepts](@ref concepts-index) section.
+- **Looking for API details?** Browse the [Reference](@ref reference-index).
+- **Want to contribute to DeviceLayout.jl?** Read the [Developer Guide](developer/index.md)
 
 ## Examples
 

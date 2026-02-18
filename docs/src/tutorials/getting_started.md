@@ -160,8 +160,7 @@ For more performance tips, see [the Julia manual](https://docs.julialang.org/en/
 
 ## Which section should I read next?
 
-- **New to DeviceLayout.jl?** Continue with [Installation](installation.md), then work through the [Quick Start](quickstart.md).
-- **Want to learn systematically?** After the quick start, head to the [Tutorials](@ref tutorials-index).
+- **Want to learn systematically?** Head to the [Tutorials](@ref tutorials-index).
 - **Have a specific task in mind?** Check the [How-To Guides](@ref how-to-index).
 - **Want to understand the concepts?** Read the [Concepts](@ref concepts-index) section.
 - **Looking for API details?** Browse the [Reference](@ref reference-index).

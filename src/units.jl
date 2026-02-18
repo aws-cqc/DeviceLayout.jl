@@ -81,6 +81,14 @@ else # unit_preference == "NoUnits"
     using .PreferNoUnits
     const PreferredUnits = PreferNoUnits
 end
+@doc """
+    module PreferredUnits
+
+Module exporting `fm, pm, nm, μm, mm, cm, dm, m`.
+
+Mixed unit operations with these imports will be converted based on the unit
+preference set by [`DeviceLayout.set_unit_preference!`](@ref) (default `nm`).
+""" PreferredUnits
 
 onemicron(v::T) where {T <: Unitful.Length} =
     one(T) * Unitful.ContextUnits(Unitful.μm, Unitful.unit(Unitful.upreferred(v)))

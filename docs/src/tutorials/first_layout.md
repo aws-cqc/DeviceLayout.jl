@@ -21,7 +21,7 @@ In this tutorial, you'll learn the fundamentals of DeviceLayout.jl by creating a
 You'll work interactively in the Julia REPL. If using VS Code, you can use the built-in REPL from the
 Julia extension with `Alt+J Alt+O` (or `Option+J Option+O` on Mac), which will display graphical
 previews of geometry in a separate tab when a `Cell` or `CoordinateSystem` is returned by REPL execution.
-Otherwise, you can save any `Cell` to GDSII and view it in KLayout or another program.
+Otherwise, you can save any `Cell` to GDSII and view it in KLayout or another program, or save to `.svg` and open it in a graphics viewer or browser.
 
 Create a directory for this tutorial project and start the Julia REPL with `julia`. Type `]` to enter the REPL mode for the package manager. The name
 of the current environment appears in parentheses at the left of the prompt. This will be the default
