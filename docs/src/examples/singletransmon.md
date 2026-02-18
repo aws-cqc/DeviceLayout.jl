@@ -1,4 +1,4 @@
-# Single transmon with readout resonator
+# [Single transmon with readout resonator](@id single-transmon-example)
 
 In this example, we demonstrate the layout and solid model generation of a single transmon
 coupled to a readout resonator. In particular, this example demonstrates the additional steps
@@ -6,7 +6,7 @@ necessary to generate a mesh suitable for electromagnetic simulation using exter
 applications, such as the [*Palace*](https://github.com/awslabs/palace) solver. *Palace* is
 an open-source, parallel finite element code for full-wave 3D electromagnetic simulations. This example
 constructs the geometry used in [the *Palace* release documentation](https://aws.amazon.com/blogs/quantum-computing/aws-releases-open-source-software-palace-for-cloud-based-electromagnetics-simulations-of-quantum-computing-hardware/) and is aimed at
-demonstrating the power of the [`SolidModels`](../schematicdriven/solidmodels.md)
+demonstrating the power of the [`SolidModels`](../concepts/solidmodels.md)
 capability for electronic design automation in an open-source toolchain.
 
 The full code for this example can be found [in `examples/SingleTransmon/SingleTransmon.jl` in the `DeviceLayout.jl` repository](https://github.com/aws-cqc/DeviceLayout.jl/blob/main/examples/SingleTransmon/SingleTransmon.jl). Components and process technology are drawn from the

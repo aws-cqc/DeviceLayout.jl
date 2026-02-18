@@ -8,7 +8,7 @@
         "port_2",
         "lumped_element"
     ])
-    @show SchematicDrivenLayout.ExamplePDK.FLIPCHIP_SOLIDMODEL_TARGET.rendering_options
+
     @test ("port_1", 2) in fc_target.retained_physical_groups
     @test ("port_2", 2) in fc_target.rendering_options.retained_physical_groups # Backwards compatibility
 end

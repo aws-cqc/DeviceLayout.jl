@@ -1,6 +1,6 @@
 # ExamplePDK
 
-`ExamplePDK` is [a DeviceLayout.jl PDK](../schematicdriven/pdks.md) containing layer definitions, components, and rendering targets for an example process technology.
+`ExamplePDK` is [a DeviceLayout.jl PDK](../concepts/pdks.md) containing layer definitions, components, and rendering targets for an example process technology.
 
 !!! warning
     
@@ -19,7 +19,7 @@
     registered to your private Julia package registry.
     Each subfolder in `MyPDK/components/` would represent its own package (e.g., MyClawCapacitors.jl)
     with its own `Project.toml` specifying a version number, dependencies, and compatibility
-    requirements. See the [documentation on PDKs](../schematicdriven/pdks.md) for more detail.
+    requirements. See the [documentation on PDKs](../concepts/pdks.md) for more detail.
 
 ```@docs
 SchematicDrivenLayout.ExamplePDK.LAYER_RECORD

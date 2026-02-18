@@ -333,7 +333,7 @@ route_nodes = add_routes!(g, port_nodes, q_nodes, readout_nodes, p)
 return (; chip, port_nodes, q_nodes, readout_nodes, route_nodes)
 ```
 
-[Routes](../schematicdriven/schematics.md#Routing) in DeviceLayout.jl are flexible elements used to create paths without having to know ahead of time exactly what the path looks like. We use the following rules for routing:
+[Routes](../concepts/routes.md) in DeviceLayout.jl are flexible elements used to create paths without having to know ahead of time exactly what the path looks like. We use the following rules for routing:
 
 ```julia
 # params.jl
@@ -661,9 +661,9 @@ In this case, the only components to check are the [`ExampleSimpleSQUID`](exampl
 
 Our routing has control lines that intersect with readout lines. One way to handle a route crossing would be to define a crossover component, place it at fixed location on the chip, then route your lines to the crossover. We also have control lines that intersect transmon couplers, as well as a readout resonator that crosses a coupler. This is a little trickier but could be handled in a similar way.
 
-Instead, we'll use DeviceLayout.jl's [automatic crossover generation](../schematicdriven/schematics.md#Automatic-crossover-generation) to make these paths hop over one another without having to know in advance exactly where the crossings occur. Any `Path` or `RouteComponent` that intersects another—including those nested within composite components, like transmon coupler paths or resonator sections—can be used with this functionality.
+Instead, we'll use DeviceLayout.jl's [automatic crossover generation](@ref SchematicDrivenLayout.crossovers!) to make these paths hop over one another without having to know in advance exactly where the crossings occur. Any `Path` or `RouteComponent` that intersects another—including those nested within composite components, like transmon coupler paths or resonator sections—can be used with this functionality.
 
-We use the simple built-in [`AirBridge` crossover style](../paths.md#Intersections), with parameters set in `params.jl`:
+We use the simple built-in [`AirBridge` crossover style](../concepts/paths.md#Intersections), with parameters set in `params.jl`:
 
 ```julia
 # params.jl
@@ -712,7 +712,7 @@ y_grid = (lowerleft(bnds).y + 600μm):GROUND_HOLE_SPACING:(upperright(bnds).y - 
 
 ## Rendering
 
-We now have the final device in a "DeviceLayout.jl-native" representation, but we need to output a GDSII file. To do this, we `render!` the `schematic` to a [`Cell`](../coordinate_systems.md#Cells), which draws all shapes as `Polygon`s and maps our named layers (`SemanticMeta`) to GDS layer and datatype (`GDSMeta`). The rendering settings (including the layer mapping) are provided by `DemoQPU17.L1_TARGET`.
+We now have the final device in a "DeviceLayout.jl-native" representation, but we need to output a GDSII file. To do this, we `render!` the `schematic` to a [`Cell`](../concepts/coordinate_systems.md#Cells), which draws all shapes as `Polygon`s and maps our named layers (`SemanticMeta`) to GDS layer and datatype (`GDSMeta`). The rendering settings (including the layer mapping) are provided by `DemoQPU17.L1_TARGET`.
 
 ```julia
 #### Render results to Cell for GDS export

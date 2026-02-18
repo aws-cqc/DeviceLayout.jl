@@ -103,7 +103,7 @@ function Base.show(
     bnd = bounds(c0)
     w, h = width(ustrip(bnd)), height(ustrip(bnd))
     w1 = haskey(opt, :width) ? lscale(opt[:width]) : 4 * 72
-    h1 = haskey(opt, :height) ? lscale(opt[:height]) : 4 * 72
+    h1 = haskey(opt, :height) ? lscale(opt[:height]) : min(4 * 72, Int(ceil(w1 * h / w)))
     bboxes = haskey(opt, :bboxes) ? opt[:bboxes] : false
 
     surf = if mime isa MIME"image/png"

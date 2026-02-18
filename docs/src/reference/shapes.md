@@ -62,9 +62,11 @@ We also provide methods for a few "compound shapes" that render multiple entitie
 
 ```@docs
     checkerboard!
+    grating!
+    interdigit!
 ```
 
-Example:
+Example for `checkerboard!`:
 
 ```@example 1
 using DeviceLayout, DeviceLayout.PreferredUnits, FileIO # hide
@@ -79,11 +81,7 @@ nothing; # hide
 <img src="../checkers.svg" style="width:2in;"/>
 ```
 
-```@docs
-    grating!
-```
-
-Example:
+Example for `grating!`:
 
 ```@example 2
 using DeviceLayout, DeviceLayout.PreferredUnits, FileIO # hide
@@ -95,10 +93,6 @@ nothing; # hide
 
 ```@raw html
 <img src="../grating.svg" style="width:2in;"/>
-```
-
-```@docs
-    interdigit!
 ```
 
 Simple usage for `interdigit!`:

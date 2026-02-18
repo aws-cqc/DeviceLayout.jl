@@ -285,7 +285,7 @@ Some specific guidelines:
       + The hook should be easy to find directly from parameters, without building complex geometry first
       + In particular, “tuning parameters” should not change hook positions
       + If changing one hook position can’t be avoided, consider whether another hook position should change along with it to more easily express a simple “distance between hooks” constraint and to keep the entire floorplan from shifting when the parameter is tuned
-  - Avoid “flags” that change how the component is rendered for different purposes like simulation or artwork—use `OptionalStyle` (e.g., with the helper functions `not_simulated`, `only_simulated`, `only_solidmodel`) or metadata together with your [rendering target](./targets.md) to customize behavior
+  - Avoid “flags” that change how the component is rendered for different purposes like simulation or artwork—use `OptionalStyle` (e.g., with the helper functions `not_simulated`, `only_simulated`, `only_solidmodel`) or metadata together with your [rendering target](@ref api-targets) to customize behavior
   - Orientation/reference frames
     
       + If components always have a particular global orientation on chip, the local orientation should be the same
@@ -399,8 +399,8 @@ end
     
       + Helper functions should generally be private, start with an underscore, and take the component as input with the appropriate type annotation, e.g. `_paths(comp::MyComponent)`
   - Internal coordinate systems should always use `uniquename` (to ensure different names across instances)
-  - Use [bounding-box alignment methods](../transformations.md#Alignment) for alignment rather than manually calculating dimensions
-  - Use `OptionalStyle` (e.g., with the helper functions `not_simulated`, `only_simulated`, `only_solidmodel`) or metadata to allow customizable rendering based on your [rendering target](./targets.md)
+  - Use [bounding-box alignment methods](../reference/api.md#Alignment) for alignment rather than manually calculating dimensions
+  - Use `OptionalStyle` (e.g., with the helper functions `not_simulated`, `only_simulated`, `only_solidmodel`) or metadata to allow customizable rendering based on your [rendering target](@ref api-targets)
 
 ## Hooks methods
 
@@ -430,7 +430,7 @@ end
     end
     ```
 
-## Component and package creation and versioning
+## [Component and package creation and versioning](@id style-package)
 
 See [the page on Process Design Kits (PDKs)](pdks.md) for general recommendations on creating and organizing a DeviceLayout.jl PDK. For component packages within your PDK:
 
@@ -503,12 +503,12 @@ As a layout abstraction, `AbstractComponent` is a parameterized geometry with de
 
 Meanwhile, `AbstractComponent` does not have necessarily satisfy any functional/physical contract—for example, hooks do not have to be electrical "pins" or "ports". However, a component will be used as a schematic-level abstraction, allowing us to assign meaning to its presence in a device and to its connections to other components.
 
-You should not create a `Component` for every unit of reusable parameterized geometry. You should instead create a function that returns a `GeometryEntity` or two or places them in a coordinate system (for examples, see the [shape library](../shapes.md)) when most of the following are true of your parameterized geometry:
+You should not create a `Component` for every unit of reusable parameterized geometry. You should instead create a function that returns a `GeometryEntity` or two or places them in a coordinate system (for examples, see the [shape library](../reference/shapes.md)) when most of the following are true of your parameterized geometry:
 
   - It has only one or two shapes
   - It can be useful in various layers
   - It has relatively few parameters, most of which have no natural defaults
-  - It has no special attachment/alignment points ([bounding-box alignment methods](../transformations.md#Alignment) are sufficient)
+  - It has no special attachment/alignment points ([bounding-box alignment methods](../reference/api.md#Alignment) are sufficient)
   - It has no independent physical meaning
 
 Anything more complicated or meaningful is a candidate for a `Component`.

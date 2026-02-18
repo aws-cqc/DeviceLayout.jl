@@ -42,6 +42,7 @@ Simulation layers:
     simulated_area = GDSMeta(200, 0)
     port           = GDSMeta(210, 0)
     lumped_element = GDSMeta(211, 0)
+    wave_port      = GDSMeta(212, 0)
     mesh_control   = GDSMeta(220, 0)
     integration    = GDSMeta(230, 0)
 

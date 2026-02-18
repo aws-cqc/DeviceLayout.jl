@@ -1,4 +1,4 @@
-using Documenter, DeviceLayout, FileIO, CoordinateTransformations
+using Documenter, DeviceLayout, FileIO, CoordinateTransformations, .SchematicDrivenLayout
 DocMeta.setdocmeta!(
     DeviceLayout,
     :DocTestSetup,
@@ -25,51 +25,62 @@ DocMeta.setdocmeta!(
 makedocs(
     repo=Documenter.Remotes.GitHub("aws-cqc", "DeviceLayout.jl"),
     modules=[DeviceLayout, CoordinateTransformations, DeviceLayout.SchematicDrivenLayout],
-    warnonly=false,
+    warnonly=true,
     checkdocs=:none,
-    format=Documenter.HTML(prettyurls=true, assets=["assets/favicon.ico"]),
+    format=Documenter.HTML(
+        prettyurls=true,
+        assets=["assets/favicon.ico"],
+        size_threshold=300_000,
+        collapselevel=1
+    ),
     sitename="DeviceLayout.jl",
     authors="""
   AWS Center for Quantum Computing
   """,
     pages=[
         "Home" => "index.md",
-        "Geometry-Level Layout" => [
-            "Overview" => "geometrylevel.md",
-            "Units" => "units.md",
-            "Points" => "points.md",
-            "Geometry" => "geometry.md",
-            "Transformations" => "transformations.md",
-            "Entity Styles" => "entitystyles.md",
-            "Polygons" => "polygons.md",
-            "Coordinate Systems" => "coordinate_systems.md",
-            "Texts" => "texts.md",
-            "Paths" => "paths.md",
-            "Routes" => "routes.md",
-            "Shape library" => "shapes.md",
-            "Autofill" => "autofill.md",
-            "Rendering" => "render.md",
-            "Solid Models (3D Geometry)" => "solidmodels.md",
-            "File Formats" => "fileio.md",
-            "Troubleshooting/FAQ" => "faq.md"
+        "Getting Started" => "how_to/get_started.md",
+        "Tutorials" => [
+            "Overview" => "tutorials/index.md",
+            "First Layout" => "tutorials/first_layout.md",
+            "Working with Paths" => "tutorials/working_with_paths.md",
+            "Building a Component" => "tutorials/building_a_component.md",
+            "Schematic Basics" => "tutorials/schematic_basics.md",
+            "Composite Components" => "tutorials/composite_components.md",
+            "Creating a PDK" => "tutorials/creating_a_pdk.md"
         ],
-        "Schematic-Driven Layout" => [
-            "Overview" => "schematicdriven/index.md",
-            "Components" => "schematicdriven/components.md",
-            "Hooks" => "schematicdriven/hooks.md",
-            "Schematics" => "schematicdriven/schematics.md",
-            "Technologies" => "schematicdriven/technologies.md",
-            "Targets" => "schematicdriven/targets.md",
-            "Solid Models" => "schematicdriven/solidmodels.md",
-            "PDKs" => "schematicdriven/pdks.md",
-            "Style Guide" => "schematicdriven/styleguide.md",
-            "Troubleshooting/FAQ" => "schematicdriven/faq.md"
+        "Concepts" => [
+            "Overview" => "concepts/index.md",
+            "Units" => "concepts/units.md",
+            "Points" => "concepts/points.md",
+            "Geometry" => "concepts/geometry.md",
+            "Transformations" => "concepts/transformations.md",
+            "Polygons" => "concepts/polygons.md",
+            "Coordinate Systems" => "concepts/coordinate_systems.md",
+            "Texts" => "concepts/texts.md",
+            "Paths" => "concepts/paths.md",
+            "Routes" => "concepts/routes.md",
+            "Rendering and Export" => "concepts/render.md",
+            "Solid Models (3D Geometry)" => "concepts/solidmodels.md",
+            "Schematic-Driven Design" => "concepts/schematic_driven_design.md",
+            "Components" => "concepts/components.md",
+            "Autofill" => "concepts/autofill.md",
+            "PDKs" => "concepts/pdks.md",
+            "Style Guide" => "concepts/styleguide.md"
         ],
         "Examples" => [
             "ExamplePDK" => "examples/examplepdk.md",
             "Quantum Processor" => "examples/qpu17.md",
             "Single-Transmon Simulation" => "examples/singletransmon.md"
-        ]
+        ],
+        "Reference" => [
+            "Overview" => "reference/index.md",
+            "Geometry API Reference" => "reference/api.md",
+            "Path API Reference" => "reference/path_api.md",
+            "Schematic API Reference" => "reference/schematic_api.md",
+            "Shape Reference" => "reference/shapes.md"
+        ],
+        "FAQ/Troubleshooting" => "how_to/faq.md"
     ]
 )
 

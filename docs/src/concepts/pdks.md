@@ -1,4 +1,4 @@
-# Process Design Kit
+# [Process Design Kit](@id pdk-architecture)
 
 A [process design kit (PDK)](https://en.wikipedia.org/wiki/Process_design_kit) defines process-specific tools used to assemble designs for fabrication. For example, a typical PDK defines a set of layer names along with the GDS layer and datatype for each of those names. It also defines a set of components using those layers.
 
@@ -45,7 +45,7 @@ end
 
 A DeviceLayout.jl PDK would also define any [`Component`s](@ref SchematicDrivenLayout.AbstractComponent) to be used in building schematics. We provide [ExamplePDK](../examples/examplepdk.md) as a module within DeviceLayout.jl as an example.
 
-One way we recommend organizing your own PDK for use with DeviceLayout.jl is as a single version-controlled repository, with a `MyPDK.jl` package at the top level, defining a module like the above snippet, and component packages in a subdirectory. For example:
+We recommend organizing your own PDK for use with DeviceLayout.jl is as a single version-controlled repository, with a `MyPDK.jl` package at the top level, defining a module like the above snippet, and component packages in a subdirectory. For example:
 
 ```
 MyPDK/
@@ -56,32 +56,31 @@ MyPDK/
 │  ├─ MyInterdigitalCapacitors/
 │  │  ├─ Project.toml
 │  │  ├─ README.md
-│  │  ├─ src/
-│  │  │  └─ MyInterdigitalCapacitors.jl
+│  │  ├─ docs/
 │  │  ├─ examples/
 │  │  │  └─ example.jl
+│  │  ├─ src/
+│  │  │  └─ MyInterdigitalCapacitors.jl
 │  │  └─ test/
 │  ├─ MyMeanderInductors/
 │  ├─ MySpiralInductors/
 │  └─ ...
+├─ docs/
 ├─ src/
 │  └─ MyPDK.jl
 └─ test/
 ```
 
-MyPDK.jl would have DeviceLayout.jl as a dependency, and each component package would depend on MyPDK.jl (and possibly other components) for layer names and other information or functionality held in common. The PDK and component packages will be independently versioned using [semantic versioning](https://semver.org/).
+MyPDK.jl has DeviceLayout.jl as a dependency, and each component package depend on MyPDK.jl (and possibly other components) for layer names and other information or functionality held in common. The PDK and component packages are independently versioned using [semantic versioning](https://semver.org/).
 
 Here, component packages have their own `Project.toml` file distinct from MyPDKPackage because they are separate packages despite living in the same repository. Like
 with all Julia packages it is not advised to actually commit `Manifest.toml` files, although it is useful to commit them to one-off "projects" like analyses and layout scripts to enable fully reproducible environments.
 
 This structure can be combined with [LocalRegistry](https://github.com/GunnarFarneback/LocalRegistry.jl/) to make the PDK and component packages available from a private registry. Doing so allows you to use the full power of the [Julia package manager](https://pkgdocs.julialang.org/) by versioning physical designs using semantic versioning, seamlessly tracking and switching between versions as needed.
 
-## PDK tools
+## See Also
 
-DeviceLayout.jl provides some utilities for generating packages and files for PDKs and components from templates:
-
-```@docs
-SchematicDrivenLayout.generate_component_definition
-SchematicDrivenLayout.generate_component_package
-SchematicDrivenLayout.generate_pdk
-```
+- [Tutorial: Creating a PDK](../tutorials/creating_a_pdk.md) for a walkthrough of PDK creation
+- [ExamplePDK](../examples/examplepdk.md), the PDK used for [single transmon](../examples/singletransmon.md) and [QPU](../examples/qpu17.md) examples
+- [API Reference: PDKs](@ref api-pdks) for utilities for generating packages and files for PDKs and components from templates
+- [API Reference: Technologies](@ref api-technologies) and [Targets](@ref api-targets)

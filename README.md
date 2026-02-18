@@ -6,77 +6,57 @@
 [![Aqua](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 [![codecov](https://codecov.io/gh/aws-cqc/DeviceLayout.jl/graph/badge.svg?token=D3EQ7I4LP0)](https://codecov.io/gh/aws-cqc/DeviceLayout.jl)
 
-DeviceLayout.jl is a [Julia](http://julialang.org) package for computer-aided design (CAD) of quantum integrated circuits, developed at the AWS Center for Quantum Computing. The package supports the generation of 2D layouts and 3D models of complex devices using a low-level geometry interface together with a high-level schematic-driven workflow.
+DeviceLayout.jl is a [Julia](http://julialang.org) package for computer-aided design (CAD) of quantum integrated circuits, developed at the AWS Center for Quantum Computing. The package supports 
 
-## Why use this package?
+- **2D layout generation** for fabrication (GDSII export)
+- **3D model generation** for electromagnetic simulation
+- **Schematic-driven design** for managing complex devices with many components
 
-DeviceLayout.jl provides functionality for 2D/2.5D device CAD, including generation of GDS layouts for fabrication as well as 3D models for electromagnetic simulation. Package development aims to allow designers to produce and iterate on layouts quickly and easily, with particular attention to scalability in support of larger quantum processors and growing, collaborative teams. Key features include:
+## Why DeviceLayout.jl?
 
-  - Geometry-level layout with rich geometry types like polygons, ellipses, and paths
-  - Schematic-driven layout, allowing users to manage complexity by maintaining separate levels of abstraction for component geometry and device connectivity
-  - 3D modeling and meshing (via [Open CASCADE Technology](https://dev.opencascade.org/) and [Gmsh](https://gmsh.info/)), which takes advantage of rich geometry and schematic information to improve meshing and allow programmatic generation of configurations for simulation software (like [*Palace*](https://awslabs.github.io/palace/stable/), an open-source tool for electromagnetic finite-element analysis also developed at the AWS CQC)
-  - Built-in support for common elements of superconducting quantum processors like coplanar waveguides, air bridges, and flip-chip assemblies
-  - GDSII and graphics format export for 2D layouts, as well as various standard formats for 3D models and meshes
-  - Explicit unit support without sacrificing performance
-  - Users write code in Julia, a scientific programming language that combines high performance and ease of use
-  - The [Julia package manager](https://pkgdocs.julialang.org/v1/) offers portability and reproducibility for design projects in collaborations of any size
-  - Teams can manage their own process design kit as a set of Julia packages in a private registry, leveraging the package manager for versioning process technologies and components
+We develop DeviceLayout.jl to accelerate design cycles as we scale to larger quantum processors and larger teams. Key features include:
+
+- **Rich geometry types** with first-class support for paths
+- **Schematic-driven layout**: Manage complexity by separating component geometry and device connectivity
+- **3D modeling and meshing** (via [Open CASCADE Technology](https://dev.opencascade.org/) and [Gmsh](https://gmsh.info/)) using rich geometry and schematic information to improve meshing and configure simulations
+- **Developed alongside [*Palace*](https://awslabs.github.io/palace/stable/)**, an open-source tool for electromagnetic finite-element analysis
+- **Built-in support** for common elements of superconducting quantum processors like coplanar waveguides, air bridges, and flip-chip assemblies
+- **Explicit unit support** without sacrificing performance
+- **The Julia ecosystem**: Users write code in Julia, a scientific programming language combining high performance and ease of use
+- **Package management**: The [Julia package manager](https://pkgdocs.julialang.org/v1/) offers portability and reproducibility for design projects
+- **PDK support**: Teams can manage their own process design kit as a set of Julia packages in a private registry
 
 ## Installation
 
-You can follow [these instructions](https://julialang.org/install/) to install Julia. We support Julia v1.10 or later.
+DeviceLayout.jl requires Julia v1.10 or later. You can follow [these instructions](https://julialang.org/install/) to install Julia.
 
 From Julia, install DeviceLayout.jl using the built-in package manager, [Pkg.jl](https://pkgdocs.julialang.org/v1/getting-started/):
 
-```r
+```bash
 julia> ] # Pressing ] in the Julia REPL activates the Pkg REPL mode
 pkg> activate . # Activates an environment in the current directory
 pkg> add DeviceLayout # Adds DeviceLayout.jl to the environment
+pkg> add FileIO # You'll want FileIO too, to save output files
 ```
 
-We recommend [using an environment for each project](https://julialang.github.io/Pkg.jl/v1/environments/) rather than installing packages in the default environment.
+We recommend [using an environment for each project](https://julialang.github.io/Pkg.jl/v1/environments/) rather than installing packages in the default environment. This ensures reproducibility and avoids version conflicts.
 
-The [DeviceLayout.jl documentation](https://aws-cqc.github.io/DeviceLayout.jl/) will help you get started with a [quick-start tutorial](https://aws-cqc.github.io/DeviceLayout.jl/stable/#Quick-start). Examples can be found in the `examples` directory, with full walkthroughs in the docs, including a [17-qubit quantum processor](https://aws-cqc.github.io/DeviceLayout.jl/stable/examples/qpu17/) and [simulation of a transmon and resonator with Palace](https://aws-cqc.github.io/DeviceLayout.jl/stable/examples/singletransmon/).
-
-## Performance and workflow tips
-
-[KLayout](https://www.klayout.de/) is a free (GPL v2+) GDS viewer/editor. It watches
-its open files for changes, making it easy to use as a fast previewer alongside DeviceLayout.jl.
-
-The recommended IDE for Julia is [Visual Studio Code](https://code.visualstudio.com/)
-with the [Julia for Visual Studio Code extension](https://www.julia-vscode.org/).
-
-Since Julia has a just-in-time compiler, the first time code is executed may take much
-longer than subsequent times in the same Julia session. This means that a lot of time will be wasted repeating
-compilations if you run your DeviceLayout.jl code by calling a script from the command line each time,
-like you might in other languages.
-
-For readability, it is best to split up your CAD code into functions that have clearly named
-inputs and perform a well-defined task. It is also best to avoid writing statements in global scope.
-In other words, put most of your code in a function. Your CAD script should ideally look like the following:
+### Hello World
 
 ```julia
-# mycad.jl
-using DeviceLayout, DeviceLayout.PreferredUnits, FileIO
+using DeviceLayout, DeviceLayout.PreferredUnits
+using FileIO
 
-function subroutine1()
-    # render some thing
-end
+# Create a cell
+cell = Cell("hello", nm)
 
-function subroutine2()
-    # render some other thing
-end
+# Add a rectangle
+render!(cell, centered(Rectangle(100μm, 50μm)), GDSMeta(0))
 
-function main()
-    # my cad code goes here: do all of the things
-    subroutine1()
-    subroutine2()
-    return save("/path/to/out.gds", ...)
-end
-
-main() # execute main() at end of script.
+# Save to GDS
+save("hello.gds", cell)
 ```
 
-In a typical workflow, you'll have a text editor open alongside a Julia REPL. You'll save the above code in a file (e.g., `mycad.jl`) and then run `include("mycad.jl")` from the Julia REPL to generate your pattern.
-You'll iteratively revise `mycad.jl` and save your changes.
-Subsequent runs should be several times faster than the first, if you `include` the file again from the same Julia session.
+See [Getting Started](https://aws-cqc.github.io/DeviceLayout.jl/stable/how_to/get_started.md) for a more complete introduction, including workflow setup. There's one especially important tip for users new to Julia: Julia has a just-in-time compiler, so the first execution of code takes longer due to compilation. Subsequent runs in the same session are much faster. To take advantage of this, don't run scripts from the command line each time. Instead, use functions defined in files, and `include` those files in a persistent REPL session.
+
+To explore what you can build with DeviceLayout, see our examples with full walkthroughs in the documentation, including a [17-qubit quantum processor](https://aws-cqc.github.io/DeviceLayout.jl/stable/examples/qpu17/) and [simulation of a transmon and resonator with Palace](https://aws-cqc.github.io/DeviceLayout.jl/stable/examples/singletransmon/).

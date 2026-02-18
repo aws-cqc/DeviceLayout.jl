@@ -45,8 +45,7 @@ julia> 3 * Point(1, 1) + Point(1, 2)
  5
 ```
 
-You can also do affine transformations by composing any number of `Translation`
-and `Rotation`s, which will return a callable object representing the
+You can also do affine [transformations](transformations.md) by composing any number of `CoordinateTransformation`s, which will return a callable object representing the
 transformation. You can type the following Unicode symbols with `\degree` and
 `\circ` tab-completions in the Julia REPL or in VS Code with the [Julia extension](https://www.julia-vscode.org/docs/stable/).
 
@@ -58,18 +57,6 @@ julia> aff(Point(0, 0))
 2-element Point{Float64} with indices SOneTo(2):
  -2.0
   1.0
-```
-
-## API
-
-```@docs
-    DeviceLayout.PointTypes
-    DeviceLayout.Coordinate
-    Points.Point
-    Points.getx
-    Points.gety
-    Points.lowerleft(::AbstractArray{Point{T}}) where T
-    Points.upperright(::AbstractArray{Point{T}}) where T
 ```
 
 ## Implementation details
