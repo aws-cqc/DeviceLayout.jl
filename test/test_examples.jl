@@ -1,6 +1,16 @@
 @testitem "ExamplePDK" setup = [CommonTestSetup] begin
     include("../examples/DemoQPU17/DemoQPU17.jl")
     @time "Total" schematic, artwork = DemoQPU17.qpu17_demo(dir=tdir)
+
+    # Check target constructor
+    fc_target = SchematicDrivenLayout.ExamplePDK.flipchip_solidmodel_target([
+        "port_1",
+        "port_2",
+        "lumped_element"
+    ])
+    @show SchematicDrivenLayout.ExamplePDK.FLIPCHIP_SOLIDMODEL_TARGET.rendering_options
+    @test ("port_1", 2) in fc_target.retained_physical_groups
+    @test ("port_2", 2) in fc_target.rendering_options.retained_physical_groups # Backwards compatibility
 end
 
 @testitem "Single Transmon" setup = [CommonTestSetup] begin
@@ -49,11 +59,11 @@ end
     render!(
         sm,
         floorplan,
-        SchematicDrivenLayout.ExamplePDK.ExamplePDK.singlechip_solidmodel_target(
+        SchematicDrivenLayout.ExamplePDK.singlechip_solidmodel_target([
             "port_1",
             "port_2",
             "lumped_element"
-        );
+        ]);
         strict=:no
     )
     # Ensure fragment and map found all the exterior boundaries: 3*4 sides of chip and vacuum boxes + top + bottom = 14

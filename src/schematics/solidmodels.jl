@@ -42,6 +42,7 @@ The `rendering_options` include any keyword arguments to be passed down to the l
     `technology` into the substrate, rather than away from it.
   - `wave_port_layers`: A list of layer `Symbol`s for layers that are 1D line segments extruded to define wave port boundary conditions.
   - `ignored_layers`: A list of layer `Symbol`s for layers that should be ignored during rendering (mapped to `nothing`). This provides an alternative to using `NORENDER_META` for layers that should be conditionally ignored in solid model rendering but may be needed for other rendering targets.
+  - `retained_physical_groups`: Vector of `(name, dimension)` tuples specifying which physical groups to keep after rendering. All other groups are removed.
 
 The `postrenderer` is a list of geometry kernel commands that create new named groups of
 entities from other groups, for example by geometric Boolean operations like intersection.
@@ -56,7 +57,7 @@ struct SolidModelTarget <: Target
     substrate_layers::Vector{Symbol}
     wave_port_layers::Vector{Symbol}
     ignored_layers::Vector{Symbol}
-    preserved_groups::Vector{Tuple{String, Int}}
+    retained_physical_groups::Vector{Tuple{String, Int}}
     rendering_options
     postrenderer
 end
@@ -70,7 +71,7 @@ SolidModelTarget(
     wave_port_layers=[],
     ignored_layers=[],
     postrender_ops=[],
-    preserved_groups=[],
+    retained_physical_groups=[],
     kwargs...
 ) = SolidModelTarget(
     tech,
@@ -80,8 +81,8 @@ SolidModelTarget(
     substrate_layers,
     wave_port_layers,
     ignored_layers,
-    preserved_groups,
-    (; solidmodel=true, kwargs...),
+    retained_physical_groups,
+    (; solidmodel=true, retained_physical_groups=retained_physical_groups, kwargs...),
     postrender_ops
 )
 
@@ -255,6 +256,7 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
             zmap=Base.Fix1(layer_z, target),
             postrender_ops=postrender_ops,
             map_meta=_map_meta_fn(target),
+            retained_physical_groups=target.retained_physical_groups,
             kwargs...,
             target.rendering_options...
         )

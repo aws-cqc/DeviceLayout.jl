@@ -246,7 +246,7 @@ function singlechip_solidmodel_target(boundary_groups...)
         )
     )
     retained_physical_groups = [(x, 2) for x ∈ boundary_groups]
-    append!(target.rendering_options.retained_physical_groups, retained_physical_groups)
+    append!(target.retained_physical_groups, retained_physical_groups)
     return target
 end
 singlechip_solidmodel_target(boundary_groups::Vector) =
@@ -367,7 +367,7 @@ groups to be retained specified by boundary_groups
 function flipchip_solidmodel_target(boundary_groups...)
     target = deepcopy(FLIPCHIP_SOLIDMODEL_TARGET)
     retained_physical_groups = [(x, 2) for x ∈ boundary_groups]
-    append!(target.rendering_options.retained_physical_groups, retained_physical_groups)
+    append!(target.retained_physical_groups, retained_physical_groups)
     return target
 end
 flipchip_solidmodel_target(boundary_groups::Vector) =
