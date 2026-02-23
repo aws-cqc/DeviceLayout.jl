@@ -977,7 +977,13 @@ end
         cs2 = CoordinateSystem("test")
         r1 = Rectangle(10mm, 10mm)
         t1 = Texts.Text("test1", Point(1, 1)mm, rot=10°, xalign=Align.XCenter())
-        t2 = Texts.Text("test2", Point(1, 1)mm, rot=pi / 2, yalign=Align.YCenter())
+        t2 = Texts.Text(
+            "test2",
+            Point(1, 1)mm,
+            rot=pi / 2,
+            yalign=Align.YCenter(),
+            width=2mm
+        )
         t3 = Texts.Text(
             "test3",
             Point(1, 1)mm,
@@ -990,6 +996,10 @@ end
         place!(cs2, t2, :text)
         place!(cs2, t3, :text)
         save(path, cs2)
+        rm(path, force=true)
+        # With intermediate cell
+        c = Cell(cs2)
+        save(path, c)
         rm(path, force=true)
     end
 end

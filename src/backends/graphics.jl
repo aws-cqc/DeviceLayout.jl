@@ -144,6 +144,16 @@ function Base.show(
         Cairo.restore(ctx)
     end
 
+    if c0 isa Cell
+        Cairo.save(ctx)
+        for (t, meta) in zip(c0.texts, c0.text_metadata)
+            Cairo.set_source_rgba(ctx, fillcolor(options, gdslayer(meta))...)
+            render_text!(ctx, trans(t), sf)
+        end
+        Cairo.fill(ctx)
+        Cairo.restore(ctx)
+    end
+
     if bboxes
         for ref in c0.refs
             Cairo.save(ctx)
@@ -193,7 +203,7 @@ alignstr(::YCenter) = "center"
 alignstr(::BottomEdge) = "bottom"
 
 function render_text!(ctx, t::Text, sf)
-    fontsize = Int(round(iszero(t.width) ? 12 : (ustrip(t.width) * sf * t.mag)))
+    fontsize = Int(round(iszero(t.width) ? 12 * t.mag : (ustrip(t.width) * sf * t.mag)))
     pos = ustrip(t.origin)
     Cairo.set_font_face(ctx, "Serif $fontsize")
     return Cairo.text(
