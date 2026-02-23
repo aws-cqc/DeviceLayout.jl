@@ -57,7 +57,7 @@ function render!(
 end
 
 function render!(c::Cell{S}, text::Texts.Text, meta::GDSMeta=GDSMeta(); kwargs...) where {S}
-    return text!(c, text, meta; kwargs...)
+    return text!(c, text, meta)
 end
 
 function render!(c::Cell{S}, text::Vector{Texts.Text{S}}, meta::Vector{GDSMeta}) where {S}

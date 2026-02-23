@@ -11,6 +11,8 @@ using ..Transformations
 import ..Rectangles: Rectangle, width, height
 import ..Polygons: Polygon, points
 using ..Cells
+import ..Texts: Text
+import ..Align: LeftEdge, RightEdge, XCenter, TopEdge, BottomEdge, YCenter
 
 import FileIO: File, @format_str, stream
 
@@ -134,7 +136,9 @@ function Base.show(
         Cairo.save(ctx)
         Cairo.set_source_rgba(ctx, fillcolor(options, l)...)
         for el in c0.elements[gdslayer.(default_meta_map.(element_metadata(c0))) .== l]
-            poly!(ctx, trans(el))
+            tel = trans(el)
+            poly!(ctx, tel)
+            render_text!(ctx, tel, sf)
         end
         Cairo.fill(ctx)
         Cairo.restore(ctx)
@@ -178,6 +182,30 @@ end
 poly!(cr::Cairo.CairoContext, p::Polygon) = poly!(cr, ustrip(points(p)))
 poly!(cr::Cairo.CairoContext, ps::Vector{<:Polygon}) = poly!.(Ref(cr), ps)
 poly!(cr::Cairo.CairoContext, ent::GeometryEntity) = poly!(cr, to_polygons(ent))
+
+function render_text!(ctx, t::GeometryEntity, sf) end
+
+alignstr(::LeftEdge) = "left"
+alignstr(::XCenter) = "center"
+alignstr(::RightEdge) = "right"
+alignstr(::TopEdge) = "top"
+alignstr(::YCenter) = "center"
+alignstr(::BottomEdge) = "bottom"
+
+function render_text!(ctx, t::Text, sf)
+    fontsize = Int(round(iszero(t.width) ? 12 : (ustrip(t.width) * sf * t.mag)))
+    pos = ustrip(t.origin)
+    Cairo.set_font_face(ctx, "Serif $fontsize")
+    return Cairo.text(
+        ctx,
+        pos.x,
+        pos.y,
+        t.text;
+        halign=alignstr(t.xalign),
+        valign=alignstr(t.yalign),
+        angle=-t.rot * 180 / pi
+    )
+end
 
 function save(f::File{format"SVG"}, c0::Cell; options...)
     open(f, "w") do s
