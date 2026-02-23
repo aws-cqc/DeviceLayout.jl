@@ -8,6 +8,7 @@ The format of this changelog is based on
 
   - Added `SchematicDrivenLayout.filter_parameters` for sharing parameters between composite components and subcomponents
   - Added component style guide to docs
+  - Fixed SolidModel bug where assigning the result of a boolean operation to the same physical group name as the object/tool without explicitly removing the object/tool could cause an error
 
 ## 1.9.0 (2026-02-09)
 

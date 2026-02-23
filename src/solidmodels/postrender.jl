@@ -1,9 +1,29 @@
 ######## Postrendering
 function _postrender!(sm::SolidModel, operations)
-    # Operations
     for (destination, op, args, kwargs...) in operations
-        sm[destination] = op(sm, args...; kwargs...)
+        kw = Dict{Symbol, Any}(kwargs...)
+        _maybe_autoremove!(kw, op, args, destination)
+        sm[destination] = op(sm, args...; kw...)
     end
+end
+
+# Check if a postrender argument matches the destination group name
+_destination_matches(arg::AbstractString, dest::AbstractString) = arg == dest
+_destination_matches(arg::AbstractVector, dest::AbstractString) = dest ∈ arg
+_destination_matches(_, _) = false
+
+# For boolean ops where the destination matches an input group name,
+# default to removing those entities to prevent entity tag invalidation
+# from overlapping geometry (#155). Allow manual override.
+function _maybe_autoremove!(kw, op, args, destination)
+    op ∈ (union_geom!, difference_geom!, intersect_geom!, fragment_geom!) || return
+    length(args) >= 1 &&
+        _destination_matches(args[1], destination) &&
+        get!(kw, :remove_object, true)
+    length(args) >= 2 &&
+        _destination_matches(args[2], destination) &&
+        get!(kw, :remove_tool, true)
+    return
 end
 
 function _fuse!(k, object, tool; tag=-1, remove_object=true, remove_tool=true)
