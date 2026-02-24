@@ -1323,6 +1323,25 @@
             CoordinateSystem("test", nm),
             meshing_parameters=SolidModels.MeshingParameters()
         )
+
+        # Issue #155: destination matching input group name should auto-remove
+        # to prevent entity tag invalidation
+        sm = SolidModel("test", overwrite=true)
+        cs = CoordinateSystem("test", nm)
+        place!(cs, Rectangle(2μm, 1μm), SemanticMeta(:a))
+        place!(cs, Rectangle(2μm, 1μm) + Point(0.5μm, 0.5μm), SemanticMeta(:b))
+        place!(cs, centered(Rectangle(6μm, 6μm)), SemanticMeta(:bg))
+        render!(
+            sm,
+            cs;
+            postrender_ops=[
+                ("a", SolidModels.union_geom!, ("a", "b", 2, 2)),
+                ("bg", SolidModels.difference_geom!, ("bg", "a", 2, 2))
+            ]
+        )
+        @test SolidModels.hasgroup(sm, "bg", 2)
+        @test !isempty(SolidModels.entitytags(sm["bg", 2]))
+        @test length(SolidModels.entitytags(sm["a", 2])) == 2
     end
 
     @testset "Mesh size modifications" begin
