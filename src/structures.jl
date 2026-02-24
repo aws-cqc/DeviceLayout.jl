@@ -1,4 +1,4 @@
-const GLOBAL_NAME_COUNTER = Dict{String, Int}()
+const GLOBAL_NAME_COUNTER = ThreadSafeDict{String, Int}()
 
 """
     uniquename(str, dlm="\\\$"; modify_first=false, counter=GLOBAL_NAME_COUNTER, case_sensitive=true)
