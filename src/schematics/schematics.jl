@@ -1179,7 +1179,7 @@ function index_layer!(
     ly,
     nextindex=1
 )
-    for (cs, trans) in traversal(comp_cs)
+    for (cs, trans) in DeviceLayout.traversal(comp_cs)
         for (idx, el, m) in zip(1:length(elements(cs)), elements(cs), element_metadata(cs))
             if layer(m) == ly
                 place!(parent_cs, trans(el), SemanticMeta(m, index=nextindex))
@@ -1189,14 +1189,6 @@ function index_layer!(
         end
     end
     return nextindex
-end
-
-function traversal(cs::GeometryStructure, trans=DeviceLayout.ScaledIsometry())
-    tv = [(cs, trans)]
-    for ref in refs(cs)
-        tv = vcat(tv, traversal(structure(ref), trans ∘ transformation(ref)))
-    end
-    return tv
 end
 
 """

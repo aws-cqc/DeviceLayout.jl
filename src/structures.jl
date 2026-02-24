@@ -168,15 +168,41 @@ lowerleft(s::GeometryStructure) = lowerleft(bounds(s))
 upperright(s::GeometryStructure) = upperright(bounds(s))
 
 """
-    function map_metadata!(geom::GeometryStructure, map_meta)
+    traversal(cs::GeometryStructure, trans=ScaledIsometry())
+
+Return a vector of `(structure, transformation)` tuples for `cs` and all structures in its
+reference hierarchy. The transformation is the global transformation from the root to the
+structure.
+
+Note: The same structure may appear multiple times with different transformations if it is
+referenced multiple times.
+"""
+function traversal(cs::GeometryStructure, trans=ScaledIsometry())
+    tv = [(cs, trans)]
+    for ref in refs(cs)
+        tv = vcat(tv, traversal(structure(ref), trans ∘ transformation(ref)))
+    end
+    return tv
+end
+
+"""
+    function map_metadata!(geom::GeometryStructure, map_meta, [visited])
 
 For every element in `geom` with original meta `m`, set its metadata to `map_meta(m)`.
 
-Recursive on referenced structures.
+Operates on all unique structures in the reference hierarchy exactly once, so that
+multiply-referenced structures are not mapped multiple times.
+
+The `visited` argument is used internally to track structures already processed.
 """
-function map_metadata!(geom::GeometryStructure, map_meta)
-    element_metadata(geom) .= map_meta.(geom.element_metadata)
-    return map_metadata!.(structure.(refs(geom)), map_meta)
+function map_metadata!(geom::GeometryStructure, map_meta, visited::Set{Any}=Set{Any}())
+    geom in visited && return nothing
+    push!(visited, geom)
+    geom.element_metadata .= map_meta.(geom.element_metadata)
+    for ref in refs(geom)
+        map_metadata!(structure(ref), map_meta, visited)
+    end
+    return nothing
 end
 
 """
