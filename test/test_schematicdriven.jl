@@ -760,12 +760,16 @@
         )
             return add_node!(g, subcomps.bqbq)
         end
+        function SchematicDrivenLayout.map_hooks(comp::TestWrapper) # Define based on instance
+            return Dict((1 => :xy1) => :xy1)
+        end
         c = TestWrapper(jj_width=200nm)
         @test component(graph(c)[1]).jj_width == 200nm
         @test component(graph(component(graph(c)[1]))[1]).jj_width == 200nm
 
         @composite_variant TestWrapperVariant TestWrapper new_defaults = (; jj_width=200nm)
         @test component(graph(TestWrapperVariant())[1]).jj_width == 200nm
+        @test hooks(TestWrapperVariant()).xy1.p == hooks(c).xy1.p # Uses base variant map_hooks
 
         ### No reordering of nodes or changing root of rendering tree
         g = SchematicGraph("spacers")
