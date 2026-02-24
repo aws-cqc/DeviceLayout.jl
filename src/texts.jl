@@ -25,11 +25,14 @@ import DeviceLayout: to_polygons, transform, transformation, Transformation
 
 Text element in a layout. Distinct from rendering text as polygons (`PolyText`).
 
+Text rendering may be viewer or system dependent. Use `PolyText` for text with
+well-defined geometry.
+
 Arguments:
 
   - `text`: the text string.
   - `origin`: location of the text in parent coordinate system.
-  - `width`: character width
+  - `width`: character size
   - `can_scale`: defaults to `false`, set to `true` if the text size should not be affected
     by scaling of parent coordinate system.
   - `xalign`: horizontal alignment of text with respect to `origin`. Can be any instance of
@@ -51,6 +54,23 @@ struct Text{S} <: GeometryEntity{S}
     mag::Float64
     rot::Float64
 end
+Base.convert(::Type{GeometryEntity{T}}, t::Text) where {T} = convert(Text{T}, t)
+function Base.convert(::Type{Text{T}}, t::Text) where {T}
+    origin = convert(Point{T}, t.origin)
+    width = convert(T, t.width)
+    return Text(;
+        t.text,
+        origin,
+        width,
+        t.can_scale,
+        t.xalign,
+        t.yalign,
+        t.xrefl,
+        t.mag,
+        t.rot
+    )
+end
+Base.convert(::Type{Text{T}}, t::Text{T}) where {T} = t
 
 transformation(t::Text) = ScaledIsometry(t.origin, t.rot, t.xrefl, t.mag)
 
@@ -103,21 +123,5 @@ function Text(;
     return Text{S}(text, origin, width, can_scale, xalign, yalign, xrefl, mag, rot)
 end
 Text(text, origin; kwargs...) = Text(; text, origin, kwargs...)
-
-function Base.convert(::Type{Text{S}}, t::Text) where {S}
-    origin = convert(Point{S}, t.origin)
-    width = convert(S, t.width)
-    return Text(;
-        t.text,
-        origin,
-        width,
-        t.can_scale,
-        t.xalign,
-        t.yalign,
-        t.xrefl,
-        t.mag,
-        t.rot
-    )
-end
 
 end

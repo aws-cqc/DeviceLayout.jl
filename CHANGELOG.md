@@ -10,6 +10,7 @@ The format of this changelog is based on
   - Added component style guide to docs
   - Fixed bug where `map_metadata!` would map multiply-referenced structures multiple times
   - Fixed bug where `@composite_variant` would not forward `map_hooks` to base variant when defined with component instance rather than type
+  - Added experimental Text entity support to graphics backend
 
 ## 1.9.0 (2026-02-09)
 
