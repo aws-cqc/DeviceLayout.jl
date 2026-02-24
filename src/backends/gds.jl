@@ -73,6 +73,10 @@ Options controlling warnings and validation during GDS file writing.
   - `max_datatype::Int = 32767`: Maximum datatype number that will not throw a warning.
   - `warn_invalid_names::Bool = true`: Whether to warn about cell/text names that violate
     the GDSII spec (must be ≤32 chars, only A-Z, a-z, 0-9, '_', '?', '\$').
+  - `rename_duplicates::Bool = false`: If `true`, automatically rename duplicate cell names
+    during GDS save using [`uniquename`](@ref) with a save-scoped counter. Renaming is
+    case-insensitive (GDS readers like KLayout treat cell names case-insensitively).
+    The original `Cell` objects are not mutated; renamed names are only written to the file.
 
 Warnings for layer number and datatype are configurable because different tools may have
 different limits. In the GDSII specification, layer and datatype must be in the range 0 to 63,
@@ -97,12 +101,16 @@ opts = GDSWriterOptions(
     max_datatype=typemax(UInt16),
     warn_invalid_names=false
 )
+
+# Auto-rename duplicate cell names on save
+opts = GDSWriterOptions(rename_duplicates=true)
 ```
 """
 @kwdef struct GDSWriterOptions
     max_layer::Int = 32767
     max_datatype::Int = 32767
     warn_invalid_names::Bool = true
+    rename_duplicates::Bool = false
 end
 
 const GDSTokens = Dict{UInt16, String}(
@@ -340,19 +348,23 @@ function gdsbegin(
 end
 
 """
-    gdswrite(io::IO, cell::Cell, dbs::Length, options::GDSWriterOptions=GDSWriterOptions())
+    gdswrite(io::IO, cell::Cell, dbs::Length, options::GDSWriterOptions=GDSWriterOptions(); name_map=IdDict{Cell,String}())
 
 Write a `Cell` to an IO buffer. The creation and modification date of the cell
 are written first, followed by the cell name, the polygons in the cell,
 and finally any references or arrays. Warnings are controlled by `options`.
+
+If `name_map` maps `cell` to a replacement name, that name is written instead
+of `cell.name`. The same `name_map` is forwarded to reference writes.
 """
 function gdswrite(
     io::IO,
     cell::Cell,
     dbs::Length,
-    options::GDSWriterOptions=GDSWriterOptions()
+    options::GDSWriterOptions=GDSWriterOptions();
+    name_map=IdDict{Cell, String}()
 )
-    name = even(cell.name)
+    name = even(get(name_map, cell, cell.name))
     options.warn_invalid_names && namecheck(name)
 
     y   = UInt16(Dates.value(Dates.Year(cell.create)))
@@ -376,7 +388,7 @@ function gdswrite(
         bytes += gdswrite(io, x, m, dbs, options)
     end
     for x in cell.refs
-        bytes += gdswrite(io, x, dbs)
+        bytes += gdswrite(io, x, dbs; name_map)
     end
     for (x, m) in zip(cell.texts, cell.text_metadata)
         bytes += gdswrite(io, x, m, dbs, options)
@@ -462,7 +474,7 @@ function gdswrite(
 end
 
 """
-    gdswrite(io::IO, ref::CellReference, dbs)
+    gdswrite(io::IO, ref::CellReference, dbs; name_map=IdDict{Cell,String}())
 
 Write a [`CellReference`](@ref) to an IO buffer. The name of the referenced cell
 is written first. Reflection, magnification, and rotation info are written next.
@@ -471,9 +483,9 @@ Finally, the origin of the cell reference is written.
 Note that cell references without units on their `origin` are presumed to
 be in microns.
 """
-function gdswrite(io::IO, ref::CellReference, dbs)
+function gdswrite(io::IO, ref::CellReference, dbs; name_map=IdDict{Cell, String}())
     bytes = gdswrite(io, SREF)
-    bytes += gdswrite(io, SNAME, even(ref.structure.name))
+    bytes += gdswrite(io, SNAME, even(get(name_map, ref.structure, ref.structure.name)))
 
     bytes += strans(io, ref)
 
@@ -484,7 +496,7 @@ function gdswrite(io::IO, ref::CellReference, dbs)
 end
 
 """
-    gdswrite(io::IO, a::CellArray, dbs)
+    gdswrite(io::IO, a::CellArray, dbs; name_map=IdDict{Cell,String}())
 
 Write a [`CellArray`](@ref) to an IO buffer. The name of the referenced cell is
 written first. Reflection, magnification, and rotation info are written next.
@@ -494,9 +506,9 @@ column vector, and row vector are written.
 Note that cell references without units on their `origin` are presumed to
 be in microns.
 """
-function gdswrite(io::IO, a::CellArray, dbs)
+function gdswrite(io::IO, a::CellArray, dbs; name_map=IdDict{Cell, String}())
     bytes = gdswrite(io, AREF)
-    bytes += gdswrite(io, SNAME, even(a.structure.name))
+    bytes += gdswrite(io, SNAME, even(get(name_map, a.structure, a.structure.name)))
 
     bytes += strans(io, a)
 
@@ -630,7 +642,12 @@ function save(
     verbose=false
 )
     if !spec_warnings
-        options = GDSWriterOptions(typemax(UInt16), typemax(UInt16), false)
+        options = GDSWriterOptions(
+            max_layer=typemax(UInt16),
+            max_datatype=typemax(UInt16),
+            warn_invalid_names=false,
+            rename_duplicates=options.rename_duplicates
+        )
     end
     dbs = dbscale(cell0, cell...)
     pad = mod(length(name), 2) == 1 ? "\0" : ""
@@ -651,24 +668,39 @@ function save(
             print("\n")
         end
         ordered = order!(a)
-        names = Dict{String, Cell}()
         if verbose
             @info("Cells written in order:")
             display(ordered)
             print("\n")
         end
+        name_map = IdDict{Cell, String}()
+        local_counter = Dict{String, Int}()
+        names = Dict{String, Cell}()
         for c in ordered
-            if (haskey(names, c.name) && names[c.name] != c) ||
-               (!haskey(names, c.name) && lowercase(c.name) in lowercase.(keys(names)))
-                match = first(filter(s -> lowercase(s) == lowercase(c.name), keys(names)))
-                @warn(
-                    """Duplicate cell name '$(c.name)' will lead to undefined behavior. Please fix before design review.
-              Original: $(names[match])
-              With duplicate name: $c"""
+            if options.rename_duplicates
+                new_name = uniquename(
+                    c.name,
+                    "\$\$";
+                    modify_first=false,
+                    counter=local_counter,
+                    case_sensitive=false
                 )
+                if new_name != c.name
+                    name_map[c] = new_name
+                    @info "Renamed duplicate cell '$(c.name)' to '$(new_name)' during GDS save."
+                end
+            elseif (haskey(names, c.name) && names[c.name] != c) ||
+                   (!haskey(names, c.name) && lowercase(c.name) in lowercase.(keys(names)))
+                match = first(filter(s -> lowercase(s) == lowercase(c.name), keys(names)))
+                @warn("""Duplicate cell name '$(c.name)' will lead to undefined behavior. \
+                  Use `GDSWriterOptions(rename_duplicates=true)` to auto-rename.
+                  Original: $(names[match])
+                  With duplicate name: $c""")
             end
             names[c.name] = c
-            bytes += gdswrite(io, c, dbs, options)
+        end
+        for c in ordered
+            bytes += gdswrite(io, c, dbs, options; name_map)
         end
         return bytes += gdsend(io)
     end

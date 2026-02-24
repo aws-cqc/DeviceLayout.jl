@@ -1,7 +1,7 @@
 const GLOBAL_NAME_COUNTER = Dict{String, Int}()
 
 """
-    uniquename(str, dlm="\\\$"; modify_first=false, counter=GLOBAL_NAME_COUNTER)
+    uniquename(str, dlm="\\\$"; modify_first=false, counter=GLOBAL_NAME_COUNTER, case_sensitive=true)
 
 Given string input `str` for the `n`th time, return `str * dlm * string(n)`.
 
@@ -18,6 +18,9 @@ The uniqueness is expected on a per-Julia session basis or until [`reset_uniquen
 called, so if you load an existing GDSII file and try to save unique
 cells on top of that you may get an unlucky clash. Calling `uniquename` on all loaded `Cell`
 names will effectively "register" them, making subsequent `uniquename` calls aware of them.
+
+If `case_sensitive` is `false`, counter keys are lowercased so that e.g. "Main" and "main"
+are treated as duplicates. The original case of `str` is preserved in the output.
 
 # Example
 
@@ -41,20 +44,27 @@ julia> uniquename("name")
 The default is a global counter that persists until the end of the Julia session or until
 [`reset_uniquename!`](@ref) is called.
 """
-function uniquename(str, dlm='\$'; modify_first=false, counter=GLOBAL_NAME_COUNTER)
-    # if format is already str0 * dlm * n, count it like the (>=n)th occurrence of str0  
+function uniquename(
+    str,
+    dlm='\$';
+    modify_first=false,
+    counter=GLOBAL_NAME_COUNTER,
+    case_sensitive=true
+)
+    key = case_sensitive ? identity : lowercase
+    # if format is already str0 * dlm * n, count it like the (>=n)th occurrence of str0
     substrings = split(str, dlm)
     if !isnothing(tryparse(Int, last(substrings)))
         n0 = parse(Int, last(substrings))
         str0 = join(substrings[1:(end - 1)])
-        n1 = 1 + get(counter, str0, 0)
+        n1 = 1 + get(counter, key(str0), 0)
         n = max(n0, n1)
-        counter[str0] = n
+        counter[key(str0)] = n
         return str0 * dlm * string(n)
     end
     # otherwise just count
-    n = 1 + get(counter, str, 0)
-    counter[str] = n
+    n = 1 + get(counter, key(str), 0)
+    counter[key(str)] = n
     (!modify_first && n == 1) && return str
     return str * dlm * string(n)
 end
