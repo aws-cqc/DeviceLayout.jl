@@ -13,3 +13,4 @@ Manifest.toml
 coverage/
 *.xao
 *.msh2
+CLAUDE*
