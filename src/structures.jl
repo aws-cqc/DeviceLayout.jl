@@ -1,5 +1,18 @@
 const GLOBAL_NAME_COUNTER = ThreadSafeDict{String, Int}()
 
+# Lock the underlying Dict for compound read-modify-write on ThreadSafeDict.
+# For plain Dict counters (e.g. save-local), this is a no-op.
+_with_lock(f, d::Dict) = f(d)
+function _with_lock(f, d::ThreadSafeDict)
+    lk = d.dlock
+    lock(lk)
+    try
+        return f(d.d)
+    finally
+        unlock(lk)
+    end
+end
+
 """
     uniquename(str, dlm="\\\$"; modify_first=false, counter=GLOBAL_NAME_COUNTER, case_sensitive=true)
 
@@ -52,21 +65,23 @@ function uniquename(
     case_sensitive=true
 )
     key = case_sensitive ? identity : lowercase
-    # if format is already str0 * dlm * n, count it like the (>=n)th occurrence of str0
-    substrings = split(str, dlm)
-    if !isnothing(tryparse(Int, last(substrings)))
-        n0 = parse(Int, last(substrings))
-        str0 = join(substrings[1:(end - 1)])
-        n1 = 1 + get(counter, key(str0), 0)
-        n = max(n0, n1)
-        counter[key(str0)] = n
-        return str0 * dlm * string(n)
+    _with_lock(counter) do d
+        # if format is already str0 * dlm * n, count it like the (>=n)th occurrence of str0
+        substrings = split(str, dlm)
+        if !isnothing(tryparse(Int, last(substrings)))
+            n0 = parse(Int, last(substrings))
+            str0 = join(substrings[1:(end - 1)])
+            n1 = 1 + get(d, key(str0), 0)
+            n = max(n0, n1)
+            d[key(str0)] = n
+            return str0 * dlm * string(n)
+        end
+        # otherwise just count
+        n = 1 + get(d, key(str), 0)
+        d[key(str)] = n
+        (!modify_first && n == 1) && return str
+        return str * dlm * string(n)
     end
-    # otherwise just count
-    n = 1 + get(counter, key(str), 0)
-    counter[key(str)] = n
-    (!modify_first && n == 1) && return str
-    return str * dlm * string(n)
 end
 
 """
