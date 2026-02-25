@@ -191,10 +191,11 @@ end
 function round_to_curvilinearpolygon(
     pol::GeometryEntity{T},
     radius::S;
-    corner_indices = eachindex(points(pol)),
-    min_angle      = 1e-3,
-    relative::Bool = (T <: Length) && (S <: Real),
-    min_side_len   = relative ? zero(T) : radius
+    corner_indices=eachindex(points(pol)),
+    line_arc_corner_indices=nothing,
+    min_angle=1e-3,
+    relative::Bool=(T <: Length) && (S <: Real),
+    min_side_len=relative ? zero(T) : radius
 )::CurvilinearPolygon{T} where {T, S <: Coordinate}
     # If radius is dimensional, non-relative rounding.
     V = ((S <: Length && T <: Length) || (S <: Real && T <: Real)) ? promote_type(T, S) : T
@@ -206,8 +207,64 @@ function round_to_curvilinearpolygon(
     new_points = Point{float(V)}[]
     new_curves = Paths.Turn{float(V)}[]
     new_curve_start_idx = Int[]
+
+    # Track trims for existing curves when rounding line-arc corners
+    trim_start_pts = Dict{Int, Point{float(V)}}()
+    trim_end_pts = Dict{Int, Point{float(V)}}()
+
+    # Determine which line-arc corners to round
+    la_indices = if pol isa CurvilinearPolygon && !isnothing(line_arc_corner_indices)
+        line_arc_corner_indices
+    elseif pol isa CurvilinearPolygon
+        line_arc_cornerindices(pol)
+    else
+        Int[]
+    end
+
     for i in eachindex(poly)
-        if !(i in corner_indices)
+        # Detect line-arc corners (one straight edge, one arc)
+        is_line_arc = false
+        local edge
+        if pol isa CurvilinearPolygon
+            edge = edge_type_at_vertex(pol, i)
+            is_line_arc = i in la_indices
+        end
+
+        if is_line_arc
+            arc_is_outgoing = edge.outgoing != :straight
+            arc_curve = arc_is_outgoing ? edge.outgoing : edge.incoming
+            p_line = arc_is_outgoing ? poly[mod1(i - 1, len)] : poly[mod1(i + 1, len)]
+            straight_len = norm(p_line - poly[i])
+            arc_len = Paths.pathlength(arc_curve)
+            radius_dim = relative ? radius * min(straight_len, arc_len) : radius
+            result = rounded_corner_segment_line_arc(
+                p_line,
+                poly[i],
+                arc_curve,
+                arc_is_outgoing,
+                radius_dim;
+                min_side_len=min_side_len,
+                min_angle=min_angle
+            )
+            if !isnothing(result)
+                push!(new_points, Paths.p0(result.fillet))
+                push!(new_curves, result.fillet)
+                push!(new_curve_start_idx, length(new_points))
+                push!(new_points, Paths.p1(result.fillet))
+                # Record trim for the original arc
+                arc_start_vtx = arc_is_outgoing ? i : mod1(i - 1, len)
+                curve_k = findfirst(csi -> abs(csi) == arc_start_vtx, pol.curve_start_idx)
+                if !isnothing(curve_k)
+                    if arc_is_outgoing
+                        trim_start_pts[curve_k] = result.T_arc
+                    else
+                        trim_end_pts[curve_k] = result.T_arc
+                    end
+                end
+            else
+                push!(new_points, poly[i])
+            end
+        elseif !(i in corner_indices)
             push!(new_points, poly[i])
         else
             p0 = poly[mod1(i - 1, len)] # handles the cyclic boundary condition
@@ -242,9 +299,42 @@ function round_to_curvilinearpolygon(
             old_curve_start_idx[old_curve_start_idx .>= nci] .+= 1
         end
 
-        append!(new_curve_start_idx, old_curve_start_idx)
-        append!(new_curves, pol.curves)
+        for (k, csi) in enumerate(old_curve_start_idx)
+            original = pol.curves[k]
+            has_start = haskey(trim_start_pts, k)
+            has_end = haskey(trim_end_pts, k)
+            if has_start || has_end
+                total_len = Paths.pathlength(original)
+                t_s =
+                    has_start ? Paths.pathlength_nearest(original, trim_start_pts[k]) :
+                    zero(total_len)
+                t_e =
+                    has_end ? Paths.pathlength_nearest(original, trim_end_pts[k]) :
+                    total_len
+                if t_e > t_s
+                    # Trimmed arc still has positive length
+                    p0_new = original(t_s)
+                    α0_new = Paths.direction(original, t_s)
+                    α_new = original.α * (t_e - t_s) / total_len
+                    push!(new_curves, Paths.Turn(α_new, original.r; p0=p0_new, α0=α0_new))
+                    push!(new_curve_start_idx, csi)
+                end
+                # t_e <= t_s means both fillets overlap; arc is dropped and
+                # fillets connect directly.
+            else
+                push!(new_curves, original)
+                push!(new_curve_start_idx, csi)
+            end
+        end
+
+        # Sort curves by start index so to_polygons can iterate in vertex order
+        if length(new_curve_start_idx) > 1
+            perm = sortperm(new_curve_start_idx, by=abs)
+            new_curves = new_curves[perm]
+            new_curve_start_idx = new_curve_start_idx[perm]
+        end
     end
+
     return CurvilinearPolygon(new_points, new_curves, new_curve_start_idx)
 end
 
@@ -285,6 +375,159 @@ function rounded_corner_segment(
     return Paths.Turn(uconvert(°, dα), rad, p0_seg, uconvert(°, α1))
 end
 
+# TODO: The fillet center geometry here duplicates `rounded_corner_line_arc` in
+# curvilinear.jl. Extract the shared solver into a common helper when consolidating
+# rounding logic through CurvilinearPolygon.
+"""
+    rounded_corner_segment_line_arc(
+        p_line, p_corner, arc_curve, arc_is_outgoing, radius;
+        min_side_len, min_angle
+    )
+
+SolidModel analogue of `rounded_corner_line_arc`: computes a fillet arc at the corner
+where a straight edge meets a circular arc, returning a `Paths.Turn` segment instead of
+discretized points.
+
+  - `p_line`: far endpoint of the straight edge (not the corner)
+  - `p_corner`: vertex where the straight edge meets the arc
+  - `arc_curve`: `Paths.Turn` representing the circular arc
+  - `arc_is_outgoing`: `true` if the arc leaves from `p_corner`, `false` if it arrives
+  - `radius`: fillet radius
+
+Returns `(; fillet::Paths.Turn, T_line::Point, T_arc::Point)` or `nothing`.
+"""
+function rounded_corner_segment_line_arc(
+    p_line::Point{T},
+    p_corner::Point{T},
+    arc_curve::Paths.Turn,
+    arc_is_outgoing::Bool,
+    radius::S;
+    min_side_len=radius,
+    min_angle=1e-3
+) where {T, S <: Coordinate}
+    V = promote_type(T, S)
+    r = convert(V, radius)
+    atol = DeviceLayout.Polygons._round_atol(T, S)
+
+    # Validate straight edge length
+    line_len = norm(p_corner - p_line)
+    if line_len < min_side_len && !isapprox(line_len, min_side_len, atol=atol)
+        return nothing
+    end
+
+    # Line direction: from p_line toward p_corner
+    v_line = (p_corner - p_line) / line_len
+    α_line = atan(v_line.y, v_line.x)
+
+    # Arc tangent direction at the corner
+    arc_len = Paths.pathlength(arc_curve)
+    α_arc = if arc_is_outgoing
+        Paths.direction(arc_curve, zero(arc_len))
+    else
+        Paths.direction(arc_curve, arc_len)
+    end
+
+    # Check if line and arc tangent are nearly parallel (already smooth)
+    if isapprox(rem2pi(α_line - α_arc, RoundNearest), 0, atol=min_angle)
+        return nothing
+    end
+
+    # Arc geometry
+    O = Paths.curvaturecenter(arc_curve)
+    R = arc_curve.r
+
+    # Determine which side of the line the polygon interior is on.
+    # Use a coordinate-derived offset to avoid both collinear degeneracy and
+    # Unitful ContextUnits mismatches (atol may have different unit context).
+    offset_scale = line_len * 1e-6
+    p_virtual = p_corner + Point(cos(α_arc), sin(α_arc)) * offset_scale
+    turn_sign = orientation(p_line, p_corner, p_virtual)
+    if !arc_is_outgoing
+        turn_sign = -turn_sign
+    end
+    # If orientation is degenerate (collinear), skip this corner
+    iszero(turn_sign) && return nothing
+
+    # Fillet center C_f must satisfy:
+    #   (1) distance to straight edge = r  (tangent to line)
+    #   (2) distance to arc center O  = D  (tangent to arc)
+    # Constraint (1): C_f lies on a line parallel to the edge, offset by r.
+    # Constraint (2): C_f lies on a circle of radius D centered at O.
+    n_line = Point(-v_line.y, v_line.x)
+    fillet_side = sign(turn_sign)
+    p_offset = p_corner + (r * fillet_side) * n_line
+
+    function solve_for_D(D_val)
+        w = p_offset - O
+        b = w.x * v_line.x + w.y * v_line.y
+        c = w.x * w.x + w.y * w.y - D_val * D_val
+        disc = b * b - c
+        disc < zero(disc) && return Point{float(V)}[]
+        sq = sqrt(disc)
+        s1 = -b + sq
+        s2 = -b - sq
+        return [p_offset + s * v_line for s in (s1, s2)]
+    end
+
+    function validate_t_line(cf)
+        t = (cf - p_line).x * v_line.x + (cf - p_line).y * v_line.y
+        return -atol < t < line_len + atol
+    end
+
+    function find_best_center(D_val)
+        candidates = solve_for_D(D_val)
+        isempty(candidates) && return nothing
+        valid = filter(validate_t_line, candidates)
+        isempty(valid) && return nothing
+        _, idx = findmin(cf -> norm(cf - p_corner), valid)
+        return valid[idx]
+    end
+
+    C_f_ext = find_best_center(R + r)
+    C_f_int = abs(R - r) > zero(R) ? find_best_center(abs(R - r)) : nothing
+    ext_ok = !isnothing(C_f_ext)
+    int_ok = !isnothing(C_f_int)
+
+    C_f = if ext_ok && int_ok
+        norm(C_f_ext - p_corner) < norm(C_f_int - p_corner) ? C_f_ext : C_f_int
+    elseif ext_ok
+        C_f_ext
+    elseif int_ok
+        C_f_int
+    else
+        return nothing
+    end
+
+    # Tangent point on line: foot of perpendicular from C_f
+    t_proj = (C_f - p_line).x * v_line.x + (C_f - p_line).y * v_line.y
+    T_line = p_line + t_proj * v_line
+
+    # Tangent point on arc: point on arc in direction of fillet center
+    cf_dir = (C_f - O) / norm(C_f - O)
+    T_arc_pt = O + R * cf_dir
+
+    # Construct fillet Turn segment
+    # Winding order determines start/end:
+    #   arc_is_outgoing=true:  ...line → T_line → [fillet] → T_arc → arc...
+    #   arc_is_outgoing=false: ...arc → T_arc → [fillet] → T_line → line...
+    start_pt, end_pt = arc_is_outgoing ? (T_line, T_arc_pt) : (T_arc_pt, T_line)
+
+    d_start = (start_pt - C_f) / norm(start_pt - C_f)
+    d_end = (end_pt - C_f) / norm(end_pt - C_f)
+
+    cross_val = d_start.x * d_end.y - d_start.y * d_end.x
+    dot_val = d_start.x * d_end.x + d_start.y * d_end.y
+    dα = atan(cross_val, dot_val)
+
+    # Tangent direction at start: perpendicular to radius, rotated by sweep direction
+    angle_start = atan(d_start.y, d_start.x)
+    α0 = angle_start + sign(dα) * π / 2
+
+    fillet = Paths.Turn(uconvert(°, dα), r, start_pt, uconvert(°, α0))
+
+    return (; fillet, T_line, T_arc=T_arc_pt)
+end
+
 ######## Styled Polygon and CurvilinearPolygon
 
 # Given a polygon and style, create a CurvilinearPolygon
@@ -303,6 +546,9 @@ function styled_loop(p::GeometryEntity, sty::Rounded; kwargs...)
         radius(sty),
         min_side_len=sty.min_side_len,
         corner_indices=cornerindices(p, sty),
+        line_arc_corner_indices=(
+            p isa CurvilinearPolygon ? line_arc_cornerindices(p, sty) : nothing
+        ),
         min_angle=sty.min_angle
     )
 end
@@ -311,6 +557,20 @@ styled_loop(n, sty; kwargs...) = styled_loop(Polygon(contour(n)), sty; kwargs...
 styled_loop(l::CurvilinearPolygon, sty::Plain; kwargs...) = l
 styled_loop(::CurvilinearPolygon{T}, ::NoRender; kwargs...) where {T} =
     CurvilinearPolygon{T}([])
+
+# Bridge for nested Rounded styles in the Cell rendering path.
+# Without this, the inner Rounded resolves to a plain Polygon (losing arc info),
+# so the outer Rounded can only do line-line rounding. By routing through styled_loop,
+# the inner Rounded produces a CurvilinearPolygon with exact fillet arcs, and the outer
+# Rounded can then apply line-arc rounding via to_polygons(CurvilinearPolygon, Rounded).
+function to_polygons(
+    ent::StyledEntity{T, U, V},
+    sty::Rounded{S};
+    atol=DeviceLayout.Polygons._round_atol(S, T),
+    kwargs...
+) where {S, T, U, V <: Rounded}
+    return to_polygons(styled_loop(ent.ent, ent.sty), sty; atol, kwargs...)
+end
 
 ######## Ellipse
 function _add_to_current_solidmodel!(
