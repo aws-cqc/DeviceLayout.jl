@@ -815,6 +815,103 @@ end
         push!(dup.refs, sref(Cell("Main", nm)))
         @test_logs (:warn, r"Duplicate cell name") save(joinpath(tdir, "dup.gds"), dup)
 
+        # rename_duplicates=true: auto-rename exact duplicates
+        rename_opts = GDSWriterOptions(rename_duplicates=true)
+        s_orig = Cell("sub", nm)
+        render!(s_orig, Rectangle(10μm, 10μm), GDSMeta(1, 0))
+        s_dup = Cell("sub", nm)
+        render!(s_dup, Rectangle(5μm, 5μm), GDSMeta(2, 0))
+        top = Cell("top", nm)
+        push!(top.refs, CellReference(s_orig, p(0.0μm, 0.0μm)))
+        push!(top.refs, CellReference(s_dup, p(10.0μm, 0.0μm)))
+        dup_path = joinpath(tdir, "rename_dup.gds")
+        @test_logs (:info, r"Renamed duplicate cell") save(
+            dup_path,
+            top;
+            options=rename_opts
+        )
+        cells = load(dup_path)
+        cell_names = sort(collect(keys(cells)))
+        @test "top" in cell_names
+        # The original "sub" plus the renamed one (sub$2)
+        @test count(n -> startswith(n, "sub"), cell_names) == 2
+        @test any(n -> contains(n, "\$\$"), cell_names)
+        # Original Cell objects are not mutated
+        @test s_orig.name == "sub"
+        @test s_dup.name == "sub"
+        # All loaded cells should have refs that point to cells present in the file
+        for (_, cell) in cells
+            for r in cell.refs
+                @test r.structure.name in keys(cells)
+            end
+        end
+
+        # rename_duplicates=true: case-insensitive rename
+        s_lower = Cell("block", nm)
+        render!(s_lower, Rectangle(10μm, 10μm), GDSMeta(1, 0))
+        s_upper = Cell("Block", nm)
+        render!(s_upper, Rectangle(5μm, 5μm), GDSMeta(2, 0))
+        top_ci = Cell("top_ci", nm)
+        push!(top_ci.refs, CellReference(s_lower, p(0.0μm, 0.0μm)))
+        push!(top_ci.refs, CellReference(s_upper, p(10.0μm, 0.0μm)))
+        ci_path = joinpath(tdir, "rename_ci.gds")
+        @test_logs (:info, r"Renamed duplicate cell") save(
+            ci_path,
+            top_ci;
+            options=rename_opts
+        )
+        cells_ci = load(ci_path)
+        ci_names = collect(keys(cells_ci))
+        @test length(unique(lowercase.(ci_names))) == length(ci_names)
+
+        # rename_duplicates=true: cascading collisions (foo, foo, foo$$2)
+        c_foo1 = Cell("foo", nm)
+        render!(c_foo1, Rectangle(10μm, 10μm), GDSMeta(1, 0))
+        c_foo2 = Cell("foo", nm)
+        render!(c_foo2, Rectangle(5μm, 5μm), GDSMeta(2, 0))
+        c_foo_1 = Cell("foo\$\$2", nm)
+        render!(c_foo_1, Rectangle(3μm, 3μm), GDSMeta(3, 0))
+        top_casc = Cell("top_casc", nm)
+        push!(top_casc.refs, CellReference(c_foo1, p(0.0μm, 0.0μm)))
+        push!(top_casc.refs, CellReference(c_foo2, p(10.0μm, 0.0μm)))
+        push!(top_casc.refs, CellReference(c_foo_1, p(20.0μm, 0.0μm)))
+        casc_path = joinpath(tdir, "rename_casc.gds")
+        save(casc_path, top_casc; options=rename_opts)
+        cells_casc = load(casc_path)
+        casc_names = collect(keys(cells_casc))
+        # All cell names must be unique (case-insensitively)
+        @test length(unique(lowercase.(casc_names))) == length(casc_names)
+        # All foo-family cells present
+        @test count(n -> startswith(n, "foo"), casc_names) == 3
+
+        # rename_duplicates=true with CellArray
+        arr_inner = Cell("arr_cell", nm)
+        render!(arr_inner, Rectangle(10μm, 10μm), GDSMeta(1, 0))
+        arr_dup = Cell("arr_cell", nm)
+        render!(arr_dup, Rectangle(5μm, 5μm), GDSMeta(2, 0))
+        top_arr = Cell("top_arr", nm)
+        push!(top_arr.refs, CellReference(arr_inner, p(0.0μm, 0.0μm)))
+        push!(
+            top_arr.refs,
+            CellArray(
+                arr_dup,
+                p(20.0μm, 0.0μm);
+                nrows=2,
+                ncols=1,
+                dc=p(0.0μm, 0.0μm),
+                dr=p(0.0μm, 20.0μm)
+            )
+        )
+        arr_path = joinpath(tdir, "rename_arr.gds")
+        @test_logs (:info, r"Renamed duplicate cell") save(
+            arr_path,
+            top_arr;
+            options=rename_opts
+        )
+        cells_arr = load(arr_path)
+        arr_names = collect(keys(cells_arr))
+        @test count(n -> startswith(n, "arr_cell"), arr_names) == 2
+
         # Warns against invalid characters according to GDS spec
         bad_names = ["bad.name", "badname!", "bad-name", repeat("b", 33)]
         for n in bad_names

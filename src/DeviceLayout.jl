@@ -10,6 +10,7 @@ export PreferredUnits
 import StaticArrays
 import Clipper
 import Clipper: libcclipper
+import ThreadSafeDicts: ThreadSafeDict
 
 import Base: length, show, eltype
 import CoordinateTransformations:
