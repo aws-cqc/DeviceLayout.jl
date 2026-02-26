@@ -10,55 +10,21 @@ To draw a `Path` from a `Route`, you can use [`Path(r::Route, sty)`](@ref).
 
 More often, you won't work directly with the `Route` type but will instead use [`route!`](@ref) to extend an existing path to an endpoint according to the rules you specify.
 
-## Reference
+See [API Reference: Routes](@ref api-routes).
 
-```@docs
-    Paths.Route
-```
-
-### Route rules
-
-```@docs
-    Paths.RouteRule
-    Paths.BSplineRouting
-    Paths.StraightAnd90
-    Paths.StraightAnd45
-    Paths.CompoundRouteRule
-    Paths.SingleChannelRouting
-    Paths.RouteChannel
-```
-
-### Route drawing
+## Route drawing internals
 
 Calling `Path(r::Route, sty::Style)` creates a new `Path` at `p0(r)`, then extends it to
 `p1(r)` using `route!`. The default implementation of `route!`, for a generic `RouteRule`,
 first calls `reconcile!` to validate and modify waypoints as necessary. It then calls
-`_route!` to draw the path, which by default calls `_route_leg!` to each waypoint in
-order. (A "leg" is an informal abstraction describing the "unit" that the `RouteRule`
-works with, which may be more than one `Paths.Segment`. For example, each leg in
-`StraightAnd90` routing has a single 90-degree bend with up to one straight segment on
-either side, or a single straight segment if no bend is necessary.)
+`_route!` to draw the path.
 
-```@docs
-    Paths.Path(::Paths.Route, ::Paths.Style)
-    Paths.route!
-    Paths.reconcile!(::Paths.Path, ::Point, ::Any, ::Paths.RouteRule, ::Any, ::Any)
-```
+Some rules, like [`Paths.BSplineRouthing`](@ref), route through all waypoints at once by
+implementing a specialization for `_route!` directly.
+Others use the rule to route from waypoint to waypoint by implementing `_route_leg!`.
+For example, each leg in `StraightAnd90` routing has a single 90-degree bend with up to one straight segment on either side, or a single straight segment if no bend is necessary.
 
-### Route inspection
-
-A `Route` supports endpoint inspection much like a `Path` does:
-
-```@docs
-    Paths.p0(::Paths.Route)
-    Paths.α0(::Paths.Route)
-    Paths.p1(::Paths.Route)
-    Paths.α1(::Paths.Route)
-```
-
-## Examples
-
-### Channel routing
+## Channel routing
 
 `RouteChannels` offer a way to run routes in parallel, with routes joining or leaving a channel at different points. Using [`Paths.SingleChannelRouting`](@ref), we can set the "track" (a curve offset from the channel centerline) for each route to follow through the channel, as well as some rules for joining and leaving the channel from route start and end points. Here's a basic example with a straight channel:
 
@@ -102,7 +68,7 @@ end
 c = Cell("test")
 render!.(c, paths, GDSMeta())
 render!(c, channel_path, GDSMeta(1))
-save("straight_channel.svg", flatten(c); width=6inch, height=2inch);
+save("straight_channel.svg", c; width=6inch, height=2inch);
 nothing; # hide
 ```
 
@@ -140,7 +106,7 @@ end
 c = Cell("test")
 render!.(c, paths, GDSMeta())
 render!(c, channel_path, GDSMeta(1))
-save("bspline_channel.svg", flatten(c); width=6inch, height=4inch);
+save("bspline_channel.svg", c; width=6inch, height=4inch);
 nothing; # hide
 ```
 
@@ -176,7 +142,7 @@ end
 c = Cell("test")
 render!.(c, paths, GDSMeta())
 render!(c, channel_path, GDSMeta(1))
-save("compound_channel.svg", flatten(c); width=6inch, height=4inch);
+save("compound_channel.svg", c; width=6inch, height=4inch);
 nothing; # hide
 ```
 

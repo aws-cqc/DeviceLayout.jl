@@ -6,6 +6,8 @@ other, so each node knows what the previous and next nodes are.
 
 Because `Path` is a subtype of `GeometryStructure`, paths can be used with the [transformation interface](./transformations.md) as well as the [structure interface](./geometry.md#structures) including `bounds` and other operations.
 
+See [API Reference: Paths](@ref api-paths).
+
 ## Segments
 
 Segments describe the curve a `Paths.Node` follows. For example, [`Paths.Straight`](@ref) or [`Paths.Turn`](@ref) are used frequently.
@@ -15,7 +17,7 @@ In general, each subtype of `Segment` can represent a class of parametric functi
 !!! note
     
     This package assumes that the parametric functions are
-    implemented such that $\sqrt{((dx/dt)^2 + (dy/dt)^2)} = 1$. In other words, `t` ranges
+    implemented such that $\sqrt{((dx/dt)^2 + (dy/dt)^2)} = 1$. In other words, the functions are parameterized by arclength `t` ranging
     from zero to the path length of the segment.
 
 Instances of these subtypes of `Segment` specify a particular path in the plane. Instances of `Turn`, for example, will
@@ -27,6 +29,8 @@ or more points with specified start and end tangents (and curvature, optionally)
 These have the property that curvature is continuous along the spline, and
 can be automatically optimized further to avoid sharp changes in curvature.
 
+See [API Reference: Path Segments](@ref api-path-segments).
+
 ## Styles
 
 Each subtype of `Style` describes how to render a segment. They define a one-dimensional cross-section that is swept along the `Segment` and that can vary with arclength along the segment. You can create the most common
@@ -36,6 +40,8 @@ styles using the constructors [`Paths.Trace`](@ref) (a trace with some width) an
 One can implement new styles by writing rendering methods (for GDSII, that would be [`to_polygons`](@ref)) that dispatch on
 different pairs of segment and style types. In this way, the rendering code can be specialized for the task at
 hand, improving performance and shrinking generated file sizes (ideally).
+
+See [API Reference: Path Styles](@ref api-path-styles).
 
 ### Tapers
 
@@ -111,9 +117,7 @@ should be displaced with respect to the origin of a containing `Cell`.
 
 The same `StructureReference` can be attached to multiple points along multiple paths. If the
 reference is modified (e.g. rotation, origin, magnification) before rendering to a `Cell`, the
-changes should be reflected at all attachment points. The attachment of the cell reference
-is not a perfect abstraction: a `CellReference` must ultimately live inside a `Cell`, but
-an unrendered `Path` does not necessarily live inside any cell. If the path is modified further before rendering, the attachment points will follow the path modifications, moving the origins of
+changes should be reflected at all attachment points. If the path is modified further before rendering, the attachment points will follow the path modifications, moving the origins of
 the local coordinate systems. The origin fields of the cell references do not change as the
 path is modified.
 
@@ -161,7 +165,7 @@ is done prior to rendering, further modification can be done easily. Both self-i
 and pairwise intersections can be handled for any reasonable number of paths.
 
 For now, one intersection style is implemented, but the heavy-lifting to add more has been
-done already. Here's an example (consult API docs below for further information):
+done already. Here's an example (consult the [Intersection API reference](@ref api-path-intersection) for further information):
 
 ```@example 1
 pa1 = Path(μm)
@@ -241,139 +245,4 @@ nothing; # hide
 
 ```@raw html
 <img src="../intersect_spiral.svg" style="width:4in;"/>
-```
-
-## Path API
-
-### Path construction
-
-```@docs
-    Paths.Path
-```
-
-### Path interrogation
-
-```@docs
-    Paths.direction
-    Paths.pathlength
-    Paths.p0
-    Paths.α0
-    Paths.p1
-    Paths.α1
-    Paths.style0
-    Paths.style1
-    Paths.discretestyle1
-    Paths.contstyle1
-```
-
-### Path manipulation
-
-```@docs
-    Paths.setp0!
-    Paths.setα0!
-    append!(::Path, ::Path)
-    attach!(::Path{T}, ::DeviceLayout.GeometryReference{T}, ::DeviceLayout.Coordinate) where {T}
-    bspline!
-    corner!
-    intersect!
-    launch!
-    meander!
-    overlay!
-    reconcile!
-    Paths.round_trace_transitions!
-    simplify
-    simplify!
-    straight!
-    terminate!
-    turn!
-```
-
-### Path intersection styles
-
-```@docs
-    Intersect.IntersectStyle
-    Intersect.AirBridge
-```
-
-## Node API
-
-### Node construction
-
-```@docs
-    Paths.Node
-```
-
-### Node methods
-
-```@docs
-    Paths.previous
-    Paths.next
-    Paths.segment
-    Paths.split(::Paths.Node, ::DeviceLayout.Coordinate)
-    Paths.style
-    Paths.setsegment!
-    Paths.setstyle!
-```
-
-## Segment API
-
-### Abstract types
-
-```@docs
-    Paths.Segment
-```
-
-### Concrete types
-
-```@docs
-    Paths.Straight
-    Paths.Turn
-    Paths.Corner
-    Paths.CompoundSegment
-    Paths.BSpline
-```
-
-## Style API
-
-### Style construction
-
-```@docs
-    Paths.Trace
-    Paths.CPW
-    Paths.Taper
-    Paths.Strands
-    Paths.NoRender
-```
-
-### Style manipulation
-
-```@docs
-    Paths.pin
-    Paths.translate
-    Paths.undecorated
-```
-
-### Abstract types
-
-```@docs
-    Paths.Style
-    Paths.ContinuousStyle
-    Paths.DiscreteStyle
-```
-
-### Concrete types
-
-```@docs
-    Paths.SimpleNoRender
-    Paths.SimpleTrace
-    Paths.GeneralTrace
-    Paths.SimpleCPW
-    Paths.GeneralCPW
-    Paths.TaperTrace
-    Paths.TaperCPW
-    Paths.SimpleStrands
-    Paths.GeneralStrands
-    Paths.CompoundStyle
-    Paths.DecoratedStyle
-    Paths.PeriodicStyle
 ```

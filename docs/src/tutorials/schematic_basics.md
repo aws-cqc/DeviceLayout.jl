@@ -74,7 +74,7 @@ for (hname, h) in pairs(hooks(chip))
 end
 ```
 
-The `p0_*` hooks are at the origin and the `p1_*` hooks are at (6mm, 0). We'll use them to position launchers at the chip edges.
+The `p0_*` hooks are at the origin and the `p1_*` hooks are at (6mm, -2mm). We'll use them to position launchers at the chip edges.
 
 ## Step 3: Build the schematic graph
 
@@ -123,12 +123,16 @@ println("p1: $(h.p1.p), $(h.p1.in_direction)")
 
 ### Attach the resonator to the feedline
 
-[`attach!`](@ref) connects a component to a specific point along a path, rather than to a named hook. This is how you place a resonator at a coupling position on the feedline:
+[`attach!`](@ref) connects a component to a specific point along a path, rather than to a named hook. This is a schematic-based analogue of how you used `attach!` in [Working with Paths](./working_with_paths.md) to place a reference to the resonator along the feedline.
+
+Typically, you'd write something like `attach!(g, feedline_node, resonator_node => :feedline, 2mm, location=1)` to position a resonator's `:feedline` hook 2mm along and on the right side of the path. However, we made a choice to work with bare Paths as lightweight components, and the bare Path doesn't have such a hook at the necessary position and orientation.
+
+Instead, place a resonator at a coupling position on the feedline using a Spacer:
 
 ```@example schematic
 resonator_node = add_node!(g, resonator)
 # This won't attach with the desired spacing and orientation
-# attach!(g, feedline_node, resonator_node => :p0, 1mm, location=1)
+# attach!(g, feedline_node, resonator_node => :p0, 2mm, location=1)
 # So we'll attach another Spacer
 coupling_gap = 5μm
 spacing = coupling_gap + Paths.extent(cpw)
@@ -136,14 +140,18 @@ coupling_spacer_node = attach!(g, feedline_node, Spacer(0μm, -spacing) => :p0_s
 fuse!(g, coupling_spacer_node => :p1_west, resonator_node => :p0)
 ```
 
-The `location=1` offsets the attachment to the right side of the feedline trace, as though the hook were pointing back towards the trace. The `:p0_south` hook on the spacer points opposite that hook already, so `attach!` does not rotate it. The resonator then fuses to the `:p1_west` hook by orienting is `:p0` hook in the opposite direction. In other words, the initial direction of the resonator path is "east".
+In practice, you'll usually avoid needing the `Spacer` by defining your own resonator component with the necessary hook. However, it may be a useful exercise to think through how this Spacer results in the desired resonator position.
+
+The `location=1` offsets the attachment to the right side of the feedline trace, as though with a feedline hook pointing back towards the trace ("north"). The `:p0_south` hook on the spacer points opposite that hook already, so `attach!` does not rotate it. The resonator then fuses to the `:p1_west` hook, by orienting its `:p0` hook in the opposite direction ("east"). Since the `:p0` hook points along a path's initial direction, the initial direction of the resonator path is "east". 
+
+Meanwhile, thanks to the Spacer, the path starts at a point `spacing` below the edge of the ground of the feedline CPW; since `spacing = coupling_gap + Paths.extent(cpw)`, the width of the ground plane between the feedline and resonator is `coupling_gap`.
 
 ### Route the feedline to the output launcher
 
 The feedline end and the output launcher's narrow end are both positioned, but they don't coincide — there's a gap between them. [`route!`](@ref) creates a flexible path that will be computed after placement:
 
 ```@example schematic
-route!(g, Paths.StraightAnd90(50μm),
+route_node = route!(g, Paths.StraightAnd90(50μm),
     feedline_node => :p1, launcher_out_node => :p1,
     cpw, SemanticMeta(:metal_negative))
 nothing # hide
@@ -161,12 +169,19 @@ sch = plan(g; log_dir=nothing)
 
 To see that our components are now positioned, we can get geometric information based on the schematic and a node of our choice:
 
-```@example
+```@example schematic
 println("Resonator bounds: Rectangle($(bounds(sch, resonator_node).ll), $(bounds(sch, resonator_node).ur))")
 println("Resonator center: $(center(sch, resonator_node))")
 println("Resonator origin: $(origin(sch, resonator_node))")
 println("Resonator global transformation: $(transformation(sch, resonator_node))")
 println("Resonator p1 hook: $(hooks(sch, resonator_node).p1)")
+```
+
+Our route now has endpoints, and we can construct its path:
+
+```@example schematic
+routed_path = SchematicDrivenLayout.path(component(route_node))
+println("Route length: $(pathlength(routed_path))")
 ```
 
 `check!` validates design rules (component orientations, etc.) and must be called before rendering:
@@ -179,7 +194,7 @@ To render the schematic to GDS, we need a target that maps semantic layer names 
 
 ```@example schematic
 tech = ProcessTechnology(
-    (metal_negative=GDSMeta(0),),
+    (; metal_negative=GDSMeta(0)),
     (;)
 )
 target = ArtworkTarget(tech)

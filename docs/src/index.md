@@ -63,7 +63,7 @@ using DeviceLayout, DeviceLayout.PreferredUnits
 using FileIO
 
 # Create a cell
-cell = Cell("hello")
+cell = Cell("hello", nm)
 
 # Add a rectangle
 render!(cell, centered(Rectangle(100μm, 50μm)), GDSMeta(0))

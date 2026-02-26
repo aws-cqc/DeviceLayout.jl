@@ -60,18 +60,6 @@ julia> aff(Point(0, 0))
   1.0
 ```
 
-## API
-
-```@docs
-    DeviceLayout.PointTypes
-    DeviceLayout.Coordinate
-    Points.Point
-    Points.getx
-    Points.gety
-    Points.lowerleft(::AbstractArray{Point{T}}) where T
-    Points.upperright(::AbstractArray{Point{T}}) where T
-```
-
 ## Implementation details
 
 Points are implemented using the abstract type `FieldVector`

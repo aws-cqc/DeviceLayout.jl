@@ -6,36 +6,20 @@ In general, geometric types are parameterized by a [`coordinatetype`](@ref), whi
 common representation, allowing more efficient manipulation and avoiding
 unnecessary conversions and compilations.
 
-Recall the quick-start example from the home page:
+Recall the "hello world" example from the home page:
 
 ```julia
-using DeviceLayout, DeviceLayout.PreferredUnits, FileIO
+using DeviceLayout, DeviceLayout.PreferredUnits
+using FileIO
 
-cr = Cell("rect", nm)
-r = centered(Rectangle(20μm, 40μm))
-render!(cr, r, GDSMeta(1, 0))
-p = Path(μm)
-sty = launch!(p)
-straight!(p, 500μm, sty)
-turn!(p, π / 2, 150μm)
-straight!(p, 500μm)
-launch!(p)
-cp = Cell("pathonly", nm)
-render!(cp, p, GDSMeta(0))
-turnidx = Int((length(p) + 1) / 2) - 1 # the first straight segment of the path
-simplify!(p, turnidx .+ (0:2))
-attach!(
-    p,
-    CellReference(cr, Point(0.0μm, 0.0μm)),
-    (40μm):(40μm):((pathlength(p[turnidx])) - 40μm),
-    i=turnidx
-)
-c = Cell("decoratedpath", nm)
-render!(c, p, GDSMeta(0))
-```
+# Create a cell
+cell = Cell("hello", nm)
 
-```@raw html
-<img src="../units.svg" style="width: 3in;"/>
+# Add a rectangle
+render!(cell, centered(Rectangle(100μm, 50μm)), GDSMeta(0))
+
+# Save to GDS
+save("hello.gds", cell)
 ```
 
 The example begins with `using DeviceLayout.PreferredUnits`, which enables the unqualified use of
@@ -44,10 +28,10 @@ mean that the symbols are imported into the calling namespace and do not need to
 with a module name. `using DeviceLayout` also gives you `°` and `rad` for angles.) `DeviceLayout.PreferredUnits` is, by default, an alias for `DeviceLayout.PreferNanometers`. This means that when adding length units together, if the units don't agree, the result
 will be in nanometers.
 
-You can instead do `using DeviceLayout.PreferMicrons` if you want the
+You can instead write `using DeviceLayout.PreferMicrons` if you want the
 result to default to microns. This is simple and effective, but does not enforce consistency across large projects like process design kits (PDKs) or layout scripts with multiple modules that might accidentally import units in different ways. Accordingly, DeviceLayout.jl provides a slightly more sophisticated method to specify alternative preferences using a configuration setting applied at compilation time, which is described below.
 
-### Unit preferences
+## Unit preferences
 
 By default, DeviceLayout will be compiled with `using .PreferNanometers` internally. If you then import units from DeviceLayout
 
@@ -74,12 +58,6 @@ then DeviceLayout will be compiled with `using .PreferMicrons` internally. (This
 
 Similarly, if we have the preference `units = "NoUnits"`, then DeviceLayout uses `import Unitful: nm, ...` and `const UPREFERRED = Unitful.NoUnits; const PreferredUnits = PreferNoUnits` internally.
 
-```@docs
-    DeviceLayout.UPREFERRED
-    DeviceLayout.PreferMicrons.UPREFERRED
-    DeviceLayout.PreferNoUnits.UPREFERRED
-```
-
 You can also set the preference in `Project.toml` with the following lines:
 
 ```
@@ -90,10 +68,6 @@ units = "PreferMicrons"
 Typically, `LocalPreferences.toml` will be ignored by version control (that is, listed in `.gitignore`), so you'll use it to set preferences that are only meant to be used locally. If you want preferences to be used by anyone cloning and instantiating your project, then you'll put them in `Project.toml`.
 
 For convenience, you can use `DeviceLayout.set_unit_preference!` to add the preference to either `LocalPreferences.toml` or `Project.toml`.
-
-```@docs
-    DeviceLayout.set_unit_preference!
-```
 
 Note that only preferences of the active project are applied. For example, if you have a separate package defining your process design kit (PDK), adding the preference to `Project.toml` does not mean that any project that uses the PDK will inherit that preference. If a PDK is meant to be used with units, you can have it set the preference during package setup:
 
@@ -118,33 +92,17 @@ all for compatibility and laziness reasons.
 **If you do not provide units, all values are presumed to be in microns.** The syntax
 is otherwise the same:
 
-```@example
+```julia
 using DeviceLayout, FileIO
 
-cr = Cell{Float64}("rect") # If unit preference were `NoUnits`, we wouldn't need `{Float64}`
-r = centered(Rectangle(20, 40))
-render!(cr, r, GDSMeta(1))
+# Create a cell
+cell = Cell{Float64}("hello") # If unit preference were `NoUnits`, we wouldn't need `{Float64}`
 
-p = Path{Float64}()
-sty = launch!(p)
-straight!(p, 500, sty)
-turn!(p, π / 2, 150)
-straight!(p, 500)
-launch!(p)
-cp = Cell{Float64}("pathonly")
-render!(cp, p, GDSMeta(0))
+# Add a rectangle
+render!(cell, centered(Rectangle(100, 50)), GDSMeta(0))
 
-turnidx = Int((length(p) + 1) / 2) - 1 # the first straight segment of the path
-simplify!(p, turnidx .+ (0:2))
-attach!(
-    p,
-    CellReference(cr, Point(0.0, 0.0)),
-    40:40:((pathlength(p[turnidx])) - 40),
-    i=turnidx
-)
-c = Cell{Float64}("decoratedpath")
-render!(c, p, GDSMeta(0))
-flatten(c) # just show using default colors
+# Save to GDS
+save("hello.gds", cell)
 ```
 
 Maintaining unitless functionality alongside unitful functionality takes some care, so you may encounter errors when using unitless geometries, particularly with less mature features. Please file an issue if that happens.
