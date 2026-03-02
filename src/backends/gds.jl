@@ -77,6 +77,7 @@ Options controlling warnings and validation during GDS file writing.
     during GDS save using [`uniquename`](@ref) with a save-scoped counter. Renaming is
     case-insensitive (GDS readers like KLayout treat cell names case-insensitively).
     The original `Cell` objects are not mutated; renamed names are only written to the file.
+    New names may exceed the GDSII spec's 32 character limit.
 
 Warnings for layer number and datatype are configurable because different tools may have
 different limits. In the GDSII specification, layer and datatype must be in the range 0 to 63,
@@ -675,7 +676,7 @@ function save(
         end
         name_map = IdDict{Cell, String}()
         local_counter = Dict{String, Int}()
-        names = Dict{String, Cell}()
+        names = Dict{String, Cell}() # Only used to identify duplicates if not renaming them
         for c in ordered
             if options.rename_duplicates
                 new_name = uniquename(
