@@ -4,7 +4,7 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Upcoming
+## 1.10.0 (2026-03-04)
 
 This release includes several new features and fixes involving Path styles:
 
@@ -21,11 +21,17 @@ This release includes several new features and fixes involving Path styles:
 There are also several minor features and fixes:
 
   - Added `SchematicDrivenLayout.filter_parameters` for sharing parameters between composite components and subcomponents
-  - Added component style guide to docs
   - Added `rename_duplicates` option to `GDSWriterOptions`
   - Added experimental Text entity support to graphics backend
   - Fixed bug where `map_metadata!` would map multiply-referenced structures multiple times
   - Fixed bug where `@composite_variant` would not forward `map_hooks` to base variant when defined with component instance rather than type
+
+The documentation has also been reorganized and improved:
+
+  - Moved API reference material to separate pages
+  - Added several tutorials
+  - Added a style guide for component definition
+  - Improved or expanded several sections, including explanation of rendering and solid models
 
 ## 1.9.0 (2026-02-09)
 
