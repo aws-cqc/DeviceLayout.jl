@@ -40,9 +40,21 @@ const _gip_r2 = Rectangle(100μm, 100μm) + Point(50μm, 50μm)
 const _gip_poly = [difference2d(_gip_r1, _gip_r2)]
 
 const _gip_grids = [
-    ("33x25", collect(range(-10μm, 210μm, length=33)), collect(range(-10μm, 210μm, length=25))),
-    ("321x241", collect(range(-10μm, 210μm, length=321)), collect(range(-10μm, 210μm, length=241))),
-    ("3201x2401", collect(range(-10μm, 210μm, length=3201)), collect(range(-10μm, 210μm, length=2401)))
+    (
+        "33x25",
+        collect(range(-10μm, 210μm, length=33)),
+        collect(range(-10μm, 210μm, length=25))
+    ),
+    (
+        "321x241",
+        collect(range(-10μm, 210μm, length=321)),
+        collect(range(-10μm, 210μm, length=241))
+    ),
+    (
+        "3201x2401",
+        collect(range(-10μm, 210μm, length=3201)),
+        collect(range(-10μm, 210μm, length=2401))
+    )
 ]
 
 SUITE["autofill"]["gridpoints_in_polygon"] = BenchmarkGroup()
