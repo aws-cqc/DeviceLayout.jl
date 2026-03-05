@@ -949,6 +949,9 @@ function plan(
     S = typeof(1.0DeviceLayout.UPREFERRED)
     !isempty(nodes(g)) && (S = coordinatetype(component(g[1])))
     floorplan = Schematic{S}(g; log_dir=log_dir, log_level=log_level)
+    # Cache hooks(comp) results during planning to avoid redundant recomputation.
+    # Key: comp, Value: NamedTuple from hooks(comp).
+    hooks_cache = Dict{AbstractComponent, Any}()
     with_logger(floorplan.logger) do
         # Place constrained element
         for node in filter(n -> !(component(n) isa RouteComponent), nodes(g))
@@ -958,7 +961,7 @@ function plan(
                 addref!(floorplan, node_ref)
                 floorplan.ref_dict[node] = node_ref
                 try
-                    _plan!(floorplan, node_cs, node, hooks_fn, id_prefix)
+                    _plan!(floorplan, node_cs, node, hooks_fn, id_prefix, hooks_cache)
                 catch e
                     @error "Failed to plan top-level node $(node.id)" exception =
                         (e, catch_backtrace()) _group = :plan
@@ -972,7 +975,7 @@ function plan(
             addref!(floorplan, node_ref)
             floorplan.ref_dict[node] = node_ref
             try
-                _plan_route!(floorplan, node_cs, node, hooks_fn)
+                _plan_route!(floorplan, node_cs, node, hooks_fn, hooks_cache)
             catch e
                 @error "Failed to plan route $(node.id)" exception = (e, catch_backtrace()) _group =
                     :plan
@@ -1007,30 +1010,62 @@ function transformation(
     graph::SchematicGraph,
     parent_node::ComponentNode,
     node::ComponentNode,
-    hooks_fn=hooks
+    hooks_fn=hooks,
+    hooks_cache::Union{Dict{AbstractComponent, Any}, Nothing}=nothing
 )
     h1sym = get_prop(graph, node, parent_node, node)
     h2sym = get_prop(graph, node, parent_node, parent_node)
-    hook1 = _hook(graph, node, h1sym, hooks_fn)
-    hook2 = _hook(graph, parent_node, h2sym, hooks_fn)
+    hook1 = _hook(graph, node, h1sym, hooks_fn, hooks_cache)
+    hook2 = _hook(graph, parent_node, h2sym, hooks_fn, hooks_cache)
     return transformation(hook2, hook1)
 end
 
-function _hook(g::SchematicGraph, node::ComponentNode, hsym::Symbol, hooks_fn=hooks)
+function _hook(
+    g::SchematicGraph,
+    node::ComponentNode,
+    hsym::Symbol,
+    hooks_fn=hooks,
+    hooks_cache::Union{Dict{AbstractComponent, Any}, Nothing}=nothing
+)
     comp = component(node)
-    if has_hook(comp, hsym)
-        return hooks_fn(comp, hsym)
-    elseif has_prop(g, node, :additional_hooks)
-        add_hooks = get_prop(g, node, :additional_hooks)
-        !haskey(add_hooks, hsym) && error(
-            "Node $(node.id) does not have hook $hsym. Component hooks are $(keys(hooks(comp))); the node was also given additional hooks $(keys(add_hooks))"
-        )
-        return add_hooks[hsym]
+    # Compute hooks once per component, using cache if available
+    nt = if !isnothing(hooks_cache)
+        get!(hooks_cache, comp) do
+            return hooks_fn(comp)
+        end
     else
+        hooks_fn(comp)
+    end
+
+    # Look up the specific hook directly on the cached NamedTuple
+    hasproperty(nt, hsym) && return getproperty(nt, hsym)
+
+    # Array index fallback: hookname_i → hookname[i]
+    s = rsplit(string(hsym), "_", limit=2)
+    if length(s) == 2
+        idx = tryparse(Int, s[2])
+        if !isnothing(idx) && hasproperty(nt, Symbol(s[1]))
+            h_arr = getproperty(nt, Symbol(s[1]))
+            try
+                return h_arr[idx]
+            catch
+                error("$(typeof(comp)) $(name(comp)): No hook $hsym[$idx] or $(hsym)_$idx")
+            end
+        end
+    end
+
+    # Additional hooks fallback
+    if has_prop(g, node, :additional_hooks)
+        add_hooks = get_prop(g, node, :additional_hooks)
+        haskey(add_hooks, hsym) && return add_hooks[hsym]
         error(
-            "Node $(node.id) does not have hook $hsym. Component hooks are $(keys(hooks(comp)))."
+            "Node $(node.id) does not have hook $hsym. Component hooks are $(keys(nt)); the node was also given additional hooks $(keys(add_hooks))"
         )
     end
+
+    return error(
+        "Node $(node.id) does not have hook $hsym. Component hooks are $(keys(nt))."
+    )
 end
 
 function skips_edge(graph::SchematicGraph, parent::ComponentNode, child::ComponentNode)
@@ -1038,14 +1073,25 @@ function skips_edge(graph::SchematicGraph, parent::ComponentNode, child::Compone
            get_prop(graph, parent, child, PLAN_SKIPS_EDGE)
 end
 
-function _plan_route!(sch::Schematic, node_cs, node, hooks_fn=hooks)
+function _plan_route!(
+    sch::Schematic,
+    node_cs,
+    node,
+    hooks_fn=hooks,
+    hooks_cache::Union{Dict{AbstractComponent, Any}, Nothing}=nothing
+)
     graph = sch.graph
     comp1 = component(node)
     nbrs = graph[neighbors(graph, node)]
     filter!(n -> !(skips_edge(graph, node, n)), nbrs) # Filter out from nbrs any nodes that have PLAN_SKIPS_EDGE=>true
     n0, n1 = (get_prop(graph, node, nbrs[1], node) == :p0) ? nbrs : reverse(nbrs)
-    h0 = hooks_fn(sch, n0, get_prop(graph, n0, node, n0))
-    h1 = hooks_fn(sch, n1, get_prop(graph, node, n1, n1))
+    # Get hooks in global coordinates, using cache for hook lookup
+    h0 = transformation(sch, n0)(
+        _hook(graph, n0, get_prop(graph, n0, node, n0), hooks_fn, hooks_cache)
+    )
+    h1 = transformation(sch, n1)(
+        _hook(graph, n1, get_prop(graph, node, n1, n1), hooks_fn, hooks_cache)
+    )
     comp1.r.p0 = h0.p
     comp1.r.p1 = h1.p
     comp1.r.α0 = out_direction(h0)
@@ -1059,7 +1105,14 @@ function _plan_route!(sch::Schematic, node_cs, node, hooks_fn=hooks)
     return addref!(node_cs, comp1)
 end
 
-function _plan!(sch::Schematic{S}, node_cs, node, hooks_fn=hooks, id_prefix="") where {S}
+function _plan!(
+    sch::Schematic{S},
+    node_cs,
+    node,
+    hooks_fn=hooks,
+    id_prefix="",
+    hooks_cache::Union{Dict{AbstractComponent, Any}, Nothing}=nothing
+) where {S}
     addref!(node_cs, component(node))
     for idx in neighbors(sch.graph, node)
         child_node = nodes(sch.graph)[idx]
@@ -1079,7 +1132,7 @@ function _plan!(sch::Schematic{S}, node_cs, node, hooks_fn=hooks, id_prefix="") 
                 existing_trans = transformation(sch, child_node)
                 new_trans =
                     transformation(sch, node) ∘
-                    transformation(sch.graph, node, child_node, hooks_fn)
+                    transformation(sch.graph, node, child_node, hooks_fn, hooks_cache)
                 isapprox(
                     existing_trans,
                     new_trans,
@@ -1101,12 +1154,12 @@ function _plan!(sch::Schematic{S}, node_cs, node, hooks_fn=hooks, id_prefix="") 
                 child_node_cs,
                 convert(
                     ScaledIsometry{Point{S}},
-                    transformation(sch.graph, node, child_node, hooks_fn)
+                    transformation(sch.graph, node, child_node, hooks_fn, hooks_cache)
                 )
             )
             addref!(node_cs, child_ref)
             sch.ref_dict[child_node] = child_ref
-            _plan!(sch, child_node_cs, child_node, hooks_fn, id_prefix)
+            _plan!(sch, child_node_cs, child_node, hooks_fn, id_prefix, hooks_cache)
         catch e
             @error "Failed to plan node $(id_prefix * child_node.id) under parent $(id_prefix * node.id)" exception =
                 (e, catch_backtrace()) _group = :plan
