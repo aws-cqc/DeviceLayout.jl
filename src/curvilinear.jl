@@ -182,6 +182,10 @@ CurvilinearRegion(points::Vector{Point{T}}, curves, curve_start_idx) where {T} =
 
 to_polygons(e::CurvilinearRegion{T}; kwargs...) where {T} =
     difference2d(to_polygons(e.exterior), to_polygons.(e.holes))
+to_polygons(e::CurvilinearRegion, sty::Polygons.Rounded; kwargs...) = difference2d(
+    to_polygons(e.exterior, sty; kwargs...),
+    [to_polygons(h, sty; kwargs...) for h in e.holes]
+)
 
 function transform(e::CurvilinearRegion{T}, f::Transformation) where {T}
     return CurvilinearRegion{T}(transform(e.exterior, f), transform.(e.holes, Ref(f)))
@@ -465,6 +469,354 @@ function cornerindices(p::CurvilinearPolygon, r::Polygons.Rounded)
         isempty(p0(r)) ? cornerindices(p) :
         cornerindices(p, p0(r); tol=r.selection_tolerance)
     return r.inverse_selection ? setdiff(cornerindices(p), corner_indices) : corner_indices
+end
+
+"""
+    edge_type_at_vertex(p::CurvilinearPolygon, i::Int)
+
+For vertex `i`, determine whether the incoming and outgoing edges are straight or curved.
+
+Returns a NamedTuple `(incoming=..., outgoing=...)` where each field is either
+`:straight` or the `Paths.Segment` (e.g., `Paths.Turn`) for that edge.
+
+  - **Outgoing edge** (from `p[i]` to `p[i+1]`): curved if any
+    `abs(curve_start_idx[k]) == i`
+  - **Incoming edge** (from `p[i-1]` to `p[i]`): curved if any
+    `abs(curve_start_idx[k]) == mod1(i-1, n)`
+"""
+function edge_type_at_vertex(p::CurvilinearPolygon, i::Int)
+    n = length(p.p)
+    prev_i = mod1(i - 1, n)
+
+    incoming = :straight
+    outgoing = :straight
+    # k = index into curves array, csi = vertex index where curve k starts
+    for (k, csi) in enumerate(p.curve_start_idx)
+        if abs(csi) == prev_i
+            incoming = p.curves[k]
+        end
+        if abs(csi) == i
+            outgoing = p.curves[k]
+        end
+    end
+    return (; incoming=incoming, outgoing=outgoing)
+end
+
+"""
+    to_polygons(ent::CurvilinearPolygon{S}, sty::Polygons.Rounded{T}; kwargs...)
+
+Apply rounding to a CurvilinearPolygon, handling both straight-straight corners
+(using the existing `rounded_corner`) and line-arc corners (using `rounded_corner_line_arc`).
+
+Works on the CurvilinearPolygon's vertex list directly (before curve discretization),
+so that arc geometry (center, radius, tangent) is available for the fillet computation.
+After rounding all corners, discretizes the remaining curves to produce a plain Polygon.
+"""
+function to_polygons(
+    ent::CurvilinearPolygon{S},
+    sty::Polygons.Rounded{T};
+    atol=Polygons._round_atol(S, T),
+    kwargs...
+) where {S, T}
+    rad = Polygons.radius(sty)
+    iszero(rad) && return to_polygons(ent; kwargs...)
+
+    V = promote_type(float(S), float(T))
+    poly = ent.p
+    n = length(poly)
+
+    # Get straight-straight corner indices from the existing cornerindices logic
+    straight_corners = cornerindices(ent, sty)
+
+    # Round corners, tracking which original vertex maps to which output range.
+    # Also track T_arc for each line-arc corner so we can trim the curves.
+    rounded_pts = Point{V}[]
+    vertex_ranges = Vector{UnitRange{Int}}(undef, n)
+    # For each curve, track trim points: trim_start[k] and trim_end[k]
+    # are the T_arc points where the fillet meets the curve at its start/end vertex.
+    trim_start = Dict{Int, Point{V}}()  # curve index k → T_arc at curve start vertex
+    trim_end = Dict{Int, Point{V}}()    # curve index k → T_arc at curve end vertex
+
+    for i in eachindex(poly)
+        start_idx = length(rounded_pts) + 1
+        edges = edge_type_at_vertex(ent, i)
+        is_line_arc = (edges.incoming == :straight) != (edges.outgoing == :straight)
+
+        if i in straight_corners &&
+           edges.incoming == :straight &&
+           edges.outgoing == :straight
+            # Straight-straight corner: use existing rounded_corner
+            append!(
+                rounded_pts,
+                Polygons.rounded_corner(
+                    poly[mod1(i - 1, n)],
+                    poly[i],
+                    poly[mod1(i + 1, n)],
+                    rad,
+                    atol=atol,
+                    min_side_len=sty.min_side_len,
+                    min_angle=sty.min_angle
+                )
+            )
+        elseif is_line_arc && edges.incoming == :straight && edges.outgoing isa Paths.Turn
+            # Straight → arc: line is incoming, arc is outgoing
+            result = rounded_corner_line_arc(
+                poly[mod1(i - 1, n)],
+                poly[i],
+                edges.outgoing,
+                true,
+                rad,
+                atol=atol,
+                min_side_len=sty.min_side_len,
+                min_angle=sty.min_angle
+            )
+            append!(rounded_pts, result.points)
+            # Record trim point for the curve starting at this vertex
+            if !isnothing(result.T_arc)
+                curve_k = findfirst(
+                    k -> abs(ent.curve_start_idx[k]) == i,
+                    eachindex(ent.curve_start_idx)
+                )
+                !isnothing(curve_k) && (trim_start[curve_k] = result.T_arc)
+            end
+        elseif is_line_arc && edges.incoming isa Paths.Turn && edges.outgoing == :straight
+            # Arc → straight: arc is incoming, line is outgoing
+            result = rounded_corner_line_arc(
+                poly[mod1(i + 1, n)],
+                poly[i],
+                edges.incoming,
+                false,
+                rad,
+                atol=atol,
+                min_side_len=sty.min_side_len,
+                min_angle=sty.min_angle
+            )
+            append!(rounded_pts, result.points)
+            # Record trim point for the curve ending at this vertex
+            if !isnothing(result.T_arc)
+                prev_i = mod1(i - 1, n)
+                curve_k = findfirst(
+                    k -> abs(ent.curve_start_idx[k]) == prev_i,
+                    eachindex(ent.curve_start_idx)
+                )
+                !isnothing(curve_k) && (trim_end[curve_k] = result.T_arc)
+            end
+        else
+            # Non-corner vertex or arc-arc corner: pass through
+            push!(rounded_pts, poly[i])
+        end
+        vertex_ranges[i] = start_idx:length(rounded_pts)
+    end
+
+    # Assemble final polygon: interleave rounded vertex points with discretized curves.
+    # Curves are trimmed at fillet tangent points when applicable.
+    final_points = Point{V}[]
+    for i = 1:n
+        append!(final_points, rounded_pts[vertex_ranges[i]])
+
+        # If there's a curve starting at vertex i, discretize it (possibly trimmed)
+        curve_k =
+            findfirst(k -> abs(ent.curve_start_idx[k]) == i, eachindex(ent.curve_start_idx))
+        if !isnothing(curve_k)
+            c = ent.curves[curve_k]
+            csi = ent.curve_start_idx[curve_k]
+            arc_len = pathlength(c)
+
+            # Determine trim parameters: find t values for trim points on the arc
+            t_start = zero(S)
+            t_end = arc_len
+            if haskey(trim_start, curve_k)
+                # Find the arc parameter closest to T_arc at the start
+                T_s = trim_start[curve_k]
+                t_start = Paths.pathlength_nearest(c, T_s)
+            end
+            if haskey(trim_end, curve_k)
+                # Find the arc parameter closest to T_arc at the end
+                T_e = trim_end[curve_k]
+                t_end = Paths.pathlength_nearest(c, T_e)
+            end
+
+            # Discretize the trimmed portion of the curve
+            if t_end > t_start
+                npts = max(2, Int(ceil(181 * (t_end - t_start) / arc_len)))
+                pp = c.(range(t_start, t_end, npts))
+                # Remove endpoints (already present as fillet tangent points or vertex points)
+                if csi < 0
+                    popfirst!(pp)
+                    pop!(pp)
+                    reverse!(pp)
+                else
+                    popfirst!(pp)
+                    pop!(pp)
+                end
+                append!(final_points, pp)
+            end
+        end
+    end
+
+    return Polygon(final_points...)
+end
+
+"""
+    rounded_corner_line_arc(
+        p_line::Point, p_corner::Point,
+        arc_curve::Paths.Turn, arc_is_outgoing::Bool,
+        radius;
+        atol, min_side_len, min_angle
+    )
+
+Compute a fillet arc at the corner where a straight edge meets a circular arc,
+using bisection to find the fillet center.
+
+  - `p_line`: the far endpoint of the straight edge (not the corner)
+  - `p_corner`: the vertex where the straight edge meets the arc
+  - `arc_curve`: the `Paths.Turn` representing the circular arc
+  - `arc_is_outgoing`: `true` if the arc leaves from `p_corner`, `false` if it arrives
+  - `radius`: fillet radius
+
+Returns a NamedTuple `(; points, T_arc)` where:
+
+  - `points`: vector of discretized fillet arc points (including endpoints)
+  - `T_arc`: the tangent point on the existing arc (for trimming), or `nothing` if no fillet
+
+If the fillet cannot be computed, returns `(; points=[p_corner], T_arc=nothing)`.
+"""
+function rounded_corner_line_arc(
+    p_line::Point{T},
+    p_corner::Point{T},
+    arc_curve::Paths.Turn,
+    arc_is_outgoing::Bool,
+    radius::S;
+    atol=Polygons._round_atol(T, S),
+    min_side_len=radius,
+    min_angle=1e-3
+) where {T, S <: DeviceLayout.Coordinate}
+    V = promote_type(T, S)
+    r = convert(V, radius)
+
+    # Check straight edge length against min_side_len
+    line_len = norm(p_corner - p_line)
+    if line_len < min_side_len && !isapprox(line_len, min_side_len, atol=atol)
+        return (; points=[p_corner], T_arc=nothing)
+    end
+
+    # Line direction: always from p_line toward p_corner.
+    # This determines the normal and bisection bracket for both cases.
+    v_line = (p_corner - p_line) / line_len
+    α_line = atan(v_line.y, v_line.x)
+
+    arc_len = Paths.pathlength(arc_curve)
+    α_arc = if arc_is_outgoing
+        # Arc starts at p_corner: tangent at t=0
+        Paths.direction(arc_curve, zero(arc_len))
+    else
+        # Arc ends at p_corner: tangent at t=pathlength
+        Paths.direction(arc_curve, arc_len)
+    end
+
+    # Check if line and arc tangent are nearly parallel (already smooth)
+    if isapprox(rem2pi(α_line - α_arc, RoundNearest), 0, atol=min_angle)
+        return (; points=[p_corner], T_arc=nothing)
+    end
+
+    ## Arc geometry
+    O = Paths.curvaturecenter(arc_curve)           # arc center
+    R = arc_curve.r                                # arc radius
+
+    # Determine which side of the line the polygon interior is on,
+    # using the arc tangent direction at the corner as a proxy for the "next" point.
+    p_virtual = p_corner + Point(cos(α_arc), sin(α_arc)) * atol
+    turn_sign = DeviceLayout.orientation(p_line, p_corner, p_virtual)
+    # For arc_is_outgoing=false, p_line is the NEXT vertex (not the previous),
+    # so orientation(p_line, p_corner, p_virtual) gives the reverse winding.
+    # Negate to get the correct polygon interior side.
+    if !arc_is_outgoing
+        turn_sign = -turn_sign
+    end
+
+    ## Bisection
+    # The fillet center lies at distance D from arc center O and distance r from
+    # the line. D = R + r (external tangency) or |R - r| (internal tangency).
+    # We try both D values. For each, the center lies on a circle of radius D
+    # around O; bisect over angle θ to find where the distance to the line = r.
+    # Validate by checking that T_line falls between p_line and p_corner (not
+    # past the corner on the line extension — the wrong tangency overshoots).
+    n_line = Point(-v_line.y, v_line.x)  # left normal
+    fillet_side = sign(turn_sign)
+    θ_corner = atan((p_corner - O).y, (p_corner - O).x)
+
+    function bisect_for_D(D_val)
+        dist_minus_r(θ) =
+            let cf = O + Point(D_val * cos(θ), D_val * sin(θ))
+                ((cf - p_corner).x * n_line.x + (cf - p_corner).y * n_line.y) *
+                fillet_side - r
+            end
+
+        θ_lo = θ_corner
+        θ_hi = θ_corner + fillet_side * turn_sign * π / 2
+        f_lo, f_hi = dist_minus_r(θ_lo), dist_minus_r(θ_hi)
+        if sign(f_lo) == sign(f_hi)
+            θ_hi = θ_corner - fillet_side * turn_sign * π / 2
+            f_hi = dist_minus_r(θ_hi)
+        end
+        sign(f_lo) == sign(f_hi) && return nothing
+
+        for _ = 1:64
+            θ_mid = (θ_lo + θ_hi) / 2
+            if sign(dist_minus_r(θ_mid)) == sign(f_lo)
+                θ_lo = θ_mid
+            else
+                θ_hi = θ_mid
+            end
+        end
+        cf = O + Point(D_val * cos((θ_lo + θ_hi) / 2), D_val * sin((θ_lo + θ_hi) / 2))
+        d_check =
+            ((cf - p_corner).x * n_line.x + (cf - p_corner).y * n_line.y) * fillet_side
+        return d_check > zero(d_check) - atol ? cf : nothing
+    end
+
+    function validate_t_line(cf)
+        isnothing(cf) && return false
+        t = (cf - p_line).x * v_line.x + (cf - p_line).y * v_line.y
+        return -atol < t < line_len + atol
+    end
+
+    C_f_ext = bisect_for_D(R + r)
+    C_f_int = abs(R - r) > zero(R) ? bisect_for_D(abs(R - r)) : nothing
+    ext_ok = validate_t_line(C_f_ext)
+    int_ok = validate_t_line(C_f_int)
+
+    C_f = if ext_ok && int_ok
+        norm(C_f_ext - p_corner) < norm(C_f_int - p_corner) ? C_f_ext : C_f_int
+    elseif ext_ok
+        C_f_ext
+    elseif int_ok
+        C_f_int
+    else
+        return (; points=[p_corner], T_arc=nothing)
+    end
+
+    # Tangent point on line: foot of perpendicular from C_f to line
+    t_proj = (C_f - p_line).x * v_line.x + (C_f - p_line).y * v_line.y
+    T_line = p_line + t_proj * v_line
+
+    # Tangent point on arc: point on the arc in the direction of the fillet center
+    cf_dir = (C_f - O) / norm(C_f - O)
+    T_arc = O + R * cf_dir
+
+    ## Fillet arc angles
+    # The fillet arc must follow the polygon winding order:
+    #   arc_is_outgoing=true:  polygon goes ...line → T_line → [fillet] → T_arc → arc...
+    #   arc_is_outgoing=false: polygon goes ...arc → T_arc → [fillet] → T_line → line...
+    α_T_line = atan((T_line - C_f).y, (T_line - C_f).x)
+    α_T_arc = atan((T_arc - C_f).y, (T_arc - C_f).x)
+
+    fillet_pts = if arc_is_outgoing
+        DeviceLayout.circular_arc([α_T_line, α_T_arc], r, atol, center=C_f)
+    else
+        DeviceLayout.circular_arc([α_T_arc, α_T_line], r, atol, center=C_f)
+    end
+    return (; points=fillet_pts, T_arc=T_arc)
 end
 
 end # module
