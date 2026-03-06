@@ -327,7 +327,7 @@ The angle with the x-axis made by segment `ws` directed along its wire toward it
 """
 function segment_direction(ar::ChannelRouter, ws::TrackWireSegment, s)
     off = segment_offset(ar, ws, s)
-    seg = Paths.offset(ar.channels[running_channel(ws)].seg, off)
+    seg = Paths.offset(ar.channels[running_channel(ws)].node.seg, off)
     return direction(seg, s)
 end
 
@@ -351,7 +351,7 @@ measured at pathlength `s` in the channel.
 """
 function track_offset(ar::ChannelRouter{T}, channel_idx, track_idx, s...) where {T}
     n_tracks = length(channel_tracks(ar, channel_idx))
-    w = Paths.width(ar.channels[channel_idx].sty, zero(T))
+    w = Paths.width(ar.channels[channel_idx].node.sty, zero(T))
     spacing = w / (n_tracks + 1)
     return spacing * (track_idx - (1 + n_tracks) / 2)
 end
@@ -947,7 +947,7 @@ Segment waypoints are marked with circles and numbered sequentially within each 
 """
 function visualize_router_state(
     ar::ChannelRouter{T};
-    wire_width=0.1 * oneunit(T),
+    wire_width=0.1*oneunit(T),
     rule=StraightAnd90(min_bend_radius=wire_width, max_bend_radius=wire_width)
 ) where {T}
     c = DeviceLayout.Cell{T}("track_viz")
@@ -957,12 +957,12 @@ function visualize_router_state(
 
     DeviceLayout.render!.(c, paths, GDSMeta())
     rect = track_rectangles(ar)
-    DeviceLayout.render!.(c, rect, GDSMeta(2))
-    rect2 = channel_rectangles(ar)
-    DeviceLayout.render!.(c, rect2, GDSMeta(3))
+    # DeviceLayout.render!.(c, rect, GDSMeta(2))
+    channels = channel_paths(ar)
+    DeviceLayout.render!.(c, channels, GDSMeta(3))
     lab = track_labels(ar)
     [DeviceLayout.text!(c, l..., GDSMeta(4)) for l in lab]
-    [DeviceLayout.render!(c, DeviceLayout.circle(wire_width) + p, GDSMeta(5)) for rt in rts for p in rt.waypoints]
+    [DeviceLayout.render!(c, DeviceLayout.Circle(wire_width) + p, GDSMeta(5)) for rt in rts for p in rt.waypoints]
     plab = pin_labels(ar)
     [DeviceLayout.text!(c, l..., GDSMeta(6)) for l in plab]
     wlab = waypoint_labels(ar)
@@ -979,7 +979,7 @@ function track_rectangles(ar::ChannelRouter)
     ]
 end
 
-channel_rectangles(ar::ChannelRouter) = [channel_rectangle(ar, s) for s = 1:num_channels(ar)]
+channel_paths(ar::ChannelRouter) = [channel_path(ar, s) for s = 1:num_channels(ar)]
 
 function track_labels(ar::ChannelRouter)
     return [
@@ -1003,15 +1003,15 @@ function waypoint_labels(ar::ChannelRouter)
     ]
 end
 
-function channel_rectangle(ar::ChannelRouter, channel_idx)
-    return ar.channels[channel_idx]
+function channel_path(ar::ChannelRouter, channel_idx)
+    return ar.channels[channel_idx].path
 end
 
 function track_rectangle(ar::ChannelRouter{T}, channel_idx, track_idx) where {T}
     off = track_offset(ar, channel_idx, track_idx, zero(T))
-    seg = Paths.offset(ar.channels[channel_idx].seg, off)
+    seg = Paths.offset(ar.channels[channel_idx].node.seg, off)
     n_tracks = length(channel_tracks(ar, channel_idx))
-    w = Paths.width(ar.channels[channel_idx].sty, zero(T))
+    w = Paths.width(ar.channels[channel_idx].node.sty, zero(T))
     pa = Path([Paths.Node(seg, Paths.Trace(w / (n_tracks+1)))])
     return pa
 end
@@ -1061,13 +1061,13 @@ end
 
 function _update_with_plan!(rule::AutoChannelRouting{T}, route_node, sch) where {T}
     pin_idx = length(rule.router.pins) + 1
-    push!(pins, hooks(route_node.component).p0)
-    push!(pins, hooks(route_node.component).p1)
+    push!(rule.router.pins, hooks(route_node.component).p0)
+    push!(rule.router.pins, hooks(route_node.component).p1)
     push!(rule.router.net_pins, (pin_idx, pin_idx + 1))
     # If all paths have been added, go ahead and run autorouting
     if length(rule.router.net_pins) == length(rule.router.net_paths)
-        build_channel_graph(rule.router.pins, rule.router.channels, T)
+        build_channel_graph(rule.router.pins, getproperty.(rule.router.channels, :path), T)
         assign_channels!(rule.router)
-        assign_tracks!(ar)
+        assign_tracks!(rule.router)
     end
 end
