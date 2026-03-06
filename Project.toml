@@ -39,11 +39,9 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 gmsh_jll = "630162c2-fc9b-58b3-9910-8442a8a132e6"
 
 [weakdeps]
-GeoInterface = "cf35fbd7-0cd7-5166-be24-54bfbe79505f"
 GraphMakie = "1ecd5474-83a3-4783-bb4f-06765db800d2"
 
 [extensions]
-GeoInterfaceExt = "GeoInterface"
 SchematicGraphMakieExt = "GraphMakie"
 
 [compat]
@@ -56,7 +54,6 @@ CoordinateTransformations = "0.6"
 Distances = "0.10.12"
 FileIO = "1.6"
 ForwardDiff = "0.10, 1"
-GeoInterface = "1"
 Gmsh = "0.3.1"
 GraphMakie = "0.5, 0.6"
 Graphs = "1"
