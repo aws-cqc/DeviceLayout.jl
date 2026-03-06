@@ -736,6 +736,7 @@ include("segments/bspline_optimization.jl")
 include("routes.jl")
 
 include("channels.jl")
+include("channel_autorouter.jl")
 
 function change_handedness!(seg::Union{Turn, Corner})
     return seg.α = -seg.α

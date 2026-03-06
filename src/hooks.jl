@@ -36,6 +36,13 @@ The outward-pointing angle opposite to the direction stored by the PointHook
 out_direction(h::Hook) = in_direction(h) + 180°
 
 """
+    getp(h::Hook)
+
+The point defining the position of `h`.
+"""
+getp(h::Hook) = h.p
+
+"""
     compass(;p0=Point(0μm, 0μm))
 
 An 8-point compass of `PointHook`s at `p0`.
@@ -111,6 +118,8 @@ function transformation(h1::HandedPointHook, h2::HandedPointHook)
 end
 transformation(h1::PointHook, h2::HandedPointHook) = transformation(h1, h2.h)
 transformation(h1::HandedPointHook, h2::PointHook) = transformation(h1.h, h2)
+
+getp(h::HandedPointHook) = h.h.p
 
 function Base.getproperty(h::HandedPointHook, s::Symbol)
     if s in (:p, :in_direction)
