@@ -6,6 +6,7 @@ import Graphs:
     SimpleGraph,
     SimpleDiGraph,
     nv,
+    ne,
     add_edge!,
     rem_edge!,
     adjacency_matrix,
@@ -15,8 +16,12 @@ import Graphs:
     outneighbors,
     dag_longest_path,
     maximal_cliques,
-    yen_k_shortest_paths
+    yen_k_shortest_paths,
+    dijkstra_shortest_paths,
+    enumerate_paths,
+    topological_sort_by_dfs
 import LinearAlgebra: norm
+import SparseArrays: sparse
 import BipartiteMatching
 
 # TrackWireSegment = (net, lengthwise channel, start vertex, end vertex)
@@ -36,6 +41,13 @@ const Track = Vector{TrackWireSegment}
 const NetWire = Vector{TrackWireSegment}
 # pathlength 1, pathlength 2, dir1, dir2, intersection point
 const IntersectionInfo{T} = Tuple{T, T, typeof(1.0°), typeof(1.0°), Point{T}}
+
+struct AuxiliaryGraph{T, M <: AbstractMatrix{T}}
+    graph::SimpleGraph{Int}
+    distmx::M
+    aux_to_edge::Vector{Tuple{Int, Int}}       # aux vertex → original (u, v) edge
+    edge_to_aux::Dict{Tuple{Int, Int}, Int}     # original (u, v) edge → aux vertex
+end
 
 """
     ChannelRouter{T <: Coordinate}
@@ -189,6 +201,14 @@ end
 
 segment_waypoint(ar::ChannelRouter, ws::TrackWireSegment) = ar.segment_waypoints[ws]
 _swap(x, y) = (y > x ? (x, y) : (y, x))
+
+function _shared_vertex(edge_a::Tuple{Int,Int}, edge_b::Tuple{Int,Int})
+    a1, a2 = edge_a
+    b1, b2 = edge_b
+    a1 in (b1, b2) && return a1
+    a2 in (b1, b2) && return a2
+    error("Edges $edge_a and $edge_b share no vertex")
+end
 
 pathlength_from_start(channel, node, s) = pathlength(channel[1:node-1]) + s
 
@@ -424,15 +444,69 @@ function prev(ar::ChannelRouter, ws::TrackWireSegment)
 end
 
 """
+    build_auxiliary_graph(ar::ChannelRouter)
+
+Build an auxiliary graph where each vertex represents an intersection point (edge in the
+channel graph) and edges connect consecutive intersections along the same channel, weighted
+by the physical distance between them.
+"""
+function build_auxiliary_graph(ar::ChannelRouter{T}) where {T}
+    g = channel_graph(ar)
+    n_aux = ne(g)
+
+    # Map channel-graph edges to auxiliary vertices
+    aux_to_edge = Vector{Tuple{Int,Int}}(undef, n_aux)
+    edge_to_aux = Dict{Tuple{Int,Int}, Int}()
+    for (i, e) in enumerate(edges(g))
+        key = _swap(e.src, e.dst)
+        aux_to_edge[i] = key
+        edge_to_aux[key] = i
+    end
+
+    # Build auxiliary graph: chain consecutive intersections per channel
+    aux_g = SimpleGraph(n_aux)
+    I = Int[]
+    J = Int[]
+    V = T[]
+    for ch in 1:num_channels(ar)
+        nbs = neighbors(g, ch)
+        length(nbs) < 2 && continue
+
+        # Collect (pathlength_along_ch, aux_vertex) for each intersection on this channel
+        ch_ixns = Tuple{T, Int}[
+            (pathlength_at_intersection(ar, ch, nb), edge_to_aux[_swap(ch, nb)])
+            for nb in nbs
+        ]
+        sort!(ch_ixns, by=first)
+
+        # Connect consecutive intersection points
+        for k in 1:(length(ch_ixns) - 1)
+            s1, aux1 = ch_ixns[k]
+            s2, aux2 = ch_ixns[k + 1]
+            add_edge!(aux_g, aux1, aux2)
+            w = abs(s2 - s1)
+            push!(I, aux1); push!(J, aux2); push!(V, w)
+            push!(I, aux2); push!(J, aux1); push!(V, w)
+        end
+    end
+
+    distmx = sparse(I, J, V, n_aux, n_aux)
+    return AuxiliaryGraph(aux_g, distmx, aux_to_edge, edge_to_aux)
+end
+
+"""
     shortest_path_between_pins(ar::ChannelRouter, pin_1::Int, pin_2::Int)
 
-A shortest path in the router's channel graph from `pin_1` to `pin_2`.
+A shortest path in the router's channel graph from `pin_1` to `pin_2`, minimizing
+hop count (number of channel transitions).
 
-Distance is not physical distance but graph distance (the number of edges in the path).
+    shortest_path_between_pins(ar::ChannelRouter, pin_1::Int, pin_2::Int, aux::AuxiliaryGraph)
 
-In the channel graph, each channel is a vertex, and there is an edge between each intersecting
-pair of channels. Each pin is also a vertex, with an edge only to its adjoining channel. A path
-is a list of vertex indices `path::Vector{Int}`.
+A shortest path minimizing physical distance (sum of arclengths along channels between
+intersection points), using a precomputed [`AuxiliaryGraph`](@ref).
+
+In both cases, the returned path is a list of vertex indices
+`[pin_gidx, ch1, ..., chN, pin_gidx]`.
 """
 function shortest_path_between_pins(ar::ChannelRouter, p0::Int, p1::Int)
     ys = yen_k_shortest_paths(
@@ -443,14 +517,39 @@ function shortest_path_between_pins(ar::ChannelRouter, p0::Int, p1::Int)
     return ys.paths[1]
 end
 
+function shortest_path_between_pins(ar::ChannelRouter, p0::Int, p1::Int, aux::AuxiliaryGraph)
+    pin0_gidx = pin_to_graphidx(ar, p0)
+    pin1_gidx = pin_to_graphidx(ar, p1)
+    src_aux = aux.edge_to_aux[_swap(pin0_gidx, adjoining_channel(ar, p0))]
+    dst_aux = aux.edge_to_aux[_swap(pin1_gidx, adjoining_channel(ar, p1))]
+
+    ds = dijkstra_shortest_paths(aux.graph, src_aux, aux.distmx)
+    aux_path = enumerate_paths(ds, dst_aux)
+    isempty(aux_path) && error("No path between pins $p0 and $p1")
+
+    # Convert aux vertices back to channel-graph vertex sequence.
+    # Skip consecutive duplicates: the aux path may traverse multiple intersections on
+    # the same channel, which just means a longer segment on that channel.
+    path = Int[pin0_gidx]
+    for i in 1:(length(aux_path) - 1)
+        ch = _shared_vertex(aux.aux_to_edge[aux_path[i]],
+                            aux.aux_to_edge[aux_path[i + 1]])
+        if ch != last(path)
+            push!(path, ch)
+        end
+    end
+    push!(path, pin1_gidx)
+    return path
+end
+
 """
     assign_channels!(ar::ChannelRouter)
 
 Performs channel assignment for `ar`.
 
-Currently just finds a "shortest path" between pins, where 
-distance is not physical distance but graph distance (the number of edges in the path).
-In other words, each net takes a path that changes channels a minimal number of times.
+Finds a shortest path between pins minimizing physical distance along channels
+(sum of arclengths between intersection points), using an auxiliary intersection-point
+graph with Dijkstra's algorithm.
 Does not currently take congestion, crossings, or channel capacity into account.
 """
 function assign_channels!(
@@ -458,6 +557,7 @@ function assign_channels!(
     net_indices=eachindex(ar.net_pins),
     fixed_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}()
 )
+    aux = build_auxiliary_graph(ar)
     for (idx_net, net) in zip(net_indices, ar.net_pins[net_indices])
         p0, p1 = net
         path = if idx_net in keys(fixed_paths)
@@ -467,7 +567,7 @@ function assign_channels!(
                 pin_to_graphidx(ar, p1)
             ]
         else
-            shortest_path_between_pins(ar, p0, p1)
+            shortest_path_between_pins(ar, p0, p1, aux)
         end
         ixns = [(path[i], path[i + 1]) for i = 1:(length(path) - 1)]
         segs = [(ixns[i], ixns[i + 1]) for i = 1:(length(ixns) - 1)]
@@ -581,7 +681,7 @@ function assign_tracks_matching!(ar, channel)
     tracks = channel_tracks(ar, channel)
     # At the end of this process, segments are merged into layers in the VCG
     # So the longest directed path gives a representative of each merged group
-    high_to_low = dag_longest_path(vcg) # If vcg was acyclic to begin with, it is still acyclic
+    high_to_low = topological_sort_by_dfs(vcg) # If vcg was acyclic to begin with, it is still acyclic
     num_tracks = length(high_to_low)
     for v in 1:nv(vcg)
         if !haskey(merged_groups, v)
@@ -735,7 +835,7 @@ function channel_problem_graphs(ar::ChannelRouter, channel)
             # Crossing is avoidable, so add a constraint
             # Determine which goes on top based on the lower bound tendency of seg2
             # Is prev or next the lower bound?
-            # top is rightmost segment iff its lower bound tends towards higher tracks
+            # top is rightmost segment iff its lower bound tends towards higher (lower index) tracks
             top = (idx1, idx2)[1 + (low2_tend == 1)]
             bottom = (idx1, idx2)[2 - (low2_tend == 1)]
             add_edge!(vcg, top, bottom) # VCG has edge from higher to lower tracks
@@ -769,7 +869,7 @@ function is_avoidable(low1, high1, low2, high2, low1_tend, high1_tend, low2_tend
     avoidable = (avoidable || (low1 == low2 || high1 == high2))
 end
 
-# +1 if segment crosses over high track index in ws's channel
+# +1 if segment crosses over low track index in ws's channel
 function prev_next_tendency(ar, ws; use_segment_direction=true)
     channel_idx = running_channel(ws)
     start_channel, stop_channel = bounding_channels(ws)
