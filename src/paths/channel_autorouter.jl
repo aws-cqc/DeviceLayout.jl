@@ -21,7 +21,7 @@ import Graphs:
     enumerate_paths,
     topological_sort_by_dfs
 import LinearAlgebra: norm
-import SparseArrays: sparse
+import SparseArrays: sparse, nonzeros
 import BipartiteMatching
 
 # TrackWireSegment = (net, lengthwise channel, start vertex, end vertex)
@@ -542,41 +542,237 @@ function shortest_path_between_pins(ar::ChannelRouter, p0::Int, p1::Int, aux::Au
     return path
 end
 
+function edge_capacities(ar::ChannelRouter{T}, aux::AuxiliaryGraph, min_pitch) where {T}
+    caps = Dict{Tuple{Int,Int}, Int}()
+    for e in edges(aux.graph)
+        v1, v2 = e.src, e.dst
+        e1 = aux.aux_to_edge[v1]
+        e2 = aux.aux_to_edge[v2]
+        ch = _shared_vertex(e1, e2)
+        nb1 = e1[1] == ch ? e1[2] : e1[1]
+        nb2 = e2[1] == ch ? e2[2] : e2[1]
+        s1 = pathlength_at_intersection(ar, ch, nb1)
+        s2 = pathlength_at_intersection(ar, ch, nb2)
+        s_mid = (s1 + s2) / 2
+        w = channel_width(ar, ch, s_mid)
+        pitch = min_pitch isa Dict ? get(min_pitch, ch, zero(T)) : min_pitch
+        cap = iszero(pitch) ? typemax(Int) : floor(Int, w / pitch)
+        caps[_swap(v1, v2)] = cap
+    end
+    return caps
+end
+
+function update_cost_matrix!(cost_distmx, base_distmx, occupancy, capacity, history, pfac)
+    nonzeros(cost_distmx) .= nonzeros(base_distmx)
+    affected_keys = union(keys(history), keys(occupancy))
+    for key in affected_keys
+        h = get(history, key, 1.0)
+        occ = get(occupancy, key, 0)
+        cap = get(capacity, key, typemax(Int))
+        overflow = max(0, occ - cap)
+        factor = h * (1 + overflow * pfac)
+        if factor != 1.0
+            v1, v2 = key
+            cost_distmx[v1, v2] *= factor
+            cost_distmx[v2, v1] *= factor
+        end
+    end
+end
+
+function count_path_aux_occupancy!(
+    occupancy::Dict{Tuple{Int,Int}, Int},
+    ar::ChannelRouter,
+    aux::AuxiliaryGraph,
+    channel_path::Vector{Int}
+)
+    g = channel_graph(ar)
+    for i in 2:(length(channel_path) - 1)
+        ch = channel_path[i]
+        prev_v = channel_path[i - 1]
+        next_v = channel_path[i + 1]
+        nbs = neighbors(g, ch)
+        ch_ixns = sort(
+            [(pathlength_at_intersection(ar, ch, nb), aux.edge_to_aux[_swap(ch, nb)])
+             for nb in nbs],
+            by=first
+        )
+        entry_aux = aux.edge_to_aux[_swap(ch, prev_v)]
+        exit_aux = aux.edge_to_aux[_swap(ch, next_v)]
+        entry_idx = findfirst(x -> x[2] == entry_aux, ch_ixns)
+        exit_idx = findfirst(x -> x[2] == exit_aux, ch_ixns)
+        lo, hi = minmax(entry_idx, exit_idx)
+        for k in lo:(hi - 1)
+            key = _swap(ch_ixns[k][2], ch_ixns[k + 1][2])
+            occupancy[key] = get(occupancy, key, 0) + 1
+        end
+    end
+end
+
+function route_net_congestion!(
+    ar::ChannelRouter, idx_net, p0, p1,
+    aux::AuxiliaryGraph, cost_distmx,
+    occupancy::Dict{Tuple{Int,Int}, Int}
+)
+    pin0_gidx = pin_to_graphidx(ar, p0)
+    pin1_gidx = pin_to_graphidx(ar, p1)
+    src_aux = aux.edge_to_aux[_swap(pin0_gidx, adjoining_channel(ar, p0))]
+    dst_aux = aux.edge_to_aux[_swap(pin1_gidx, adjoining_channel(ar, p1))]
+
+    ds = dijkstra_shortest_paths(aux.graph, src_aux, cost_distmx)
+    aux_path = enumerate_paths(ds, dst_aux)
+    isempty(aux_path) && error("No path between pins $p0 and $p1")
+
+    # Convert aux path to channel-graph vertex sequence
+    path = Int[pin0_gidx]
+    for i in 1:(length(aux_path) - 1)
+        ch = _shared_vertex(aux.aux_to_edge[aux_path[i]],
+                            aux.aux_to_edge[aux_path[i + 1]])
+        if ch != last(path)
+            push!(path, ch)
+        end
+    end
+    push!(path, pin1_gidx)
+
+    # Create wire segments
+    ixns = [(path[i], path[i + 1]) for i = 1:(length(path) - 1)]
+    segs = [(ixns[i], ixns[i + 1]) for i = 1:(length(ixns) - 1)]
+    for (channel, seg) in zip(path[2:(end - 1)], segs)
+        ws = TrackWireSegment(idx_net, channel, first(seg[1]), last(seg[2]))
+        push!(net_wire(ar, idx_net), ws)
+        push!(channel_segments(ar, channel), ws)
+    end
+
+    # Increment occupancy for aux edges used
+    for i in 1:(length(aux_path) - 1)
+        key = _swap(aux_path[i], aux_path[i + 1])
+        occupancy[key] = get(occupancy, key, 0) + 1
+    end
+    return path
+end
+
 """
-    assign_channels!(ar::ChannelRouter)
+    assign_channels!(ar::ChannelRouter; min_pitch=0, max_iter=50, ...)
 
 Performs channel assignment for `ar`.
 
-Finds a shortest path between pins minimizing physical distance along channels
-(sum of arclengths between intersection points), using an auxiliary intersection-point
-graph with Dijkstra's algorithm.
-Does not currently take congestion, crossings, or channel capacity into account.
+When `min_pitch` is zero (default), finds shortest paths minimizing physical distance
+(sum of arclengths between intersection points).
+
+When `min_pitch > 0`, uses PathFinder-style negotiated congestion routing to spread
+wires across channels, respecting capacity constraints derived from channel width and
+`min_pitch` (capacity = floor(width / min_pitch) per channel section).
+
+`min_pitch` can be a scalar (same for all channels) or a `Dict{Int,T}` mapping channel
+indices to per-channel pitch values.
 """
 function assign_channels!(
-    ar::ChannelRouter;
+    ar::ChannelRouter{T};
     net_indices=eachindex(ar.net_pins),
-    fixed_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}()
-)
+    fixed_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}(),
+    min_pitch=zero(T),
+    max_iter::Int=50,
+    pfac_init=0.5,
+    pfac_mult=2.0,
+    hfac=1.0
+) where {T}
     aux = build_auxiliary_graph(ar)
-    for (idx_net, net) in zip(net_indices, ar.net_pins[net_indices])
-        p0, p1 = net
-        path = if idx_net in keys(fixed_paths)
-            [
+    use_congestion = min_pitch isa Dict ? !isempty(min_pitch) : !iszero(min_pitch)
+
+    if !use_congestion
+        # Single-pass shortest-distance routing (original behavior)
+        for (idx_net, net) in zip(net_indices, ar.net_pins[net_indices])
+            p0, p1 = net
+            path = if idx_net in keys(fixed_paths)
+                [
+                    pin_to_graphidx(ar, p0)
+                    fixed_paths[idx_net]
+                    pin_to_graphidx(ar, p1)
+                ]
+            else
+                shortest_path_between_pins(ar, p0, p1, aux)
+            end
+            ixns = [(path[i], path[i + 1]) for i = 1:(length(path) - 1)]
+            segs = [(ixns[i], ixns[i + 1]) for i = 1:(length(ixns) - 1)]
+            for (channel, seg) in zip(path[2:(end - 1)], segs)
+                ws = TrackWireSegment(idx_net, channel, first(seg[1]), last(seg[2]))
+                push!(net_wire(ar, idx_net), ws)
+                push!(channel_segments(ar, channel), ws)
+            end
+        end
+        return
+    end
+
+    # Negotiated congestion routing (PathFinder-style)
+    base_distmx = copy(aux.distmx)
+    cost_distmx = copy(aux.distmx)
+    capacity = edge_capacities(ar, aux, min_pitch)
+    history = Dict{Tuple{Int,Int}, Float64}()
+    pfac = Float64(pfac_init)
+
+    # Sort nets by Manhattan distance (longest first)
+    net_order = sort(collect(net_indices),
+        by = i -> let (p0, p1) = ar.net_pins[i]
+            norm(pin_coordinates(ar, p0) - pin_coordinates(ar, p1))
+        end,
+        rev=true
+    )
+    fixed_nets = filter(i -> i in keys(fixed_paths), net_order)
+    routable_nets = filter(i -> !(i in keys(fixed_paths)), net_order)
+
+    for iter in 1:max_iter
+        # Reset all nets and clear occupancy
+        reset_nets!(ar; net_indices=net_indices, reset_tracks=false)
+        occupancy = Dict{Tuple{Int,Int}, Int}()
+
+        # Route fixed-path nets first (not ripped up, occupancy counted)
+        for idx_net in fixed_nets
+            p0, p1 = ar.net_pins[idx_net]
+            path = [
                 pin_to_graphidx(ar, p0)
                 fixed_paths[idx_net]
                 pin_to_graphidx(ar, p1)
             ]
-        else
-            shortest_path_between_pins(ar, p0, p1, aux)
+            ixns = [(path[i], path[i + 1]) for i = 1:(length(path) - 1)]
+            segs = [(ixns[i], ixns[i + 1]) for i = 1:(length(ixns) - 1)]
+            for (channel, seg) in zip(path[2:(end - 1)], segs)
+                ws = TrackWireSegment(idx_net, channel, first(seg[1]), last(seg[2]))
+                push!(net_wire(ar, idx_net), ws)
+                push!(channel_segments(ar, channel), ws)
+            end
+            count_path_aux_occupancy!(occupancy, ar, aux, path)
         end
-        ixns = [(path[i], path[i + 1]) for i = 1:(length(path) - 1)]
-        segs = [(ixns[i], ixns[i + 1]) for i = 1:(length(ixns) - 1)]
-        for (channel, seg) in zip(path[2:(end - 1)], segs)
-            ws = TrackWireSegment(idx_net, channel, first(seg[1]), last(seg[2]))
-            push!(net_wire(ar, idx_net), ws)
-            push!(channel_segments(ar, channel), ws)
+
+        # Route each net with congestion-aware costs
+        for idx_net in routable_nets
+            p0, p1 = ar.net_pins[idx_net]
+            update_cost_matrix!(cost_distmx, base_distmx, occupancy, capacity, history, pfac)
+            route_net_congestion!(ar, idx_net, p0, p1, aux, cost_distmx, occupancy)
         end
+
+        # Check convergence: no edge over capacity
+        max_overuse = 0
+        for (key, occ) in occupancy
+            cap = get(capacity, key, typemax(Int))
+            max_overuse = max(max_overuse, occ - cap)
+        end
+        if max_overuse <= 0
+            @info "Congestion routing converged in $iter iteration(s)"
+            return
+        end
+
+        @info "Iteration $iter: max overuse = $max_overuse"
+
+        # Update history for over-capacity edges
+        for (key, occ) in occupancy
+            cap = get(capacity, key, typemax(Int))
+            if occ > cap
+                history[key] = get(history, key, 1.0) + hfac
+            end
+        end
+        pfac *= pfac_mult
     end
+
+    @warn "Congestion routing did not converge after $max_iter iterations"
 end
 
 """
@@ -646,7 +842,7 @@ function assign_tracks_matching!(ar, channel)
                         push!(group, v)
                         merged_groups[v] = group
                         # Replace match with v as representative of merged group in L
-                        pop!(L, matching[v]) # match must have been in L
+                        matching[v] in L && pop!(L, matching[v]) # match must have been in L
                     end
                     v in R && pop!(R, v)
                 end
@@ -994,7 +1190,7 @@ end
 
 """
     autoroute!(ar::ChannelRouter, rule; net_indices=eachindex(ar.net_pins),
-        fixed_channel_paths::Dict{Int,Vector{Int}}=Dict())
+        fixed_channel_paths::Dict{Int,Vector{Int}}=Dict(), channel_kwargs...)
 
 Perform channel and track assigment, then make routes.
 
@@ -1002,15 +1198,20 @@ Routes only the nets in `net_indices`. If the net is already routed, it is reset
 for a net can be specified in `fixed_channel_paths` by the indices of the channels the route
 takes. For example, `fixed_channel_paths=Dict(1 => [2, 4, 1, 5])` will force net 1 to be
 routed from its source pin, through channels 2, 4, 1, 5 in order, then to its destination pin.
+
+Additional keyword arguments (e.g. `min_pitch`, `max_iter`, `pfac_init`, `pfac_mult`,
+`hfac`) are forwarded to [`assign_channels!`](@ref).
 """
 function autoroute!(
     ar::ChannelRouter,
     rule;
     net_indices=eachindex(ar.net_pins),
-    fixed_channel_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}()
+    fixed_channel_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}(),
+    channel_kwargs...
 )
     reset_nets!(ar, net_indices=net_indices)
-    assign_channels!(ar; net_indices=net_indices, fixed_paths=fixed_channel_paths)
+    assign_channels!(ar; net_indices=net_indices, fixed_paths=fixed_channel_paths,
+        channel_kwargs...)
     assign_tracks!(ar)
     return make_routes!(ar, rule; net_indices=net_indices)
 end
