@@ -680,7 +680,8 @@ function assign_tracks_matching!(ar, channel)
     # Assign merged groups to tracks according to VCG
     tracks = channel_tracks(ar, channel)
     # At the end of this process, segments are merged into layers in the VCG
-    # So the longest directed path gives a representative of each merged group
+    # The longest directed path gives a representative of each merged group where track height is max
+    # But VCG may be a partial order so use topological sort
     high_to_low = topological_sort_by_dfs(vcg) # If vcg was acyclic to begin with, it is still acyclic
     num_tracks = length(high_to_low)
     for v in 1:nv(vcg)
@@ -688,9 +689,12 @@ function assign_tracks_matching!(ar, channel)
             merged_groups[v] = [v]
         end
     end
+    assigned = Int[]
     for v in reverse(high_to_low)
         # Create a track with `v` and all others merged with it
+        v in assigned && continue
         push!(tracks, wiresegs_ascending[merged_groups[v]])
+        append!(assigned, merged_groups[v])
     end
 end
 
