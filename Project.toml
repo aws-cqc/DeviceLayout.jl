@@ -33,6 +33,7 @@ Preferences = "21216c6a-2e73-6563-6e65-726566657250"
 QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 SpatialIndexing = "d4ead438-fe20-5cc5-a293-4fd39a41b74c"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 ThreadSafeDicts = "4239201d-c60e-5e0a-9702-85d713665ba7"
@@ -91,6 +92,9 @@ Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
 YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
+
+[preferences.DeviceLayout]
+units = "PreferMicrons"
 
 [targets]
 test = ["Aqua", "Test", "TestItemRunner", "YAML"]
