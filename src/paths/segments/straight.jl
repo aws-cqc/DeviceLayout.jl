@@ -22,8 +22,21 @@ Straight(l::T, p0::Point{T}, α0::Real) where {T} = Straight{T}(l, p0, α0)
 convert(::Type{Straight{T}}, x::Straight) where {T} =
     Straight{T}(convert(T, x.l), convert(Point{T}, x.p0), x.α0)
 convert(::Type{Segment{T}}, x::Straight) where {T} = convert(Straight{T}, x)
-
 copy(s::Straight{T}) where {T} = Straight{T}(s.l, s.p0, s.α0)
+
+function Base.:(==)(a::Straight, b::Straight)
+    return a.l == b.l && a.p0 == b.p0 && (a.α0 % 360° == b.α0 % 360°)
+end
+
+function Base.hash(a::Straight, h::UInt)
+    um = unit(DeviceLayout.onemicron(a.l))
+    h = hash(Straight, h)
+    h = hash(1um, h) # Unitful and unitless segments are not equal
+    h = hash(ustrip(um, a.l), h)  # Workaround Unitful.jl issue #379
+    h = hash(ustrip(um, a.p0), h) # Same segment hash for different units
+    return hash(a.α0 % 360°, h)
+end
+
 pathlength(s::Straight) = s.l
 p0(s::Straight) = s.p0
 α0(s::Straight) = s.α0

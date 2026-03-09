@@ -32,6 +32,20 @@ convert(::Type{Turn{T}}, x::Turn) where {T} =
 convert(::Type{Segment{T}}, x::Turn) where {T} = convert(Turn{T}, x)
 copy(s::Turn{T}) where {T} = Turn{T}(s.α, s.r, s.p0, s.α0)
 
+function Base.:(==)(a::Turn, b::Turn)
+    return a.α == b.α && a.r == b.r && a.p0 == b.p0 && (a.α0 % 360° == b.α0 % 360°)
+end
+
+function Base.hash(a::Turn, h::UInt)
+    um = unit(DeviceLayout.onemicron(a.r))
+    h = hash(Turn, h)
+    h = hash(1um, h) # Unitful and unitless segments are not equal
+    h = hash(a.α, h)
+    h = hash(ustrip(um, a.r), h)  # Workaround Unitful.jl issue #379
+    h = hash(ustrip(um, a.p0), h) # Same segment hash for different units
+    return hash(a.α0 % 360°, h)
+end
+
 pathlength(s::Turn{T}) where {T} = convert(T, abs(s.r * s.α))
 p0(s::Turn) = s.p0
 α0(s::Turn) = s.α0

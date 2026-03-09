@@ -101,27 +101,29 @@ function Base.:(==)(b1::BSpline, b2::BSpline)
            b1.r == b2.r &&
            b1.p0 == b2.p0 &&
            b1.p1 == b2.p1 &&
-           b1.α0 == b2.α0 &&
-           b1.α1 == b2.α1
+           b1.α0 % 360° == b2.α0 % 360° &&
+           b1.α1 % 360° == b2.α1 % 360°
 end
 
 function Base.hash(b::BSpline, h::UInt)
+    um = unit(DeviceLayout.onemicron(b.p0.x))
     h = hash(BSpline, h)
-    h = hash(b.p, h)
-    h = hash(b.t0, h)
-    h = hash(b.t1, h)
+    h = hash(1um, h) # Unitful and unitless turns are not equal
+    h = hash(ustrip(um, b.p), h)
+    h = hash(ustrip(um, b.t0), h) # Workaround Unitful.jl issue #379
+    h = hash(ustrip(um, b.t1), h) # Same segment hash for different units
     # h = hash(b.r, h) # Hashes for AbstractInterpolation are different even when b1.r == b2.r
     # But b.r follows from everything else, including scaling which is captured in p0, p1
     # ... as long as _update_interpolation! has been called
     # So we hash the parts of r that can vary
     h = hash(b.r.ranges, h)
     h = hash(b.r.itp.it, h)
-    h = hash(b.r.itp.coefs, h)
+    h = hash(ustrip(um, b.r.itp.coefs), h)
     h = hash(b.r.itp.parentaxes, h)
-    h = hash(b.p0, h)
-    h = hash(b.p1, h)
-    h = hash(b.α0, h)
-    return hash(b.α1, h)
+    h = hash(ustrip(um, b.p0), h)
+    h = hash(ustrip(um, b.p1), h)
+    h = hash(b.α0 % 360°, h)
+    return hash(b.α1 % 360°, h)
 end
 
 """

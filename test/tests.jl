@@ -621,6 +621,25 @@ end
         turn!(pa, "lrrl", 25μm, Paths.Trace(10μm))
         @test Paths.p1(pa) == Point(100μm, 0μm)
         @test Paths.α1(pa) == 0
+
+        # Straight/Turn == and hash
+        pa = Path()
+        straight!(pa, 10μm, Paths.Trace(10μm))
+        straight!(pa, 10μm)
+        turn!(pa, 90°, 10μm)
+        turn!(pa, 90°, 10μm)
+        @test pa[1].seg != pa[2].seg
+        @test hash(pa[1].seg) != hash(pa[2].seg)
+        @test pa[3].seg != pa[4].seg
+        @test hash(pa[3].seg) != hash(pa[4].seg)
+        straight_um = convert(Paths.Straight{typeof(1.0μm)}, pa[1].seg)
+        turn_um = convert(Paths.Turn{typeof(1.0μm)}, pa[3].seg)
+        @test pa[1].seg == straight_um
+        @test hash(pa[1].seg) == hash(straight_um)
+        @test pa[3].seg == turn_um
+        @test hash(pa[3].seg) == hash(turn_um)
+        @test pa[1].seg != Paths.Straight(10.0)
+        @test hash(pa[1].seg) != hash(Paths.Straight(10.0))
     end
 
     @testset "> Path transformations" begin
