@@ -282,3 +282,97 @@
         end
     )
 end
+
+@testitem "Horseshoe landing pad rounding" setup = [CommonTestSetup] begin
+    using LinearAlgebra
+    using DeviceLayout.Curvilinear: edge_type_at_vertex
+
+    # Horseshoe-shaped landing pad: two concentric arcs (outer counterclockwise ~270°, inner clockwise ~289°)
+    # connected by straight gap segments with a trace extension.
+    # This tests large-sweep arcs where the two straight edges at each arc endpoint
+    # approach from nearly opposite directions — a geometry not covered by the
+    # rectangle-with-features test above.
+
+    R = 340.0μm        # outer radius
+    gap = 100.0μm      # gap between arcs
+    trace = 280.0μm    # trace width at opening
+    trace_height = 100.0μm  # trace extension length
+
+    total = trace + 2gap
+    θ = asin(total / (2R))
+
+    outer_start = Point(R * cos(θ), R * sin(θ))
+    outer_end = Point(R * cos(θ), -R * sin(θ))
+    x1 = Point(R * cos(θ) + trace_height, -R * sin(θ))
+    x2 = Point(x1.x, x1.y + gap)
+
+    r_inner = R - gap
+    ϕ = asin(-x2.y / r_inner)
+    inner_start = Point(r_inner * cos(ϕ), -r_inner * sin(ϕ))
+    inner_end = Point(r_inner * cos(ϕ), r_inner * sin(ϕ))
+    x3 = Point(x2.x, -x2.y)
+    x4 = Point(x1.x, -x1.y)
+
+    # Outer arc: counterclockwise from outer_start to outer_end
+    outer_α = 2π - 2θ
+    outer_α0 = atan(outer_start.y, outer_start.x) + π / 2
+    outer_arc = Paths.Turn(outer_α, R, p0=outer_start, α0=outer_α0)
+
+    # Inner arc: clockwise from inner_start to inner_end
+    inner_α = -(2π - 2ϕ)
+    inner_α0 = atan(inner_start.y, inner_start.x) - π / 2
+    inner_arc = Paths.Turn(inner_α, r_inner, p0=inner_start, α0=inner_α0)
+
+    # Verify arc endpoints
+    @test isapprox(Paths.p1(outer_arc), outer_end, atol=0.1nm)
+    @test isapprox(Paths.p1(inner_arc), inner_end, atol=0.1nm)
+
+    pts = [outer_start, outer_end, x1, x2, inner_start, inner_end, x3, x4]
+    horseshoe = CurvilinearPolygon(pts, [outer_arc, inner_arc], [1, 5])
+
+    # Edge type verification
+    @test edge_type_at_vertex(horseshoe, 1).outgoing == outer_arc  # LINE→ARC
+    @test edge_type_at_vertex(horseshoe, 2).incoming == outer_arc  # ARC→LINE
+    @test edge_type_at_vertex(horseshoe, 5).outgoing == inner_arc  # LINE→ARC
+    @test edge_type_at_vertex(horseshoe, 6).incoming == inner_arc  # ARC→LINE
+    for i in [3, 4, 7, 8]
+        @test edge_type_at_vertex(horseshoe, i).incoming == :straight
+        @test edge_type_at_vertex(horseshoe, i).outgoing == :straight
+    end
+
+    # Renders without rounding
+    @test_nowarn render!(
+        Cell("horseshoe_no_round", nm),
+        let
+            cs = CoordinateSystem("hnr", nm)
+            place!(cs, horseshoe, GDSMeta())
+            cs
+        end
+    )
+
+    # Apply rounding — all 8 corners should be rounded
+    fillet_r = 30.0μm
+    rounded = to_polygons(horseshoe, Rounded(fillet_r))
+    rounded_pts = points(rounded)
+    @test length(rounded_pts) > 8  # must have more vertices than the 8 original
+
+    # Verify rounding at ALL 8 original vertices: no output vertex should coincide
+    # with any original corner. If rounding worked, every corner is replaced by a
+    # fillet arc and the original sharp point is gone.
+    labels =
+        ["outer_start", "outer_end", "x1", "x2", "inner_start", "inner_end", "x3", "x4"]
+    original_pts = [outer_start, outer_end, x1, x2, inner_start, inner_end, x3, x4]
+    for (vi, orig_pt) in enumerate(original_pts)
+        dists = [norm(p - orig_pt) for p in rounded_pts]
+        d = minimum(dists)
+        d <= 0.1μm && @info "Vertex $vi ($(labels[vi])) NOT rounded: min_dist=$d"
+        @test d > 0.1μm
+    end
+
+    # Renders after rounding
+    @test_nowarn render!(Cell("horseshoe_rounded", nm), let
+        cs = CoordinateSystem("hr", nm)
+        place!(cs, rounded, GDSMeta())
+        cs
+    end)
+end

@@ -734,57 +734,78 @@ function rounded_corner_line_arc(
         turn_sign = -turn_sign
     end
 
-    ## Bisection
-    # The fillet center lies at distance D from arc center O and distance r from
-    # the line. D = R + r (external tangency) or |R - r| (internal tangency).
-    # We try both D values. For each, the center lies on a circle of radius D
-    # around O; bisect over angle θ to find where the distance to the line = r.
-    # Validate by checking that T_line falls between p_line and p_corner (not
-    # past the corner on the line extension — the wrong tangency overshoots).
-    n_line = Point(-v_line.y, v_line.x)  # left normal
+    ## Find the fillet center C_f
+    #
+    # The fillet is a small rounding arc of radius r that replaces the sharp
+    # corner where the straight edge meets the curved arc. C_f is the center
+    # of this rounding arc. Once found, the two tangent points follow:
+    #   T_line: where the fillet meets the straight edge (foot of perpendicular)
+    #   T_arc:  where the fillet meets the curved arc
+    #
+    # C_f must satisfy two distance constraints:
+    #   (1) |C_f to straight edge| = r   → fillet is tangent to the line
+    #   (2) |C_f to arc center O|  = D   → fillet is tangent to the arc
+    # where D = R + r (external tangency) or |R - r| (internal tangency).
+    #
+    # Constraint (1) means C_f lies on a line parallel to the straight edge,
+    # offset by r toward the polygon interior.
+    # Constraint (2) means C_f lies on a circle of radius D centered at O.
+    # The intersection of this parallel line with this circle gives C_f
+    # analytically (quadratic formula), avoiding iterative bisection.
+
+    # n_line: unit vector perpendicular to v_line, pointing left when facing
+    # along v_line. fillet_side: +1 or -1, selects which side of the straight
+    # edge the polygon interior (and thus the fillet center) is on.
+    n_line = Point(-v_line.y, v_line.x)
     fillet_side = sign(turn_sign)
-    θ_corner = atan((p_corner - O).y, (p_corner - O).x)
 
-    function bisect_for_D(D_val)
-        dist_minus_r(θ) =
-            let cf = O + Point(D_val * cos(θ), D_val * sin(θ))
-                ((cf - p_corner).x * n_line.x + (cf - p_corner).y * n_line.y) *
-                fillet_side - r
-            end
+    # p_offset: a reference point on the parallel line, obtained by shifting
+    # p_corner by r toward the interior. The fillet center C_f lies somewhere
+    # along this parallel line, but not necessarily at p_offset — it slides
+    # along the line direction v_line until constraint (2) is also satisfied.
+    p_offset = p_corner + (r * fillet_side) * n_line
 
-        θ_lo = θ_corner
-        θ_hi = θ_corner + fillet_side * turn_sign * π / 2
-        f_lo, f_hi = dist_minus_r(θ_lo), dist_minus_r(θ_hi)
-        if sign(f_lo) == sign(f_hi)
-            θ_hi = θ_corner - fillet_side * turn_sign * π / 2
-            f_hi = dist_minus_r(θ_hi)
-        end
-        sign(f_lo) == sign(f_hi) && return nothing
-
-        for _ = 1:64
-            θ_mid = (θ_lo + θ_hi) / 2
-            if sign(dist_minus_r(θ_mid)) == sign(f_lo)
-                θ_lo = θ_mid
-            else
-                θ_hi = θ_mid
-            end
-        end
-        cf = O + Point(D_val * cos((θ_lo + θ_hi) / 2), D_val * sin((θ_lo + θ_hi) / 2))
-        d_check =
-            ((cf - p_corner).x * n_line.x + (cf - p_corner).y * n_line.y) * fillet_side
-        return d_check > zero(d_check) - atol ? cf : nothing
+    function solve_for_D(D_val)
+        # Parameterize the parallel line: C_f(s) = p_offset + s * v_line.
+        # Substitute into |C_f - O|² = D² and expand (|v_line| = 1):
+        #   s² + 2bs + c = 0
+        #   b = w · v_line,  c = |w|² - D²,  w = p_offset - O
+        # The discriminant b² - c determines 0 or 2 solutions.
+        w = p_offset - O
+        b = w.x * v_line.x + w.y * v_line.y
+        c = w.x * w.x + w.y * w.y - D_val * D_val
+        disc = b * b - c
+        disc < zero(disc) && return Point{V}[]
+        sq = sqrt(disc)
+        s1 = -b + sq
+        s2 = -b - sq
+        return [p_offset + s * v_line for s in (s1, s2)]
     end
 
+    # Validate that C_f projects onto the actual line segment (between p_line
+    # and p_corner), not onto the extension beyond the corner. The wrong
+    # tangency type typically overshoots past the corner.
     function validate_t_line(cf)
-        isnothing(cf) && return false
         t = (cf - p_line).x * v_line.x + (cf - p_line).y * v_line.y
         return -atol < t < line_len + atol
     end
 
-    C_f_ext = bisect_for_D(R + r)
-    C_f_int = abs(R - r) > zero(R) ? bisect_for_D(abs(R - r)) : nothing
-    ext_ok = validate_t_line(C_f_ext)
-    int_ok = validate_t_line(C_f_int)
+    # Try both tangency types (external and internal). For each, solve the
+    # quadratic, discard candidates that project outside the line segment,
+    # and pick the one closest to the corner.
+    function find_best_center(D_val)
+        candidates = solve_for_D(D_val)
+        isempty(candidates) && return nothing
+        valid = filter(validate_t_line, candidates)
+        isempty(valid) && return nothing
+        _, idx = findmin(cf -> norm(cf - p_corner), valid)
+        return valid[idx]
+    end
+
+    C_f_ext = find_best_center(R + r)
+    C_f_int = abs(R - r) > zero(R) ? find_best_center(abs(R - r)) : nothing
+    ext_ok = !isnothing(C_f_ext)
+    int_ok = !isnothing(C_f_int)
 
     C_f = if ext_ok && int_ok
         norm(C_f_ext - p_corner) < norm(C_f_int - p_corner) ? C_f_ext : C_f_int
