@@ -59,6 +59,7 @@ struct SolidModelTarget <: Target
     ignored_layers::Vector{Symbol}
     retained_physical_groups::Vector{Tuple{String, Int}}
     rendering_options
+    preextrusion_ops
     postrenderer
 end
 
@@ -70,6 +71,7 @@ SolidModelTarget(
     substrate_layers=[],
     wave_port_layers=[],
     ignored_layers=[],
+    preextrusion_ops=[],
     postrender_ops=[],
     retained_physical_groups=[],
     kwargs...
@@ -83,6 +85,7 @@ SolidModelTarget(
     ignored_layers,
     retained_physical_groups,
     (; solidmodel=true, retained_physical_groups=retained_physical_groups, kwargs...),
+    preextrusion_ops,
     postrender_ops
 )
 
@@ -246,8 +249,12 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
     # Extrusions
     # Target specific actions
     # Intersections with rendered volume
-    postrender_ops =
-        vcat(extrusion_ops(target, sch), target.postrenderer, intersection_ops(target, sch))
+    postrender_ops = vcat(
+        target.preextrusion_ops,
+        extrusion_ops(target, sch),
+        target.postrenderer,
+        intersection_ops(target, sch)
+    )
     reopen_logfile(sch, :render_solidmodel)
     with_logger(sch.logger) do
         return render!(
