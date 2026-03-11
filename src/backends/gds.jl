@@ -78,6 +78,8 @@ Options controlling warnings and validation during GDS file writing.
     case-insensitive (GDS readers like KLayout treat cell names case-insensitively).
     The original `Cell` objects are not mutated; renamed names are only written to the file.
     New names may exceed the GDSII spec's 32 character limit.
+  - `normalize::Bool = false`: If `true`, save with a fixed timestamp and a canonical sorting
+    of elements to allow geometry validation by bitwise file comparison.
 
 Warnings for layer number and datatype are configurable because different tools may have
 different limits. In the GDSII specification, layer and datatype must be in the range 0 to 63,
@@ -112,6 +114,7 @@ opts = GDSWriterOptions(rename_duplicates=true)
     max_datatype::Int = 32767
     warn_invalid_names::Bool = true
     rename_duplicates::Bool = false
+    normalize::Bool = false
 end
 
 const GDSTokens = Dict{UInt16, String}(
@@ -367,15 +370,16 @@ function gdswrite(
 )
     name = even(get(name_map, cell, cell.name))
     options.warn_invalid_names && namecheck(name)
+    create = options.normalize ? unix2datetime(0) : cell.create
 
-    y   = UInt16(Dates.value(Dates.Year(cell.create)))
-    mo  = UInt16(Dates.value(Dates.Month(cell.create)))
-    d   = UInt16(Dates.value(Dates.Day(cell.create)))
-    h   = UInt16(Dates.value(Dates.Hour(cell.create)))
-    min = UInt16(Dates.value(Dates.Minute(cell.create)))
-    s   = UInt16(Dates.value(Dates.Second(cell.create)))
+    y   = UInt16(Dates.value(Dates.Year(create)))
+    mo  = UInt16(Dates.value(Dates.Month(create)))
+    d   = UInt16(Dates.value(Dates.Day(create)))
+    h   = UInt16(Dates.value(Dates.Hour(create)))
+    min = UInt16(Dates.value(Dates.Minute(create)))
+    s   = UInt16(Dates.value(Dates.Second(create)))
 
-    modify = now()
+    modify = options.normalize ? unix2datetime(0) : now()
     y1 = UInt16(Dates.value(Dates.Year(modify)))
     mo1 = UInt16(Dates.value(Dates.Month(modify)))
     d1 = UInt16(Dates.value(Dates.Day(modify)))
@@ -385,14 +389,29 @@ function gdswrite(
 
     bytes = gdswrite(io, BGNSTR, y, mo, d, h, min, s, y1, mo1, d1, h1, min1, s1)
     bytes += gdswrite(io, STRNAME, name)
-    for (x, m) in zip(cell.elements, cell.element_metadata)
-        bytes += gdswrite(io, x, m, dbs, options)
-    end
-    for x in cell.refs
-        bytes += gdswrite(io, x, dbs; name_map)
-    end
-    for (x, m) in zip(cell.texts, cell.text_metadata)
-        bytes += gdswrite(io, x, m, dbs, options)
+    if !options.normalize
+        for (x, m) in zip(cell.elements, cell.element_metadata)
+            bytes += gdswrite(io, x, m, dbs, options)
+        end
+        for x in cell.refs
+            bytes += gdswrite(io, x, dbs; name_map)
+        end
+        for (x, m) in zip(cell.texts, cell.text_metadata)
+            bytes += gdswrite(io, x, m, dbs, options)
+        end
+    else
+        # Normalize (order same as Cells.geometry_fingerprint except refs not flattened)
+        els_metas = [(Polygon(circshift(poly.p, 1 - findmin(poly.p))), meta) for (poly, meta) in zip(cell.elements, cell.element_metadata)]
+        for (x, m) in sort(els_metas; by=xm -> (gdslayer(last(xm)), datatype(last(xm)), points(first(xm))))
+            bytes += gdswrite(io, x, m, dbs, options)
+        end
+        for x in sort(cell.refs; by=x -> (x.structure.name, x.origin, x.xrefl, x.rotation, x.mag))
+            bytes += gdswrite(io, x, dbs; name_map)
+        end
+        texts_metas = zip(cell.texts, cell.text_metadata)
+        for (x, m) in sort(texts_metas; by=xm -> (gdslayer(last(xm)), datatype(last(xm)), first(x).text, first(x).origin))
+            bytes += gdswrite(io, x, m, dbs, options)
+        end
     end
     return bytes += gdswrite(io, ENDSTR)
 end
@@ -647,7 +666,8 @@ function save(
             max_layer=typemax(UInt16),
             max_datatype=typemax(UInt16),
             warn_invalid_names=false,
-            rename_duplicates=options.rename_duplicates
+            rename_duplicates=options.rename_duplicates,
+            normalize=options.normalize
         )
     end
     dbs = dbscale(cell0, cell...)
