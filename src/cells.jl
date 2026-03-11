@@ -311,4 +311,50 @@ end
 
 Base.isempty(c::Cell) = isempty(elements(c)) && isempty(refs(c)) && isempty(c.texts)
 
+"""
+    geometry_fingerprint(cell::Cell) -> String
+
+Deterministic SHA-256 of a Cell's geometry. Normalizes by flattening all
+references, sorting elements by (layer, datatype, vertices), and hashing
+the canonical byte representation.
+
+Coordinates are converted to Float64 in μm. Texts are included in the hash.
+"""
+function geometry_fingerprint(c::Cell)
+    flat = flatten(cell)
+    um = unit(DeviceLayout.onemicron(coordinatetype(c)))
+    # Polygons: (layer, datatype, [(x,y)...])
+    polys = map(zip(element_metadata(flat), elements(flat))) do (meta, poly)
+        coords = Tuple{Float64, Float64}[
+            (Float64(ustrip(um, p.x)), Float64(ustrip(um, p.y))) for p in points(poly)
+        ]
+        return (Int32(gdslayer(meta)), Int32(datatype(meta)), circshift(coords, 1 - findmin(coords)))
+    end
+    sort!(polys)
+
+    ctx = SHA256_CTX()
+
+    # Hash polygons
+    for (layer, dt, coords) in polys
+        update!(ctx, reinterpret(UInt8, [layer, dt]))
+        update!(ctx, reinterpret(UInt8, [Int32(length(coords))]))
+        for (x, y) in coords
+            update!(ctx, reinterpret(UInt8, [x, y]))
+        end
+    end
+
+    # Hash texts (labels/ports can change too), only worry about origin and string
+    texts_data = map(zip(flat.text_metadata, flat.texts)) do (m, t)
+        return (Int32(gdslayer(m)), Int32(datatype(m)), Float64(ustrip(um, t.origin)), t.text)
+    end
+    sort!(texts_data)
+    for (layer, dt, og, s) in texts_data
+        update!(ctx, reinterpret(UInt8, [layer, dt]))
+        update!(ctx, reinterpret(UInt8, og))
+        update!(ctx, Vector{UInt8}(s))
+    end
+
+    return bytes2hex(digest!(ctx))
+end
+
 end # module
