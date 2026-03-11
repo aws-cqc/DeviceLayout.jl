@@ -2100,6 +2100,10 @@ function gridpoints_in_polygon(
     fT = float(T)
     grid_x = convert.(fT, sort(grid_x))
     grid_y = convert.(fT, sort(grid_y))
+    nx = length(grid_x)
+
+    # Pre-strip units once for horizontal edge lookups (avoids per-edge allocation)
+    grid_x_stripped = ustrip.(grid_x)
 
     # Segment endpoints
     p0s = points.(poly)
@@ -2120,24 +2124,22 @@ function gridpoints_in_polygon(
     )
     edge_tree = IntervalTrees.IntervalMap{fT, Tuple{Point{T}, Point{T}}}(edge_iv)
 
+    # Difference array for winding number accumulation (extra element as sentinel)
+    delta = zeros(Int32, nx + 1)
     # For each grid y value, look at the edges containing that value
-    grid_count = zeros(Int32, length(grid_x))
     for (iy, y) in enumerate(grid_y)
         for i2 in intersect(edge_tree, (y, y))
             edge = i2.value
             # Count horizontal edges only if grid point lies on them
             if last(edge).y == first(edge).y
                 if first(edge).y == y
-                    in_poly[
-                        findall(
-                            in(
-                                ustrip(min(first(edge).x, last(edge).x)) ..
-                                ustrip(max(first(edge).x, last(edge).x))
-                            ),
-                            ustrip.(grid_x)
-                        ),
-                        iy
-                    ] .= true
+                    x_lo = ustrip(min(first(edge).x, last(edge).x))
+                    x_hi = ustrip(max(first(edge).x, last(edge).x))
+                    i_lo = searchsortedfirst(grid_x_stripped, x_lo)
+                    i_hi = searchsortedlast(grid_x_stripped, x_hi)
+                    for i in i_lo:i_hi
+                        in_poly[i, iy] = true
+                    end
                 end
                 continue
             end
@@ -2150,18 +2152,27 @@ function gridpoints_in_polygon(
                 first(edge).x +
                 (last(edge).x - first(edge).x) * (y - first(edge).y) /
                 (last(edge).y - first(edge).y)
-            ix = findfirst(grid_x .>= x) # The first index to the right of x
-            x_right_minidx = isnothing(ix) ? length(grid_x) + 1 : ix
+            x_right_minidx = searchsortedfirst(grid_x, x)
             # If the grid point lies on the edge, it's in the polygon
-            x_right_minidx <= length(grid_x) &&
+            x_right_minidx <= nx &&
                 x == grid_x[x_right_minidx] &&
                 (in_poly[x_right_minidx, iy] = true)
-            # Add edge count to all grid points to the left (sign depending on direction)
+            # Record edge crossing in difference array (O(1) instead of O(grid_x))
             s = sign(last(edge).y - first(edge).y)
-            @. grid_count[1:(x_right_minidx - 1)] = grid_count[1:(x_right_minidx - 1)] + s
+            delta[1] += s
+            if x_right_minidx <= nx
+                delta[x_right_minidx] -= s
+            end
         end
-        @. in_poly[:, iy] = (grid_count != 0) || in_poly[:, iy]
-        grid_count .= 0
+        # Prefix sum over delta to recover winding counts, then mark in_poly
+        acc = zero(Int32)
+        for ix in 1:nx
+            acc += delta[ix]
+            if acc != 0
+                in_poly[ix, iy] = true
+            end
+        end
+        delta .= 0
     end
 
     return in_poly
