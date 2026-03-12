@@ -383,6 +383,7 @@ import .Polygons:
     circle,
     circle_polygon,
     clip,
+    clip_tiled,
     cliptree,
     difference2d,
     difference2d_layerwise,

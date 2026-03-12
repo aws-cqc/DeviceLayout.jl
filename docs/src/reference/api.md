@@ -178,10 +178,15 @@
 ```@docs
     Polygons.ClippedPolygon
     difference2d
+    difference2d_layerwise
     intersect2d
+    intersect2d_layerwise
     union2d
+    union2d_layerwise
     xor2d
+    xor2d_layerwise
     clip
+    clip_tiled
     Polygons.StyleDict
 ```
 

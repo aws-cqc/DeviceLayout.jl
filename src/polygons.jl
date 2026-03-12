@@ -85,7 +85,8 @@ export circle,
     union2d,
     xor2d
 
-export difference2d_layerwise, intersect2d_layerwise, union2d_layerwise, xor2d_layerwise
+export difference2d_layerwise,
+    intersect2d_layerwise, union2d_layerwise, xor2d_layerwise, clip_tiled
 
 const USCALE = 1.0 * Unitful.fm
 const SCALE  = 10.0^9
