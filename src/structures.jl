@@ -211,6 +211,30 @@ function traversal(cs::GeometryStructure, trans=ScaledIsometry())
 end
 
 """
+    indexed_traversal(cs::GeometryStructure, trans=ScaledIsometry(), index=Int[])
+
+Return a vector of `(structure, transformation, index)` tuples for `cs` and all structures in its
+reference hierarchy. The transformation is the global transformation from the root to the
+structure.
+
+`index` is a `Vector{Int}` with the index in `refs` of each structure in the hierarchy:
+
+  - The top-level `cs` has index `Int[]`
+  - `structure(refs(cs)[i])` has index `[i]`
+  - `structure(refs(structure(refs(cs)[i]))[j])` has index `[i, j]`, and so on
+
+Note: The same structure may appear multiple times with different transformations if it is
+referenced multiple times.
+"""
+function indexed_traversal(cs::GeometryStructure, trans=ScaledIsometry(), index=Int[])
+    tv = [(cs, trans, index)]
+    for (i, ref) in enumerate(refs(cs))
+        tv = vcat(tv, indexed_traversal(structure(ref), trans ∘ transformation(ref), [index; i]))
+    end
+    return tv
+end
+
+"""
     function map_metadata!(geom::GeometryStructure, map_meta, [visited])
 
 For every element in `geom` with original meta `m`, set its metadata to `map_meta(m)`.

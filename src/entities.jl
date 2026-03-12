@@ -419,6 +419,10 @@ end
 An `RTree` of minimum bounding rectangles for `geoms`, with indices in `geoms` as values.
 
 See also [`findbox`](@ref).
+
+    mbr_spatial_index(geom::GeometryStructure)
+
+An `RTree` of MBRs for elements of `geom` and its references, with nested indices in the reference hierarchy as values.
 """
 function mbr_spatial_index(geoms)
     tree = SpatialIndexing.RTree{Float64, 2}(Int)
@@ -428,6 +432,19 @@ function mbr_spatial_index(geoms)
     end
     SpatialIndexing.load!(tree, enumerate(geoms), convertel=convertel)
     return tree
+end
+
+function mbr_spatial_index(geom::GeometryStructure)
+    tree = SpatialIndexing.RTree{Float64, 2}(Tuple{Vector{Int}, Int})
+    tv = DeviceLayout.indexed_traversal(geom)
+    idxs_elements = map(tv) do (cs, trans, ref_idx)
+        zip(zip(Iterators.repeated(ref_idx), eachindex(elements(cs))), trans.(elements(cs)))
+    end
+    function convertel(enum_ent)
+        idx, ent = enum_ent
+        return SpatialIndexing.SpatialElem(SpatialIndexing.mbr(ent), nothing, idx)
+    end
+    SpatialIndexing.load!(tree, Iterators.flatten(idxs_elements), convertel=convertel)
 end
 
 """
@@ -440,6 +457,10 @@ A spatial index created with [`mbr_spatial_index(geoms)`](@ref) can be supplied 
 
 By default, `findbox` will find only entities with bounds contained in `bounds(box)`. If `intersects` is `true`,
 it also includes entities with bounds intersecting `bounds(box)` (including those only touching edge-to-edge).
+
+    findbox(box, geom::GeometryStructure; intersects=false)
+
+Return nested `indices` for elements of `geom` and its references with minimum bounding rectangle contained in `bounds(box)`.
 """
 function findbox(box, geoms; intersects=false)
     tree = mbr_spatial_index(geoms)
