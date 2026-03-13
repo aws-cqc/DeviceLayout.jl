@@ -543,10 +543,12 @@ area(p::Polygon) = abs(signed_area(p))
 """
     is_sliver(p::Polygon{T}; atol=DeviceLayout.onenanometer(T))
 
-Return `true` if `area(p) / perimeter(p) < atol`, and `false` otherwise.
+Return `true` if `2 * area(p) / perimeter(p) < atol`, and `false` otherwise.
+
+In other words, if `p` has an "average width" less than `atol`, it is counted as a sliver.
 """
 function is_sliver(p::Polygon{T}; atol=DeviceLayout.onenanometer(T)) where {T}
-    return area(p) / perimeter(p) < atol
+    return 2 * area(p) / perimeter(p) < atol
 end
 
 """
