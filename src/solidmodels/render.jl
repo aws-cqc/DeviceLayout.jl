@@ -523,7 +523,7 @@ function rounded_corner_segment_line_arc(
     angle_start = atan(d_start.y, d_start.x)
     α0 = angle_start + sign(dα) * π / 2
 
-    fillet = Paths.Turn(uconvert(°, dα), r, start_pt, uconvert(°, α0))
+    fillet = Paths.Turn(uconvert(°, dα), r; p0=start_pt, α0=uconvert(°, α0))
 
     return (; fillet, T_line, T_arc=T_arc_pt)
 end
