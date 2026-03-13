@@ -20,7 +20,7 @@ Geometric Boolean operations on polygons are called "clipping" operations. For 2
     Because clipping converts entities into polygons, rounding should be performed *after* clipping, not before. Otherwise, rounded corners are discretized into many points in the clipping operation, which can make geometry operations expensive and lead to poor 3D meshes.
 
 !!! info
-    
+
     Boolean operations in 3D with `SolidModel` are handled by the Open CASCADE Technology kernel, which works directly with rich geometry types rendered from our native `CoordinateSystem`. If you need boolean operations involving curved geometry whose results can't be achieved by clipping-then-rounding, then your 2D geometry should defer the boolean operation until `SolidModel` postrendering so that the result will still be represented with curves.
 
 For many use cases, `union2d`, `difference2d`, `intersect2d`, and `xor2d` behave as expected and are easiest to use.
@@ -30,6 +30,66 @@ The results of clipping are represented using the `ClippedPolygon <: AbstractPol
 
 A related operation is [`offset`](@ref), which grows or shrinks the polygon by offsetting its edges a given distance.
 
+## Curvilinear polygons
+
+A [`CurvilinearPolygon`](@ref) is a polygon where some edges are replaced by circular arcs
+(stored as [`Paths.Turn`](@ref) segments). This preserves exact arc geometry for the
+`SolidModel` rendering path while still supporting discretization to a plain `Polygon` for
+`Cell` / GDS output.
+
+`CurvilinearPolygon`s arise naturally when rendering [`Path`](@ref) segments (e.g.,
+`SimpleTrace`, `CPW`) and can also be constructed directly.
+
+A [`CurvilinearRegion`](@ref) pairs a `CurvilinearPolygon` exterior with zero or more
+`CurvilinearPolygon` holes.
+
+See [API Reference: Curvilinear geometry](@ref api-curvilinear).
+
 ## Styles
 
 In addition to other generic [entity styles](./geometry.md#Entity-Styles) like `NoRender`, `AbstractPolygon`s can be paired with the `Rounded` style. `ClippedPolygon`s support `StyleDict`, which allows for different styles to be applied to different contours in its tree.
+
+### Rounding
+
+The [`Rounded`](@ref Polygons.Rounded) style applies fillet arcs to selected corners of a
+polygon. It handles two kinds of corners:
+
+  - **Straight-straight corners** (two straight edges meeting at a vertex) — available for
+    both `Polygon` and `CurvilinearPolygon`.
+  - **Line-arc corners** (a straight edge meeting a circular arc) — for
+    `CurvilinearPolygon` only.
+
+Arc-arc corners (two arcs meeting at a vertex) are not supported and are left as-is.
+
+Corner selection uses the `p0` keyword to target specific vertices by their coordinates.
+When `p0` is empty (the default), all eligible corners are rounded. The
+`inverse_selection` flag inverts the selection.
+
+#### Per-corner fillet radii (nested rounding)
+
+Different corners can be rounded with different radii by stacking `Rounded` styles:
+
+```julia
+poly = Rectangle(10mm, 6mm)
+r1_pts = [Point(0, 0)mm, Point(10, 6)mm]
+r2_pts = [Point(10, 0)mm, Point(0, 6)mm]
+
+inner  = Rounded(1mm; p0=r1_pts)(poly)
+result = Rounded(0.3mm; p0=r2_pts)(inner)
+to_polygons(result)  # all four corners rounded with two different radii
+```
+
+This works for both the Cell and SolidModel rendering paths. The inner `Rounded` produces
+a `CurvilinearPolygon` with exact fillet arcs, and the outer `Rounded` applies line-arc
+rounding at the transitions.
+
+#### Selecting line-arc corners
+
+[`line_arc_cornerindices`](@ref) identifies vertices where a straight edge meets a curve.
+This is useful for components that need to round only arc-to-straight transitions while leaving other corners sharp:
+
+```julia
+cp = some_curvilinear_polygon()
+la_pts = cp.p[line_arc_cornerindices(cp)]
+rounded = Rounded(r; p0=la_pts)(cp)  # only line-arc corners get filleted
+```

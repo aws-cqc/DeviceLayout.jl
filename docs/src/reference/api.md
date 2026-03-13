@@ -181,6 +181,15 @@
     Polygons.StyleDict
 ```
 
+#### [Curvilinear geometry](@id api-curvilinear)
+
+```@docs
+    CurvilinearPolygon
+    CurvilinearRegion
+    Curvilinear.edge_type_at_vertex
+    Curvilinear.line_arc_cornerindices
+```
+
 ### [Shapes](@id api-shapes)
 
 ```@docs
