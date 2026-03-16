@@ -192,6 +192,55 @@ function round_to_curvilinearpolygon(
     pol::GeometryEntity{T},
     radius::S;
     corner_indices=eachindex(points(pol)),
+    min_angle=1e-3,
+    relative::Bool=(T <: Length) && (S <: Real),
+    min_side_len=relative ? zero(T) : radius
+)::CurvilinearPolygon{T} where {T, S <: Coordinate}
+    # If radius is dimensional, non-relative rounding.
+    V = ((S <: Length && T <: Length) || (S <: Real && T <: Real)) ? promote_type(T, S) : T
+    # Tie break for Real, Real introduces a type instability for non-dimensional.
+    relative = ((T <: Length) && (S <: Real)) || (relative && T <: Real && S <: Real)
+
+    poly = points(pol)
+    len = length(poly)
+    new_points = Point{float(V)}[]
+    new_curves = Paths.Turn{float(V)}[]
+    new_curve_start_idx = Int[]
+
+    for i in eachindex(poly)
+        if !(i in corner_indices)
+            push!(new_points, poly[i])
+        else
+            p0 = poly[mod1(i - 1, len)] # handles the cyclic boundary condition
+            p1 = poly[i]
+            p2 = poly[mod1(i + 1, len)]
+            radius_dim = relative ? radius * min(norm(p0 - p1), norm(p1 - p2)) : radius
+            seg_or_p1 = rounded_corner_segment(
+                p0,
+                p1,
+                p2,
+                radius_dim,
+                min_side_len=min_side_len,
+                min_angle=min_angle
+            )
+            if seg_or_p1 isa Paths.Turn
+                push!(new_points, Paths.p0(seg_or_p1))
+                push!(new_curves, seg_or_p1)
+                push!(new_curve_start_idx, length(new_points))
+                push!(new_points, Paths.p1(seg_or_p1))
+            else
+                push!(new_points, seg_or_p1)
+            end
+        end
+    end
+
+    return CurvilinearPolygon(new_points, new_curves, new_curve_start_idx)
+end
+
+function round_to_curvilinearpolygon(
+    pol::CurvilinearPolygon{T},
+    radius::S;
+    corner_indices=eachindex(points(pol)),
     line_arc_corner_indices=nothing,
     min_angle=1e-3,
     relative::Bool=(T <: Length) && (S <: Real),
@@ -213,22 +262,15 @@ function round_to_curvilinearpolygon(
     trim_end_pts = Dict{Int, Point{float(V)}}()
 
     # Determine which line-arc corners to round
-    la_indices = if pol isa CurvilinearPolygon && !isnothing(line_arc_corner_indices)
+    la_indices = if !isnothing(line_arc_corner_indices)
         line_arc_corner_indices
-    elseif pol isa CurvilinearPolygon
-        line_arc_cornerindices(pol)
     else
-        Int[]
+        line_arc_cornerindices(pol)
     end
 
     for i in eachindex(poly)
-        # Detect line-arc corners (one straight edge, one arc)
-        is_line_arc = false
-        local edge
-        if pol isa CurvilinearPolygon
-            edge = edge_type_at_vertex(pol, i)
-            is_line_arc = i in la_indices
-        end
+        edge = edge_type_at_vertex(pol, i)
+        is_line_arc = i in la_indices
 
         if is_line_arc
             arc_is_outgoing = edge.outgoing != :straight
@@ -290,49 +332,42 @@ function round_to_curvilinearpolygon(
         end
     end
 
-    if pol isa CurvilinearPolygon
-        # Need to shift start indices for all old curves if new points were introduced
-        # behind them by the additional curves. Need to do this iteratively, in case the
-        # shifted point overtakes added in points.
-        old_curve_start_idx = deepcopy(pol.curve_start_idx)
-        for nci ∈ new_curve_start_idx
-            old_curve_start_idx[old_curve_start_idx .>= nci] .+= 1
-        end
+    # Need to shift start indices for all old curves if new points were introduced
+    # behind them by the additional curves. Need to do this iteratively, in case the
+    # shifted point overtakes added in points.
+    old_curve_start_idx = deepcopy(pol.curve_start_idx)
+    for nci ∈ new_curve_start_idx
+        old_curve_start_idx[old_curve_start_idx .>= nci] .+= 1
+    end
 
-        for (k, csi) in enumerate(old_curve_start_idx)
-            original = pol.curves[k]
-            has_start = haskey(trim_start_pts, k)
-            has_end = haskey(trim_end_pts, k)
-            if has_start || has_end
-                total_len = Paths.pathlength(original)
-                t_s =
-                    has_start ? Paths.pathlength_nearest(original, trim_start_pts[k]) :
-                    zero(total_len)
-                t_e =
-                    has_end ? Paths.pathlength_nearest(original, trim_end_pts[k]) :
-                    total_len
-                if t_e > t_s
-                    # Trimmed arc still has positive length
-                    p0_new = original(t_s)
-                    α0_new = Paths.direction(original, t_s)
-                    α_new = original.α * (t_e - t_s) / total_len
-                    push!(new_curves, Paths.Turn(α_new, original.r; p0=p0_new, α0=α0_new))
-                    push!(new_curve_start_idx, csi)
-                end
-                # t_e <= t_s means both fillets overlap; arc is dropped and
-                # fillets connect directly.
-            else
-                push!(new_curves, original)
+    for (k, csi) in enumerate(old_curve_start_idx)
+        original = pol.curves[k]
+        has_start = haskey(trim_start_pts, k)
+        has_end = haskey(trim_end_pts, k)
+        if has_start || has_end
+            total_len = Paths.pathlength(original)
+            t_s =
+                has_start ? Paths.pathlength_nearest(original, trim_start_pts[k]) :
+                zero(total_len)
+            t_e = has_end ? Paths.pathlength_nearest(original, trim_end_pts[k]) : total_len
+            if t_e > t_s
+                p0_new = original(t_s)
+                α0_new = Paths.direction(original, t_s)
+                α_new = original.α * (t_e - t_s) / total_len
+                push!(new_curves, Paths.Turn(α_new, original.r; p0=p0_new, α0=α0_new))
                 push!(new_curve_start_idx, csi)
             end
+        else
+            push!(new_curves, original)
+            push!(new_curve_start_idx, csi)
         end
+    end
 
-        # Sort curves by start index so to_polygons can iterate in vertex order
-        if length(new_curve_start_idx) > 1
-            perm = sortperm(new_curve_start_idx, by=abs)
-            new_curves = new_curves[perm]
-            new_curve_start_idx = new_curve_start_idx[perm]
-        end
+    # Sort curves by start index so to_polygons can iterate in vertex order
+    if length(new_curve_start_idx) > 1
+        perm = sortperm(new_curve_start_idx, by=abs)
+        new_curves = new_curves[perm]
+        new_curve_start_idx = new_curve_start_idx[perm]
     end
 
     return CurvilinearPolygon(new_points, new_curves, new_curve_start_idx)
@@ -546,9 +581,16 @@ function styled_loop(p::GeometryEntity, sty::Rounded; kwargs...)
         radius(sty),
         min_side_len=sty.min_side_len,
         corner_indices=cornerindices(p, sty),
-        line_arc_corner_indices=(
-            p isa CurvilinearPolygon ? line_arc_cornerindices(p, sty) : nothing
-        ),
+        min_angle=sty.min_angle
+    )
+end
+function styled_loop(p::CurvilinearPolygon, sty::Rounded; kwargs...)
+    return round_to_curvilinearpolygon(
+        p,
+        radius(sty),
+        min_side_len=sty.min_side_len,
+        corner_indices=cornerindices(p, sty),
+        line_arc_corner_indices=line_arc_cornerindices(p, sty),
         min_angle=sty.min_angle
     )
 end
