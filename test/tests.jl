@@ -204,7 +204,7 @@ end
         @test Polygons.signed_area(pfloat) == 0.5m^2
         @test Polygons.signed_area(Polygon(reverse(points(pfloat)))) == -0.5m^2
         @test Polygons.area(Polygon(reverse(points(pfloat)))) == 0.5m^2
-        @test !Polygons.is_sliver(pfloat)
+        @test (!).(is_sliver(pfloat))
     end
 end
 

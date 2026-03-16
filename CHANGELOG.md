@@ -24,7 +24,7 @@ There are also several minor features and fixes:
   - Added `rename_duplicates` option to `GDSWriterOptions`
   - Added experimental Text entity support to graphics backend
   - Added layerwise Booleans `union2d_layerwise`, `difference2d_layerwise`, `intersect2d_layerwise`, and `xor2d_layerwise`
-  - Added `Polygons.area` and `Polygons.is_sliver`
+  - Added `Polygons.area`
   - Added `findbox(box, geoms; intersects=false)` for finding all elements of `geoms` whose bounding box is contained in or intersects `bounds(box)`
   - Added `mbr_spatial_index` for creating an R-tree of minimum bounding rectangles
     associated with an array of geometries, which can be used directly with `findbox` to avoid re-indexing for multiple `findbox` calls

@@ -596,7 +596,7 @@ end
     # Make sure error is as small as tolerance says
     e_fine = to_polygons(e; atol=0.1nm)
     poly = to_polygons(difference2d(e_fine, e_default))[1]
-    @test Polygons.is_sliver(poly; atol=1nm) # on average better than 1nm (area/perimeter)
+    @test is_sliver(poly; atol=1nm) # on average better than 1nm (area/perimeter)
 
     # Last two points are not too close together
     poly = points(to_polygons(e, atol=60nm))

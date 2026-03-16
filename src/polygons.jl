@@ -541,17 +541,6 @@ Area of a non-self-intersecting polygon. Always positive.
 area(p::Polygon) = abs(signed_area(p))
 
 """
-    is_sliver(p::Polygon{T}; atol=DeviceLayout.onenanometer(T))
-
-Return `true` if `2 * area(p) / perimeter(p) < atol`, and `false` otherwise.
-
-In other words, if `p` has an "average width" less than `atol`, it is counted as a sliver.
-"""
-function is_sliver(p::Polygon{T}; atol=DeviceLayout.onenanometer(T)) where {T}
-    return 2 * area(p) / perimeter(p) < atol
-end
-
-"""
     circle_polygon(r, Δθ=10°)
 
 Return a circular `Polygon` centered about the origin with radius `r` and angular step `Δθ`.

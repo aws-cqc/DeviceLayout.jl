@@ -1005,11 +1005,8 @@ end
 
         @test Polygons.area(to_polygons(difference2d(r3, r4))[1]) ==
               Polygons.area(to_polygons(r3)) - Polygons.area(to_polygons(r4))
-        @test Polygons.is_sliver(
-            to_polygons(difference2d(r3, r3 + Point(5, 5)nm))[1];
-            atol=10nm
-        )
-        @test !Polygons.is_sliver(to_polygons(difference2d(r3, r3 + Point(5, 5)nm))[1]) # default 1nm
+        @test is_sliver(to_polygons(difference2d(r3, r3 + Point(5, 5)nm))[1]; atol=10nm)
+        @test (!).(is_sliver(to_polygons(difference2d(r3, r3 + Point(5, 5)nm))[1])) # default 1nm
     end
 end
 

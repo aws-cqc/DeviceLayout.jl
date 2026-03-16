@@ -164,7 +164,6 @@
     bounds
     circle_polygon
     gridpoints_in_polygon
-    Polygons.is_sliver
     offset
     perimeter
     points
