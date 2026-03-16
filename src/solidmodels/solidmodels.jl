@@ -66,7 +66,8 @@ import DeviceLayout:
     level,
     norm,
     render!,
-    uniquename
+    uniquename,
+    isapprox_angle
 import DeviceLayout.Paths: trace, gap, offset, extent, pathlength, bspline_approximation
 import DeviceLayout.Polygons:
     RelativeRounded,

@@ -463,7 +463,7 @@ function rounded_corner_segment_line_arc(
     end
 
     # Check if line and arc tangent are nearly parallel (already smooth)
-    if isapprox(rem2pi(α_line - α_arc, RoundNearest), 0, atol=min_angle)
+    if isapprox_angle(α_line, α_arc; atol=min_angle)
         return nothing
     end
 
