@@ -57,6 +57,6 @@ render!(cell, centered(Rectangle(100μm, 50μm)), GDSMeta(0))
 save("hello.gds", cell)
 ```
 
-See [Getting Started](https://aws-cqc.github.io/DeviceLayout.jl/stable/how_to/get_started.md) for a more complete introduction, including workflow setup. There's one especially important tip for users new to Julia: Julia has a just-in-time compiler, so the first execution of code takes longer due to compilation. Subsequent runs in the same session are much faster. To take advantage of this, don't run scripts from the command line each time. Instead, use functions defined in files, and `include` those files in a persistent REPL session.
+See [Getting Started](https://aws-cqc.github.io/DeviceLayout.jl/stable/how_to/get_started) for a more complete introduction, including workflow setup. There's one especially important tip for users new to Julia: Julia has a just-in-time compiler, so the first execution of code takes longer due to compilation. Subsequent runs in the same session are much faster. To take advantage of this, don't run scripts from the command line each time. Instead, use functions defined in files, and `include` those files in a persistent REPL session.
 
 To explore what you can build with DeviceLayout, see our examples with full walkthroughs in the documentation, including a [17-qubit quantum processor](https://aws-cqc.github.io/DeviceLayout.jl/stable/examples/qpu17/) and [simulation of a transmon and resonator with Palace](https://aws-cqc.github.io/DeviceLayout.jl/stable/examples/singletransmon/).
