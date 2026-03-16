@@ -192,6 +192,7 @@ function round_to_curvilinearpolygon(
     pol::GeometryEntity{T},
     radius::S;
     corner_indices=eachindex(points(pol)),
+    line_arc_corner_indices=nothing,
     min_angle=1e-3,
     relative::Bool=(T <: Length) && (S <: Real),
     min_side_len=relative ? zero(T) : radius
@@ -576,15 +577,6 @@ function styled_loop(p::GeometryEntity, sty::OptionalStyle; kwargs...)
     )
 end
 function styled_loop(p::GeometryEntity, sty::Rounded; kwargs...)
-    return round_to_curvilinearpolygon(
-        p,
-        radius(sty),
-        min_side_len=sty.min_side_len,
-        corner_indices=cornerindices(p, sty),
-        min_angle=sty.min_angle
-    )
-end
-function styled_loop(p::CurvilinearPolygon, sty::Rounded; kwargs...)
     return round_to_curvilinearpolygon(
         p,
         radius(sty),

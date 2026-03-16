@@ -489,6 +489,9 @@ end
 Return indices of vertices where one edge is straight and the other is a curve (line-arc
 corners). These are the vertices at curve boundaries that can be fillet-rounded.
 """
+line_arc_cornerindices(::AbstractPolygon) = Int[]
+line_arc_cornerindices(::AbstractPolygon, ::Polygons.Rounded) = Int[]
+
 function line_arc_cornerindices(p::CurvilinearPolygon)
     indices = Int[]
     n = length(p.p)
