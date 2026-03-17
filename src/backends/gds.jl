@@ -1,6 +1,5 @@
 module GDS
 using Dates
-import SHA: sha256
 using Unitful
 import Unitful: Length, °
 import DeviceLayout: pm, nm, μm, m
@@ -414,14 +413,14 @@ function gdswrite(
             bytes += gdswrite(io, x, m, dbs, options)
         end
         for x in
-            sort(cell.refs; by=x -> (x.structure.name, x.origin, x.xrefl, x.rot, x.mag))
+            sort(cell.refs; by=r -> (r.structure.name, r.origin, r.xrefl, r.rot, r.mag))
             bytes += gdswrite(io, x, dbs; name_map)
         end
         texts_metas = collect(zip(cell.texts, cell.text_metadata))
         for (x, m) in sort(
             texts_metas;
             by=xm ->
-                (gdslayer(last(xm)), datatype(last(xm)), first(x).text, first(x).origin)
+                (gdslayer(last(xm)), datatype(last(xm)), first(xm).text, first(xm).origin)
         )
             bytes += gdswrite(io, x, m, dbs, options)
         end
@@ -698,6 +697,7 @@ function save(
             traverse!(a, c)
         end
         if verbose
+            @info("Traversal tree:")
             display(a)
             print("\n")
         end
@@ -706,6 +706,7 @@ function save(
             sort!(ordered, by=x -> x.name)
         end
         if verbose
+            @info("Cells written in order:")
             display(ordered)
             print("\n")
         end
