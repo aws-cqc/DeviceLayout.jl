@@ -150,4 +150,4 @@ function _split(seg::Turn{T}, x) where {T}
     return s1, s2
 end
 
-direction(s::Turn, t) = s.α0 + s.α * (t / pathlength(s))
+direction(s::Turn, t) = iszero(s.α) ? s.α0 : s.α0 + s.α * (t / pathlength(s))

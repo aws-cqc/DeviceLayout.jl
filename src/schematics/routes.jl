@@ -8,12 +8,13 @@ Route(rule, hook0::PointHook, hook1::PointHook; kwargs...) =
     Route(rule, hook0.p, hook1.p, out_direction(hook0), hook1.in_direction; kwargs...)
 
 """
-    struct RouteComponent{T} <: AbstractComponent{T}
+    mutable struct RouteComponent{T} <: AbstractComponent{T}
         name::String
         r::Paths.Route{T}
         global_waypoints::Bool
-        sty::Paths.Style
+        sty::Vector{Paths.Style}
         meta::Meta
+        _path::Path{T}
 
 Wraps a `Route` in a `Component` type for use with schematics.
 

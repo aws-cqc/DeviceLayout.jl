@@ -498,6 +498,9 @@ end
             pts = (elements(c)[i]).p
             @test pts[1].y < pts[end].y
         end
+        # verify extent
+        @test height(bounds(c)) ≈ 2 * Paths.extent(pa[1].sty)
+        @test contains(summary(pa[1].sty), "2 strands")
     end
 
     @testset "Turn, Strands" begin

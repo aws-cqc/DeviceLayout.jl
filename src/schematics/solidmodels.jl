@@ -5,8 +5,10 @@
         levelwise_layers::Vector{Symbol}
         indexed_layers::Vector{Symbol}
         substrate_layers::Vector{Symbol}
+        wave_port_layers::Vector{Symbol}
         ignored_layers::Vector{Symbol}
-        rendering_options::NamedTuple
+        retained_physical_groups::Vector{Tuple{String, Int}}
+        rendering_options
         postrenderer
     end
 

@@ -326,7 +326,7 @@ function fuse!(
 end
 
 """
-    add_graph!(g0::SchematicGraph, g1::SchematicGraph; id_prefix=name(g1))
+    add_graph!(g0::SchematicGraph, g1::SchematicGraph; id_prefix=name(g1) * ".", kwargs...)
 
 Add the graph `g1` to `g0`, creating new nodes by prefixing IDs with `id_prefix`.
 
@@ -870,10 +870,8 @@ schematic's origin is the keyword argument `schematic_origin_globalcoords` in
 function position_dependent_replace!(
     sch::Schematic{S},
     node_index::Int,
-    replacement::Function,
-    args...;
-    schematic_origin_globalcoords=zero(Point{S}),
-    kwargs...
+    replacement::Function;
+    schematic_origin_globalcoords=zero(Point{S})
 ) where {S}
     node = nodes(sch.graph)[node_index]
     orig = origin(sch, node)
@@ -908,8 +906,8 @@ function position_dependent_replace!(
 end
 
 """
-    plan(g::SchematicGraph, hooks_fn=hooks; strict=:error, log_dir="build", log_level=Logging.Info)
-    plan(g::SchematicGraph, t::Target; strict=:error, log_dir="build", log_level=Logging.Info)
+    plan(g::SchematicGraph, hooks_fn=hooks; strict=:error, log_dir="build", log_level=Logging.Info, id_prefix="")
+    plan(g::SchematicGraph, t::Target; strict=:error, log_dir="build", log_level=Logging.Info, id_prefix="")
 
 Constructs a `Schematic` floorplan from `g` without rendering Components.
 

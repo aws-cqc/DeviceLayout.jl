@@ -112,16 +112,17 @@ end
 
 """
     CompoundRouteRule <: RouteRule
-    CompoundRouteRule(rules::Vector{RouteRule}, leg_length::Vector{Int}=ones(length(rules)))
+    CompoundRouteRule(rules::Vector{RouteRule}, leg_lengths::Vector{Int}=ones(Int, length(rules)))
 
 Specifies a sequence of rules for routing from one point to another, where `rules[i]` is used
-to route through the next `leg_length[i]` waypoints and/or endpoint.
+to route through the next `leg_lengths[i]` waypoints and/or endpoint.
 """
 struct CompoundRouteRule <: RouteRule
     rules::Vector{RouteRule}
     leg_lengths::Vector{Int}
 end
-CompoundRouteRule(rules::Vector{RouteRule}) = CompoundRouteRule(rules, ones(length(rules)))
+CompoundRouteRule(rules::Vector{RouteRule}) =
+    CompoundRouteRule(rules, ones(Int, length(rules)))
 
 """
     struct Route{T<:RouteRule, S<:Coordinate}
@@ -384,10 +385,9 @@ function reconcile!(
             isapprox_angle(nextdir_target, startdir - 90°)
         )
             # Check if double turn is possible
-            abs(perp) < rule.min_bend_radius ||
-                abs(par) < rule.min_bend_radius &&
-                    @error "Next point can't be reached with a pair of 45° turns" _group =
-                        :route
+            (abs(perp) < rule.min_bend_radius || abs(par) < rule.min_bend_radius) &&
+                @error "Next point can't be reached with a pair of 45° turns" _group =
+                    :route
             bend_r =
                 max(rule.min_bend_radius, min(abs(perp), abs(par), rule.max_bend_radius))
 
@@ -513,7 +513,7 @@ function route!(
     p1::Point,
     α1,
     crr::CompoundRouteRule,
-    sty=fill(Paths.nextstyle(path), length(rules));
+    sty=fill(Paths.nextstyle(path), length(crr.rules));
     waypoints=Point{S}[],
     waydirs=Vector{typeof(1.0°)}(undef, length(waypoints))
 ) where {S}

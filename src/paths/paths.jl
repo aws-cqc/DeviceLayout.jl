@@ -357,7 +357,7 @@ function pathlength_nearest(seg::Paths.Segment{T}, pt::Point) where {T}
 end
 
 """
-    mutable struct Path{T<:Coordinate} <: GeometryStructure{T}
+    mutable struct Path{T<:Coordinate} <: AbstractComponent{T}
 
 Type for abstracting an arbitrary styled path in the plane. Iterating returns
 [`Paths.Node`](@ref) objects.
@@ -1511,7 +1511,7 @@ function halo(sty::Union{TaperTrace, TaperCPW}, outer_delta, inner_delta=nothing
     end
     return _withlength!(
         Paths.TaperCPW(
-            2 * (extent(sty, zero(delta)) + inner_delta),
+            2 * (extent(sty, zero(outer_delta)) + inner_delta),
             outer_delta - inner_delta,
             2 * (extent(sty, sty.length) + inner_delta),
             outer_delta - inner_delta

@@ -52,7 +52,7 @@ const CellArray = ArrayReference{S, T} where {S, T <: AbstractCell}
 cell(r::CellRef) = r.structure
 
 """
-    mutable struct Cell{S<:Coordinate}
+    mutable struct Cell{S<:Coordinate} <: AbstractCell{S}
 
 A cell has a name and contains polygons and references to `CellArray` or
 `CellReference` objects. It also records the time of its own creation. As

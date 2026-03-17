@@ -61,7 +61,7 @@ struct SimpleStrands{T <: Coordinate} <: Strands{false}
     num::Int
 end
 copy(x::SimpleStrands) = SimpleStrands(x.offset, x.width, x.spacing, x.num)
-extent(s::SimpleStrands, t...) = s.offset + (s.num) * (s.width + (s.num - 1) * (s.spacing))
+extent(s::SimpleStrands, t...) = s.offset + (s.num) * (s.width) + (s.num - 1) * (s.spacing)
 offset(s::SimpleStrands, t...) = s.offset
 width(s::SimpleStrands, t...) = s.width
 spacing(s::SimpleStrands, t...) = s.spacing
@@ -112,7 +112,7 @@ Strands(offset, width, spacing, num::Int) = GeneralStrands(offset, width, spacin
 
 summary(::GeneralStrands) = "Strands with variable center offset, width, and spacing"
 summary(s::SimpleStrands) = string(
-    num,
+    s.num,
     " strands with center offset ",
     s.offset,
     ", width ",

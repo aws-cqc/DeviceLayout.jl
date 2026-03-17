@@ -640,6 +640,11 @@ end
         @test hash(pa[3].seg) == hash(turn_um)
         @test pa[1].seg != Paths.Straight(10.0)
         @test hash(pa[1].seg) != hash(Paths.Straight(10.0))
+
+        # Zero-length turn
+        pa = Path(α0=90°)
+        turn!(pa, 0°, 10μm, Paths.Trace(10μm))
+        @test Paths.direction(pa[1].seg, 0μm) == 90°
     end
 
     @testset "> Path transformations" begin

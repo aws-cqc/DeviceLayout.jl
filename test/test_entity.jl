@@ -145,5 +145,11 @@
         @test bounds(cs_halo2) ≈ Rectangle(Point(80μm, 80μm), Point(120μm, 920μm))
         @test bounds(cs_halo3) ≈ Rectangle(Point(80μm, 80μm), Point(120μm, 920μm))
         @test bounds(cs_halo4) ≈ Rectangle(Point(75μm, 85μm), Point(125μm, 915μm))
+
+        # TaperTrace halo
+        pth = Path()
+        straight!(pth, 10μm, Paths.TaperTrace(10μm, 20μm))
+        @test halo(pth[1].sty, 20μm, 10μm) ==
+              Paths.TaperCPW{typeof(1.0μm)}(30μm, 10μm, 40μm, 10μm, 10μm)
     end
 end
