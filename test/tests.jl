@@ -1046,6 +1046,29 @@ end
             joinpath(@__DIR__, "propattr.gds");
             verbose=true
         )
+
+        # Normalized GDS tests
+        cf = Cell{Float64}("main")
+        render!(cf, Rectangle(10, 10), GDSMeta())
+        render!(cf, Rectangle(20, 20), GDSMeta(1))
+        addref!(cf, Cell{Float64}("sub1"), Point(10, 10))
+        addref!(cf, Cell{Float64}("sub2"), Point(20, 20))
+        text!(cf, "test", Point(30, 30))
+        c = Cell("main", nm)
+        render!(c, Rectangle(10μm, 10μm), GDSMeta())
+        render!(c, Rectangle(20μm, 20μm), GDSMeta(1))
+        addref!(c, Cell("sub2", nm), Point(20, 20)μm)
+        addref!(c, Cell("sub1", nm), Point(10, 10)μm)
+        text!(c, "test", Point(30, 30)μm)
+        path1 = joinpath(tdir, "test1.gds")
+        path2 = joinpath(tdir, "test2.gds")
+        save(path1, cf, options=GDSWriterOptions(normalize=true))
+        save(path2, c, options=GDSWriterOptions(normalize=true))
+        @test success(`cmp --quiet $path1 $path2`)
+        @test Cells.geometry_fingerprint(cf) == Cells.geometry_fingerprint(c)
+        # negative test
+        render!(cf, Rectangle(10, 10), GDSMeta())
+        @test Cells.geometry_fingerprint(cf) != Cells.geometry_fingerprint(c)
     end
 
     @testset "DXF format" begin

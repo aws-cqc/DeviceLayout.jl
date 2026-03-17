@@ -4,6 +4,8 @@ using Dates
 using Unitful
 import Unitful: Length
 
+using SHA
+
 import ..Texts
 
 import DeviceLayout
@@ -20,11 +22,20 @@ import DeviceLayout:
     Transformations,
     UPREFERRED
 import DeviceLayout:
-    aref, sref, gdslayer, layer, nm, elements, element_metadata, refs, render!
+    aref, sref, gdslayer, layer, μm, nm, elements, element_metadata, refs, render!
 import DeviceLayout: flatten, flatten!, order!, traverse!, uniquename # to re-export
 
 export Cell, CellArray, CellReference
-export cell, dbscale, layers, gdslayers, flatten, flatten!, order!, traverse!, uniquename
+export cell,
+    dbscale,
+    layers,
+    gdslayers,
+    geometry_fingerprint,
+    flatten,
+    flatten!,
+    order!,
+    traverse!,
+    uniquename
 
 # Avoid circular definitions
 abstract type AbstractCell{S} <: AbstractCoordinateSystem{S} end
@@ -311,6 +322,9 @@ end
 
 Base.isempty(c::Cell) = isempty(elements(c)) && isempty(refs(c)) && isempty(c.texts)
 
+p2p(x::Length, dbs) = convert(Int, round(convert(Float64, x / dbs)))
+p2p(x::Real, dbs) = p2p(x * 1μm, dbs)
+
 """
     geometry_fingerprint(cell::Cell) -> String
 
@@ -321,14 +335,16 @@ the canonical byte representation.
 Coordinates are converted to Float64 in μm. Texts are included in the hash.
 """
 function geometry_fingerprint(c::Cell)
-    flat = flatten(cell)
-    um = unit(DeviceLayout.onemicron(coordinatetype(c)))
+    flat = flatten(c)
+    dbs = dbscale(c)
     # Polygons: (layer, datatype, [(x,y)...])
     polys = map(zip(element_metadata(flat), elements(flat))) do (meta, poly)
-        coords = Tuple{Float64, Float64}[
-            (Float64(ustrip(um, p.x)), Float64(ustrip(um, p.y))) for p in points(poly)
-        ]
-        return (Int32(gdslayer(meta)), Int32(datatype(meta)), circshift(coords, 1 - findmin(coords)))
+        coords = Tuple{Int, Int}[(p2p(p.x, dbs), p2p(p.y, dbs)) for p in poly.p]
+        return (
+            Int32(meta.layer),
+            Int32(meta.datatype),
+            circshift(coords, 1 - findmin(coords)[2])
+        )
     end
     sort!(polys)
 
@@ -345,7 +361,12 @@ function geometry_fingerprint(c::Cell)
 
     # Hash texts (labels/ports can change too), only worry about origin and string
     texts_data = map(zip(flat.text_metadata, flat.texts)) do (m, t)
-        return (Int32(gdslayer(m)), Int32(datatype(m)), Float64(ustrip(um, t.origin)), t.text)
+        return (
+            Int32(m.layer),
+            Int32(m.datatype),
+            [p2p(t.origin.x, dbs), p2p(t.origin.y, dbs)],
+            t.text
+        )
     end
     sort!(texts_data)
     for (layer, dt, og, s) in texts_data

@@ -223,6 +223,7 @@ See [Shapes](./shapes.md).
     GDSMeta
     GDSWriterOptions
     gdslayers(::Cell)
+    Cells.geometry_fingerprint
     render!(::Cell, ::Polygon, ::GDSMeta)
     render!(::Cell, ::DeviceLayout.GeometryStructure)
     DeviceLayout.save(::File{format"GDS"}, ::Cell, ::Cell...)

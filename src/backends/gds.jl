@@ -1,5 +1,6 @@
 module GDS
 using Dates
+import SHA: sha256
 using Unitful
 import Unitful: Length, °
 import DeviceLayout: pm, nm, μm, m
@@ -12,6 +13,7 @@ using ..Points
 import ..Rectangles: Rectangle
 import ..Polygons: Polygon
 using ..Cells
+import ..Cells: p2p
 using ..Texts
 
 import FileIO: File, @format_str, stream, magic, skipmagic
@@ -401,23 +403,31 @@ function gdswrite(
         end
     else
         # Normalize (order same as Cells.geometry_fingerprint except refs not flattened)
-        els_metas = [(Polygon(circshift(poly.p, 1 - findmin(poly.p))), meta) for (poly, meta) in zip(cell.elements, cell.element_metadata)]
-        for (x, m) in sort(els_metas; by=xm -> (gdslayer(last(xm)), datatype(last(xm)), points(first(xm))))
+        els_metas = [
+            (Polygon(circshift(poly.p, 1 - findmin(poly.p)[2])), meta) for
+            (poly, meta) in zip(cell.elements, cell.element_metadata)
+        ]
+        for (x, m) in sort(
+            els_metas;
+            by=xm -> (gdslayer(last(xm)), datatype(last(xm)), points(first(xm)))
+        )
             bytes += gdswrite(io, x, m, dbs, options)
         end
-        for x in sort(cell.refs; by=x -> (x.structure.name, x.origin, x.xrefl, x.rotation, x.mag))
+        for x in
+            sort(cell.refs; by=x -> (x.structure.name, x.origin, x.xrefl, x.rot, x.mag))
             bytes += gdswrite(io, x, dbs; name_map)
         end
-        texts_metas = zip(cell.texts, cell.text_metadata)
-        for (x, m) in sort(texts_metas; by=xm -> (gdslayer(last(xm)), datatype(last(xm)), first(x).text, first(x).origin))
+        texts_metas = collect(zip(cell.texts, cell.text_metadata))
+        for (x, m) in sort(
+            texts_metas;
+            by=xm ->
+                (gdslayer(last(xm)), datatype(last(xm)), first(x).text, first(x).origin)
+        )
             bytes += gdswrite(io, x, m, dbs, options)
         end
     end
     return bytes += gdswrite(io, ENDSTR)
 end
-
-p2p(x::Length, dbs) = convert(Int, round(convert(Float64, x / dbs)))
-p2p(x::Real, dbs) = p2p(x * 1μm, dbs)
 
 """
     gdswrite(io::IO, poly::Polygon{T}, meta, dbs, options::GDSWriterOptions=GDSWriterOptions()) where {T}
@@ -670,6 +680,10 @@ function save(
             normalize=options.normalize
         )
     end
+    if options.normalize
+        modify = unix2datetime(0)
+        acc = unix2datetime(0)
+    end
     dbs = dbscale(cell0, cell...)
     pad = mod(length(name), 2) == 1 ? "\0" : ""
     open(f, "w") do s
@@ -684,13 +698,14 @@ function save(
             traverse!(a, c)
         end
         if verbose
-            @info("Traversal tree:")
             display(a)
             print("\n")
         end
         ordered = order!(a)
+        if options.normalize
+            sort!(ordered, by=x -> x.name)
+        end
         if verbose
-            @info("Cells written in order:")
             display(ordered)
             print("\n")
         end
