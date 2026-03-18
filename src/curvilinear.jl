@@ -630,10 +630,7 @@ function to_polygons(
             append!(rounded_pts, result.points)
             # Record trim point for the curve starting at this vertex
             if !isnothing(result.T_arc)
-                curve_k = findfirst(
-                    k -> abs(ent.curve_start_idx[k]) == i,
-                    eachindex(ent.curve_start_idx)
-                )
+                curve_k = findfirst(csi -> abs(csi) == i, ent.curve_start_idx)
                 !isnothing(curve_k) && (trim_start[curve_k] = result.T_arc)
             end
         elseif i in la_corners &&
@@ -654,10 +651,7 @@ function to_polygons(
             # Record trim point for the curve ending at this vertex
             if !isnothing(result.T_arc)
                 prev_i = mod1(i - 1, n)
-                curve_k = findfirst(
-                    k -> abs(ent.curve_start_idx[k]) == prev_i,
-                    eachindex(ent.curve_start_idx)
-                )
+                curve_k = findfirst(csi -> abs(csi) == prev_i, ent.curve_start_idx)
                 !isnothing(curve_k) && (trim_end[curve_k] = result.T_arc)
             end
         else
@@ -674,8 +668,7 @@ function to_polygons(
         append!(final_points, rounded_pts[vertex_ranges[i]])
 
         # If there's a curve starting at vertex i, discretize it (possibly trimmed)
-        curve_k =
-            findfirst(k -> abs(ent.curve_start_idx[k]) == i, eachindex(ent.curve_start_idx))
+        curve_k = findfirst(csi -> abs(csi) == i, ent.curve_start_idx)
         if !isnothing(curve_k)
             c = ent.curves[curve_k]
             csi = ent.curve_start_idx[curve_k]
