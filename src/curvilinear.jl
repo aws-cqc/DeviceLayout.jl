@@ -699,22 +699,15 @@ function to_polygons(
             # the arc is dropped and the fillets connect directly.
             if t_end > t_start
                 npts = max(2, Int(ceil(181 * (t_end - t_start) / arc_len)))
-                pp = c.(range(t_start, t_end, npts))
                 # Remove endpoints (already present as fillet tangent points or vertex points)
-                if csi < 0
-                    popfirst!(pp)
-                    pop!(pp)
-                    reverse!(pp)
-                else
-                    popfirst!(pp)
-                    pop!(pp)
-                end
+                inner = range(t_start, t_end, npts)[(begin + 1):(end - 1)]
+                pp = c.(csi < 0 ? reverse(inner) : inner)
                 append!(final_points, pp)
             end
         end
     end
 
-    return Polygon(final_points...)
+    return Polygon(final_points)
 end
 
 """
