@@ -17,7 +17,8 @@ import DeviceLayout:
     ScaledIsometry,
     Transformation,
     Translation
-import DeviceLayout: to_polygons, points, rotation, origin, mag, xrefl, transform, perimeter
+import DeviceLayout:
+    to_polygons, points, rotation, origin, mag, xrefl, transform, perimeter, isapprox_angle
 using DeviceLayout.Paths
 import DeviceLayout.Polygons: cornerindices
 
@@ -768,7 +769,7 @@ function rounded_corner_line_arc(
     end
 
     # Check if line and arc tangent are nearly parallel (already smooth)
-    if isapprox(rem2pi(α_line - α_arc, RoundNearest), 0, atol=min_angle)
+    if isapprox_angle(α_line, α_arc; atol=min_angle)
         return (; points=[p_corner], T_arc=nothing)
     end
 
