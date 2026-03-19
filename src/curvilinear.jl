@@ -583,8 +583,8 @@ function to_polygons(
     n = length(poly)
 
     # Get corner indices for both straight-straight and line-arc corners
-    straight_corners = cornerindices(ent, sty)
-    la_corners = line_arc_cornerindices(ent, sty)
+    straight_corners = Set(cornerindices(ent, sty))
+    la_corners = Set(line_arc_cornerindices(ent, sty))
 
     # Precompute vertex for curve index lookup
     vertex_to_curve = Dict(abs(csi) => k for (k, csi) in enumerate(ent.curve_start_idx))
@@ -757,7 +757,7 @@ end
     )
 
 Compute a fillet arc at the corner where a straight edge meets a circular arc,
-using bisection to find the fillet center.
+using an analytic line-circle intersection to find the fillet center.
 
   - `p_line`: the far endpoint of the straight edge (not the corner)
   - `p_corner`: the vertex where the straight edge meets the arc
