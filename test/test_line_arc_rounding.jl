@@ -453,7 +453,7 @@
     la = line_arc_cornerindices(simple_cp, inv_sty)
     @test isempty(la)
 
-    # The inverse: selecting WITH those p0 points should select the line-arc corners
+    # The inverse: selecting with those p0 points should select the line-arc corners
     fwd_sty = Rounded(0.5μm; p0=la_pts)
     la_fwd = line_arc_cornerindices(simple_cp, fwd_sty)
     @test sort(la_fwd) == sort(line_arc_cornerindices(simple_cp))
@@ -477,29 +477,48 @@
     )
     @test neg_cp.curve_start_idx[1] < 0
 
-    # Should render without error
+    # Plain rendering must work (catches invalid vertex/curve mismatch)
+    neg_plain = to_polygons(neg_cp)
+    @test length(points(neg_plain)) > 5
+
+    # Rounded rendering
     neg_rounded = to_polygons(neg_cp, Rounded(0.3μm))
     @test length(points(neg_rounded)) > 5
 
-    # G1 continuity check on negative curve_start_idx result.
-    # Line-arc corners with negative curve_start_idx may not be fully rounded,
-    # so we check that most vertices satisfy G1 — only the line-arc corners at
-    # the negative-index arc endpoints may remain sharp.
-    let
-        dθ_max_neg = 2 * sqrt(2 * ustrip(nm, 1.0nm) / ustrip(nm, 0.3μm))
-        neg_rounded_pts = points(neg_rounded)
-        n_neg = length(neg_rounded_pts)
-        n_smooth = 0
-        for i in eachindex(neg_rounded_pts)
-            e1 = neg_rounded_pts[i] - neg_rounded_pts[mod1(i - 1, n_neg)]
-            e2 = neg_rounded_pts[mod1(i + 1, n_neg)] - neg_rounded_pts[i]
-            if norm(e1) > 0.01nm && norm(e2) > 0.01nm
-                cos_a =
-                    clamp((e1.x * e2.x + e1.y * e2.y) / (norm(e1) * norm(e2)), -1.0, 1.0)
-                acos(cos_a) < 1.1 * dθ_max_neg && (n_smooth += 1)
-            end
-        end
-        @test n_smooth / n_neg > 0.9
+    # Strict G1 continuity check on ALL vertices
+    dθ_max_neg = 2 * sqrt(2 * ustrip(nm, 1.0nm) / ustrip(nm, 0.3μm))
+    check_g1_continuity(points(neg_rounded), dθ_max_neg)
+
+    # Containment: rounded polygon must stay within the bounding box of the plain polygon
+    plain_pts = points(neg_plain)
+    rounded_pts = points(neg_rounded)
+    plain_xs = [p.x for p in plain_pts]
+    plain_ys = [p.y for p in plain_pts]
+    bbox_margin = 0.01μm
+    for p in rounded_pts
+        @test p.x >= minimum(plain_xs) - bbox_margin
+        @test p.x <= maximum(plain_xs) + bbox_margin
+        @test p.y >= minimum(plain_ys) - bbox_margin
+        @test p.y <= maximum(plain_ys) + bbox_margin
+    end
+
+    # Equivalence with positive-index version
+    pos_cp = CurvilinearPolygon(
+        [
+            Point(0.0μm, 0.0μm),
+            Point(4.0μm, 0.0μm),
+            Point(4.0μm, 2.0μm),
+            Point(2.0μm, 4.0μm),
+            Point(0.0μm, 2.0μm)
+        ],
+        [reverse(neg_arc)],
+        [3]
+    )
+    pos_rounded = to_polygons(pos_cp, Rounded(0.3μm))
+    pos_pts = points(pos_rounded)
+    @test length(rounded_pts) == length(pos_pts)
+    for i in eachindex(rounded_pts)
+        @test isapprox(rounded_pts[i], pos_pts[i]; atol=1.0nm)
     end
 
     # Relative rounding with line-arc corners (SolidModel path)
