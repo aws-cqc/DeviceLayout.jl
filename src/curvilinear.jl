@@ -586,6 +586,9 @@ function to_polygons(
     straight_corners = cornerindices(ent, sty)
     la_corners = line_arc_cornerindices(ent, sty)
 
+    # Precompute vertex for curve index lookup
+    vertex_to_curve = Dict(abs(csi) => k for (k, csi) in enumerate(ent.curve_start_idx))
+
     # Round corners, tracking which original vertex maps to which output range.
     # Also track T_arc for each line-arc corner so we can trim the curves.
     rounded_pts = Point{V}[]
@@ -598,7 +601,6 @@ function to_polygons(
     for i in eachindex(poly)
         start_idx = length(rounded_pts) + 1
         edges = edge_type_at_vertex(ent, i)
-        is_line_arc = (edges.incoming == :straight) != (edges.outgoing == :straight)
 
         if i in straight_corners &&
            edges.incoming == :straight &&
@@ -633,7 +635,7 @@ function to_polygons(
             append!(rounded_pts, result.points)
             # Record trim point for the curve starting at this vertex
             if !isnothing(result.T_arc)
-                curve_k = findfirst(csi -> abs(csi) == i, ent.curve_start_idx)
+                curve_k = get(vertex_to_curve, i, nothing)
                 !isnothing(curve_k) && (trim_start[curve_k] = result.T_arc)
             end
         elseif i in la_corners &&
@@ -654,7 +656,7 @@ function to_polygons(
             # Record trim point for the curve ending at this vertex
             if !isnothing(result.T_arc)
                 prev_i = mod1(i - 1, n)
-                curve_k = findfirst(csi -> abs(csi) == prev_i, ent.curve_start_idx)
+                curve_k = get(vertex_to_curve, prev_i, nothing)
                 !isnothing(curve_k) && (trim_end[curve_k] = result.T_arc)
             end
         else
@@ -671,7 +673,7 @@ function to_polygons(
         append!(final_points, rounded_pts[vertex_ranges[i]])
 
         # If there's a curve starting at vertex i, discretize it (possibly trimmed)
-        curve_k = findfirst(csi -> abs(csi) == i, ent.curve_start_idx)
+        curve_k = get(vertex_to_curve, i, nothing)
         if !isnothing(curve_k)
             c = ent.curves[curve_k]
             csi = ent.curve_start_idx[curve_k]
@@ -683,8 +685,6 @@ function to_polygons(
             # low t value. Swap them so t_start < t_end for correct discretization.
             t_start = zero(S)
             t_end = arc_len
-            ts_key = csi < 0 ? :trim_end : :trim_start
-            te_key = csi < 0 ? :trim_start : :trim_end
             ts_dict = csi < 0 ? trim_end : trim_start
             te_dict = csi < 0 ? trim_start : trim_end
             if haskey(ts_dict, curve_k)
@@ -708,6 +708,44 @@ function to_polygons(
     end
 
     return Polygon(final_points)
+end
+
+# Intersect a parallel line (p_offset + s * v_line) with a circle of radius D centered at O.
+# Returns up to two candidate fillet-center points, or an empty vector if no intersection.
+function _solve_line_circle_intersection(D_val, p_offset::Point{V}, v_line, O) where {V}
+    w = p_offset - O
+    b = w.x * v_line.x + w.y * v_line.y
+    c = w.x * w.x + w.y * w.y - D_val * D_val
+    disc = b * b - c
+    disc < zero(disc) && return Point{V}[]
+    sq = sqrt(disc)
+    s1 = -b + sq
+    s2 = -b - sq
+    return [p_offset + s * v_line for s in (s1, s2)]
+end
+
+# Find the best fillet center for a given tangency distance D_val.
+# Solves the line-circle intersection, filters to candidates that project onto the
+# line segment (between p_line and p_corner), and returns the one closest to p_corner.
+function _find_fillet_center(
+    D_val,
+    p_offset::Point{V},
+    v_line,
+    O,
+    p_line,
+    p_corner,
+    atol,
+    line_len
+) where {V}
+    candidates = _solve_line_circle_intersection(D_val, p_offset, v_line, O)
+    isempty(candidates) && return nothing
+    valid = filter(candidates) do cf
+        t = (cf - p_line).x * v_line.x + (cf - p_line).y * v_line.y
+        return -atol < t < line_len + atol
+    end
+    isempty(valid) && return nothing
+    _, idx = findmin(cf -> norm(cf - p_corner), valid)
+    return valid[idx]
 end
 
 """
@@ -825,45 +863,20 @@ function rounded_corner_line_arc(
     # along the line direction v_line until constraint (2) is also satisfied.
     p_offset = p_corner + (r * fillet_side) * n_line
 
-    function solve_for_D(D_val)
-        # Parameterize the parallel line: C_f(s) = p_offset + s * v_line.
-        # Substitute into |C_f - O|² = D² and expand (|v_line| = 1):
-        #   s² + 2bs + c = 0
-        #   b = w · v_line,  c = |w|² - D²,  w = p_offset - O
-        # The discriminant b² - c determines 0 or 2 solutions.
-        w = p_offset - O
-        b = w.x * v_line.x + w.y * v_line.y
-        c = w.x * w.x + w.y * w.y - D_val * D_val
-        disc = b * b - c
-        disc < zero(disc) && return Point{V}[]
-        sq = sqrt(disc)
-        s1 = -b + sq
-        s2 = -b - sq
-        return [p_offset + s * v_line for s in (s1, s2)]
-    end
-
-    # Validate that C_f projects onto the actual line segment (between p_line
-    # and p_corner), not onto the extension beyond the corner. The wrong
-    # tangency type typically overshoots past the corner.
-    function validate_t_line(cf)
-        t = (cf - p_line).x * v_line.x + (cf - p_line).y * v_line.y
-        return -atol < t < line_len + atol
-    end
-
-    # Try both tangency types (external and internal). For each, solve the
-    # quadratic, discard candidates that project outside the line segment,
-    # and pick the one closest to the corner.
-    function find_best_center(D_val)
-        candidates = solve_for_D(D_val)
-        isempty(candidates) && return nothing
-        valid = filter(validate_t_line, candidates)
-        isempty(valid) && return nothing
-        _, idx = findmin(cf -> norm(cf - p_corner), valid)
-        return valid[idx]
-    end
-
-    C_f_ext = find_best_center(R + r)
-    C_f_int = abs(R - r) > zero(R) ? find_best_center(abs(R - r)) : nothing
+    C_f_ext =
+        _find_fillet_center(R + r, p_offset, v_line, O, p_line, p_corner, atol, line_len)
+    C_f_int =
+        abs(R - r) > zero(R) ?
+        _find_fillet_center(
+            abs(R - r),
+            p_offset,
+            v_line,
+            O,
+            p_line,
+            p_corner,
+            atol,
+            line_len
+        ) : nothing
     ext_ok = !isnothing(C_f_ext)
     int_ok = !isnothing(C_f_int)
 
