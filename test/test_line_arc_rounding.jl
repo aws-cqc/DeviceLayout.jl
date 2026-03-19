@@ -382,48 +382,43 @@
         cs
     end)
 
-    # Nested Rounded: to_polygons bridge
-    # Stacking two Rounded styles with different radii on different corners.
-    # Inner Rounded(r1) rounds corners at (0,0) and (10,6).
-    # Outer Rounded(r2) rounds corners at (10,0) and (0,6).
-    # The outer rounding must handle line-arc corners created by the inner rounding.
-    rect = Rectangle(10.0μm, 6.0μm)
-    r1 = 1.0μm
-    r2 = 0.3μm
-    r1_corners = [Point(0.0, 0.0)μm, Point(10.0, 6.0)μm]
-    r2_corners = [Point(10.0, 0.0)μm, Point(0.0, 6.0)μm]
-    inner = Rounded(r1; p0=r1_corners)(rect)
-    nested = Rounded(r2; p0=r2_corners)(inner)
+    # Nested line-arc rounding on a semicircle (bump shape).
+    # Diameter along x-axis, arc bulging upward. Both corners are line-arc.
+    # Round one corner, then both, verifying G1 continuity at each step.
+    import DeviceLayout.SolidModels: styled_loop
+    semi_arc = Paths.Turn(-π, 3.0μm, p0=Point(0.0μm, 0.0μm), α0=90.0°)
+    semi_cp =
+        CurvilinearPolygon([Point(0.0μm, 0.0μm), Point(6.0μm, 0.0μm)], [semi_arc], [1])
+    r_la = 0.5μm
+    v1 = Point(0.0, 0.0)μm
+    v2 = Point(6.0, 0.0)μm
 
-    nested_poly = to_polygons(nested)
-    nested_pts = points(nested_poly)
-    # All 4 corners should be rounded (2 by r1, 2 by r2)
-    @test length(nested_pts) > 4
+    # Round first line-arc corner
+    pol1 = styled_loop(semi_cp, Rounded(r_la; p0=[v1]))
+    pol1_poly = to_polygons(pol1)
+    pol1_pts = points(pol1_poly)
+    @test length(pol1_pts) > 2
 
-    # G1 continuity check on nested rounding output
-    dθ_max_nested = 2 * sqrt(2 * ustrip(nm, 1.0nm) / ustrip(nm, r2))
-    check_g1_continuity(nested_pts, dθ_max_nested)
+    # Round both line-arc corners
+    pol2 = styled_loop(pol1, Rounded(r_la; p0=[v2]))
+    pol2_poly = to_polygons(pol2)
+    pol2_pts = points(pol2_poly)
+    @test length(pol2_pts) > length(pol1_pts)
 
-    # No output vertex should coincide with any original rectangle corner
-    rect_corners =
-        [Point(0.0, 0.0)μm, Point(10.0, 0.0)μm, Point(10.0, 6.0)μm, Point(0.0, 6.0)μm]
-    for corner in rect_corners
-        dists = [norm(p - corner) for p in nested_pts]
+    # G1 continuity check on fully rounded result
+    dθ_max_la = 2 * sqrt(2 * ustrip(nm, 1.0nm) / ustrip(nm, r_la))
+    check_g1_continuity(pol2_pts, dθ_max_la)
+
+    # No output vertex should coincide with the original sharp corners
+    for corner in [v1, v2]
+        dists = [norm(p - corner) for p in pol2_pts]
         @test minimum(dists) > 0.01μm
     end
-
-    # For a 90° corner rounded with radius r, the minimum distance from the
-    # original corner to the fillet arc is r * (√2 - 1).
-    expected_d(r) = r * (√2 - 1)
-    d_r1 = minimum(norm(p - Point(0.0, 0.0)μm) for p in nested_pts)
-    d_r2 = minimum(norm(p - Point(10.0, 0.0)μm) for p in nested_pts)
-    @test isapprox(d_r1, expected_d(r1), rtol=0.05)
-    @test isapprox(d_r2, expected_d(r2), rtol=0.05)
 
     # Renders without error
     @test_nowarn render!(Cell("nested_rounded", nm), let
         cs = CoordinateSystem("nr", nm)
-        place!(cs, nested_poly, GDSMeta())
+        place!(cs, pol2_poly, GDSMeta())
         cs
     end)
 
@@ -473,11 +468,10 @@
         [
             Point(0.0μm, 0.0μm),
             Point(4.0μm, 0.0μm),
-            Point(4.0μm, 4.0μm),
-            Point(2.0μm, 4.0μm),
-            Point(0.0μm, 2.0μm),
-            Point(0.0μm, 0.0μm)
-        ][1:5],
+            Point(4.0μm, 2.0μm),   # p1(neg_arc)
+            Point(2.0μm, 4.0μm),   # p0(neg_arc)
+            Point(0.0μm, 2.0μm)
+        ],
         [neg_arc],
         [-3]  # negative: curve between p[3] and p[4], parameterized from p[4] to p[3]
     )

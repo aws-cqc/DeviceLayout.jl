@@ -544,13 +544,16 @@ function edge_type_at_vertex(p::CurvilinearPolygon, i::Int)
 
     incoming = :straight
     outgoing = :straight
-    # k = index into curves array, csi = vertex index where curve k starts
+    # k = index into curves array, csi = vertex index where curve k starts.
+    # Negative csi means the curve is parameterized in reverse; use reverse(curve)
+    # so p0/p1 match the vertex order expected by downstream rounding code.
     for (k, csi) in enumerate(p.curve_start_idx)
+        curve = csi < 0 ? reverse(p.curves[k]) : p.curves[k]
         if abs(csi) == prev_i
-            incoming = p.curves[k]
+            incoming = curve
         end
         if abs(csi) == i
-            outgoing = p.curves[k]
+            outgoing = curve
         end
     end
     return (; incoming=incoming, outgoing=outgoing)
@@ -674,18 +677,21 @@ function to_polygons(
             csi = ent.curve_start_idx[curve_k]
             arc_len = pathlength(c)
 
-            # Determine trim parameters: find t values for trim points on the arc
+            # Determine trim parameters: find t values for trim points on the arc.
+            # For negative csi, the curve is parameterized in reverse, so trim_start
+            # (at the forward-start vertex) maps to a high t value and trim_end to a
+            # low t value. Swap them so t_start < t_end for correct discretization.
             t_start = zero(S)
             t_end = arc_len
-            if haskey(trim_start, curve_k)
-                # Find the arc parameter closest to T_arc at the start
-                T_s = trim_start[curve_k]
-                t_start = Paths.pathlength_nearest(c, T_s)
+            ts_key = csi < 0 ? :trim_end : :trim_start
+            te_key = csi < 0 ? :trim_start : :trim_end
+            ts_dict = csi < 0 ? trim_end : trim_start
+            te_dict = csi < 0 ? trim_start : trim_end
+            if haskey(ts_dict, curve_k)
+                t_start = Paths.pathlength_nearest(c, ts_dict[curve_k])
             end
-            if haskey(trim_end, curve_k)
-                # Find the arc parameter closest to T_arc at the end
-                T_e = trim_end[curve_k]
-                t_end = Paths.pathlength_nearest(c, T_e)
+            if haskey(te_dict, curve_k)
+                t_end = Paths.pathlength_nearest(c, te_dict[curve_k])
             end
 
             # Discretize the trimmed portion of the curve.
