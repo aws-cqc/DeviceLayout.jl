@@ -2,20 +2,6 @@
     using LinearAlgebra
     using DeviceLayout.Curvilinear: edge_type_at_vertex
 
-    # G1 continuity check helper: verify no angle jump exceeds the discretization step
-    function check_g1_continuity(poly_pts, dθ_max)
-        n = length(poly_pts)
-        for i in eachindex(poly_pts)
-            e1 = poly_pts[i] - poly_pts[mod1(i - 1, n)]
-            e2 = poly_pts[mod1(i + 1, n)] - poly_pts[i]
-            if norm(e1) > 0.01nm && norm(e2) > 0.01nm
-                cos_a =
-                    clamp((e1.x * e2.x + e1.y * e2.y) / (norm(e1) * norm(e2)), -1.0, 1.0)
-                @test acos(cos_a) < 1.1 * dθ_max
-            end
-        end
-    end
-
     # 24×16μm rectangle with 13 arc features covering various arc sweeps,
     # angles between straight lines, and tangency types (internal/external).
     #
@@ -535,20 +521,6 @@ end
 @testitem "Horseshoe landing pad rounding" setup = [CommonTestSetup] begin
     using LinearAlgebra
     using DeviceLayout.Curvilinear: edge_type_at_vertex
-
-    # G1 continuity check helper
-    function check_g1_continuity(poly_pts, dθ_max)
-        n = length(poly_pts)
-        for i in eachindex(poly_pts)
-            e1 = poly_pts[i] - poly_pts[mod1(i - 1, n)]
-            e2 = poly_pts[mod1(i + 1, n)] - poly_pts[i]
-            if norm(e1) > 0.01nm && norm(e2) > 0.01nm
-                cos_a =
-                    clamp((e1.x * e2.x + e1.y * e2.y) / (norm(e1) * norm(e2)), -1.0, 1.0)
-                @test acos(cos_a) < 1.1 * dθ_max
-            end
-        end
-    end
 
     # Horseshoe-shaped landing pad: two concentric arcs (outer counterclockwise ~270°, inner clockwise ~289°)
     # connected by straight gap segments with a trace extension.
