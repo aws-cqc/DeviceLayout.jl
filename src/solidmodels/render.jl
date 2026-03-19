@@ -1266,12 +1266,9 @@ function render!(
     # Get rid of redundant entities and update groups accordingly.
     # The first [1,0] call improves robustness of the next fragment significantly.
     _synchronize!(sm)
-    _fragment_and_map!(sm, [1, 0]) # Important!
-    # The order of dimensions is important. There may be OCC errors or failures
-    # to map pre-fragment physical groups to post-fragment entities if this operation is reordered or
-    # broken up. For example, with [3, 2, 1], exterior boundaries could be lost from an
-    # "exterior_boundaries" physical group.
-    _fragment_and_map!(sm, [1, 2, 3])
+    _fragment_and_map!(sm, [0, 1]) # Important!
+    _fragment_and_map!(sm, [1, 2]) # Important!
+    _fragment_and_map!(sm, [2, 3]) # Important!
 
     # Pass in call back function for meshing against the vertices found previously.
     gmsh.model.mesh.setSizeCallback(gmsh_meshsize)

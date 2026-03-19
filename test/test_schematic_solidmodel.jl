@@ -768,7 +768,7 @@ end
         # Add a non-path/route component
         spacer_node = add_node!(g, Spacer(name="spacer", p1=Point(10μm, 0μm)))
 
-        floorplan = plan(g)
+        floorplan = plan(g; log_dir=nothing)
 
         # Chip/sim area smaller than floorplan bounds
         halo_dist = -100μm
@@ -1013,7 +1013,7 @@ end
         straight!(pa4, y_end - y_start, path_sty)
         pa4_node = add_node!(g, pa4)
 
-        floorplan = plan(g)
+        floorplan = plan(g; log_dir=nothing)
 
         # Chip/sim area smaller than floorplan bounds
         halo_dist = -100μm
