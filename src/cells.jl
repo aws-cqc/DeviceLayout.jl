@@ -330,20 +330,23 @@ p2p(x::Real, dbs) = p2p(x * 1μm, dbs)
 
 Deterministic SHA-256 of a Cell's geometry. Normalizes by flattening all
 references, sorting elements by (layer, datatype, vertices), and hashing
-the canonical byte representation.
+the canonical byte representation of polygons and their metadata.
 
-Coordinates are converted to Float64 in μm. Texts are included in the hash.
+Coordinates are converted to Int32 in the cell's database unit. Polygons
+vertices are `circshift`ed to start with the lowest of leftmost points.
+Texts are included in the hash, but only their string, origin, and metadata
+are hashed, not their other attributes.
 """
 function geometry_fingerprint(c::Cell)
     flat = flatten(c)
     dbs = dbscale(c)
     # Polygons: (layer, datatype, [(x,y)...])
     polys = map(zip(element_metadata(flat), elements(flat))) do (meta, poly)
-        coords = Tuple{Int, Int}[(p2p(p.x, dbs), p2p(p.y, dbs)) for p in poly.p]
+        coords = [Point(Int32(p2p(p.x, dbs)), Int32(p2p(p.y, dbs))) for p in poly.p]
         return (
             Int32(meta.layer),
             Int32(meta.datatype),
-            circshift(coords, 1 - findmin(coords)[2])
+            circshift(coords, 1 - argmin(coords))
         )
     end
     sort!(polys)
@@ -354,9 +357,7 @@ function geometry_fingerprint(c::Cell)
     for (layer, dt, coords) in polys
         update!(ctx, reinterpret(UInt8, [layer, dt]))
         update!(ctx, reinterpret(UInt8, [Int32(length(coords))]))
-        for (x, y) in coords
-            update!(ctx, reinterpret(UInt8, [x, y]))
-        end
+        update!(ctx, reinterpret(UInt8, coords))
     end
 
     # Hash texts (labels/ports can change too), only worry about origin and string
@@ -364,7 +365,7 @@ function geometry_fingerprint(c::Cell)
         return (
             Int32(m.layer),
             Int32(m.datatype),
-            [p2p(t.origin.x, dbs), p2p(t.origin.y, dbs)],
+            [Int32(p2p(t.origin.x, dbs)), Int32(p2p(t.origin.y, dbs))],
             t.text
         )
     end

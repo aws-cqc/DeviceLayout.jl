@@ -403,7 +403,7 @@ function gdswrite(
     else
         # Normalize (order same as Cells.geometry_fingerprint except refs not flattened)
         els_metas = [
-            (Polygon(circshift(poly.p, 1 - findmin(poly.p)[2])), meta) for
+            (Polygon(circshift(poly.p, 1 - argmin(poly.p))), meta) for
             (poly, meta) in zip(cell.elements, cell.element_metadata)
         ]
         for (x, m) in sort(
