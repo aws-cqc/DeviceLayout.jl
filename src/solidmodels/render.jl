@@ -1403,7 +1403,7 @@ function _fragment_and_map!(
         # Remove all entities that are not also output fragments.
         kernel(sm).remove(setdiff(allents, frags))
     end
-
+    isempty(entmap) && return _synchronize!(sm)
     # For each original group,
     # reassign the group to the fragments its elements were mapped to
     for (name, dim_tags) in groups
