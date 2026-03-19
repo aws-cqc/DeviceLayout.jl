@@ -1068,6 +1068,9 @@ end
         save(path2, c, options=GDSWriterOptions(normalize=true))
         @test success(`cmp --quiet $path1 $path2`)
         @test Cells.geometry_fingerprint(cf) == Cells.geometry_fingerprint(c)
+        # regression test -- if this changes, we have to decide whether it's breaking
+        @test Cells.geometry_fingerprint(c) ==
+              "5d9a98b1fa77f31f1e658e4be0dd09f90be2d734c32224b82884b857cf08a682"
         # negative test
         render!(cf, Rectangle(10, 10), GDSMeta())
         @test Cells.geometry_fingerprint(cf) != Cells.geometry_fingerprint(c)
