@@ -1291,23 +1291,35 @@ end
         return sm
     end
     @testset "Nested extrusion" begin
-        sm = extrusion_test(:basic_nested)
-        SolidModels.gmsh.finalize()
+        try
+            sm = extrusion_test(:basic_nested)
+        finally
+            SolidModels.gmsh.finalize()
+        end
     end
 
     @testset "Overlapping volume" begin
-        sm = extrusion_test(:overlapping)
-        SolidModels.gmsh.finalize()
+        try
+            sm = extrusion_test(:overlapping)
+        finally
+            SolidModels.gmsh.finalize()
+        end
     end
 
     @testset "Adjoining volume" begin
-        sm = extrusion_test(:adjoining)
-        SolidModels.gmsh.finalize()
+        try
+            sm = extrusion_test(:adjoining)
+        finally
+            SolidModels.gmsh.finalize()
+        end
     end
 
     @testset "Adjoining other area" begin
-        sm = extrusion_test(:adjoining_other)
-        SolidModels.gmsh.finalize()
+        try
+            sm = extrusion_test(:adjoining_other)
+        finally
+            SolidModels.gmsh.finalize()
+        end
     end
 
     @testset "External volume and duplicate area" begin
@@ -1399,10 +1411,13 @@ end
         @test length(SolidModels.entitytags(sm["substrate", 3])) == 1
         @test length(SolidModels.entitytags(sm["metal", 2])) == 1
         @test length(SolidModels.entitytags(sm["exterior_boundary", 2])) == 4 * 3 + 2
-        @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
-        ntets = SolidModels.gmsh.option.get_number("Mesh.NbTetrahedra")
-        @test ntets > 0
-        SolidModels.gmsh.finalize()
+        try
+            @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
+            ntets = SolidModels.gmsh.option.get_number("Mesh.NbTetrahedra")
+            @test ntets > 0
+        finally
+            SolidModels.gmsh.finalize()
+        end
     end
 
     @testset "Removing unrelated extrusion" begin
@@ -1527,7 +1542,10 @@ end
         sm = SolidModel("issue_172_repro", overwrite=true)
         SolidModels.set_gmsh_option("General.Verbosity", 0)
         @test_nowarn render!(sm, floorplan, target; strict=:no)
-
-        @test_nowarn SolidModels.gmsh.model.mesh.generate(3)  # PLC Error with DL 1.9
+        try
+            @test_nowarn SolidModels.gmsh.model.mesh.generate(3)  # PLC Error with DL 1.9
+        finally
+            SolidModels.gmsh.finalize()
+        end
     end
 end
