@@ -1189,3 +1189,84 @@ end
         )
     end
 end
+
+@testitem "Schematic + SolidModel + Cavity Etch" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+
+    # Reproducer for Gmsh booleanOperator preserve-numbering bugs:
+    # Mixed-dimension BooleanFragments with overlapping 2D surfaces extruded
+    # into volumes at different heights, followed by boolean domain decomposition.
+    # Tests that physical groups survive correctly through the pipeline and that
+    # 3D meshing produces a valid mesh.
+    cavity_depth = 20μm
+
+    cs = CoordinateSystem("test")
+    place!(cs, MeshSized(148 * cavity_depth)(centered(Rectangle(1mm, 1mm))), :cavity)
+    place!(cs, centered(Rectangle(2mm, 2mm)), :metal_negative)
+    place!(cs, centered(Rectangle(3mm, 3mm)), :chip_area)
+    place!(cs, centered(Rectangle(3mm, 3mm)), :simulated_area)
+    place!(cs, centered(Rectangle(3mm, 3mm)), :writeable_area)
+
+    tech = ProcessTechnology(
+        (;),
+        (;
+            height=(; simulated_area=-1mm),
+            thickness=(; simulated_area=2mm, chip_area=525μm, cavity=cavity_depth)
+        )
+    )
+
+    g = SchematicGraph("test")
+    add_node!(g, BasicComponent(cs))
+    sch = plan(g)
+    check!(sch)
+
+    target = SolidModelTarget(
+        tech;
+        simulation=true,
+        bounding_layers=[],
+        substrate_layers=[:chip_area, :cavity],
+        indexed_layers=[],
+        wave_port_layers=[],
+        ignored_layers=[],
+        postrender_ops=[
+            (
+                "substrate",
+                SolidModels.difference_geom!,
+                ("chip_area_extrusion", "cavity_extrusion", 3, 3),
+                :remove_object => true,
+                :remove_tool => true
+            ),
+            (
+                "vacuum",
+                SolidModels.difference_geom!,
+                ("simulated_area_extrusion", "substrate", 3, 3)
+            )
+        ],
+        retained_physical_groups=[
+            ("vacuum", 3),
+            ("substrate", 3),
+            ("cavity", 3),
+            ("metal", 2)
+        ]
+    )
+
+    sm = SolidModel("test"; overwrite=true)
+    @testset "Cavity etch render" begin
+        @test_nowarn render!(sm, sch, target)
+    end
+
+    @testset "Physical groups" begin
+        @test SolidModels.hasgroup(sm, "vacuum", 3)
+        @test SolidModels.hasgroup(sm, "substrate", 3)
+        @test length(SolidModels.entitytags(sm["vacuum", 3])) >= 1
+        @test length(SolidModels.entitytags(sm["substrate", 3])) >= 1
+    end
+
+    @testset "3D meshing" begin
+        @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
+        ntets = SolidModels.gmsh.option.get_number("Mesh.NbTetrahedra")
+        @test ntets > 0
+    end
+
+    SolidModels.gmsh.finalize()
+end
