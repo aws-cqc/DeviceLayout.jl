@@ -1265,12 +1265,11 @@ function render!(
     _postrender!(sm, postrender_ops)
     _synchronize!(sm)
     # Get rid of redundant entities and update groups accordingly.
-    # All three of these are important and cannot be combined into a single call
-    # without risking running into stale binding issues (Gmsh issue #3446)
-    # leading to an error during meshing, typically `ERROR: PLC Error:  A segment and a facet intersect at point`
-    _fragment_and_map!(sm, [0, 1]) # Important!
-    _fragment_and_map!(sm, [1, 2]) # Important!
-    _fragment_and_map!(sm, [2, 3]) # Important!
+    # Adjacent-dimension pairs avoid both exterior boundary loss ([3,2,1], PR #145)
+    # and stale OCC bindings when combined ([1,2,3], Gmsh #3446 / issue #172).
+    _fragment_and_map!(sm, [0, 1])
+    _fragment_and_map!(sm, [1, 2])
+    _fragment_and_map!(sm, [2, 3])
 
     # Pass in call back function for meshing against the vertices found previously.
     gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
