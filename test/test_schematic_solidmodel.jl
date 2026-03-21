@@ -768,7 +768,7 @@ end
         # Add a non-path/route component
         spacer_node = add_node!(g, Spacer(name="spacer", p1=Point(10μm, 0μm)))
 
-        floorplan = plan(g)
+        floorplan = plan(g; log_dir=nothing)
 
         # Chip/sim area smaller than floorplan bounds
         halo_dist = -100μm
@@ -1013,7 +1013,7 @@ end
         straight!(pa4, y_end - y_start, path_sty)
         pa4_node = add_node!(g, pa4)
 
-        floorplan = plan(g)
+        floorplan = plan(g; log_dir=nothing)
 
         # Chip/sim area smaller than floorplan bounds
         halo_dist = -100μm
@@ -1187,5 +1187,365 @@ end
                 atol=1e-6
             )
         )
+    end
+end
+
+@testitem "Schematic + SolidModel + Problematic extrusions" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+
+    # Reproducer for Gmsh booleanOperator preserve-numbering and PLC error bugs:
+    # Mixed-dimension BooleanFragments with overlapping 2D surfaces extruded
+    # into volumes at different heights, followed by boolean domain decomposition.
+    # Tests that physical groups survive correctly through the pipeline and that
+    # 3D meshing produces a valid mesh.
+    function extrusion_test(testcase=:basic_nested)
+        depth = 200μm
+        cs = CoordinateSystem("test")
+        rect = MeshSized(depth / 2)(centered(Rectangle(1mm, 1mm)))
+        if testcase == :basic_nested
+            place!(cs, rect, :nested_area)
+        elseif testcase == :overlapping
+            place!(cs, rect, :nested_area)
+            place!(cs, rect + Point(0.5, 0.5)mm, :nested_area)
+        elseif testcase == :adjoining
+            place!(cs, rect - Point(0.5, 0.0)mm, :nested_area)
+            place!(cs, rect + Point(0.5, 0.0)mm, :nested_area)
+        elseif testcase == :adjoining_other
+            place!(cs, rect + Point(1, 1)mm, :nested_area)
+        end
+        place!(cs, centered(Rectangle(4mm, 4mm)), :simulated_area)
+        place!(cs, centered(Rectangle(3mm, 3mm)), :metal_negative)
+        place!(cs, centered(Rectangle(4mm, 4mm)), :chip_area)
+        place!(cs, centered(Rectangle(4mm, 4mm)), :writeable_area)
+
+        tech = ProcessTechnology(
+            (;),
+            (;
+                height=(; simulated_area=-1mm),
+                thickness=(; simulated_area=2mm, chip_area=525μm, nested_area=depth)
+            )
+        )
+
+        g = SchematicGraph("test")
+        add_node!(g, BasicComponent(cs))
+        sch = plan(g; log_dir=nothing)
+        check!(sch)
+
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            bounding_layers=[:simulated_area],
+            substrate_layers=[:chip_area, :nested_area],
+            indexed_layers=[],
+            wave_port_layers=[],
+            ignored_layers=[],
+            postrender_ops=[
+                (
+                    "substrate",
+                    SolidModels.difference_geom!,
+                    ("chip_area_extrusion", "nested_area_extrusion", 3, 3),
+                    :remove_object => true
+                ),
+                (
+                    "vacuum",
+                    SolidModels.difference_geom!,
+                    ("simulated_area_extrusion", "substrate", 3, 3)
+                ),
+                (
+                    "metal",
+                    SolidModels.difference_geom!,
+                    ("writeable_area", "metal_negative")
+                )
+            ],
+            retained_physical_groups=[
+                ("vacuum", 3),
+                ("substrate", 3),
+                ("nested_area", 2),
+                ("exterior_boundary", 2),
+                ("metal", 2)
+            ]
+        )
+        sm = SolidModel("test"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        @test_nowarn render!(sm, sch, target)
+        if testcase == :overlapping
+            @test length(SolidModels.entitytags(sm["vacuum", 3])) == 5
+        elseif testcase == :adjoining
+            @test length(SolidModels.entitytags(sm["vacuum", 3])) == 4
+        else
+            @test length(SolidModels.entitytags(sm["vacuum", 3])) == 3
+        end
+        @test length(SolidModels.entitytags(sm["substrate", 3])) == 1
+        @test length(SolidModels.entitytags(sm["metal", 2])) == 1
+        if testcase == :overlapping
+            @test length(SolidModels.entitytags(sm["nested_area", 2])) == 4 # Should be 3, but one is double-tagged
+        elseif testcase == :adjoining
+            @test length(SolidModels.entitytags(sm["nested_area", 2])) == 2
+        else
+            @test length(SolidModels.entitytags(sm["nested_area", 2])) == 1
+        end
+        @test length(SolidModels.entitytags(sm["exterior_boundary", 2])) == 4 * 3 + 2
+        @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
+        ntets = SolidModels.gmsh.option.get_number("Mesh.NbTetrahedra")
+        @test ntets > 0
+        return sm
+    end
+    @testset "Nested extrusion" begin
+        try
+            sm = extrusion_test(:basic_nested)
+        finally
+            SolidModels.gmsh.finalize()
+        end
+    end
+
+    @testset "Overlapping volume" begin
+        try
+            sm = extrusion_test(:overlapping)
+        finally
+            SolidModels.gmsh.finalize()
+        end
+    end
+
+    @testset "Adjoining volume" begin
+        try
+            sm = extrusion_test(:adjoining)
+        finally
+            SolidModels.gmsh.finalize()
+        end
+    end
+
+    @testset "Adjoining other area" begin
+        try
+            sm = extrusion_test(:adjoining_other)
+        finally
+            SolidModels.gmsh.finalize()
+        end
+    end
+
+    @testset "External volume and duplicate area" begin
+        depth = 200μm
+        cs = CoordinateSystem("test")
+        rect = MeshSized(depth / 2)(centered(Rectangle(1mm, 1mm)))
+        place!(cs, rect, :nested_area)
+        place!(cs, rect + Point(0.3, 0.3)mm, :nested_area)
+        place!(cs, rect, :duplicate_area) # Succeeds without this on 1.10
+        place!(cs, centered(Rectangle(6mm, 6mm)), :outer_area)
+        place!(cs, centered(Rectangle(6mm, 6mm)), :simulated_area)
+        place!(cs, centered(Rectangle(2mm, 2mm)), :metal_negative)
+        place!(cs, centered(Rectangle(5mm, 5mm)), :chip_area)
+        place!(cs, centered(Rectangle(5mm, 5mm)), :writeable_area)
+
+        tech = ProcessTechnology(
+            (;),
+            (;
+                height=(; simulated_area=-1mm),
+                thickness=(; simulated_area=2mm, chip_area=525μm, outer_area=525μm)
+            )
+        )
+
+        g = SchematicGraph("test")
+        add_node!(g, BasicComponent(cs))
+        sch = plan(g; log_dir=nothing)
+        check!(sch)
+
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            bounding_layers=[:simulated_area],
+            substrate_layers=[:chip_area, :outer_area],
+            indexed_layers=[],
+            wave_port_layers=[],
+            ignored_layers=[],
+            postrender_ops=[
+                (
+                    "nested_area",
+                    SolidModels.union_geom!,
+                    ("nested_area", "nested_area", 2, 2),
+                    :remove_object => true,
+                    :remove_tool => true
+                ),
+                ("nested_area_extrusion", SolidModels.extrude_z!, ("nested_area", -depth)),
+                (
+                    "vacuum",
+                    SolidModels.difference_geom!,
+                    ("simulated_area_extrusion", "outer_area_extrusion", 3, 3)
+                ),
+                (
+                    "vacuum",
+                    SolidModels.union_geom!,
+                    ("vacuum", "nested_area_extrusion", 3, 3),
+                    :remove_object => true
+                ),
+                (
+                    "outer_area_extrusion",
+                    SolidModels.difference_geom!,
+                    ("outer_area_extrusion", "chip_area_extrusion", 3, 3)
+                ),
+                (
+                    "substrate",
+                    SolidModels.difference_geom!,
+                    ("chip_area_extrusion", "nested_area_extrusion", 3, 3),
+                    :remove_object => true,
+                    :remove_tool => true
+                ),
+                (
+                    "metal",
+                    SolidModels.difference_geom!,
+                    ("writeable_area", "metal_negative"),
+                    :remove_object => true,
+                    :remove_tool => true
+                )
+            ],
+            retained_physical_groups=[
+                ("vacuum", 3),
+                ("substrate", 3),
+                ("outer_area_extrusion", 3),
+                ("exterior_boundary", 2),
+                ("metal", 2)
+            ]
+        )
+        sm = SolidModel("test"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        @test_nowarn render!(sm, sch, target)
+        @test length(SolidModels.entitytags(sm["vacuum", 3])) == 3
+        @test length(SolidModels.entitytags(sm["substrate", 3])) == 1
+        @test length(SolidModels.entitytags(sm["metal", 2])) == 1
+        @test length(SolidModels.entitytags(sm["exterior_boundary", 2])) == 4 * 3 + 2
+        try
+            @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
+            ntets = SolidModels.gmsh.option.get_number("Mesh.NbTetrahedra")
+            @test ntets > 0
+        finally
+            SolidModels.gmsh.finalize()
+        end
+    end
+
+    @testset "Removing unrelated extrusion" begin
+        # MRE from Issue #172
+        # Geometry/recipe is not "correct" for simulation but should not throw an error
+        using DeviceLayout.SolidModels
+        ### 1. CPW meander resonator (λ/2, open-open)
+        trace_w = 35μm
+        gap_w = 40μm
+        cpw_sty = Paths.CPW(trace_w, gap_w)
+
+        res_r = 100μm
+        res_dy = 1.25mm
+        str_len = 1.0mm
+
+        pth = Path(
+            Point(0μm, 0μm);
+            α0=π / 2,
+            name="cpw_meander",
+            metadata=SemanticMeta(:base_negative)
+        )
+        straight!(pth, res_dy - res_r, cpw_sty)
+        turn!(pth, -π / 2, res_r)
+        straight!(pth, str_len)
+        turn!(pth, -π / 2, res_r)
+        straight!(pth, 2 * (res_dy - res_r))
+        turn!(pth, π / 2, res_r)
+        straight!(pth, str_len)
+        turn!(pth, π / 2, res_r)
+        straight!(pth, res_dy - res_r)
+        terminate!(pth; initial=true)
+        terminate!(pth)
+
+        ### 2. Small port rectangle in the CPW gap at the open end
+        port_w = 25μm
+        port_h = 30μm
+        port_rect = centered(
+            Rectangle(port_w, port_h),
+            on_pt=Point(0μm, -(trace_w / 2 + port_h / 2 + (gap_w - port_h) / 2))
+        )
+
+        ### 3. Build schematic
+        g = SchematicGraph("issue_172_repro")
+        add_node!(g, pth)
+        floorplan = plan(g; log_dir=nothing)
+
+        chip = centered(Rectangle(6mm, 6mm))
+        render!(floorplan.coordinate_system, chip, SemanticMeta(:chip_outline))
+        render!(floorplan.coordinate_system, chip, SemanticMeta(:simulated_area))
+        render!(floorplan.coordinate_system, chip, SemanticMeta(:writeable_area))
+        render!(
+            floorplan.coordinate_system,
+            only_simulated(only_solidmodel(port_rect)),
+            SemanticMeta(:port1)
+        )
+
+        check!(floorplan)
+
+        ### 4. Singlechip target with port subtracted from base_negative
+        tech = ProcessTechnology(
+            (;
+                base_negative=GDSMeta(1, 2),
+                simulated_area=GDSMeta(200, 0),
+                chip_outline=GDSMeta(100, 0),
+                writeable_area=GDSMeta(101, 0),
+                port1=GDSMeta(502, 1)
+            ),
+            (;
+                height=(; simulated_area=-5mm),
+                thickness=(; simulated_area=10mm, chip_outline=525μm)
+            )
+        )
+
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            bounding_layers=[:simulated_area],
+            substrate_layers=[:chip_outline],
+            postrender_ops=[
+                (
+                    "base_negative",
+                    SolidModels.union_geom!,
+                    ("base_negative", "base_negative", 2, 2),
+                    :remove_tool => true
+                ),
+                (
+                    "base_negative",
+                    SolidModels.difference_geom!,
+                    ("base_negative", "port1", 2, 2),
+                    :remove_tool => false
+                ),
+                (
+                    "metal",
+                    SolidModels.difference_geom!,
+                    ("writeable_area", "base_negative", 2, 2),
+                    :remove_object => true
+                ),
+                (
+                    "substrate",
+                    SolidModels.union_geom!,
+                    ("chip_outline_extrusion", "chip_outline_extrusion", 3, 3),
+                    :remove_object => true,
+                    :remove_tool => true
+                ),
+                (
+                    "vacuum",
+                    SolidModels.difference_geom!,
+                    ("simulated_area_extrusion", "substrate", 3, 3)
+                )
+            ],
+            retained_physical_groups=[
+                ("vacuum", 3),
+                ("substrate", 3),
+                ("metal", 2),
+                ("base_negative", 2),
+                ("port1", 2),
+                ("exterior_boundary", 2)
+            ]
+        )
+
+        ### 5. Render and mesh
+        sm = SolidModel("issue_172_repro", overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        @test_nowarn render!(sm, floorplan, target; strict=:no)
+        try
+            @test_nowarn SolidModels.gmsh.model.mesh.generate(3)  # PLC Error with DL 1.9
+        finally
+            SolidModels.gmsh.finalize()
+        end
     end
 end

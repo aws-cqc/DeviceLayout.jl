@@ -1263,15 +1263,13 @@ function render!(
     _synchronize!(sm)
     skip_postrender && return nothing
     _postrender!(sm, postrender_ops)
-    # Get rid of redundant entities and update groups accordingly.
-    # The first [1,0] call improves robustness of the next fragment significantly.
     _synchronize!(sm)
-    _fragment_and_map!(sm, [1, 0]) # Important!
-    # The order of dimensions is important. There may be OCC errors or failures
-    # to map pre-fragment physical groups to post-fragment entities if this operation is reordered or
-    # broken up. For example, with [3, 2, 1], exterior boundaries could be lost from an
-    # "exterior_boundaries" physical group.
-    _fragment_and_map!(sm, [1, 2, 3])
+    # Get rid of redundant entities and update groups accordingly.
+    # Adjacent-dimension pairs avoid both exterior boundary loss ([3,2,1], PR #145)
+    # and stale OCC bindings when combined ([1,2,3], Gmsh #3446 / issue #172).
+    _fragment_and_map!(sm, [0, 1])
+    _fragment_and_map!(sm, [1, 2])
+    _fragment_and_map!(sm, [2, 3])
 
     # Pass in call back function for meshing against the vertices found previously.
     gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
@@ -1406,7 +1404,7 @@ function _fragment_and_map!(
         # Remove all entities that are not also output fragments.
         kernel(sm).remove(setdiff(allents, frags))
     end
-
+    isempty(entmap) && return _synchronize!(sm)
     # For each original group,
     # reassign the group to the fragments its elements were mapped to
     for (name, dim_tags) in groups
