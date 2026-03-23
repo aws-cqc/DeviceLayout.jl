@@ -282,6 +282,21 @@ end
 undecorate!(sty::OverlayStyle, t) = undecorate!(sty.s, t)
 
 """
+    undecorate_range!(sty, t_lo, t_hi)
+
+Remove all decorations in the range [t_lo, t_hi] from a style.
+"""
+function undecorate_range!(sty::DecoratedStyle, t_lo, t_hi)
+    inds = findall(t -> t_lo <= t <= t_hi, sty.ts)
+    deleteat!(sty.ts, inds)
+    deleteat!(sty.dirs, inds)
+    deleteat!(sty.refs, inds)
+    return sty
+end
+undecorate_range!(sty::Style, t_lo, t_hi) = sty
+undecorate_range!(sty::OverlayStyle, t_lo, t_hi) = undecorate_range!(sty.s, t_lo, t_hi)
+
+"""
     overlay!(path::Path, oversty::Style, metadata::DeviceLayout.Meta; i::Int=length(path))
 
 Apply the style `oversty` in layer `metadata` on top of the segment at `path[i]`.

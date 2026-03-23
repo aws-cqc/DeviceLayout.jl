@@ -82,3 +82,46 @@
     @test pathlength_nearest(turn, Point(0.9, -2)) ≈ 0
     @test pathlength_nearest(turn, Point(-1, 1)) ≈ 3π / 4
 end
+
+@testitem "Crossover clears decorations (#15)" setup = [CommonTestSetup] begin
+    # Create a horizontal path (pa1) with decorations — this path will be CROSSED
+    pa1 = Path(0μm, 0μm)
+    straight!(pa1, 200μm, Paths.Trace(10μm))
+
+    # Add decorations at known positions along pa1
+    dummy_deco = Cell("deco", nm)
+    for t in [20μm, 40μm, 60μm, 80μm, 100μm, 120μm, 160μm, 180μm]
+        attach!(pa1, sref(dummy_deco), t)
+    end
+    n_before = length(pa1[1].sty.ts)
+    @test n_before == 8
+
+    # Create a vertical path (pa2) that crosses pa1 at x ≈ 100μm
+    # pa2 crosses over pa1 (pa2 is listed AFTER pa1 in intersect!)
+    pa2 = Path(100μm, -100μm, α0=π / 2)
+    straight!(pa2, 200μm, Paths.Trace(10μm))
+
+    xsty = Intersect.AirBridge(
+        crossing_gap=5μm,
+        foot_gap=2μm,
+        foot_length=4μm,
+        extent_gap=2μm,
+        scaffold_gap=5μm,
+        scaffold_meta=GDSMeta(1),
+        air_bridge_meta=GDSMeta(2)
+    )
+    Intersect.intersect!(xsty, pa1, pa2)
+
+    # Count remaining decorations on pa1 — some near the crossing should be removed
+    # pa1 is the crossed path (not spliced), so it still has one segment
+    n_after = length(pa1[1].sty.ts)
+    @test n_after < n_before  # Some decorations near the crossing were cleared
+
+    # Decorations far from the crossing (e.g. at 20μm, 180μm) should survive
+    @test n_after > 0
+
+    # Verify the result renders without error
+    c = Cell("deco_crossing", nm)
+    render!(c, pa1, GDSMeta(0))
+    render!(c, pa2, GDSMeta(0))
+end
