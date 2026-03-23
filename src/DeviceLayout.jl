@@ -542,7 +542,7 @@ include("cells.jl")
 import .Cells: Cell, CellReference, CellArray, cell, gdslayers, layers, text!
 export Cells, Cell, CellReference, CellArray, cell, gdslayers, layers, text!
 
-include("utils.jl")
+include("render/discretization.jl")
 
 include("render/render.jl")
 
