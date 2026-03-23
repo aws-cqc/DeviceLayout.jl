@@ -79,7 +79,7 @@ macro compdef(expr)
                 Expr(
                     :block,
                     __source__,
-                    :((; $(filter(arg -> Base.Meta.isexpr(arg, :kw), public_defaults)...)))
+                    _defaults_let_expr(public_defaults)
                 )
             )
         elseif Base.Meta.isexpr(T, :curly)
@@ -99,7 +99,7 @@ macro compdef(expr)
             defbody = Expr(
                 :block,
                 __source__,
-                :((; $(filter(arg -> Base.Meta.isexpr(arg, :kw), public_defaults)...)))
+                _defaults_let_expr(public_defaults)
             )
             defsig = :(
                 $(esc(:SchematicDrivenLayout)).default_parameters(
@@ -118,6 +118,37 @@ macro compdef(expr)
         $kwdefs
         $defaults
     end
+end
+
+"""
+    _defaults_let_expr(public_defaults)
+
+Build a `let` expression that evaluates default values left-to-right, so that later
+defaults can reference earlier parameter names, then returns a NamedTuple.
+
+Input: the `public_defaults` array from `params_args`, containing a mix of bare symbols
+(required params, no default) and `Expr(:kw, var, defexpr)`.
+
+Only `:kw` entries (those with defaults) are included in the result. The `defexpr` values
+are already `esc`'d (from `_kwdef!`), so `let`-bound names are also `esc`'d to ensure
+references like `a` inside `esc(:(2*a))` resolve to the `let`-bound `a`.
+"""
+function _defaults_let_expr(public_defaults)
+    kw_args = filter(arg -> Base.Meta.isexpr(arg, :kw), public_defaults)
+    isempty(kw_args) && return :((;))
+
+    vars = [arg.args[1] for arg in kw_args]          # plain symbols, e.g. [:name, :a, :b]
+    defexprs = [arg.args[2] for arg in kw_args]       # already esc'd expressions
+
+    # Build:  let name = "foo", a = 10, b = 2*a
+    #             (; name, a, b)
+    #         end
+    # The esc() on variable names places them in the caller's module scope, matching
+    # the esc'd references within defexprs.
+    let_bindings = [Expr(:(=), esc(v), d) for (v, d) in zip(vars, defexprs)]
+    nt_expr = Expr(:tuple, Expr(:parameters, esc.(vars)...))
+
+    return Expr(:let, Expr(:block, let_bindings...), nt_expr)
 end
 
 # @kwdef helper function
