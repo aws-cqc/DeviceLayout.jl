@@ -95,8 +95,8 @@ coffset() = (DeviceLayout._coffset[])::Clipper.ClipperOffset
 """
     struct Polygon{T} <: AbstractPolygon{T}
         p::Vector{Point{T}}
-        Polygon(x) = new(x)
-        Polygon(x::AbstractPolygon) = convert(Polygon{T}, x)
+        Polygon{T}(x) where {T} = new{T}(x)
+        Polygon{T}(x::AbstractPolygon) where {T} = convert(Polygon{T}, x)
     end
 
 Polygon defined by list of coordinates. The first point should not be repeated
@@ -922,7 +922,7 @@ end
 
 # Clipping polygons one at a time
 """
-    clip(op::Clipper.ClipType, s, c; kwargs...) where {S<:Coordinate, T<:Coordinate}
+    clip(op::Clipper.ClipType, s, c; kwargs...)
     clip(op::Clipper.ClipType, s::AbstractVector{A}, c::AbstractVector{B};
         kwargs...) where {S, T, A<:Polygon{S}, B<:Polygon{T}}
     clip(op::Clipper.ClipType,
@@ -1414,15 +1414,15 @@ function declipperize(
 end
 
 """
-    offset{S<:Coordinate}(s::AbstractPolygon{S}, delta::Coordinate;
+    offset(s::AbstractPolygon{T}, delta::Coordinate;
         j::Clipper.JoinType=Clipper.JoinTypeMiter,
-        e::Clipper.EndType=Clipper.EndTypeClosedPolygon)
-    offset{S<:AbstractPolygon}(subject::AbstractVector{S}, delta::Coordinate;
+        e::Clipper.EndType=Clipper.EndTypeClosedPolygon) where {T <: Coordinate}
+    offset(s::AbstractVector{A}, delta::Coordinate;
         j::Clipper.JoinType=Clipper.JoinTypeMiter,
-        e::Clipper.EndType=Clipper.EndTypeClosedPolygon)
-    offset{S<:Polygon}(s::AbstractVector{S}, delta::Coordinate;
+        e::Clipper.EndType=Clipper.EndTypeClosedPolygon) where {T, A <: AbstractPolygon{T}}
+    offset(s::AbstractVector{Polygon{T}}, delta::T;
         j::Clipper.JoinType=Clipper.JoinTypeMiter,
-        e::Clipper.EndType=Clipper.EndTypeClosedPolygon)
+        e::Clipper.EndType=Clipper.EndTypeClosedPolygon) where {T <: Coordinate}
 
 Using the [`Clipper`](http://www.angusj.com/delphi/clipper.php) library and
 the [`Clipper.jl`](https://github.com/Voxel8/Clipper.jl) wrapper, perform
