@@ -1041,3 +1041,34 @@ end
     @test c.element_metadata[1] != c.element_metadata[2]
     @test c.element_metadata[2] == c.element_metadata[3]
 end
+
+@testitem "Path metadata preservation (#160)" setup = [CommonTestSetup] begin
+    @testset "User-set GDSMeta is preserved" begin
+        c = Cell("meta_test", nm)
+        pa = Path(nm)
+        straight!(pa, 100nm, Paths.Trace(10nm))
+        pa.metadata = GDSMeta(5, 3)
+        render!(c, pa)
+        @test pa.metadata == GDSMeta(5, 3)
+        @test all(m -> m == GDSMeta(5, 3), c.element_metadata)
+    end
+
+    @testset "UNDEF_META defaults to GDSMeta(0,0)" begin
+        c = Cell("undef_test", nm)
+        pa = Path(nm)
+        straight!(pa, 100nm, Paths.Trace(10nm))
+        render!(c, pa)
+        @test pa.metadata == GDSMeta(0, 0)
+        @test all(m -> m == GDSMeta(0, 0), c.element_metadata)
+    end
+
+    @testset "Explicit metadata argument overrides" begin
+        c = Cell("explicit_test", nm)
+        pa = Path(nm)
+        straight!(pa, 100nm, Paths.Trace(10nm))
+        pa.metadata = GDSMeta(5, 3)
+        render!(c, pa, GDSMeta(7, 1))
+        @test pa.metadata == GDSMeta(7, 1)
+        @test all(m -> m == GDSMeta(7, 1), c.element_metadata)
+    end
+end

@@ -1,6 +1,16 @@
 render!(c::CoordinateSystem, p::Path, meta::Meta=p.metadata) = place!(c, p, meta)
 
-function render!(c::Cell, p::Path, meta::GDSMeta=GDSMeta(); kwargs...)
+function render!(c::Cell, p::Path, meta::Meta=p.metadata; kwargs...)
+    if meta === UNDEF_META
+        p.metadata = GDSMeta()  # Backward compat: default to (0,0) when unset
+    else
+        p.metadata = meta
+    end
+    return _render!(c, p; kwargs...)
+end
+
+# Disambiguate with render!(::Cell{S}, ::Any, ::Union{GDSMeta,Vector{GDSMeta}}) in render.jl
+function render!(c::Cell{S}, p::Path, meta::GDSMeta; kwargs...) where {S}
     p.metadata = meta
     return _render!(c, p; kwargs...)
 end
