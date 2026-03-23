@@ -76,11 +76,7 @@ macro compdef(expr)
                     esc(:(SchematicDrivenLayout.default_parameters)),
                     :(::Type{$(esc(T))})
                 ),
-                Expr(
-                    :block,
-                    __source__,
-                    _defaults_let_expr(public_defaults)
-                )
+                Expr(:block, __source__, _defaults_let_expr(public_defaults))
             )
         elseif Base.Meta.isexpr(T, :curly)
             # if T == S{A<:AA,B<:BB}, define one method
@@ -96,11 +92,7 @@ macro compdef(expr)
             kwdefs = def2
 
             # Define default_parameters method to return NamedTuple of keywords with defaults
-            defbody = Expr(
-                :block,
-                __source__,
-                _defaults_let_expr(public_defaults)
-            )
+            defbody = Expr(:block, __source__, _defaults_let_expr(public_defaults))
             defsig = :(
                 $(esc(:SchematicDrivenLayout)).default_parameters(
                     ::Type{$(esc(SQ))}
