@@ -118,9 +118,9 @@ end
 
 Extrude the entities in `g` in the `z` direction by `dz`.
 
-If the `numElements` vector is not
-empty, also extrude the mesh: the entries in `numElements` give the number of
-elements in each layer. If the `height` vector is not empty, it provides the
+If the `num_elements` vector is not
+empty, also extrude the mesh: the entries in `num_elements` give the number of
+elements in each layer. If the `heights` vector is not empty, it provides the
 (cumulative) height of the different layers, normalized to 1. If `recombine` is
 set, recombine the mesh in the layers.
 
@@ -146,18 +146,13 @@ function extrude_z!(sm::SolidModel, groupname, dz, groupdim=2; kwargs...)
     return extrude_z!(sm[groupname, groupdim], dz; kwargs...)
 end
 """
-    revolve!(g::PhysicalGroup, x, y, z, ax, ay, az, θ; num_elements=[], heights=[], recombine=false)
-    revolve!(sm::SolidModel, groupname, groupdim, x, y, z, ax, ay, az, θ; num_elements=[], heights=[], recombine=false)
+    revolve!(g::AbstractPhysicalGroup, x, y, z, ax, ay, az, θ)
+    revolve!(sm::SolidModel, groupname, groupdim, x, y, z, ax, ay, az, θ)
 
 Extrude the entities in `g` using a rotation of `θ` radians around the axis of revolution
 through `(x, y, z)` in the direction `(ax, ay, az)`.
 
-If the `numElements` vector is not
-empty, also extrude the mesh: the entries in `numElements` give the number of
-elements in each layer. If the `height` vector is not empty, it provides the
-(cumulative) height of the different layers, normalized to 1. If `recombine` is
-set, recombine the mesh in the layers. When
-the mesh is extruded the angle should be strictly smaller than 2π.
+When the mesh is extruded the angle should be strictly smaller than 2π.
 
 Return the resulting entities as a vector of `(dimension, entity_tag)` `Tuple`s.
 """
@@ -215,8 +210,8 @@ Base.:∩(object::AbstractPhysicalGroup, tool::AbstractPhysicalGroup) =
 
 """
     union_geom!(
-        object::Union{PhysicalGroup, AbstractArray{PhysicalGroup}},
-        tool::Union{PhysicalGroup, AbstractArray{PhysicalGroup}};
+        object::Union{PhysicalGroup, AbstractArray{<:AbstractPhysicalGroup}},
+        tool::Union{PhysicalGroup, AbstractArray{<:AbstractPhysicalGroup}};
         tag=-1,
         remove_object=false,
         remove_tool=false
@@ -501,14 +496,11 @@ function intersect_geom!(
 end
 
 """
-    restrict_to_volume(sm::SolidModel, volume)
+    restrict_to_volume!(sm::SolidModel, volume)
 
 Checks if all surfaces and volumes are contained within `sm[volume, 3]`, and if not performs
 an intersection operation replacing all entities and groups with their intersection with
 `sm[volume, 3]`.
-
-Embeds entities if they are on the boundary of higher-dimensional entities and removes
-duplicate entities.
 
 Preserves the meaning of existing groups by assigning to them the (possibly new) entities
 corresponding to that group's intersection with the volume.
@@ -975,7 +967,7 @@ end
 
 """
     remove_group!(sm::SolidModel, group::Union{String, Symbol}, dim; recursive=true, remove_entities=true)
-    remove_group!(group::AbstractPhysicalGroup; recursive=true, remove_entities=true)
+    remove_group!(group::PhysicalGroup; recursive=true, remove_entities=true)
 
 Remove entities in `group` from the model, unless they are boundaries of higher-dimensional entities or part of another physical group.
 

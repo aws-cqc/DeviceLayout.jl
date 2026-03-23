@@ -30,6 +30,7 @@ change_handedness!(sty::AbstractCompoundStyle) = change_handedness!.(sty.styles)
     struct CompoundStyle{T<:FloatCoordinate} <: AbstractCompoundStyle
         styles::Vector{Style}
         grid::Vector{T}
+        tag::Symbol
     end
 
 Combines styles together, typically for use with a [`CompoundSegment`](@ref).
@@ -37,6 +38,7 @@ Combines styles together, typically for use with a [`CompoundSegment`](@ref).
   - `styles`: Array of styles making up the object. This is deep-copied by the outer
     constructor.
   - `grid`: An array of `t` values needed for rendering the parametric path.
+  - `tag`: A `Symbol` used to identify the compound style.
 """
 struct CompoundStyle{T <: FloatCoordinate} <: AbstractCompoundStyle
     styles::Vector{Style}

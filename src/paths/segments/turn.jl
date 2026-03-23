@@ -21,7 +21,7 @@ function (s::Turn)(t)
 end
 
 """
-    Turn(α, r::T, p0::Point{T}=Point(0.0,0.0), α0=0.0°) where {T<:Coordinate}
+    Turn(α, r::T; p0::Point=Point(zero(T), zero(T)), α0=0.0°) where {T<:Coordinate}
 
 Outer constructor for `Turn` segments.
 """

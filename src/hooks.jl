@@ -36,7 +36,7 @@ The outward-pointing angle opposite to the direction stored by the PointHook
 out_direction(h::Hook) = in_direction(h) + 180°
 
 """
-    compass(;p0=Point(0μm, 0μm))
+    compass(prefix=""; p0=Point(0μm, 0μm))
 
 An 8-point compass of `PointHook`s at `p0`.
 

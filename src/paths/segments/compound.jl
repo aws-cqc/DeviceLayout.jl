@@ -1,6 +1,9 @@
 
 """
     struct CompoundSegment{T} <: ContinuousSegment{T}
+        segments::Vector{Segment{T}}
+        tag::Symbol
+    end
 
 Consider an array of segments as one contiguous segment.
 Useful e.g. for applying styles, uninterrupted over segment changes.

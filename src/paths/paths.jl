@@ -365,7 +365,7 @@ Type for abstracting an arbitrary styled path in the plane. Iterating returns
 Convenience constructors for `Path{T}` object:
 
     Path{T}(p0::Point=zero(Point{T}), α0::typeof(1.0°)=0.0°, metadata::Meta=UNDEF_META)
-    Path{T}(name::String, p0::Point=zero(Point{T}), α0::Float64=0.0, metadata::Meta=UNDEF_META)
+    Path{T}(name::String, p0::Point{T}=zero(Point{T}), α0=0.0°, meta::Meta=UNDEF_META, nodes::Vector{Node{T}}=Node{T}[])
     Path(p0::Point=zero(Point{typeof(1.0UPREFERRED)}); α0=0.0, name=uniquename("path"), metadata=UNDEF_META)
     Path(p0x::Coordinate, p0y::Coordinate; α0=0.0, name=uniquename("path"), metadata=UNDEF_META)
     Path(u::CoordinateUnits; α0=0.0, name=uniquename("path"), metadata=UNDEF_META)
@@ -427,30 +427,30 @@ function DeviceLayout.coordsys_name(p::Path)
 end
 
 """
-    path_in(h::PointHook)
+    path_in(h::Hook)
 
 A `Path` starting at h, pointing along its inward direction.
 """
 path_in(h::Hook) = Path(h.p, α0=in_direction(h))
 
 """
-    path_out(h::PointHook)
+    path_out(h::Hook)
 
 A `Path` starting at h, pointing along its outward direction.
 """
 path_out(h::Hook) = Path(h.p, α0=out_direction(h))
 
 """
-    p0_hook(pa::Path) = PointHook(p0(pa), α0(pa))
+    p0_hook(pa::Path, right_handed=true) = HandedPointHook(p0(pa), α0(pa), right_handed)
 
-A `PointHook` looking into the start of path `pa`.
+A `HandedPointHook` looking into the start of path `pa`.
 """
 p0_hook(pa::Path, right_handed=true) = HandedPointHook(p0(pa), α0(pa), right_handed)
 
 """
-    p1_hook(pa::Path) = PointHook(p1(pa), α1(pa) + π)
+    p1_hook(pa::Path, right_handed=true) = HandedPointHook(p1(pa), α1(pa) + π, right_handed)
 
-A `PointHook` looking into the end of path `pa`.
+A `HandedPointHook` looking into the end of path `pa`.
 """
 p1_hook(pa::Path, right_handed=true) = HandedPointHook(p1(pa), α1(pa) + π, right_handed)
 
@@ -1065,8 +1065,7 @@ Alternate between going straight with length `straightlen` and turning with radi
 angle `α`. Each turn goes the opposite direction of the previous. The total length is `len`.
 Useful for making resonators.
 
-The straight and turn segments are combined into a `CompoundSegment` and appended to the
-path `p`.
+The straight and turn segments are appended directly to the path `p`.
 """
 function meander!(p::Path, len, straightlen, r, α)
     unit = straightlen + r * abs(α)
@@ -1166,9 +1165,9 @@ meander!(
     bellow(endp::Point, l, r, sty::Paths.Style)
 
 Path from origin to `endp` of length `l`.
-The path extends in the +x direction, turns with radius `r`,
-extend (by distance needed to obtain total length), U-turns and comes back,
-and makes a 90° turn and extend horizontally to meet endp.
+The path extends in the +x direction, makes a 90° turn with radius `r`, extends vertically
+(by the distance needed to obtain total length `l`), makes a 180° U-turn, returns, makes a
+90° turn back to horizontal, and extends to meet `endp`.
 End point should have sufficiently positive x-coordinate
 so that we don't try to path-extend by a negative amount.
 """

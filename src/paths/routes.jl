@@ -8,7 +8,7 @@ of the following two methods:
 
 ```
 _route!(p::Path, p1::Point, α1, rule::MyRouteRule, sty, waypoints, waydirs)
-_route_leg!(p::Path, next::Point, rule::MyRouteRule,
+_route_leg!(p::Path, next::Point, nextdir, rule::MyRouteRule,
     sty::Paths.Style=Paths.nextstyle(p))
 ```
 
@@ -23,7 +23,7 @@ If only `_route_leg!` is implemented, then a `Path` drawn from `r::Route` with `
 will first call `reconcile!` to validate constraints and insert waypoints if necessary. (The
 default implementation of `reconcile!` does nothing.) The `Path` will then be routed
 waypoint-to-waypoint such that the path starts at `r.p0`, passes through each
-point in `r.waypoints` in order, and then ends at `r.p1`, ignoring `waydirs`. Alternatively,
+point in `r.waypoints` in order, and then ends at `r.p1`. Alternatively,
 `_route!` can be implemented to use `r.waypoints` and/or `r.waydirs` all at once as desired.
 """
 abstract type RouteRule end
@@ -125,7 +125,7 @@ CompoundRouteRule(rules::Vector{RouteRule}) =
     CompoundRouteRule(rules, ones(Int, length(rules)))
 
 """
-    struct Route{T<:RouteRule, S<:Coordinate}
+    mutable struct Route{S<:Coordinate}
     Route(rule, startpoint::Point{S}, endpoint::Point, start_direction, end_direction; waypoints=Point{S}[], waydirs=[])
     Route(rule, path0::Path, endpoint::Point, end_direction)
 
@@ -423,7 +423,7 @@ end
 
 """
     function route!(path::Path{S}, p_end::Point, α_end, rule::RouteRule, sty=Paths.nextstyle(path);
-                    waypoints=Point{S}[], waydirs=Vector{typeof(1.0°)}(undef, length(waypoints)))) where {S}
+                    waypoints=Point{S}[], waydirs=nothing, atol=1e-9 * DeviceLayout.onemicron(S)) where {S}
 
 Extend `path` to `p_end` with arrival angle `α_end` according to `RouteRule`. The default
 implementation is

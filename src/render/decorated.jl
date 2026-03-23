@@ -1,5 +1,5 @@
 """
-    to_polygons(segment::Paths.Segment, sty::Paths.DecoratedStyle; kwargs...)
+    to_polygons(segment::Paths.Segment, sty::Paths.AbstractDecoratedStyle; kwargs...)
 
 Return the polygons of a `segment` with decorated style `s`.
 

@@ -13,7 +13,7 @@ subcomponents.
 
 If a `SchematicGraph` `g` contains a node with a `CompositeComponent`, then the subgraph
 `graph(cc)` will be accessible to inspection tools for `g`. For example, `find_components`
-can return nodes in the subgraph. You can also `flatten!(g)` to simply replace
+can return nodes in the subgraph. You can also `flatten(g)` to simply replace
 `cc`'s node with `graph(cc)`.
 
 The list of subcomponents in the graph can be obtained with `components(cc)` (equivalent to
@@ -31,7 +31,7 @@ A `CompositeComponent` must implement the following specializations:
   - `_build_subcomponents`: Returns a `Tuple` of subcomponents
   - `_graph!(g::SchematicGraph, cc::MyComponent, subcomps::NamedTuple)`: Populates and connects the schematic graph corresponding to `cc`,
     where `subcomps` contains the results of `_build_subcomponents` keyed by name
-  - `map_hooks(::Type{MyComponent})`: A `Dict{Pair{Int, Symbol}, Symbol` mapping subcomponent hooks
+  - `map_hooks(::Type{MyComponent})`: A `Dict{Pair{Int, Symbol}, Symbol}` mapping subcomponent hooks
     to hooks presented by the composite component.
 
 If you define your own abstract composite component subtype, you should define
@@ -93,7 +93,7 @@ function _build_subcomponents end
 function _graph! end
 
 """
-    geometry(cc:AbstractCompositeComponent)
+    geometry(cc::AbstractCompositeComponent)
 
 Return the `CoordinateSystem` resulting from `plan(graph(cc)).coordinate_system`.
 """

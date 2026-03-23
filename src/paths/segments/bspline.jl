@@ -383,10 +383,11 @@ end
 
 """
     bspline!(p::Path{T}, nextpoints, α_end, sty::Style=nextstyle(p);
-        endpoints_speed=2500μm,
+        endpoints_speed=2500.0 * DeviceLayout.onemicron(T),
         endpoints_curvature=nothing,
         auto_speed=false,
-        auto_curvature=false)
+        auto_curvature=false,
+        kwargs...)
 
 Add a BSpline interpolation from the current endpoint of `p` through `nextpoints`.
 

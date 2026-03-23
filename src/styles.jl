@@ -72,7 +72,7 @@ styled(ent, sty) = StyledEntity(ent, sty)
 Return the unstyled entity referenced by `styled_ent`.
 
 If `styled_ent.ent` is itself a `StyledEntity`, apply `unstyled` recursively until
-the original plain `GeometyEntity` is found.
+the original plain `GeometryEntity` is found.
 """
 unstyled(styled_ent::StyledEntity) = unstyled(styled_ent.ent)
 unstyled(ent::GeometryEntity) = ent

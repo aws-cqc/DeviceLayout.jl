@@ -1034,10 +1034,8 @@ end
         high_order_optimize::Int = 1
         surface_mesh_algorithm::Int = 6
         volume_mesh_algorithm::Int = 1
-        options::Dict{String, Float64} = Dict{String, Float64}()
+        options::Dict{String, Union{String, Float64}} = Dict{String, Union{String, Float64}}()
     end
-
-α
 
 !!! warning "Deprecated"
 
@@ -1063,7 +1061,7 @@ fields throughout the domain.
     any sized entities, as opposed to only along the perimeter of the entity if
     `apply_size_to_surfaces=false`. Setting `apply_size_to_surfaces=true` will result in a
     larger number of elements.
-  - `high_order_optimize=0` flag to pass to gmsh if optimization of a higher order mesh is
+  - `high_order_optimize=1` flag to pass to gmsh if optimization of a higher order mesh is
     to be performed. (0: none, 1: optimization, 2: elastic+optimization, 3: elastic, 4: fast
     curving). Refer to the gmsh documentation for more details.
   - `surface_mesh_algorithm` specifies the algorithm gmsh should use when performing the

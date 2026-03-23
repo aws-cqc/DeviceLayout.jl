@@ -135,7 +135,7 @@ Synonyms are accepted for these keywords:
   - Row vector: `:deltarow`, `:drow`, `:dr`, `:vrow`, `:rv`, `:rowvec`,
     `:rowvector`
   - Number of columns: `:nc`, `:numcols`, `:numcol`, `:ncols`, `:ncol`, `:col`
-  - Number of rows: `:nr`, `:numrows`, `:numrow`, `:nrows`, `:nrow`, `:col`
+  - Number of rows: `:nr`, `:numrows`, `:numrow`, `:nrows`, `:nrow`, `:row`
   - X-reflection: `:xrefl`, `:xreflection`, `:refl`, `:reflect`, `:xreflect`,
     `:xmirror`, `:mirror`
   - Magnification: `:mag`, `:magnification`, `:magnify`, `:zoom`, `:scale`
@@ -505,8 +505,8 @@ aref(x::GeometryStructure{S}, f::Transformation; kwargs...) where {S} = aref(
 """
     aref(x, c::AbstractRange, r::AbstractRange; kwargs...)
 
-Construct an `ArrayReference` based on ranges (probably `LinSpace` or
-`FloatRange`). `c` specifies column coordinates and `r` for the rows. Pairs from
+Construct an `ArrayReference` based on ranges (probably `LinRange` or
+`StepRangeLen`). `c` specifies column coordinates and `r` for the rows. Pairs from
 `c` and `r` specify the origins of the repeated cells. The extrema of the ranges
 therefore do not specify the extrema of the resulting `ArrayReference`'s bounding box;
 some care is required.

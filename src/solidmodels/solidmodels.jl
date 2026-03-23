@@ -124,8 +124,9 @@ end
     struct SolidModel{T} where {T <: SolidModelKernel}
         name::String
         groups::NTuple{4,Dict{String,AbstractPhysicalGroup}}
+        kernel::T
     end
-    SolidModel(name::String, kernel=OpenCascade; overwrite=false)
+    SolidModel(name::String, kernel::SolidModelKernel=OpenCascade(); overwrite=false)
 
 A 3D geometry model.
 
@@ -261,7 +262,7 @@ _synchronize!(sm::SolidModel) = kernel(sm).synchronize()
 """
     dimgroupdict(sm::SolidModel, dim::Int)
 
-The `PhysicalGroup`s of dimension `dim` in `sm`, as a `DimGroupDict` (alias for `Dict{String, PhysicalGroup}`).
+The `PhysicalGroup`s of dimension `dim` in `sm`, as a `DimGroupDict` (alias for `Dict{String, AbstractPhysicalGroup}`).
 """
 dimgroupdict(sm::SolidModel, dim::Integer) = sm.groups[dim + 1]
 

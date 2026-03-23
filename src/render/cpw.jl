@@ -2,7 +2,7 @@ import Interpolations: hessian
 import ForwardDiff: derivative
 
 """
-    cpw_points(f, s::Paths.CPW)
+    cpw_points(f, s, scaler=identity)
 
 Return an anonymous function of `(t, sgn1, sgn2)` that returns points in the cross-section
 of the CPW defined by curve `f` and style `s`. `sgn1` and `sgn2` must be 1 or -1 and

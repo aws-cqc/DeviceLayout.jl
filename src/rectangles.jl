@@ -19,8 +19,8 @@ export isproper
         ur::Point{T}
         function Rectangle(a,b)
             # Ensure ll is lower-left, ur is upper-right.
-            ll = Point(a.<=b) .* a + Point(b.<=a) .* b
-            ur = Point(a.<=b) .* b + Point(b.<=a) .* a
+            ll = Point(a.<b) .* a + Point(b.<a) .* b
+            ur = Point(a.<b) .* b + Point(b.<a) .* a
             new(ll,ur)
         end
     end

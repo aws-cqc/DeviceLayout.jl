@@ -16,7 +16,7 @@ Used internally during SolidModel rendering. Not fully featured for general use 
 abstract type OffsetSegment{T, S <: Segment{T}} <: ContinuousSegment{T} end
 
 """
-    struct ConstantOffset{T,S} <: OffsetSegment{T,S}
+    mutable struct ConstantOffset{T,S} <: OffsetSegment{T,S}
 """
 mutable struct ConstantOffset{T, S} <: OffsetSegment{T, S}
     seg::S
@@ -24,7 +24,7 @@ mutable struct ConstantOffset{T, S} <: OffsetSegment{T, S}
 end
 
 """
-    struct GeneralOffset{T,S} <: OffsetSegment{T,S}
+    mutable struct GeneralOffset{T,S} <: OffsetSegment{T,S}
 """
 mutable struct GeneralOffset{T, S} <: OffsetSegment{T, S}
     seg::S

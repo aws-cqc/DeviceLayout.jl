@@ -1,9 +1,9 @@
 abstract type AbstractDecoratedStyle <: ContinuousStyle{false} end
 
 """
-    mutable struct DecoratedStyle{T<:FloatCoordinate} <: ContinuousStyle{false}
+    mutable struct DecoratedStyle{T<:FloatCoordinate} <: AbstractDecoratedStyle
         s::Style
-        ts::Vector{Float64}
+        ts::Vector{T}
         dirs::Vector{Int}
         refs::Vector{GeometryReference}
     end
@@ -235,7 +235,7 @@ function change_handedness!(s::DecoratedStyle)
 end
 
 """
-    mutable struct OverlayStyle{T<:FloatCoordinate} <: AbstractDecoratedStyle
+    mutable struct OverlayStyle <: AbstractDecoratedStyle
         s::Style
         overlay::Vector{Style}
         overlay_metadata::Vector{DeviceLayout.Meta}
