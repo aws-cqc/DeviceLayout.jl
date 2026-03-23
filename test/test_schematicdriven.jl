@@ -1195,4 +1195,35 @@
             )
         )
     end
+
+    @testset "Issue #20: dependent @compdef defaults" begin
+        # Non-parametric path: defaults that reference earlier parameters
+        @compdef struct DepDefaultsComp <: Component
+            a::Int = 10
+            b::Int = 2 * a
+            c::Int = a + b
+        end
+
+        # default_parameters should evaluate without error and propagate values
+        dp = default_parameters(DepDefaultsComp)
+        @test dp.a == 10
+        @test dp.b == 20       # 2 * 10
+        @test dp.c == 30       # 10 + 20
+
+        # Constructor should still work (it always did via kwarg scoping)
+        comp = DepDefaultsComp()
+        @test comp.a == 10
+        @test comp.b == 20
+        @test comp.c == 30
+
+        # Parametric path: defaults that reference earlier parameters
+        @compdef struct DepDefaultsParam{T} <: AbstractComponent{T}
+            x::Int = 3
+            y::Int = x^2
+        end
+
+        dp2 = default_parameters(DepDefaultsParam{typeof(1.0nm)})
+        @test dp2.x == 3
+        @test dp2.y == 9       # 3^2
+    end
 end
