@@ -23,6 +23,18 @@ using TestItemRunner
     import Unitful: pm, nm, μm, mm, cm, m
 
     p(x, y) = Point(x, y)
+
+    """
+        is_sliver(p::Polygon{T}; atol=DeviceLayout.onenanometer(T))
+
+    Return `true` if `2 * area(p) / perimeter(p) < atol`, and `false` otherwise.
+
+    In other words, if `p` has an "average width" less than `atol`, it is counted as a sliver.
+    """
+    function is_sliver(p::Polygon{T}; atol=DeviceLayout.onenanometer(T)) where {T}
+        return 2 * Polygons.area(p) / Polygons.perimeter(p) < atol
+    end
+
     const tdir = mktempdir()
 
     # G1 continuity check: verify no angle jump exceeds the discretization step
