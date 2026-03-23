@@ -4,6 +4,26 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## 1.11.0 (2026-03-23)
+
+This release adds line-arc corner rounding and improves SolidModel robustness:
+
+  - Added support for rounding line-arc corners in `CurvilinearPolygon` and the SolidModel rendering pipeline, extending the `Rounded` style which previously only handled straight-straight corners
+  - Changed SolidModel fragment recipe to fragment adjacent dimensions pairwise, fixing `PLC Error` failures when meshing geometries with extrusions at multiple height levels
+  - Added `hash` and `==` for `Straight` and `Turn` path segments; also fixed `BSpline` hash and equality to give consistent results for equivalent segments with different `Unitful` unit choices
+  - Improved `plan` performance by caching `hooks` results per component, avoiding redundant recomputation
+
+Several bugs have also been fixed:
+
+  - Fixed `render!` overwriting user-provided path metadata with default `GDSMeta()` when rendering a `Path` to `Cell`
+  - Fixed `show` for empty `Cell`
+  - Fixed `extent` calculation for `SimpleStrands` with more than one strand
+  - Fixed error computing halo of a taper with inner delta
+  - Fixed operator precedence in 45-degree routing double turn check
+  - Fixed `CompoundRouteRule` default `leg_lengths` type (`Vector{Int}` instead of `Vector{Float64}`)
+  - Fixed `route!` with `CompoundRouteRule` using wrong length for default style vector
+  - Fixed `direction` for zero-angle `Turn` to avoid division by zero
+
 ## 1.10.0 (2026-03-04)
 
 This release includes several new features and fixes involving Path styles:
