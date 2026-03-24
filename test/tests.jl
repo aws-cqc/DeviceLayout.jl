@@ -511,32 +511,24 @@ end
         @test typeof(Path(Point(0, 0))) == Path{Float64}
         @test α0(Path()) == 0.0° == 0.0 == 0.0rad
 
-        @test typeof(Path(0.0μm, 0.0μm)) == Path{typeof(1.0μm)}
-        @test typeof(Path(0.0μm2μm, 0.0μm2μm)) == Path{typeof(1.0μm2μm)}
-        @test typeof(Path(0.0μm2μm, 0.0nm2μm)) == Path{typeof(1.0μm2μm)}
-        @test typeof(Path(0.0μm2nm, 0.0μm2nm)) == Path{typeof(1.0μm2nm)}
-        @test typeof(Path(0.0μm2nm, 0.0nm2nm)) == Path{typeof(1.0nm2nm)}
-        @test typeof(Path(0μm, 0μm)) == Path{typeof(1.0μm)}
-        @test typeof(Path(0μm2μm, 0μm2μm)) == Path{typeof(1.0μm2μm)}
-        @test typeof(Path(0μm2μm, 0nm2μm)) == Path{typeof(1.0μm2μm)}
-        @test typeof(Path(0μm2nm, 0μm2nm)) == Path{typeof(1.0μm2nm)}
-        @test typeof(Path(0μm2nm, 0nm2nm)) == Path{typeof(1.0nm2nm)}
-
-        @test typeof(Path(Point(0.0μm, 0.0μm))) == Path{typeof(1.0μm)}
-        @test typeof(Path(Point(0.0μm2μm, 0.0μm2μm))) == Path{typeof(1.0μm2μm)}
-        @test typeof(Path(Point(0.0μm2μm, 0.0nm2μm))) == Path{typeof(1.0μm2μm)}
-        @test typeof(Path(Point(0.0μm2nm, 0.0μm2nm))) == Path{typeof(1.0μm2nm)}
-        @test typeof(Path(Point(0.0μm2nm, 0.0nm2nm))) == Path{typeof(1.0nm2nm)}
-        @test typeof(Path(Point(0μm, 0μm))) == Path{typeof(1.0μm)}
-        @test typeof(Path(Point(0μm2μm, 0μm2μm))) == Path{typeof(1.0μm2μm)}
-        @test typeof(Path(Point(0μm2μm, 0nm2μm))) == Path{typeof(1.0μm2μm)}
-        @test typeof(Path(Point(0μm2nm, 0μm2nm))) == Path{typeof(1.0μm2nm)}
-        @test typeof(Path(Point(0μm2nm, 0nm2nm))) == Path{typeof(1.0nm2nm)}
+        # FreeUnits (plain Unitful) normalize to preferred type (#93)
+        up = DeviceLayout.UPREFERRED
+        @test typeof(Path(0.0μm, 0.0μm)) == Path{typeof(1.0up)}
+        @test typeof(Path(0.0mm, 0.0mm)) == Path{typeof(1.0up)}
+        # ContextUnits preserve their preferred context
+        @test typeof(Path(0.0μm2μm, 0.0μm2μm)) == Path{typeof(1.0up)}
+        @test typeof(Path(0.0μm2μm, 0.0nm2μm)) == Path{typeof(1.0up)}
+        # Unit constructor preserves explicit unit choice (matches Cell("name", μm))
+        @test typeof(Path(μm)) == Path{typeof(1.0μm)}
+        @test typeof(Path(μm2nm, Point(0.0nm2nm, 0.0nm2nm))) == Path{typeof(1.0μm2nm)}
+        @test typeof(Path(μm2nm, Point(0, 0)μm2μm)) == Path{typeof(1.0μm2nm)}
+        @test typeof(Path(μm, Point(0, 0)μm2μm)) == Path{typeof(1.0μm)}
 
         @test α0(Path(Point(0.0μm, 0.0μm); α0=90°)) == 90.0° == π * rad / 2 == π / 2
         @test α0(Path(Point(0.0μm, 0.0μm); α0=π / 2)) == 90.0° == π * rad / 2 == π / 2
 
-        @test typeof(Path(μm)) == Path{typeof(1.0μm)}
+        # Coordinate values preserved after normalization
+        @test getx(Path(1.0mm, 2.0mm).p0) ≈ 1.0mm
 
         @test_throws DimensionError Path(0, 0μm)
         @test_throws DimensionError Path(0nm, 0)
@@ -684,8 +676,8 @@ end
         splice!(pa, 1, split(pa[1], π / 4 * 10μm))
         splice!(pa, 3, split(pa[3], π / 4 * 10μm))
 
-        @test (α1(pa[2].seg) == π / 2) && (α1(pa[1].seg) == α0(pa[2].seg))
-        @test (α1(pa[4].seg) == 0) && (α1(pa[3].seg) == α0(pa[4].seg))
+        @test (α1(pa[2].seg) ≈ π / 2) && (α1(pa[1].seg) ≈ α0(pa[2].seg))
+        @test (α1(pa[4].seg) ≈ 0) && (α1(pa[3].seg) ≈ α0(pa[4].seg))
 
         # Splitting bsplines near endpoints (MR !198)
         pa = Path(0μm, 0μm)
