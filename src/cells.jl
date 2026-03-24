@@ -4,6 +4,8 @@ using Dates
 using Unitful
 import Unitful: Length
 
+using SHA
+
 import ..Texts
 
 import DeviceLayout
@@ -20,11 +22,20 @@ import DeviceLayout:
     Transformations,
     UPREFERRED
 import DeviceLayout:
-    aref, sref, gdslayer, layer, nm, elements, element_metadata, refs, render!
+    aref, sref, gdslayer, layer, μm, nm, elements, element_metadata, refs, render!
 import DeviceLayout: flatten, flatten!, order!, traverse!, uniquename # to re-export
 
 export Cell, CellArray, CellReference
-export cell, dbscale, layers, gdslayers, flatten, flatten!, order!, traverse!, uniquename
+export cell,
+    dbscale,
+    layers,
+    gdslayers,
+    geometry_fingerprint,
+    flatten,
+    flatten!,
+    order!,
+    traverse!,
+    uniquename
 
 # Avoid circular definitions
 abstract type AbstractCell{S} <: AbstractCoordinateSystem{S} end
@@ -310,5 +321,62 @@ function text!(c::Cell{S}, texts::Vector{Texts.Text{S}}, meta::Vector{GDSMeta}) 
 end
 
 Base.isempty(c::Cell) = isempty(elements(c)) && isempty(refs(c)) && isempty(c.texts)
+
+p2p(x::Length, dbs) = convert(Int, round(convert(Float64, x / dbs)))
+p2p(x::Real, dbs) = p2p(x * 1μm, dbs)
+
+"""
+    geometry_fingerprint(cell::Cell) -> String
+
+Deterministic SHA-256 of a Cell's geometry. Normalizes by flattening all
+references, sorting elements by (layer, datatype, vertices), and hashing
+the canonical byte representation of polygons and their metadata.
+
+Coordinates are converted to Int32 in the cell's database unit. Polygons
+vertices are `circshift`ed to start with the lowest of leftmost points.
+Texts are included in the hash, but only their string, origin, and metadata
+are hashed, not their other attributes.
+"""
+function geometry_fingerprint(c::Cell)
+    flat = flatten(c)
+    dbs = dbscale(c)
+    # Polygons: (layer, datatype, [(x,y)...])
+    polys = map(zip(element_metadata(flat), elements(flat))) do (meta, poly)
+        coords = [Point(Int32(p2p(p.x, dbs)), Int32(p2p(p.y, dbs))) for p in poly.p]
+        return (
+            Int32(meta.layer),
+            Int32(meta.datatype),
+            circshift(coords, 1 - argmin(coords))
+        )
+    end
+    sort!(polys)
+
+    ctx = SHA256_CTX()
+
+    # Hash polygons
+    for (layer, dt, coords) in polys
+        update!(ctx, reinterpret(UInt8, [layer, dt]))
+        update!(ctx, reinterpret(UInt8, [Int32(length(coords))]))
+        update!(ctx, reinterpret(UInt8, coords))
+    end
+
+    # Hash texts (labels/ports can change too), only worry about origin and string
+    texts_data = map(zip(flat.text_metadata, flat.texts)) do (m, t)
+        return (
+            Int32(m.layer),
+            Int32(m.datatype),
+            [Int32(p2p(t.origin.x, dbs)), Int32(p2p(t.origin.y, dbs))],
+            t.text
+        )
+    end
+    sort!(texts_data)
+    for (layer, dt, og, s) in texts_data
+        update!(ctx, reinterpret(UInt8, [layer, dt]))
+        update!(ctx, reinterpret(UInt8, og))
+        update!(ctx, Vector{UInt8}(s))
+    end
+
+    return bytes2hex(digest!(ctx))
+end
 
 end # module
