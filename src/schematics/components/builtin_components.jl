@@ -189,7 +189,7 @@ geometry(c::BasicComponent) = c.geometry
 A simple `AbstractCompositeComponent` that acts as a lightweight wrapper for a `SchematicGraph`.
 
 The component `scc = BasicCompositeComponent(g::SchematicGraph)` copies `g` and generates
-its geometry as `plan(g)`.
+its geometry as `plan(g).coordinate_system`.
 
 `hooks(scc)` returns a `NamedTuple` with the hook `h` of the `i`th subcomponent as `_i_h`.
 

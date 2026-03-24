@@ -185,7 +185,7 @@ Usage:
   - `fuse!(g, node1=>:hook1, node2=>:hook2)`
   - `fuse!(g, idx1=>:hook1, idx2=>:hook2)`
   - `fuse!(g, node1=>:hook1, comp2=>:hook2)`
-  - `fuse!(g, node1=>:hook1, comp2=>:hook2; PLAN_SKIPS_EDGE=>true)`
+  - `fuse!(g, node1=>:hook1, comp2=>:hook2; plan_skips_edge=true)`
 
 Add an edge `(node1, node2)` connecting their hooks `(:hook1, :hook2)` to `g`.
 
@@ -209,7 +209,7 @@ additional offset, consider using the [`Spacer`](@ref) component.
 
 Cycles:
 Sometimes we need to avoid adding edges in the graph to avoid cycles that'd force the
-`plan` function to throw an error. Solution: Pass `PLAN_SKIPS_EDGE=>true` (see usage example above).
+`plan` function to throw an error. Solution: Pass a keyword argument `plan_skips_edge=true`.
 This allows us to encode all the edges in the graph, while informing the `plan` function
 that the edge should be skipped for rendering purposes.
 """

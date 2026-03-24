@@ -38,7 +38,7 @@ Combines styles together, typically for use with a [`CompoundSegment`](@ref).
   - `styles`: Array of styles making up the object. This is deep-copied by the outer
     constructor.
   - `grid`: An array of `t` values needed for rendering the parametric path.
-  - `tag`: A `Symbol` used to identify the compound style.
+  - `tag`: A `Symbol` used to identify the compound style with a matching compound segment.
 """
 struct CompoundStyle{T <: FloatCoordinate} <: AbstractCompoundStyle
     styles::Vector{Style}
