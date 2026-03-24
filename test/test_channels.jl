@@ -219,6 +219,56 @@
     @test p1(resolved.segments[1]) == Point(2, 4)
     @test p1(resolved.segments[2]) == Point(3, 9)
 
+    ## reverse(::OffsetSegment) tests
+    @testset "reverse ConstantOffset" begin
+        seg = Paths.Straight(10.0μm)
+        offset_seg = Paths.offset(seg, 2.0μm)
+        rev = reverse(offset_seg)
+        # Type preserved
+        @test typeof(rev) === typeof(offset_seg)
+        # Pathlength preserved
+        @test pathlength(rev) ≈ pathlength(offset_seg)
+        # Offset negated
+        @test Paths.getoffset(rev) ≈ -2.0μm
+        # Endpoints swapped: p0 of reversed ≈ p1 of original
+        @test p0(rev) ≈ p1(offset_seg) atol = 0.01nm
+        @test p1(rev) ≈ p0(offset_seg) atol = 0.01nm
+        # Round-trip: reverse(reverse(seg)) ≈ original
+        roundtrip = reverse(rev)
+        @test p0(roundtrip) ≈ p0(offset_seg) atol = 0.01nm
+        @test p1(roundtrip) ≈ p1(offset_seg) atol = 0.01nm
+        @test Paths.getoffset(roundtrip) ≈ 2.0μm
+    end
+
+    @testset "reverse ConstantOffset Turn" begin
+        seg = Paths.Turn(90°, 50.0μm)
+        offset_seg = Paths.offset(seg, 5.0μm)
+        rev = reverse(offset_seg)
+        @test typeof(rev) === typeof(offset_seg)
+        @test pathlength(rev) ≈ pathlength(offset_seg)
+        @test Paths.getoffset(rev) ≈ -5.0μm
+        @test p0(rev) ≈ p1(offset_seg) atol = 0.01nm
+        @test p1(rev) ≈ p0(offset_seg) atol = 0.01nm
+    end
+
+    @testset "reverse GeneralOffset" begin
+        seg = Paths.Turn(90°, 50.0μm)
+        l = pathlength(seg)
+        offset_fn = t -> t / 10  # linear offset: 0 at start, 1μm at end
+        offset_seg = Paths.offset(seg, offset_fn)
+        rev = reverse(offset_seg)
+        # Type preserved
+        @test typeof(rev) === typeof(offset_seg)
+        # Pathlength preserved
+        @test pathlength(rev) ≈ pathlength(offset_seg)
+        # Offset function is remapped: at t=0 of reversed, should get negated original end value
+        @test Paths.getoffset(rev, 0.0μm) ≈ -Paths.getoffset(offset_seg, l) atol = 0.001nm
+        @test Paths.getoffset(rev, l) ≈ -Paths.getoffset(offset_seg, 0.0μm) atol = 0.001nm
+        # Endpoints swapped
+        @test p0(rev) ≈ p1(offset_seg) atol = 0.1nm
+        @test p1(rev) ≈ p0(offset_seg) atol = 0.1nm
+    end
+
     ## Schematic-level routing
     test_schematic_single_channel()
 end

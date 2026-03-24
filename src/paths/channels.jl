@@ -129,6 +129,16 @@ reverse(s::GeneralCPW, l) = GeneralCPW(t -> trace(s, l - t), t -> gap(s, l - t))
 # For compound segments, reverse the individual sections and reverse their order
 # Keep the same tag so if a compound segment/style pair matched before they will still match
 reverse(s::CompoundSegment) = CompoundSegment(reverse(reverse.(s.segments)), s.tag)
+# Offset segments: reverse the underlying segment and negate the offset.
+# Reversal flips tangent direction → flips normal → offset sign must flip.
+# (Same reason change_handedness! negates offset in offset.jl.)
+function reverse(s::ConstantOffset{T, S}) where {T, S}
+    return ConstantOffset{T, S}(reverse(s.seg), -s.offset)
+end
+function reverse(s::GeneralOffset{T, S}) where {T, S}
+    l = pathlength(s.seg)
+    return GeneralOffset{T, S}(reverse(s.seg), t -> -s.offset(l - t))
+end
 function reverse(s::CompoundStyle{T}, l) where {T}
     lengths = diff(s.grid)
     return CompoundStyle{T}(
