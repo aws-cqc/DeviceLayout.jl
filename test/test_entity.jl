@@ -111,8 +111,6 @@
         @test Paths.style(elements(cs)[3]).length == 100μm # Make sure taper got reconciled
         flathalo = halo(elements(cs), 2μm)
         @test eltype(flathalo) <: Paths.Node
-        @show Paths.style.(elements(halopath))
-        @show Paths.style.(flathalo)
         @test all(
             Paths.width.(Paths.style.(elements(halopath)), 0nm) .≈
             Paths.width.(Paths.style.(flathalo), 0nm)
