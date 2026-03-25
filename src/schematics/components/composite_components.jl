@@ -105,6 +105,7 @@ function schematic(cc::AbstractCompositeComponent)
     !isempty(cc._schematic.ref_dict) && return cc._schematic
     floorplan = plan(
         graph(cc);
+        strict=current_logger() isa SchematicLogger ? :no : :error,
         log_dir=nothing,
         id_prefix=(cc._schematic.coordinate_system.name * COMPOSITE_NODE_ID_SEPARATOR)
     )
