@@ -230,10 +230,16 @@ function intersect_pairwise!(
         rotated_direction(direction(pa1[node1_idx].seg, s1), a1)
     sin(dα) == 0 && error("Colinear paths")
 
-    # Find extent of crossing
+    # Find extent of crossing along pa2's axis (for splicing pa2)
     extent_1 =
         (Paths.extent(pa1[node1_idx].sty, s1) + crossing_gap(xsty)) / abs(sin(dα)) +
         Paths.extent(pa2[node2_idx].sty, s2) * abs(cot(dα))
+    # Find extent of crossing along pa1's axis (for clearing pa1's decorations).
+    # This is the symmetric projection: pa2's extent across pa1, plus pa1's own
+    # contribution along its axis from the oblique crossing angle.
+    extent_along_pa1 =
+        (Paths.extent(pa2[node2_idx].sty, s2) + crossing_gap(xsty)) / abs(sin(dα)) +
+        Paths.extent(pa1[node1_idx].sty, s1) * abs(cot(dα))
 
     # Create crossover section to splice into crossing segment
     x = intersection(xsty, xnode, extent_1, s2)
@@ -250,7 +256,7 @@ function intersect_pairwise!(
     # Clear decorations from the crossed path (pa1) near the crossover point.
     # The crossover replaces a segment of pa2 with a bridge/gap — any decorations
     # on pa1 that fall within the crossing extent would be geometrically occluded.
-    _clear_crossing_decorations!(pa1, node1_idx, s1, extent_1)
+    _clear_crossing_decorations!(pa1, node1_idx, s1, extent_along_pa1)
 
     return nothing
 end
