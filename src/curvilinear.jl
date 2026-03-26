@@ -182,10 +182,12 @@ CurvilinearRegion(points::Vector{Point{T}}, curves, curve_start_idx) where {T} =
     CurvilinearRegion(CurvilinearPolygon(points, curves, curve_start_idx))
 
 to_polygons(e::CurvilinearRegion{T}; kwargs...) where {T} =
-    difference2d(to_polygons(e.exterior), to_polygons.(e.holes))
-to_polygons(e::CurvilinearRegion, sty::Polygons.Rounded; kwargs...) = difference2d(
-    to_polygons(e.exterior, sty; kwargs...),
-    [to_polygons(h, sty; kwargs...) for h in e.holes]
+    to_polygons(difference2d(to_polygons(e.exterior), to_polygons.(e.holes)))
+to_polygons(e::CurvilinearRegion, sty::Polygons.Rounded; kwargs...) = to_polygons(
+    difference2d(
+        to_polygons(e.exterior, sty; kwargs...),
+        [to_polygons(h, sty; kwargs...) for h in e.holes]
+    )
 )
 
 function transform(e::CurvilinearRegion{T}, f::Transformation) where {T}

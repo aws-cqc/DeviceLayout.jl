@@ -15,7 +15,7 @@ DeviceLayout.jl is a [Julia](http://julialang.org) package for computer-aided de
 
 ## Why DeviceLayout.jl?
 
-We develop DeviceLayout.jl to accelerate design cycles as we scale to larger quantum processors and larger teams. Key features include:
+We develop DeviceLayout.jl to accelerate design cycles as projects scale to larger quantum processors and larger teams. Key features include:
 
 - **Rich geometry types** with first-class support for paths
 - **Schematic-driven layout**: Manage complexity by separating component geometry and device connectivity

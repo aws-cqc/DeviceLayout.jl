@@ -259,20 +259,9 @@
     @test_nowarn place!(cs_region, region, GDSMeta())
     @test_nowarn render!(Cell("region_no_round", nm), cs_region)
 
-    # Apply rounding to region (returns a ClippedPolygon)
-    rounded_region = to_polygons(region, Rounded(fillet_r))
-    region_polys = to_polygons(rounded_region)
+    # Apply rounding to region
+    region_polys = to_polygons(region, Rounded(fillet_r))
     @test length(region_polys) > 0
-
-    # Renders after rounding
-    @test_nowarn render!(
-        Cell("region_rounded", nm),
-        let
-            cs = CoordinateSystem("rr", nm)
-            place!(cs, rounded_region, GDSMeta())
-            cs
-        end
-    )
 
     # SolidModel segment version: rounded_corner_segment_line_arc
     # Verify that the Turn-returning variant produces tangent points and

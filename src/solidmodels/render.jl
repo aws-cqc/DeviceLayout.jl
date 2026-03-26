@@ -74,25 +74,25 @@ function to_primitives(
     ent::StyledEntity{T, ClippedPolygon{T}, <:StyleDict};
     kwargs...
 ) where {T}
+    return to_curvilinear_regions(ent.ent, ent.sty; kwargs...)
+end
+
+function to_curvilinear_regions(ent::ClippedPolygon{T}, sty::StyleDict; kwargs...) where {T}
     # Flatten the tree into a collection of CurvilinearRegion with style applied to subpolygons.
     flat = CurvilinearRegion{T}[]
     function add_region(node)
         push!(
             flat,
             CurvilinearRegion{T}(
-                styled_loop(node, ent.sty[node]; kwargs...),
-                styled_loop.(
-                    node.children,
-                    getindex.(Ref(ent.sty), node.children);
-                    kwargs...
-                )
+                styled_loop(node, sty[node]; kwargs...),
+                styled_loop.(node.children, getindex.(Ref(sty), node.children); kwargs...)
             )
         )
         for n ∈ node.children
             add_region.(n.children) # Add all grand children -- positives
         end
     end
-    add_region.(ent.ent.tree.children)
+    add_region.(ent.tree.children)
     return flat
 end
 
@@ -600,10 +600,37 @@ styled_loop(::CurvilinearPolygon{T}, ::NoRender; kwargs...) where {T} =
 function to_polygons(
     ent::StyledEntity{T, U, V},
     sty::Rounded{S};
-    atol=DeviceLayout.Polygons._round_atol(S, T),
     kwargs...
-) where {S, T, U, V <: Rounded}
-    return to_polygons(styled_loop(ent.ent, ent.sty), sty; atol, kwargs...)
+) where {S, T, U, V}
+    inner_roundable = to_roundable(ent.ent, ent.sty; kwargs...)
+    if inner_roundable isa Vector
+        return vcat(to_polygons.(inner_roundable, Ref(sty); kwargs...)...)
+    end
+    return to_polygons(sty(inner_roundable); kwargs...)
+end
+
+# To AbstractPolygon, CurvilinearPolygon, CurvilinearRegion, or vector of those
+to_roundable(ent::GeometryEntity, sty; kwargs...) = to_polygons(ent, sty; kwargs...)
+function to_roundable(ent::StyledEntity, sty; kwargs...)
+    return to_roundable(to_roundable(ent.ent, ent.sty), sty; kwargs...)
+end
+to_roundable(ents::AbstractVector, sty; kwargs...) =
+    vcat(to_roundable.(ents, Ref(sty); kwargs...)...)
+to_roundable(ent::AbstractPolygon, sty; kwargs...) =
+    styled_loop(convert(Polygon, ent), sty; kwargs...)
+to_roundable(ent::CurvilinearPolygon, sty; kwargs...) = styled_loop(ent, sty; kwargs...)
+to_roundable(ent::ClippedPolygon, sty; kwargs...) =
+    to_roundable(ent, StyleDict(sty); kwargs...)
+to_roundable(ent::CurvilinearRegion, sty; kwargs...) =
+    to_roundable(ent, StyleDict(sty); kwargs...)
+function to_roundable(ent::ClippedPolygon, sty::StyleDict; kwargs...)
+    return to_curvilinear_regions(ent, sty; kwargs...)
+end
+function to_roundable(ent::CurvilinearRegion{T}, sty::StyleDict; kwargs...) where {T}
+    return CurvilinearRegion{T}(
+        styled_loop(ent.exterior, sty[1]; kwargs...),
+        styled_loop.(ent.holes, getindex.(sty, 1, 1:length(ent.holes)); kwargs...)
+    )
 end
 
 ######## Ellipse

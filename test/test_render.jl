@@ -1072,3 +1072,19 @@ end
         @test all(m -> m == GDSMeta(7, 1), c.element_metadata)
     end
 end
+
+@testitem "Rounding on StyledEntity" setup = [CommonTestSetup] begin
+    # Line-arc rounding should still happen
+    rnd1 = Rounded(1mm, p0=[Point(0, 0)mm, Point(5, 0)mm], selection_tolerance=1nm)
+    rnd2 = Rounded(0.1mm)
+    rect = Rectangle(1.0mm, 1.0mm)
+    poly = to_polygons(rect) + Point(5mm, 0mm)
+    clipped_poly = union2d(rect, poly) # multiple disjoint shapes
+    res_rect = to_polygons(rnd2(rnd1(DeviceLayout.Plain(rect))))
+    res_poly = to_polygons(rnd2(rnd1(DeviceLayout.Plain(poly))))
+    res_clipped_poly = to_polygons(rnd2(rnd1(DeviceLayout.Plain(clipped_poly))))
+    @test minimum(getx.(points(res_rect))) > 0mm # Bottom line-arc corner was rounded
+    @test minimum(getx.(points(res_poly))) > 0mm # Bottom line-arc corner was rounded
+    @test res_poly ≈ res_rect + Point(5mm, 0mm)
+    @test isempty(to_polygons(xor2d(res_clipped_poly, [res_rect, res_poly])))
+end
