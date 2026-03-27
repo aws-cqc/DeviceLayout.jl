@@ -492,8 +492,8 @@ Path{T}(p0::Point=zero(Point{T}), α0=0.0°, meta::Meta=UNDEF_META) where {T} =
 
 # Return "preferred" path length coordinate type
 # for consistency with non-explicit unit choice
-_to_preferred(::Length) = typeof(1.0UPREFERRED)
-_to_preferred(T) = Float64
+_to_preferred(x::Length) = 1.0UPREFERRED isa Length ? typeof(1.0UPREFERRED) : typeof(x)
+_to_preferred(_) = Float64
 
 function Path(
     p0::Point{T}=zero(Point{typeof(1.0UPREFERRED)});
