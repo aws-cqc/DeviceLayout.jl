@@ -13,6 +13,10 @@ This generates a `default_parameters` method for the defined type, which returns
 default parameters as a `NamedTuple`. If any parameters are required (have no default),
 they do not appear in `default_parameters`.
 
+Parameter defaults may reference earlier parameters with defaults (evaluated in
+declaration order). Use this only for simple derived defaults that may be overridden.
+To enforce invariants, use an inner constructor.
+
 The new type will also have a `_geometry` field for caching geometry, or `_graph`,
 `_schematic`, and `_hooks` fields for composite components. If there is no `name`
 field, one will automatically be created with a default name of the type name
