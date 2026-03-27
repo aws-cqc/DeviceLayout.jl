@@ -74,4 +74,11 @@ end
     @test length(SolidModels.dimtags(sm["port_1", 2])) == 1
     @test length(SolidModels.dimtags(sm["port_2", 2])) == 1
     @test length(SolidModels.dimtags(sm["lumped_element", 2])) == 1
+    metal_conn_comps = SolidModels.connected_components(sm, "metal")
+    active_conn_comps = SolidModels.connected_components(
+        sm,
+        ["metal", "lumped_element", "port_1", "port_2"]
+    )
+    @test length(metal_conn_comps) == 3  # Ground, island, transmission line
+    @test length(active_conn_comps) == 1 # Ports and lumped elements connect metal components
 end
