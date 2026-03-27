@@ -82,11 +82,11 @@ function circular_arc(
 ) where {T <: Coordinate}
     θ1, θ2 = θ
     θ1, θ2 = mod2pi(θ1), mod2pi(θ2) # limits to [0, 2π)
-    arc = if θ1 < θ2 && (θ2 - θ1 <= π)
+    arc = if θ1 <= θ2 && (θ2 - θ1 <= π)
         circular_arc(θ2, r, tolerance; θ_0=θ1, center=center)
     elseif θ1 > θ2 && (θ1 - θ2 < π)
         reverse(circular_arc(θ1, r, tolerance; θ_0=θ2, center=center))
-    elseif θ1 < θ2 && (θ2 - θ1 > π)
+    elseif θ1 <= θ2 && (θ2 - θ1 > π)
         reverse(circular_arc(θ1, r, tolerance; θ_0=θ2 - 2π, center=center))
     elseif θ1 > θ2 && (θ1 - θ2 >= π)
         circular_arc(θ2, r, tolerance; θ_0=θ1 - 2π, center=center)

@@ -505,6 +505,15 @@
     @test length(rel_cp.curves) > length(cp.curves)
     # Discretizes without error
     @test length(points(to_polygons(rel_cp))) > 30
+
+    # Relative rounding via to_polygons(CurvilinearPolygon, Rounded) — discretization path
+    # RelativeRounded produces a dimensionless radius; to_polygons must convert per-corner.
+    rel_rounded = to_polygons(cp, RelativeRounded(0.15))
+    @test length(points(rel_rounded)) > 30
+
+    # Relative result should differ from absolute (different radius semantics)
+    @test length(points(rel_rounded)) != length(rounded_pts) ||
+          !isapprox(points(rel_rounded)[1], rounded_pts[1]; atol=0.1nm)
 end
 
 @testitem "Horseshoe landing pad rounding" setup = [CommonTestSetup] begin
