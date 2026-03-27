@@ -230,10 +230,16 @@ function intersect_pairwise!(
         rotated_direction(direction(pa1[node1_idx].seg, s1), a1)
     sin(dα) == 0 && error("Colinear paths")
 
-    # Find extent of crossing
+    # Find extent of crossing along pa2's axis (for splicing pa2)
     extent_1 =
         (Paths.extent(pa1[node1_idx].sty, s1) + crossing_gap(xsty)) / abs(sin(dα)) +
         Paths.extent(pa2[node2_idx].sty, s2) * abs(cot(dα))
+    # Find extent of crossing along pa1's axis (for clearing pa1's decorations).
+    # This is the symmetric projection: pa2's extent across pa1, plus pa1's own
+    # contribution along its axis from the oblique crossing angle.
+    extent_along_pa1 =
+        (Paths.extent(pa2[node2_idx].sty, s2) + crossing_gap(xsty)) / abs(sin(dα)) +
+        Paths.extent(pa1[node1_idx].sty, s1) * abs(cot(dα))
 
     # Create crossover section to splice into crossing segment
     x = intersection(xsty, xnode, extent_1, s2)
@@ -245,7 +251,14 @@ function intersect_pairwise!(
         split(xnode, [s2 - pathlength(x) / 2, s2 + pathlength(x) / 2])
     )
     # Replace new middle segment with crossover
-    return splice!(xpath, node2_idx + 1, x)
+    splice!(xpath, node2_idx + 1, x)
+
+    # Clear decorations from the crossed path (pa1) near the crossover point.
+    # The crossover replaces a segment of pa2 with a bridge/gap — any decorations
+    # on pa1 that fall within the crossing extent would be geometrically occluded.
+    _clear_crossing_decorations!(pa1, node1_idx, s1, extent_along_pa1)
+
+    return nothing
 end
 
 function intersection(
@@ -392,6 +405,22 @@ function intersection(ab::AirBridge, sty::Paths.Style, crossing_extent)
     )
 
     return cs
+end
+
+"""
+    _clear_crossing_decorations!(pa, node_idx, s, extent)
+
+Remove decorations from `pa[node_idx]` that fall within `[s - extent, s + extent]`.
+"""
+function _clear_crossing_decorations!(pa::Path, node_idx::Int, s, extent)
+    node = pa[node_idx]
+    t_lo = s - extent
+    t_hi = s + extent
+    # Clamp to segment bounds
+    t_lo = max(t_lo, zero(t_lo))
+    t_hi = min(t_hi, pathlength(node.seg))
+    Paths.undecorate_range!(node.sty, t_lo, t_hi)
+    return nothing
 end
 
 end #module
