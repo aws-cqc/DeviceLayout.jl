@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Creating a PDK · DeviceLayout.jl</title><meta name="title" content="Creating a PDK · DeviceLayout.jl"/><meta property="og:title" content="Creating a PDK · DeviceLayout.jl"/><meta property="twitter:title" content="Creating a PDK · DeviceLayout.jl"/><meta name="description" content="Documentation for DeviceLayout.jl."/><meta property="og:description" content="Documentation for DeviceLayout.jl."/><meta property="twitter:description" content="Documentation for DeviceLayout.jl."/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script><link href="../../assets/favicon.ico" rel="icon" type="image/x-icon"/></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">DeviceLayout.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><a class="tocitem" href="../../how_to/get_started/">Getting Started</a></li><li><input class="collapse-toggle" id="menuitem-3" type="checkbox" checked/><label class="tocitem" for="menuitem-3"><span class="docs-label">Tutorials</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../">Overview</a></li><li><a class="tocitem" href="../first_layout/">First Layout</a></li><li><a class="tocitem" href="../working_with_paths/">Working with Paths</a></li><li><a class="tocitem" href="../building_a_component/">Building a Component</a></li><li><a class="tocitem" href="../schematic_basics/">Schematic Basics</a></li><li><a class="tocitem" href="../composite_components/">Composite Components</a></li><li class="is-active"><a class="tocitem" href>Creating a PDK</a><ul class="internal"><li><a class="tocitem" href="#What-You&#39;ll-Learn"><span>What You&#39;ll Learn</span></a></li><li><a class="tocitem" href="#Prerequisites"><span>Prerequisites</span></a></li><li><a class="tocitem" href="#What-is-a-PDK?"><span>What is a PDK?</span></a></li><li><a class="tocitem" href="#Step-1:-Generate-the-PDK-Package"><span>Step 1: Generate the PDK Package</span></a></li><li><a class="tocitem" href="#Step-2:-Define-Your-Layers"><span>Step 2: Define Your Layers</span></a></li><li><a class="tocitem" href="#Step-3:-Configure-the-Process-Technology"><span>Step 3: Configure the Process Technology</span></a></li><li><a class="tocitem" href="#Step-4:-Set-Up-Rendering-Targets"><span>Step 4: Set Up Rendering Targets</span></a></li><li><a class="tocitem" href="#Step-5:-Generate-a-Component-Package"><span>Step 5: Generate a Component Package</span></a></li><li><a class="tocitem" href="#Step-6:-Implement-the-Component"><span>Step 6: Implement the Component</span></a></li><li><a class="tocitem" href="#Step-7:-Use-Your-PDK"><span>Step 7: Use Your PDK</span></a></li><li><a class="tocitem" href="#Best-Practices"><span>Best Practices</span></a></li><li><a class="tocitem" href="#Summary"><span>Summary</span></a></li><li><a class="tocitem" href="#See-Also"><span>See Also</span></a></li></ul></li></ul></li><li><input class="collapse-toggle" id="menuitem-4" type="checkbox"/><label class="tocitem" for="menuitem-4"><span class="docs-label">Concepts</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../concepts/">Overview</a></li><li><a class="tocitem" href="../../concepts/units/">Units</a></li><li><a class="tocitem" href="../../concepts/points/">Points</a></li><li><a class="tocitem" href="../../concepts/geometry/">Geometry</a></li><li><a class="tocitem" href="../../concepts/transformations/">Transformations</a></li><li><a class="tocitem" href="../../concepts/polygons/">Polygons</a></li><li><a class="tocitem" href="../../concepts/coordinate_systems/">Coordinate Systems</a></li><li><a class="tocitem" href="../../concepts/texts/">Texts</a></li><li><a class="tocitem" href="../../concepts/paths/">Paths</a></li><li><a class="tocitem" href="../../concepts/routes/">Routes</a></li><li><a class="tocitem" href="../../concepts/render/">Rendering and Export</a></li><li><a class="tocitem" href="../../concepts/solidmodels/">Solid Models (3D Geometry)</a></li><li><a class="tocitem" href="../../concepts/schematic_driven_design/">Schematic-Driven Design</a></li><li><a class="tocitem" href="../../concepts/components/">Components</a></li><li><a class="tocitem" href="../../concepts/autofill/">Autofill</a></li><li><a class="tocitem" href="../../concepts/pdks/">PDKs</a></li><li><a class="tocitem" href="../../concepts/styleguide/">Style Guide</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-5" type="checkbox"/><label class="tocitem" for="menuitem-5"><span class="docs-label">Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../examples/examplepdk/">ExamplePDK</a></li><li><a class="tocitem" href="../../examples/qpu17/">Quantum Processor</a></li><li><a class="tocitem" href="../../examples/singletransmon/">Single-Transmon Simulation</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-6" type="checkbox"/><label class="tocitem" for="menuitem-6"><span class="docs-label">Reference</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../reference/">Overview</a></li><li><a class="tocitem" href="../../reference/api/">Geometry API Reference</a></li><li><a class="tocitem" href="../../reference/path_api/">Path API Reference</a></li><li><a class="tocitem" href="../../reference/schematic_api/">Schematic API Reference</a></li><li><a class="tocitem" href="../../reference/shapes/">Shape Reference</a></li></ul></li><li><a class="tocitem" href="../../how_to/faq/">FAQ/Troubleshooting</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Tutorials</a></li><li class="is-active"><a href>Creating a PDK</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Creating a PDK</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/aws-cqc/DeviceLayout.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/aws-cqc/DeviceLayout.jl/blob/main/docs/src/tutorials/creating_a_pdk.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Tutorial:-Creating-a-PDK"><a class="docs-heading-anchor" href="#Tutorial:-Creating-a-PDK">Tutorial: Creating a PDK</a><a id="Tutorial:-Creating-a-PDK-1"></a><a class="docs-heading-anchor-permalink" href="#Tutorial:-Creating-a-PDK" title="Permalink"></a></h1><p>A Process Design Kit (PDK) packages reusable components, layer definitions, and rendering configurations for a specific fabrication process. This tutorial shows how to create a PDK using DeviceLayout&#39;s scaffolding tools.</p><h2 id="What-You&#39;ll-Learn"><a class="docs-heading-anchor" href="#What-You&#39;ll-Learn">What You&#39;ll Learn</a><a id="What-You&#39;ll-Learn-1"></a><a class="docs-heading-anchor-permalink" href="#What-You&#39;ll-Learn" title="Permalink"></a></h2><ul><li>Generating a PDK package with <code>generate_pdk</code></li><li>Defining a layer vocabulary</li><li>Configuring a process technology and rendering targets</li><li>Generating a component package with <code>generate_component_package</code></li><li>Implementing a component within the PDK</li><li>Using the PDK to build and render a schematic</li></ul><h2 id="Prerequisites"><a class="docs-heading-anchor" href="#Prerequisites">Prerequisites</a><a id="Prerequisites-1"></a><a class="docs-heading-anchor-permalink" href="#Prerequisites" title="Permalink"></a></h2><ul><li>Completed <a href="../building_a_component/">Building a Component</a> tutorial</li><li>Completed <a href="../schematic_basics/">Schematic Basics</a> tutorial</li></ul><h2 id="What-is-a-PDK?"><a class="docs-heading-anchor" href="#What-is-a-PDK?">What is a PDK?</a><a id="What-is-a-PDK?-1"></a><a class="docs-heading-anchor-permalink" href="#What-is-a-PDK?" title="Permalink"></a></h2><p>A PDK provides:</p><ol><li><strong>Layer vocabulary</strong>: Named layers with semantic meaning (<code>:metal_negative</code>, <code>:junction</code>, etc.)</li><li><strong>Process technology</strong>: How semantic layers map to GDS layers, plus other fabrication process parameters</li><li><strong>Rendering targets</strong>: Configurations for different outputs (artwork GDS, 3D simulation model)</li><li><strong>Components</strong>: Reusable building blocks designed for the process</li></ol><h2 id="Step-1:-Generate-the-PDK-Package"><a class="docs-heading-anchor" href="#Step-1:-Generate-the-PDK-Package">Step 1: Generate the PDK Package</a><a id="Step-1:-Generate-the-PDK-Package-1"></a><a class="docs-heading-anchor-permalink" href="#Step-1:-Generate-the-PDK-Package" title="Permalink"></a></h2><p>DeviceLayout provides <a href="../../reference/schematic_api/#DeviceLayout.SchematicDrivenLayout.generate_pdk"><code>generate_pdk</code></a> to scaffold a new PDK with the correct structure and conventions:</p><pre><code class="language-julia hljs">using DeviceLayout.SchematicDrivenLayout
+
+generate_pdk(&quot;MyPDK&quot;) # You may also need `user=&quot;&lt;username&gt;&quot;` for Git</code></pre><p>This creates a Julia package with the following structure:</p><pre><code class="nohighlight hljs">MyPDK/
+├── Project.toml            # Package metadata (DeviceLayout dependency added automatically)
+├── src/
+│   └── MyPDK.jl            # Main module with template code
+├── docs/                   # Documenter.jl setup
+├── test/
+│   └── runtests.jl
+└── components/             # Directory for component packages (created empty)</code></pre><p>Open <code>MyPDK/src/MyPDK.jl</code> — you&#39;ll see the generated template:</p><pre><code class="language-julia hljs">module MyPDK
+
+using DeviceLayout, .SchematicDrivenLayout, .PreferredUnits
+
+const COMPONENTS_DIR = joinpath(dirname(@__DIR__), &quot;components&quot;)
+
+##### Layers
+const LAYER_RECORD = (;
+    # layer_name = GDSMeta(gdslayer, datatype),
+    # ...
+)
+
+module LayerVocabulary
+# Automatically generates `const LAYER_NAME = SemanticMeta(:layer_name)` for each key in LAYER_RECORD
+import ..MyPDK: LAYER_RECORD, SemanticMeta
+# ... (metaprogramming loop)
+end
+
+##### Process technologies
+const MY_PROCESS_TECHNOLOGY = ProcessTechnology(
+    LAYER_RECORD,
+    (; # Technology parameters
+    )
+)
+
+##### Rendering targets
+const MY_ARTWORK_TARGET = ArtworkTarget(MY_PROCESS_TECHNOLOGY)
+
+const MY_SOLIDMODEL_TARGET = SolidModelTarget(
+    MY_PROCESS_TECHNOLOGY;
+    simulation=true,
+    # bounding_layers = [...],
+    # substrate_layers = [...],
+    # postrender_ops = [...],
+)
+
+end # module</code></pre><p>The template handles the boilerplate — module structure, imports, and the <code>LayerVocabulary</code> metaprogramming that auto-generates constants from your layer record. Your job is to fill in the content: layers, technology parameters, and target options.</p><h2 id="Step-2:-Define-Your-Layers"><a class="docs-heading-anchor" href="#Step-2:-Define-Your-Layers">Step 2: Define Your Layers</a><a id="Step-2:-Define-Your-Layers-1"></a><a class="docs-heading-anchor-permalink" href="#Step-2:-Define-Your-Layers" title="Permalink"></a></h2><p>Edit the <code>LAYER_RECORD</code> in <code>MyPDK/src/MyPDK.jl</code>. Each entry maps a semantic layer name to a GDS layer/datatype pair:</p><pre><code class="language-julia hljs">const LAYER_RECORD = (;
+    metal_negative   = GDSMeta(0, 0),
+    metal_positive   = GDSMeta(1, 0),
+    junction         = GDSMeta(2, 0),
+    junction_bandage = GDSMeta(3, 0),
+    bridge_base      = GDSMeta(10, 0),
+    bridge           = GDSMeta(11, 0),
+    chip_area        = GDSMeta(100, 0),
+    writeable_area   = GDSMeta(101, 0),
+    simulated_area   = GDSMeta(102, 0),
+)</code></pre><p>The <code>LayerVocabulary</code> module (already generated) will automatically create constants like <code>METAL_NEGATIVE = SemanticMeta(:metal_negative)</code> for each entry. Components use these constants to place geometry on the right layer without hard-coding GDS numbers.</p><h2 id="Step-3:-Configure-the-Process-Technology"><a class="docs-heading-anchor" href="#Step-3:-Configure-the-Process-Technology">Step 3: Configure the Process Technology</a><a id="Step-3:-Configure-the-Process-Technology-1"></a><a class="docs-heading-anchor-permalink" href="#Step-3:-Configure-the-Process-Technology" title="Permalink"></a></h2><p>The <a href="../../reference/schematic_api/#DeviceLayout.SchematicDrivenLayout.ProcessTechnology"><code>ProcessTechnology</code></a> holds your layer record plus physical parameters that describe how layers relate to fabrication. The key parameters are <code>height</code> (z-position of each layer&#39;s bottom face) and <code>thickness</code> (extrusion height for 3D modeling):</p><pre><code class="language-julia hljs">const MY_PROCESS_TECHNOLOGY = ProcessTechnology(
+    LAYER_RECORD,
+    (;
+        height = (;
+            simulated_area = -1000μm,
+        ),
+        thickness = (;
+            chip_area      = 525μm,    # Substrate thickness
+            simulated_area = 2000μm,   # Simulation box height
+        ),
+    )
+)</code></pre><p>These parameters are accessed by rendering targets during 3D model generation. Layers not listed default to zero height and thickness.</p><h2 id="Step-4:-Set-Up-Rendering-Targets"><a class="docs-heading-anchor" href="#Step-4:-Set-Up-Rendering-Targets">Step 4: Set Up Rendering Targets</a><a id="Step-4:-Set-Up-Rendering-Targets-1"></a><a class="docs-heading-anchor-permalink" href="#Step-4:-Set-Up-Rendering-Targets" title="Permalink"></a></h2><p>Targets configure how a schematic renders to different outputs. The template provides two:</p><h3 id="Artwork-Target"><a class="docs-heading-anchor" href="#Artwork-Target">Artwork Target</a><a id="Artwork-Target-1"></a><a class="docs-heading-anchor-permalink" href="#Artwork-Target" title="Permalink"></a></h3><p><a href="../../reference/schematic_api/#DeviceLayout.SchematicDrivenLayout.ArtworkTarget"><code>ArtworkTarget</code></a> renders to GDS polygons for mask fabrication. For a single-chip PDK, set <code>levels=[1]</code> (the default <code>[1, 2]</code> is for flipchip stacks):</p><pre><code class="language-julia hljs">const MY_ARTWORK_TARGET = ArtworkTarget(MY_PROCESS_TECHNOLOGY; levels=[1])</code></pre><h3 id="Solid-Model-Target"><a class="docs-heading-anchor" href="#Solid-Model-Target">Solid Model Target</a><a id="Solid-Model-Target-1"></a><a class="docs-heading-anchor-permalink" href="#Solid-Model-Target" title="Permalink"></a></h3><p><a href="../../reference/schematic_api/#DeviceLayout.SchematicDrivenLayout.SolidModelTarget"><code>SolidModelTarget</code></a> renders to a 3D model for electromagnetic simulation. Uncomment and fill in the options:</p><pre><code class="language-julia hljs">const MY_SOLIDMODEL_TARGET = SolidModelTarget(
+    MY_PROCESS_TECHNOLOGY;
+    simulation       = true,
+    bounding_layers  = [:simulated_area],
+    substrate_layers = [:chip_area],
+    postrender_ops   = [
+        (   # Subtract negative from writeable area to get metal
+            &quot;metal&quot;,
+            SolidModels.difference_geom!,
+            (&quot;writeable_area&quot;, &quot;metal_negative&quot;, 2, 2),
+            :remove_object =&gt; true
+        ),
+        (   # Add any positive metal back
+            &quot;metal&quot;,
+            SolidModels.union_geom!,
+            (&quot;metal&quot;, &quot;metal_positive&quot;, 2, 2),
+            :remove_object =&gt; true, :remove_tool =&gt; true
+        ),
+    ]
+)</code></pre><p>The <code>simulation=true</code> option controls which geometry is included: entities decorated with <a href="../../reference/schematic_api/#DeviceLayout.SchematicDrivenLayout.only_simulated"><code>only_simulated</code></a> or <a href="../../reference/schematic_api/#DeviceLayout.SchematicDrivenLayout.not_simulated"><code>not_simulated</code></a> styles are filtered based on this flag. The <code>postrender_ops</code> define boolean operations that combine layers into final 3D volumes.</p><h2 id="Step-5:-Generate-a-Component-Package"><a class="docs-heading-anchor" href="#Step-5:-Generate-a-Component-Package">Step 5: Generate a Component Package</a><a id="Step-5:-Generate-a-Component-Package-1"></a><a class="docs-heading-anchor-permalink" href="#Step-5:-Generate-a-Component-Package" title="Permalink"></a></h2><p>With the PDK structure in place, activate the package and generate a component:</p><pre><code class="language-julia hljs">using Pkg
+Pkg.activate(&quot;MyPDK&quot;)
+using DeviceLayout.SchematicDrivenLayout
+using MyPDK
+
+generate_component_package(&quot;MyCapacitors&quot;, MyPDK, &quot;MyCapacitor&quot;)</code></pre><p>This creates a new package inside <code>MyPDK/components/</code>:</p><pre><code class="nohighlight hljs">MyPDK/components/MyCapacitors/
+├── Project.toml
+├── src/
+│   └── MyCapacitors.jl     # Module with component template
+├── docs/
+│   └── src/index.md        # Documentation template with example skeleton
+└── test/
+    └── runtests.jl</code></pre><p>The generated <code>MyCapacitors.jl</code> contains a stub <code>@compdef struct</code> with placeholder methods for <code>_geometry!</code> and <code>hooks</code> — the same interface you learned in the <a href="../building_a_component/">Building a Component</a> tutorial.</p><h2 id="Step-6:-Implement-the-Component"><a class="docs-heading-anchor" href="#Step-6:-Implement-the-Component">Step 6: Implement the Component</a><a id="Step-6:-Implement-the-Component-1"></a><a class="docs-heading-anchor-permalink" href="#Step-6:-Implement-the-Component" title="Permalink"></a></h2><p>Open <code>MyPDK/components/MyCapacitors/src/MyCapacitors.jl</code> and fill in the component definition with your capacitor from the <a href="../building_a_component/">Building a Component</a> tutorial:</p><pre><code class="language-julia hljs">module MyCapacitors
+
+using DeviceLayout, .SchematicDrivenLayout, .PreferredUnits
+using MyPDK, MyPDK.LayerVocabulary
+
+export MyCapacitor
+
+&quot;&quot;&quot;
+    MyCapacitor &lt;: Component
+
+A simple interdigitated capacitor with two terminals (positive pattern).
+
+# Parameters
+- `name`: Component name
+- `finger_length`: Length of each finger
+- `finger_width`: Width of each finger
+- `finger_gap`: Gap between fingers
+- `finger_count`: Number of finger pairs
+- `rounding`: Rounding radius for metal corners
+
+# Hooks
+- `p0`: Left terminal
+- `p1`: Right terminal
+&quot;&quot;&quot;
+@compdef struct MyCapacitor &lt;: Component
+    name = &quot;capacitor&quot;
+    finger_length = 100μm
+    finger_width = 5μm
+    finger_gap = 3μm
+    finger_count::Int = 4
+    rounding = 1μm
+end
+
+function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, cap::MyCapacitor)
+    (; finger_length, finger_width, finger_gap, finger_count, rounding) = cap
+    
+    # Calculate dimensions
+    pitch = finger_width + finger_gap
+    total_height = finger_count * pitch
+    
+    # Create the two bus bars
+    left_bus = Rectangle(finger_width, total_height)
+    right_bus = Translation(finger_length + finger_gap + finger_width, 0nm)(
+        Rectangle(finger_width, total_height)
+    )
+
+    finger_rect = Align.rightof(Rectangle(finger_length, finger_width), left_bus)
+    left_fingers = [
+        Align.flushbottom(
+            finger_rect, left_bus, offset = (i - 1) * pitch
+        ) for i in 1:2:finger_count
+        ]
+    finger_rect = Align.leftof(Rectangle(finger_length, finger_width), right_bus)
+    right_fingers = [
+        Align.flushbottom(
+            finger_rect, left_bus, offset = (i - 1) * pitch
+        ) for i in 2:2:finger_count
+        ]
+
+    # Take union before rounding
+    all_metal = union2d([left_fingers; right_fingers], [left_bus, right_bus])
+    # Apply rounding
+    rounded_metal = Rounded(all_metal, rounding) # Creates a StyledEntity
+    # Place in the geometry
+    place!(cs, rounded_metal, METAL_POSITIVE)
+    
+    return cs
+end
+
+function SchematicDrivenLayout.hooks(cap::MyCapacitor)
+    (; finger_length, finger_width, finger_gap, finger_count) = cap
+
+    # Calculate dimensions
+    pitch = finger_width + finger_gap
+    total_height = finger_count * pitch
+    center_y = total_height / 2
+    total_width = finger_length + finger_gap + 2*finger_width
+    
+    # Left hook: pointing right (+x direction, 0°)
+    p0 = PointHook(Point(0nm, center_y), 0°)
+    
+    # Right hook: pointing right (-x direction, 180°)
+    p1 = PointHook(Point(total_width, center_y), 180°)
+    
+    # Return NamedTuple with names p0 and p1 
+    return (; p0, p1) # (equivalent to (; p0 = p0, p1 = p1))
+end
+
+end # module</code></pre><p>There is <strong>one important change</strong> from the previous tutorial: instead of placing <code>rounded_metal</code> in the metal layer by explicitly specifying <code>SemanticMeta(:metal)</code>, the component refers to <code>METAL_POSITIVE</code> from <code>MyPDK.LayerVocabulary</code> — the constants auto-generated from your <code>LAYER_RECORD</code>. This is the connection between your layer definitions and your component geometry.</p><h2 id="Step-7:-Use-Your-PDK"><a class="docs-heading-anchor" href="#Step-7:-Use-Your-PDK">Step 7: Use Your PDK</a><a id="Step-7:-Use-Your-PDK-1"></a><a class="docs-heading-anchor-permalink" href="#Step-7:-Use-Your-PDK" title="Permalink"></a></h2><p>With the PDK and component defined, create a new project in a sibling directory <code>MyPDK/../MyDesign</code>, add the PDK and component packages as dependencies, and use them in a design:</p><pre><code class="language-julia hljs"># In a script or REPL in a sibling directory
+using Pkg
+Pkg.activate(&quot;.&quot;)
+Pkg.add(&quot;DeviceLayout&quot;)
+Pkg.add(&quot;FileIO&quot;)
+Pkg.develop(path=&quot;../MyPDK&quot;)
+Pkg.develop(path=&quot;../MyPDK/components/MyCapacitors&quot;)</code></pre><pre><code class="language-julia hljs">using DeviceLayout, DeviceLayout.PreferredUnits
+using DeviceLayout.SchematicDrivenLayout
+using MyPDK, MyCapacitors
+using FileIO
+
+# Build a schematic
+g = SchematicGraph(&quot;my_device&quot;)
+cap = add_node!(g, MyCapacitor(finger_length=150μm))
+
+# Plan, check, and render
+sch = plan(g; log_dir=nothing)
+check!(sch)
+
+cell = Cell(&quot;output&quot;)
+render!(cell, sch, MyPDK.MY_ARTWORK_TARGET)
+save(&quot;output.gds&quot;, cell)</code></pre><p>The <code>plan</code> → <code>check!</code> → <code>render!</code> sequence is the standard workflow: <code>plan</code> resolves the schematic graph into placed geometry, <code>check!</code> validates constraints (required before rendering), and <code>render!</code> converts semantic geometry into GDS polygons using the target&#39;s layer mapping (in this case, <code>metal_positive = GDSMeta(1, 0)</code>).</p><h2 id="Best-Practices"><a class="docs-heading-anchor" href="#Best-Practices">Best Practices</a><a id="Best-Practices-1"></a><a class="docs-heading-anchor-permalink" href="#Best-Practices" title="Permalink"></a></h2><h3 id="Version-Your-PDK-and-Components"><a class="docs-heading-anchor" href="#Version-Your-PDK-and-Components">Version Your PDK and Components</a><a id="Version-Your-PDK-and-Components-1"></a><a class="docs-heading-anchor-permalink" href="#Version-Your-PDK-and-Components" title="Permalink"></a></h3><p>Use <a href="https://semver.org/">semantic versioning</a> in <code>Project.toml</code>. DeviceLayout is added as a dependency automatically by <code>generate_pdk</code>, with a compatibility bound on the current major version.</p><h3 id="Separate-Component-Packages"><a class="docs-heading-anchor" href="#Separate-Component-Packages">Separate Component Packages</a><a id="Separate-Component-Packages-1"></a><a class="docs-heading-anchor-permalink" href="#Separate-Component-Packages" title="Permalink"></a></h3><p><code>generate_component_package</code> creates each component family as its own package inside <code>components/</code>. This lets teams version and release component libraries independently from the core PDK. For example:</p><pre><code class="nohighlight hljs">MyPDK/components/
+├── MyCapacitors/
+├── MyTransmons/
+└── MyResonators/</code></pre><h3 id="Document-Components"><a class="docs-heading-anchor" href="#Document-Components">Document Components</a><a id="Document-Components-1"></a><a class="docs-heading-anchor-permalink" href="#Document-Components" title="Permalink"></a></h3><p>The generated <code>docs/</code> directory in each component package includes a documentation skeleton with an example block that renders the component. Fill in docstrings for parameters and hooks so that <code>@autodocs</code> picks them up.</p><h3 id="Custom-Templates"><a class="docs-heading-anchor" href="#Custom-Templates">Custom Templates</a><a id="Custom-Templates-1"></a><a class="docs-heading-anchor-permalink" href="#Custom-Templates" title="Permalink"></a></h3><p>PDKs can override the default component templates. Place custom <code>.jlt</code> files in <code>MyPDK/templates/</code> and they&#39;ll be used instead of the built-in ones when calling <code>generate_component_package</code> against your PDK.</p><h2 id="Summary"><a class="docs-heading-anchor" href="#Summary">Summary</a><a id="Summary-1"></a><a class="docs-heading-anchor-permalink" href="#Summary" title="Permalink"></a></h2><p>In this tutorial, you learned:</p><ul><li><strong><code>generate_pdk</code></strong>: Scaffolds a PDK package with correct structure and conventions</li><li><strong>Layer vocabulary</strong>: Defined in <code>LAYER_RECORD</code>, auto-generates <code>SemanticMeta</code> constants</li><li><strong>Process technology</strong>: Physical parameters (<code>height</code>, <code>thickness</code>) for layer-to-fabrication mapping</li><li><strong>Rendering targets</strong>: <code>ArtworkTarget</code> for GDS, <code>SolidModelTarget</code> for 3D simulation</li><li><strong><code>generate_component_package</code></strong>: Scaffolds component packages within the PDK</li><li><strong>Component implementation</strong>: <code>_geometry!</code> and <code>hooks</code> using PDK layer constants</li></ul><h2 id="See-Also"><a class="docs-heading-anchor" href="#See-Also">See Also</a><a id="See-Also-1"></a><a class="docs-heading-anchor-permalink" href="#See-Also" title="Permalink"></a></h2><ul><li><a href="../../concepts/pdks/#pdk-architecture">PDK Architecture</a> for deeper understanding of the PDK system</li><li><a href="../../examples/examplepdk/">ExamplePDK</a> for a complete reference implementation</li><li><a href="../../concepts/styleguide/#style-package">Component Style Guide</a> on best practices for component and package creation and versioning</li></ul></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../composite_components/">« Composite Components</a><a class="docs-footer-nextpage" href="../../concepts/">Overview »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Friday 27 March 2026 22:04">Friday 27 March 2026</span>. Using Julia version 1.10.11.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
