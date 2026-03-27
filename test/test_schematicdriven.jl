@@ -1196,7 +1196,8 @@
         )
     end
 
-    @testset "Issue #20: dependent @compdef defaults" begin
+    @testset "Dependent @compdef defaults" begin
+        # Issue #20
         # Non-parametric path: defaults that reference earlier parameters
         @compdef struct DepDefaultsComp <: Component
             a::Int = 10
