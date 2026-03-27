@@ -28,4 +28,37 @@ function coarse_and_fine_autofill()
     return
 end
 
-SUITE["autofill"] = @benchmarkable coarse_and_fine_autofill()
+SUITE["autofill"] = BenchmarkGroup()
+SUITE["autofill"]["coarse_and_fine"] = @benchmarkable coarse_and_fine_autofill()
+
+# gridpoints_in_polygon microbenchmarks at varying grid densities
+using DeviceLayout.Polygons: difference2d
+
+# Polygon with a cutout (exercises both horizontal edge and winding number paths)
+const _gip_r1 = Rectangle(200μm, 200μm)
+const _gip_r2 = Rectangle(100μm, 100μm) + Point(50μm, 50μm)
+const _gip_poly = [difference2d(_gip_r1, _gip_r2)]
+
+const _gip_grids = [
+    (
+        "33x25",
+        collect(range(-10μm, 210μm, length=33)),
+        collect(range(-10μm, 210μm, length=25))
+    ),
+    (
+        "321x241",
+        collect(range(-10μm, 210μm, length=321)),
+        collect(range(-10μm, 210μm, length=241))
+    ),
+    (
+        "3201x2401",
+        collect(range(-10μm, 210μm, length=3201)),
+        collect(range(-10μm, 210μm, length=2401))
+    )
+]
+
+SUITE["autofill"]["gridpoints_in_polygon"] = BenchmarkGroup()
+for (label, gx, gy) in _gip_grids
+    SUITE["autofill"]["gridpoints_in_polygon"][label] =
+        @benchmarkable gridpoints_in_polygon($_gip_poly, $gx, $gy)
+end
