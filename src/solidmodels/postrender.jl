@@ -1008,6 +1008,95 @@ function remove_group!(group::PhysicalGroup; recursive=true, remove_entities=tru
 end
 
 """
+    connected_components(dim::Int, tags::Vector{Int32})
+    connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2)
+    connected_components(sm::SolidModel, groups, dim=2)
+
+Find connected components among SolidModel entities at dimension `dim` with the given `tags` or physical group names.
+
+Two entities are connected if they share any boundary entity (dimension `dim - 1`).
+Uses union-find with path compression on the adjacency graph from `gmsh.model.getAdjacencies`.
+
+Returns a `Vector{Vector{Tuple{Int32, Int32}}}` where each inner vector contains the entity dimtags
+of one connected component.
+
+# Algorithm
+
+ 1. Query downward adjacencies (boundary entities) for each tag via getAdjacencies
+ 2. Build a mapping from boundary tags to parent entity indices
+ 3. Use union-find to merge entities sharing boundaries
+ 4. Collect and return connected component groups
+
+# Notes
+
+  - Requires Gmsh model to be synchronized before calling
+  - Works for any dimension ≥ 1 (uses dim - 1 boundary adjacencies)
+  - For dim=3 (volumes): shares boundary surfaces (dim=2)
+  - For dim=2 (surfaces): shares boundary curves (dim=1)
+  - O(N) where N = number of entities + number of boundary connections
+"""
+function connected_components(sm::SolidModel, groups, dim=2)
+    tags = reduce(vcat, [entitytags(sm[name, dim]) for name in groups], init=Int32[])
+    return connected_components(dim, tags)
+end
+connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2) =
+    connected_components(dim, entitytags(sm[group, dim]))
+
+function connected_components(dim::Int, tags::Vector{Int32})
+    n = length(tags)
+    isempty(tags) && return Vector{Int32}[]
+    n == 1 && return [tags]
+
+    # Build adjacency: map boundary entities to parent entity indices
+    boundary_to_parents = Dict{Int32, Vector{Int}}()
+    for (i, tag) in enumerate(tags)
+        _, downward = gmsh.model.getAdjacencies(dim, tag)
+        for btag in downward
+            if haskey(boundary_to_parents, btag)
+                push!(boundary_to_parents[btag], i)
+            else
+                boundary_to_parents[btag] = [i]
+            end
+        end
+    end
+
+    # Union-Find with path compression
+    parent = collect(1:n)
+    function find(x)
+        while parent[x] != x
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        end
+        return x
+    end
+    function unite(a, b)
+        ra = find(a)
+        rb = find(b)
+        return ra != rb && (parent[ra] = rb)
+    end
+
+    # Merge entities that share boundary elements
+    for (_, parents) in boundary_to_parents
+        for j = 2:length(parents)
+            unite(parents[1], parents[j])
+        end
+    end
+
+    # Collect components
+    components = Dict{Int, Vector{Tuple{Int32, Int32}}}()
+    for (i, tag) in enumerate(tags)
+        root = find(i)
+        if haskey(components, root)
+            push!(components[root], (dim, tag))
+        else
+            components[root] = [(dim, tag)]
+        end
+    end
+
+    return collect(values(components))
+end
+
+"""
     check_overlap(sm::SolidModel)
 
 Check for overlap/intersections between SolidModel groups of the same dimension.

@@ -292,6 +292,7 @@ See [Shapes](./shapes.md).
 
 ```@docs
     SolidModels.box_selection
+    SolidModels.connected_components
     SolidModels.difference_geom!
     SolidModels.extrude_z!
     SolidModels.fragment_geom!
