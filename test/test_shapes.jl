@@ -611,6 +611,14 @@ end
     @test_logs (:warn, r"deprecated") circle(10.0)
 end
 
+@testitem "circular_arc equal angles" setup = [CommonTestSetup] begin
+    # When θ1 = θ2, circular_arc should return a single point, not nothing.
+    θ = convert(Float64, π)
+    arc = circular_arc([θ, θ], 1.0μm, 1.0nm)
+    @test !isnothing(arc)
+    @test length(arc) == 1
+end
+
 @testitem "Sweeping" setup = [CommonTestSetup] begin
     poly = Polygon(Point(0.0, 0.0), Point(1, 0), Point(1, 1), Point(2, 1), Point(0, 3))
     p2 = sweep_poly(poly, Point(0, -1))

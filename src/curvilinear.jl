@@ -577,8 +577,9 @@ function to_polygons(
     atol=Polygons._round_atol(S, T),
     kwargs...
 ) where {S, T}
-    rad = Polygons.radius(sty)
-    iszero(rad) && return to_polygons(ent; kwargs...)
+    rad_raw = Polygons.radius(sty)
+    iszero(rad_raw) && return to_polygons(ent; kwargs...)
+    relative = rad_raw isa Real
 
     V = promote_type(float(S), float(T))
     poly = ent.p
@@ -603,10 +604,22 @@ function to_polygons(
     for i in eachindex(poly)
         start_idx = length(rounded_pts) + 1
         edges = edge_type_at_vertex(ent, i)
+        is_straight =
+            i in straight_corners &&
+            edges.incoming == :straight &&
+            edges.outgoing == :straight
+        is_la = i in la_corners
 
-        if i in straight_corners &&
-           edges.incoming == :straight &&
-           edges.outgoing == :straight
+        # Convert relative radius to dimensional per-corner
+        if (is_straight || is_la) && relative
+            p_prev = poly[mod1(i - 1, n)]
+            p_next = poly[mod1(i + 1, n)]
+            rad = rad_raw * min(norm(p_prev - poly[i]), norm(poly[i] - p_next))
+        else
+            rad = rad_raw
+        end
+
+        if is_straight
             # Straight-straight corner: use existing rounded_corner
             append!(
                 rounded_pts,
@@ -620,9 +633,7 @@ function to_polygons(
                     min_angle=sty.min_angle
                 )
             )
-        elseif i in la_corners &&
-               edges.incoming == :straight &&
-               edges.outgoing isa Paths.Turn
+        elseif is_la && edges.incoming == :straight && edges.outgoing isa Paths.Turn
             # Straight → arc: line is incoming, arc is outgoing
             result = rounded_corner_line_arc(
                 poly[mod1(i - 1, n)],
@@ -640,9 +651,7 @@ function to_polygons(
                 curve_k = get(vertex_to_curve, i, nothing)
                 !isnothing(curve_k) && (trim_start[curve_k] = result.T_arc)
             end
-        elseif i in la_corners &&
-               edges.incoming isa Paths.Turn &&
-               edges.outgoing == :straight
+        elseif is_la && edges.incoming isa Paths.Turn && edges.outgoing == :straight
             # Arc → straight: arc is incoming, line is outgoing
             result = rounded_corner_line_arc(
                 poly[mod1(i + 1, n)],
