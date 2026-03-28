@@ -1001,8 +1001,10 @@ end
             atol=1e-9μm
         )
         # Halo uses original ClippedPolygon, hole in the center
-        # Offset returns holes as reversed-orientation polygons [issue #11]
-        @test Polygons.orientation(halo(dr1, 0.1μm)[2]) == -1 # still has a hole
+        # Offset preserves holes as interior cuts in keyhole polygons [issue #11 fix]
+        h = halo(dr1, 0.1μm)
+        @test length(h) == 1  # single keyhole polygon (hole encoded as interior cut)
+        @test length(h[1].p) > 4  # more vertices than a simple rectangle = hole present
         @test footprint(union2d(r1, r1 + Point(40, 0)μm)) isa Rectangle # multipolygon => use bounds
         @test halo(union2d(r3), 1μm, -0.5μm) == dr1 # ClippedPolygon halo with inner delta
     end
