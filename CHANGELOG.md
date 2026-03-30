@@ -4,6 +4,12 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## 1.11.1 (2026-03-30)
+
+  - Fix dispatch error for rounding of styled entities introduced by 1.11.0
+  - Fix relative radius handling in line-arc rounding
+  - Fix `circular_arc([θ1, θ2], ...)` method so `θ1 = θ2` gives a vector with a single point rather than `nothing`
+
 ## 1.11.0 (2026-03-23)
 
 This release adds line-arc corner rounding and improves SolidModel robustness:
