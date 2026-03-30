@@ -183,12 +183,15 @@ CurvilinearRegion(points::Vector{Point{T}}, curves, curve_start_idx) where {T} =
 
 to_polygons(e::CurvilinearRegion{T}; kwargs...) where {T} =
     to_polygons(difference2d(to_polygons(e.exterior), to_polygons.(e.holes)))
-to_polygons(e::CurvilinearRegion, sty::Polygons.Rounded; kwargs...) = to_polygons(
-    difference2d(
-        to_polygons(e.exterior, sty; kwargs...),
-        [to_polygons(h, sty; kwargs...) for h in e.holes]
+function to_polygons(e::CurvilinearRegion, sty::Polygons.Rounded; kwargs...)
+    isempty(e.holes) && return to_polygons(e.exterior, sty; kwargs...)
+    return to_polygons(
+        difference2d(
+            to_polygons(e.exterior, sty; kwargs...),
+            [to_polygons(h, sty; kwargs...) for h in e.holes]
+        )
     )
-)
+end
 
 function transform(e::CurvilinearRegion{T}, f::Transformation) where {T}
     return CurvilinearRegion{T}(transform(e.exterior, f), transform.(e.holes, Ref(f)))
@@ -581,7 +584,7 @@ function to_polygons(
     iszero(rad_raw) && return to_polygons(ent; kwargs...)
     relative = rad_raw isa Real
 
-    V = promote_type(float(S), float(T))
+    V = float(S)
     poly = ent.p
     n = length(poly)
 
@@ -718,7 +721,7 @@ function to_polygons(
         end
     end
 
-    return Polygon(final_points)
+    return Polygon{V}(final_points)
 end
 
 # Intersect a parallel line (p_offset + s * v_line) with a circle of radius D centered at O.
