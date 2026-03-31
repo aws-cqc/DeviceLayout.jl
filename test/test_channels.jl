@@ -227,6 +227,7 @@
         # Type preserved
         @test typeof(rev) === typeof(offset_seg)
         # Pathlength preserved
+        @test Paths.arclength(rev) ≈ Paths.arclength(offset_seg)
         @test pathlength(rev) ≈ pathlength(offset_seg)
         # Offset negated
         @test Paths.getoffset(rev) ≈ -2.0μm
@@ -245,10 +246,23 @@
         offset_seg = Paths.offset(seg, 5.0μm)
         rev = reverse(offset_seg)
         @test typeof(rev) === typeof(offset_seg)
-        @test pathlength(rev) ≈ pathlength(offset_seg)
+        @test Paths.arclength(rev) ≈ Paths.arclength(offset_seg)
+        @test pathlength(rev) == pathlength(offset_seg)
         @test Paths.getoffset(rev) ≈ -5.0μm
         @test p0(rev) ≈ p1(offset_seg) atol = 0.01nm
         @test p1(rev) ≈ p0(offset_seg) atol = 0.01nm
+    end
+
+    @testset "reverse ConstantOffset BSpline" begin
+        pa = Path(0.0μm, 0.0μm)
+        bspline!(pa, [Point(0.5, 0.5)mm, Point(1.0mm, 0.0mm)], -90°, Paths.Trace(0.1mm))
+        seg = pa[1].seg
+        offset_seg = Paths.offset(seg, 300.0μm)
+        rev = reverse(offset_seg)
+        @test Paths.arclength(rev) ≈ Paths.arclength(offset_seg)
+        @test Paths.pathlength(rev) ≈ Paths.pathlength(offset_seg)
+        @test p0(rev) ≈ p1(offset_seg) atol = 0.1nm
+        @test p1(rev) ≈ p0(offset_seg) atol = 0.1nm
     end
 
     @testset "reverse GeneralOffset" begin
@@ -260,7 +274,8 @@
         # Type preserved
         @test typeof(rev) === typeof(offset_seg)
         # Pathlength preserved
-        @test pathlength(rev) ≈ pathlength(offset_seg)
+        @test Paths.arclength(rev) ≈ Paths.arclength(offset_seg)
+        @test pathlength(rev) == pathlength(offset_seg)
         # Offset function is remapped: at t=0 of reversed, should get negated original end value
         @test Paths.getoffset(rev, 0.0μm) ≈ -Paths.getoffset(offset_seg, l) atol = 0.001nm
         @test Paths.getoffset(rev, l) ≈ -Paths.getoffset(offset_seg, 0.0μm) atol = 0.001nm
