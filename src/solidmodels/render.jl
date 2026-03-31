@@ -1086,7 +1086,8 @@ end
 
 """
     render!(sm::SolidModel, cs::AbstractCoordinateSystem{T}; map_meta=layer,
-    postrender_ops=[], zmap=(_) -> zero(T), gmsh_options = Dict(), skip_postrender = false, kwargs...) where {T}
+    postrender_ops=[], zmap=(_) -> zero(T), gmsh_options = Dict(), skip_postrender = false,
+    auto_union=false, skip_unused_layers=false, kwargs...) where {T}
 
 Render `cs` to `sm`.
 
@@ -1116,6 +1117,15 @@ Render `cs` to `sm`.
   - `skip_postrender`: Whether or not to return early without performing any postrendering
     operations. This can be particularly helpful during debugging, as all two dimensional
     entities will be placed appropriately but will not have been combined.
+  - `auto_union`: If `true`, union each physical group in dimensions 2 and 3
+    as the first postrender step, before extrusions and user-defined `postrender_ops`. This
+    consolidates overlapping entities within each group, reducing the cost of subsequent
+    pairwise fragmentation.
+  - `skip_unused_layers`: If `true`, skip rendering layers whose names are not referenced by
+    `postrender_ops` or `retained_physical_groups`. A layer is considered referenced if either
+    its mapped name or its base layer name (from `layer(meta)`) appears in the referenced set.
+    This keeps indexed and levelwise variants (e.g. `"port_1"`) when the base layer (`"port"`)
+    is referenced. Default is `false`.
 
 Available postrendering operations include [`translate!`](@ref), [`extrude_z!`](@ref), [`revolve!`](@ref),
 [`union_geom!`](@ref), [`intersect_geom!`](@ref), [`difference_geom!`](@ref), [`fragment_geom!`](@ref), and [`box_selection`](@ref).
@@ -1135,6 +1145,8 @@ function render!(
     gmsh_options=Dict{String, Union{String, Int, Float64}}(),
     meshing_parameters::Union{Nothing, MeshingParameters}=nothing,
     skip_postrender=false,
+    auto_union=false,
+    skip_unused_layers=false,
     kwargs...
 ) where {T}
     gmsh.model.set_current(name(sm))
@@ -1161,9 +1173,22 @@ function render!(
     # Create RTree for avoiding duplicating points
     points_tree = RTree{Float64, 3}(Int32)
 
+    # Build set of used layer names for skip_unused_layers optimization
+    used_names = if skip_unused_layers
+        _used_group_names(postrender_ops, retained_physical_groups)
+    else
+        nothing
+    end
+
     # Create physical groups
     for meta in unique(element_metadata(flat)) # For each unique (layer, level, index) triple
-        isnothing(map_meta(meta)) && continue
+        mapped_name = map_meta(meta)
+        isnothing(mapped_name) && continue
+        if !isnothing(used_names) &&
+           string(mapped_name) ∉ used_names &&
+           string(layer(meta)) ∉ used_names
+            continue
+        end
         idx = (element_metadata(flat) .== meta) # Get the corresponding elements
         els = to_primitives.(sm, elements(flat)[idx]; kwargs...)
         meshsizes = sizeandgrading.(elements(flat)[idx]; kwargs...)
@@ -1181,13 +1206,13 @@ function render!(
         group_dimtags = reduce(vcat, group_dimtags_unflattened, init=Tuple{Int32, Int32}[])
         # If group already exists, add to it
         for dim in unique(first.(group_dimtags))
-            if hasgroup(sm, map_meta(meta), dim)
-                append!(group_dimtags, dimtags(sm[map_meta(meta), dim]))
+            if hasgroup(sm, mapped_name, dim)
+                append!(group_dimtags, dimtags(sm[mapped_name, dim]))
             end
         end
 
         # Make physical group for each dimension
-        sm[map_meta(meta)] = group_dimtags
+        sm[mapped_name] = group_dimtags
 
         # Collect dimtags for each sizeandgrading
         for (s, dts) ∈ zip(meshsizes, group_dimtags_unflattened)
@@ -1260,6 +1285,18 @@ function render!(
     # Extrusions, Booleans, etc
     _synchronize!(sm)
     skip_postrender && return nothing
+    # Union each physical group to consolidate overlapping entities before postrender.
+    # Doing this before extrusions/booleans reduces the cost of pairwise fragmentation.
+    if auto_union
+        auto_union_ops = Tuple[]
+        for dim in (2, 3)
+            for groupname in collect(keys(dimgroupdict(sm, dim)))
+                push!(auto_union_ops, (groupname, union_geom!, (groupname, dim)))
+            end
+        end
+        _postrender!(sm, auto_union_ops)
+        _synchronize!(sm)
+    end
     _postrender!(sm, postrender_ops)
     _synchronize!(sm)
     # Get rid of redundant entities and update groups accordingly.
@@ -1705,3 +1742,32 @@ function _add_offset_curve!(
     endp_pairs = [[start, stop] for (start, stop) in zip(starts, stops)]
     return _add_curve!.(endp_pairs, bspline_approx.segments, k, z)
 end
+
+"""
+    _used_group_names(postrender_ops, retained_physical_groups)
+
+Build a `Set{String}` of physical group names referenced by `postrender_ops` or
+`retained_physical_groups`. Used by `skip_unused_layers` to avoid rendering
+entities for unreferenced layers.
+"""
+function _used_group_names(postrender_ops, retained_physical_groups)
+    names = Set{String}()
+    for (name, _) in retained_physical_groups
+        push!(names, string(name))
+    end
+    for op in postrender_ops
+        # op = (destination, func, args, kwargs...)
+        push!(names, string(op[1]))  # destination name
+        if length(op) >= 3
+            _extract_op_names!(names, op[3])  # args tuple
+        end
+    end
+    return names
+end
+
+# Recursively extract String and Symbol values from nested args structures.
+# Numeric parameters (dimensions, thicknesses) are Int or length-unit types, never strings.
+_extract_op_names!(names::Set{String}, x::Union{String, Symbol}) = push!(names, string(x))
+_extract_op_names!(names::Set{String}, x::Union{Tuple, AbstractVector}) =
+    foreach(a -> _extract_op_names!(names, a), x)
+_extract_op_names!(names::Set{String}, ::Any) = nothing
