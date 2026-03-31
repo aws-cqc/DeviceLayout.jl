@@ -1452,4 +1452,156 @@
         SolidModels.set_gmsh_option("Mesh.ElementOrder", dict)
         @test SolidModels.get_gmsh_number("Mesh.ElementOrder") == 1
     end
+
+    @testset "auto_union" begin
+        # Two overlapping rectangles on the same layer should be unioned into one entity
+        cs = CoordinateSystem("test_auto_union", nm)
+        r1 = Rectangle(Point(0μm, 0μm), Point(2μm, 1μm))
+        r2 = Rectangle(Point(1μm, 0μm), Point(3μm, 1μm))
+        place!(cs, r1, SemanticMeta(:overlap))
+        place!(cs, r2, SemanticMeta(:overlap))
+
+        # With auto_union=true (default), overlapping entities are consolidated
+        sm = SolidModel("test_auto_union", overwrite=true)
+        render!(sm, cs; auto_union=true)
+        # After auto-union + fragment, the "overlap" group should have a single surface
+        @test SolidModels.hasgroup(sm, "overlap", 2)
+        @test length(SolidModels.dimtags(sm["overlap", 2])) == 1
+
+        # With auto_union=false, overlapping entities are NOT consolidated before postrender.
+        # After fragmentation, the overlap region is split into separate fragments.
+        sm2 = SolidModel("test_auto_union_off", overwrite=true)
+        render!(sm2, cs; auto_union=false)
+        @test SolidModels.hasgroup(sm2, "overlap", 2)
+        @test length(SolidModels.dimtags(sm2["overlap", 2])) > 1
+
+        # auto_union composes with postrender_ops: union happens first, then ops run
+        cs2 = CoordinateSystem("test_auto_union_compose", nm)
+        r3 = Rectangle(Point(0μm, 0μm), Point(2μm, 1μm))
+        r4 = Rectangle(Point(1μm, 0μm), Point(3μm, 1μm))
+        r5 = Rectangle(Point(5μm, 5μm), Point(7μm, 7μm))
+        place!(cs2, r3, SemanticMeta(:a))
+        place!(cs2, r4, SemanticMeta(:a))
+        place!(cs2, r5, SemanticMeta(:b))
+        sm3 = SolidModel("test_auto_union_compose", overwrite=true)
+        render!(
+            sm3,
+            cs2;
+            auto_union=true,
+            postrender_ops=[("combined", SolidModels.union_geom!, ("a", "b", 2, 2))]
+        )
+        @test SolidModels.hasgroup(sm3, "combined", 2)
+        @test length(SolidModels.dimtags(sm3["combined", 2])) == 2
+    end
+
+    @testset "skip_unused_layers" begin
+        # Create a cs with three layers: "used", "intermediate", and "unused"
+        cs = CoordinateSystem("test_skip_unused", nm)
+        place!(cs, Rectangle(Point(0μm, 0μm), Point(1μm, 1μm)), SemanticMeta(:used))
+        place!(cs, Rectangle(Point(2μm, 0μm), Point(3μm, 1μm)), SemanticMeta(:intermediate))
+        place!(cs, Rectangle(Point(4μm, 0μm), Point(5μm, 1μm)), SemanticMeta(:unused))
+
+        # Without skip_unused_layers, all three layers are rendered
+        sm = SolidModel("test_skip_unused_off", overwrite=true)
+        render!(
+            sm,
+            cs;
+            skip_unused_layers=false,
+            postrender_ops=[(
+                "result",
+                SolidModels.union_geom!,
+                ("used", "intermediate", 2, 2),
+                :remove_object => true,
+                :remove_tool => true
+            )]
+        )
+        # "unused" was rendered
+        @test SolidModels.hasgroup(sm, "unused", 2)
+
+        # With skip_unused_layers=true, "unused" is never rendered
+        sm2 = SolidModel("test_skip_unused_on", overwrite=true)
+        render!(
+            sm2,
+            cs;
+            skip_unused_layers=true,
+            postrender_ops=[(
+                "result",
+                SolidModels.union_geom!,
+                ("used", "intermediate", 2, 2),
+                :remove_object => true,
+                :remove_tool => true
+            )]
+        )
+        @test !SolidModels.hasgroup(sm2, "unused", 2)
+
+        # Indexed layers: "port_1" kept when base layer "port" is referenced
+        cs3 = CoordinateSystem("test_skip_indexed", nm)
+        place!(cs3, Rectangle(Point(0μm, 0μm), Point(1μm, 1μm)), SemanticMeta(:metal))
+        place!(
+            cs3,
+            Rectangle(Point(2μm, 0μm), Point(3μm, 1μm)),
+            SemanticMeta(:port, index=0)
+        )
+        place!(
+            cs3,
+            Rectangle(Point(4μm, 0μm), Point(5μm, 1μm)),
+            SemanticMeta(:port, index=1)
+        )
+        place!(
+            cs3,
+            Rectangle(Point(6μm, 0μm), Point(7μm, 1μm)),
+            SemanticMeta(:port, index=2)
+        )
+        place!(cs3, Rectangle(Point(8μm, 0μm), Point(9μm, 1μm)), SemanticMeta(:unused))
+        # map_meta that appends _$(index) for non-zero port indices (like _map_meta_fn)
+        indexed_map = m -> begin
+            name = string(layer(m))
+            if layer(m) == :port
+                idx = DeviceLayout.layerindex(m)
+                idx != 0 && (name = name * "_$(idx)")
+            end
+            return name
+        end
+        sm4 = SolidModel("test_skip_indexed", overwrite=true)
+        render!(
+            sm4,
+            cs3;
+            skip_unused_layers=true,
+            map_meta=indexed_map,
+            postrender_ops=[(
+                "result",
+                SolidModels.difference_geom!,
+                ("metal", "port", 2, 2)
+            )]
+        )
+        # "port" referenced by postrender_ops → indexed variants kept via base name
+        @test SolidModels.hasgroup(sm4, "port_1", 2)
+        @test SolidModels.hasgroup(sm4, "port_2", 2)
+        # "unused" not referenced and has no referenced base layer
+        @test !SolidModels.hasgroup(sm4, "unused", 2)
+
+        # Verify the _used_group_names helper extracts names correctly
+        ops = [
+            ("metal", SolidModels.union_geom!, ("metal_negative", "metal_negative", 2, 2)),
+            ("base", SolidModels.difference_geom!, ("writeable_area", "base_negative"))
+        ]
+        retained = [("vacuum", 3), ("substrate", 3)]
+        names = DeviceLayout.SolidModels._used_group_names(ops, retained)
+        @test "metal" ∈ names
+        @test "metal_negative" ∈ names
+        @test "base" ∈ names
+        @test "writeable_area" ∈ names
+        @test "base_negative" ∈ names
+        @test "vacuum" ∈ names
+        @test "substrate" ∈ names
+
+        # Verify transitive deps: intermediate names referenced by ops are included
+        ops2 =
+            [("final", SolidModels.difference_geom!, ("big", ["small1", "small2"], 2, 2))]
+        names2 = DeviceLayout.SolidModels._used_group_names(ops2, [])
+        @test "final" ∈ names2
+        @test "big" ∈ names2
+        @test "small1" ∈ names2
+        @test "small2" ∈ names2
+    end
 end
