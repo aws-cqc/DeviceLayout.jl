@@ -98,14 +98,13 @@ function to_polygons(
     i = 1
     p = Point{T}[]
 
-    # TODO: Use ToTolerance
     for (idx, (csi, c)) ∈ enumerate(zip(e.curve_start_idx, e.curves))
         # Add the points from current to start of curve
         append!(p, e.p[i:abs(csi)])
 
-        # Discretize segment with 181 pts (1° over 180° turn).
+        # Discretize segment using tolerance-based adaptive grid.
         wrapped_i = mod1(abs(csi) + 1, length(e.p))
-        pp = c.(range(zero(T), pathlength(c), 181))
+        pp = DeviceLayout.discretize_curve(c, atol)
 
         # Remove the calculated points corresponding to start and end.
         term_p = csi < 0 ? popfirst!(pp) : pop!(pp)
@@ -716,9 +715,16 @@ function to_polygons(
             # t_end <= t_start means both fillets overlap (radius too large for arc);
             # the arc is dropped and the fillets connect directly.
             if t_end > t_start
-                npts = max(2, Int(ceil(181 * (t_end - t_start) / arc_len)))
-                # Remove endpoints (already present as fillet tangent points or vertex points)
-                inner = range(t_start, t_end, npts)[(begin + 1):(end - 1)]
+                # Adaptive grid directly over the trimmed arc range
+                l = pathlength(c)
+                grid = DeviceLayout.discretization_grid(
+                    t -> Paths.signed_curvature(c, t * l),
+                    atol,
+                    (Float64(t_start / l), Float64(t_end / l));
+                    t_scale=l
+                )
+                # Remove endpoints (already present as fillet tangent points)
+                inner = grid[(begin + 1):(end - 1)] .* l
                 pp = c.(csi < 0 ? reverse(inner) : inner)
                 append!(final_points, pp)
             end

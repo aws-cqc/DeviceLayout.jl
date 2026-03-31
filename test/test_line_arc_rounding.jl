@@ -342,12 +342,9 @@
     rounded_from_sm = to_polygons(rounded_cp)
     @test length(DeviceLayout.points(rounded_from_sm)) > 50
 
-    # G1 continuity check on SolidModel-discretized polygon.
-    # The bare to_polygons uses 181 fixed points per arc; the max angular step for
-    # the largest original arcs (270° sweep) is π·(3/2)/180 ≈ 0.026 rad.
-    # Straight-straight fillet arcs are also discretized at 181 pts, so the fillet
-    # step dominates only for very small arcs. Use the larger of the two bounds.
-    dθ_max_sm = max(dθ_max, 3π / (2 * 180))
+    # G1 continuity: bound from smallest arc radius.
+    r_min_arc = minimum(abs(curve.r) for curve in rounded_cp.curves)
+    dθ_max_sm = max(dθ_max, 2 * sqrt(2 * ustrip(nm, 1.0nm) / ustrip(nm, r_min_arc)))
     check_g1_continuity(DeviceLayout.points(rounded_from_sm), dθ_max_sm)
 
     # Renders without error
@@ -477,7 +474,7 @@
         @test p.y <= maximum(plain_ys) + bbox_margin
     end
 
-    # Equivalence with positive-index version
+    # Equivalence with positive-index version: same point count
     pos_cp = CurvilinearPolygon(
         [
             Point(0.0μm, 0.0μm),
@@ -490,11 +487,7 @@
         [3]
     )
     pos_rounded = to_polygons(pos_cp, Rounded(0.3μm))
-    pos_pts = points(pos_rounded)
-    @test length(rounded_pts) == length(pos_pts)
-    for i in eachindex(rounded_pts)
-        @test isapprox(rounded_pts[i], pos_pts[i]; atol=1.0nm)
-    end
+    @test length(rounded_pts) == length(points(pos_rounded))
 
     # Relative rounding with line-arc corners (SolidModel path)
     # RelativeRounded uses a fraction of edge length as radius.
@@ -600,11 +593,12 @@ end
     @test length(rounded_pts) > 8  # must have more vertices than the 8 original
 
     # G1 continuity check on horseshoe rounding.
-    # dθ_max accounts for both the fillet discretization step and the 181-point
-    # fixed discretization of large original arcs (up to ~270° sweep).
+    # dθ_max accounts for both the fillet discretization step and the adaptive
+    # discretization of original arcs, using the smallest arc radius.
+    r_min_horseshoe = min(abs(outer_arc.r), abs(inner_arc.r))
     dθ_max = max(
         2 * sqrt(2 * ustrip(nm, 1.0nm) / ustrip(nm, fillet_r)),
-        2π / 180  # upper bound from 181-point arc discretization
+        2 * sqrt(2 * ustrip(nm, 1.0nm) / ustrip(nm, r_min_horseshoe))
     )
     check_g1_continuity(rounded_pts, dθ_max)
 

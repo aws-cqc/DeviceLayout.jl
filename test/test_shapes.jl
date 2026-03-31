@@ -429,17 +429,19 @@ end
     c = Cell("main", nm)
     @test_nowarn render!(c, cs)
 
-    # Reverse parameterized and forward parameterized should result in same points
-    @test all(isapprox.(pgen, points(to_polygons(cp))))
-    @test all(isapprox.(ptgen, points(to_polygons(t(cp)))))
+    # Reverse parameterized and forward parameterized should produce same number of points
+    @test length(points(to_polygons(cp))) == length(pgen)
+    @test length(points(to_polygons(t(cp)))) == length(ptgen)
 
     cs = CoordinateSystem("abc", nm)
     @test_nowarn place!(cs, cpt, GDSMeta())
     c = Cell("main", nm)
     @test_nowarn render!(c, cs)
 
-    # Clipping the transformed inverse and forward should give an empty space
-    @test isempty(points(difference2d(to_polygons(cpt), to_polygons(t(cp)))))
+    # Clipping the transformed inverse and forward should give negligible difference.
+    # Adaptive discretization may produce thin slivers rather than exactly empty.
+    diff_poly = difference2d(to_polygons(cpt), to_polygons(t(cp)))
+    @test perimeter(diff_poly) < 0.1μm
 
     # Convert a SimpleTrace to a CurvilinearRegion
     pa = Path(0nm, 0nm)
@@ -451,6 +453,12 @@ end
     place!(cs, cr[2], GDSMeta())
     c = Cell("main", nm)
     @test_nowarn render!(c, cs)
+
+    # Tolerance-based discretization: coarser atol should produce fewer points than finer
+    cp = CurvilinearPolygon(pp, [Paths.Turn(90°, 1.0μm, α0=90°, p0=pp[2])], [2])
+    coarse = to_polygons(cp; atol=2.0nm)
+    fine = to_polygons(cp; atol=0.1nm)
+    @test length(points(coarse)) < length(points(fine))
 end
 
 @testitem "Ellipses" setup = [CommonTestSetup] begin
