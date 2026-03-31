@@ -514,6 +514,16 @@
     # Relative result should differ from absolute (different radius semantics)
     @test length(points(rel_rounded)) != length(rounded_pts) ||
           !isapprox(points(rel_rounded)[1], rounded_pts[1]; atol=0.1nm)
+
+    # Unitful issue addressed by Unitful.jl PR#845 bypassed
+    rect = Rectangle(10.0μm2μm, 10.0μm2μm)
+    cr = CurvilinearRegion(CurvilinearPolygon(points(rect)))
+    rnd_μm2nm = Rounded(1.0μm2nm)
+    poly = only(to_polygons(rnd_μm2nm(cr))) # Runs without error
+    @test coordinatetype(poly) == typeof(1.00μm2μm)
+    # Test no-holes bypasses difference2d -- point order would be different
+    @test poly == to_polygons(cr.exterior, rnd_μm2nm)
+    @test only(to_polygons(cr)) == to_polygons(cr.exterior)
 end
 
 @testitem "Horseshoe landing pad rounding" setup = [CommonTestSetup] begin

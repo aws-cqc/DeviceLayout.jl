@@ -390,6 +390,13 @@
     @test_nowarn place!(cs, csty, GDSMeta())
     c = Cell("main", nm)
     @test_nowarn render!(c, cs)
+
+    # Use float input polygon coordinatetype -- don't promote with rounded type
+    r_int = Rectangle(2μm2μm, 2μm2μm)
+    r_float = Rectangle(2.0μm2μm, 2.0μm2μm)
+    rnd = Rounded(0.5μm2nm)
+    @test coordinatetype(to_polygons(rnd(r_int))) == typeof(1.02μm2μm)
+    @test coordinatetype(to_polygons(rnd(r_float))) == typeof(1.02μm2μm)
 end
 
 @testitem "Curvilinear" setup = [CommonTestSetup] begin

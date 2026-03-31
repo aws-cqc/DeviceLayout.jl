@@ -198,14 +198,14 @@ function round_to_curvilinearpolygon(
     min_side_len=relative ? zero(T) : radius
 )::CurvilinearPolygon{T} where {T, S <: Coordinate}
     # If radius is dimensional, non-relative rounding.
-    V = ((S <: Length && T <: Length) || (S <: Real && T <: Real)) ? promote_type(T, S) : T
+    V = float(T)
     # Tie break for Real, Real introduces a type instability for non-dimensional.
     relative = ((T <: Length) && (S <: Real)) || (relative && T <: Real && S <: Real)
 
     poly = points(pol)
     len = length(poly)
-    new_points = Point{float(V)}[]
-    new_curves = Paths.Turn{float(V)}[]
+    new_points = Point{V}[]
+    new_curves = Paths.Turn{V}[]
     new_curve_start_idx = Int[]
 
     for i in eachindex(poly)
@@ -248,19 +248,19 @@ function round_to_curvilinearpolygon(
     min_side_len=relative ? zero(T) : radius
 )::CurvilinearPolygon{T} where {T, S <: Coordinate}
     # If radius is dimensional, non-relative rounding.
-    V = ((S <: Length && T <: Length) || (S <: Real && T <: Real)) ? promote_type(T, S) : T
+    V = float(T)
     # Tie break for Real, Real introduces a type instability for non-dimensional.
     relative = ((T <: Length) && (S <: Real)) || (relative && T <: Real && S <: Real)
 
     poly = points(pol)
     len = length(poly)
-    new_points = Point{float(V)}[]
-    new_curves = Paths.Turn{float(V)}[]
+    new_points = Point{V}[]
+    new_curves = Paths.Turn{V}[]
     new_curve_start_idx = Int[]
 
     # Track trims for existing curves when rounding line-arc corners
-    trim_start_pts = Dict{Int, Point{float(V)}}()
-    trim_end_pts = Dict{Int, Point{float(V)}}()
+    trim_start_pts = Dict{Int, Point{V}}()
+    trim_end_pts = Dict{Int, Point{V}}()
 
     # Determine which line-arc corners to round
     la_indices = if !isnothing(line_arc_corner_indices)
@@ -382,7 +382,7 @@ function rounded_corner_segment(
     min_side_len=radius,
     min_angle=1e-3
 ) where {T, S <: Coordinate}
-    V = promote_type(T, S)
+    V = float(T)
     rad = convert(V, radius)
 
     v1 = (p1 - p0) / norm(p1 - p0)
@@ -441,7 +441,7 @@ function rounded_corner_segment_line_arc(
     min_side_len=radius,
     min_angle=1e-3
 ) where {T, S <: Coordinate}
-    V = promote_type(T, S)
+    V = float(T)
     r = convert(V, radius)
     atol = DeviceLayout.Polygons._round_atol(T, S)
 

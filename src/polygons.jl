@@ -754,13 +754,13 @@ function _round_poly(
 ) where {T, S <: Coordinate}
     iszero(radius) && return pol
     # If radius is dimensional, non-relative rounding.
-    V = ((S <: Length && T <: Length) || (S <: Real && T <: Real)) ? promote_type(T, S) : T
+    V = float(T)
     # Tie break for Real, Real introduces a type instability for non-dimensional.
     relative = ((T <: Length) && (S <: Real)) || (relative && T <: Real && S <: Real)
 
     poly = points(pol)
     len = length(poly)
-    new_polygon = Point{float(V)}[]
+    new_polygon = Point{V}[]
     for i in eachindex(poly)
         if !(i in corner_indices)
             push!(new_polygon, poly[i])
@@ -783,7 +783,7 @@ function _round_poly(
             )
         end
     end
-    return Polygon(new_polygon...)
+    return Polygon(new_polygon)
 end
 
 # Perform rounding by creating Polygons of each contour, dispatching
@@ -799,7 +799,7 @@ function _round_poly(
     radius::S;
     kwargs...
 ) where {T, S <: Coordinate}
-    V = ((S <: Length && T <: Length) || (S <: Real && T <: Real)) ? promote_type(T, S) : T
+    V = float(T)
     new_pol = T == V ? deepcopy(pol) : convert(ClippedPolygon{V}, pol)
     round_node!.(new_pol.tree.children, Ref(radius); kwargs...)
     return new_pol
@@ -829,7 +829,7 @@ function rounded_corner(
     min_side_len=radius,
     min_angle=1e-3
 ) where {T, S <: Coordinate}
-    V = promote_type(T, S)
+    V = float(T)
     rad = convert(V, radius)
 
     v1 = (p1 - p0) / norm(p1 - p0)
