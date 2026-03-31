@@ -4,6 +4,11 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## 1.11.2 (2026-03-31)
+
+  - Fix unit promotion in rounding that could hit a Unitful bug (Unitful.jl#845)
+  - Fix `kwargs...` forwarding for CurvilinearRegion `to_polygons`
+
 ## 1.11.1 (2026-03-30)
 
   - Fix dispatch error for rounding of styled entities introduced by 1.11.0
