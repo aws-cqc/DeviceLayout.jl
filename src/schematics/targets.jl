@@ -31,6 +31,23 @@ The `simulation` option can be set as a keyword argument to `render!` or as an e
 only_simulated(ent::GeometryEntity) = optional_entity(ent, :simulation, default=false)
 
 """
+    only_simulated!(cs::CoordinateSystem)
+
+Apply [`only_simulated`](@ref) in-place to every element in `cs`, recursing into referenced
+coordinate systems.
+"""
+function only_simulated!(cs::CoordinateSystem)
+    only_simulated!.(cs.refs)
+    cs.elements .= only_simulated.(cs.elements)
+    return cs
+end
+
+function only_simulated!(csref::CoordinateSystemReference)
+    only_simulated!(csref.structure)
+    return csref
+end
+
+"""
     not_solidmodel(ent::GeometryEntity)
 
 Return a version of `ent` that is rendered unless `solidmodel=true` in the rendering options.
@@ -61,6 +78,62 @@ The `solidmodel` option can be set as a keyword argument to `render!` or as an e
 `rendering_options` in the `Target` provided to `render!`.
 """
 only_solidmodel(ent::GeometryEntity) = optional_entity(ent, :solidmodel, default=false)
+
+"""
+    only_solidmodel!(cs::CoordinateSystem)
+
+Apply [`only_solidmodel`](@ref) in-place to every element in `cs`, recursing into referenced
+coordinate systems.
+"""
+function only_solidmodel!(cs::CoordinateSystem)
+    only_solidmodel!.(cs.refs)
+    cs.elements .= only_solidmodel.(cs.elements)
+    return cs
+end
+
+function only_solidmodel!(csref::CoordinateSystemReference)
+    only_solidmodel!(csref.structure)
+    return csref
+end
+
+"""
+    not_simulated(pa::Paths.Path)
+
+Return a styled entity equivalent to `not_simulated(simplify(pa))`.
+
+The result is a `GeometryEntity` (not a `Path`) and should be placed with
+`place!(cs, result, meta)` rather than `place!(cs, path, meta)`.
+
+See also [`not_simulated(::GeometryEntity)`](@ref).
+"""
+not_simulated(pa::Paths.Path) = not_simulated(Paths.simplify(pa))
+
+"""
+    only_simulated(pa::Paths.Path)
+
+Return a styled entity equivalent to `only_simulated(simplify(pa))`.
+
+See also [`only_simulated(::GeometryEntity)`](@ref).
+"""
+only_simulated(pa::Paths.Path) = only_simulated(Paths.simplify(pa))
+
+"""
+    not_solidmodel(pa::Paths.Path)
+
+Return a styled entity equivalent to `not_solidmodel(simplify(pa))`.
+
+See also [`not_solidmodel(::GeometryEntity)`](@ref).
+"""
+not_solidmodel(pa::Paths.Path) = not_solidmodel(Paths.simplify(pa))
+
+"""
+    only_solidmodel(pa::Paths.Path)
+
+Return a styled entity equivalent to `only_solidmodel(simplify(pa))`.
+
+See also [`only_solidmodel(::GeometryEntity)`](@ref).
+"""
+only_solidmodel(pa::Paths.Path) = only_solidmodel(Paths.simplify(pa))
 
 """
     facing(l::Int)
