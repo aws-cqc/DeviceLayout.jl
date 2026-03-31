@@ -101,7 +101,7 @@ function route!(
     node2::ComponentNode,
     sty,
     meta;
-    name="r_$(component(node1).name)_$(component(node2).name)",
+    name=uniquename("r_$(component(node1).name)_$(component(node2).name)"),
     kwargs...
 )
     h1, h2 = matching_hooks(component(node1), component(node2))
@@ -115,7 +115,7 @@ route!(
     node2::ComponentNode,
     sty,
     meta;
-    name="r_$(component(nodehook1.first).name)_$(component(node2).name)",
+    name=uniquename("r_$(component(nodehook1.first).name)_$(component(node2).name)"),
     kwargs...
 ) = route!(
     g,
@@ -136,7 +136,7 @@ route!(
     nodehook2::Pair{ComponentNode, Symbol},
     sty,
     meta;
-    name="r_$(component(node1).name)_$(component(nodehook2.first).name)",
+    name=uniquename("r_$(component(node1).name)_$(component(nodehook2.first).name)"),
     kwargs...
 ) = route!(
     g,
