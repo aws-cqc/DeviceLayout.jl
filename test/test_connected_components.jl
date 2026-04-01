@@ -14,7 +14,7 @@
     @testset "empty input" begin
         fresh_model("empty")
         result = connected_components(3, Int32[])
-        @test result == Vector{Int32}[]
+        @test result == Vector{Tuple{Int32, Int32}}[]
     end
 
     @testset "single entity" begin
@@ -24,7 +24,7 @@
         tags = Int32[1]
         result = connected_components(3, tags)
         @test length(result) == 1
-        @test result[1] == Int32[1]
+        @test result[1] == (Int32(3), Int32(1))
     end
 
     @testset "two disconnected volumes" begin
@@ -117,7 +117,7 @@
         gmsh.model.occ.addRectangle(50, 50, 0, 4, 4)
         gmsh.model.occ.addRectangle(51, 51, 0, 1, 1)
         gmsh.model.occ.synchronize()
-        gmsh.model.occ.fragment(gmsh.model.getEntities(2), [])
+        dt, dtmap = gmsh.model.occ.fragment(gmsh.model.getEntities(2), [])
         gmsh.model.occ.synchronize()
         surfs = [dt[2] for dt in gmsh.model.getEntities(2)]
         result = connected_components(2, surfs)
@@ -126,5 +126,12 @@
         sizes = sort([length(c) for c in result])
         @test sizes[1] == 2
         @test sizes[2] == 3
+        # If you skip the connecting rectangle you get 3 groups
+        disconnected = unique(vcat(dtmap[1], dtmap[3], dtmap[4], dtmap[5]))
+        result2 = connected_components(2, last.(disconnected))
+        @show result2
+        @test length(result2) == 3
+        sizes = sort([length(c) for c in result2])
+        @test sizes == [1, 1, 2]
     end
 end

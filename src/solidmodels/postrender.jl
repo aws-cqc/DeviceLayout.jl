@@ -1033,19 +1033,19 @@ of one connected component.
   - Works for any dimension ≥ 1 (uses dim - 1 boundary adjacencies)
   - For dim=3 (volumes): shares boundary surfaces (dim=2)
   - For dim=2 (surfaces): shares boundary curves (dim=1)
-  - O(N) where N = number of entities + number of boundary connections
 """
 function connected_components(sm::SolidModel, groups, dim=2)
     tags = reduce(vcat, [entitytags(sm[name, dim]) for name in groups], init=Int32[])
+    unique!(tags)
     return connected_components(dim, tags)
 end
 connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2) =
     connected_components(dim, entitytags(sm[group, dim]))
 
-function connected_components(dim::Int, tags::Vector{Int32})
+function connected_components(dim::Integer, tags::Vector{Int32})
     n = length(tags)
-    isempty(tags) && return Vector{Int32}[]
-    n == 1 && return [tags]
+    isempty(tags) && return Vector{Tuple{Int32, Int32}}[]
+    n == 1 && return [(Int32(dim), only(tags))]
 
     # Build adjacency: map boundary entities to parent entity indices
     boundary_to_parents = Dict{Int32, Vector{Int}}()
