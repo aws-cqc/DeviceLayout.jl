@@ -779,6 +779,35 @@ end
         poly = to_polygons(intersect2d(r0, pa => :test))
         @test length(poly) == 12
     end
+
+    @testset "Offset preserves holes (#11)" begin
+        # Create a ring shape: outer square with inner hole
+        outer = Rectangle(100nm, 100nm)
+        inner = Rectangle(60nm, 60nm) + Point(20nm, 20nm)
+        ring = difference2d(outer, inner)
+
+        # Offset outward — should produce a single polygon (with interior cut
+        # encoding the hole), not two separate flat polygons.
+        # Without the fix, Clipper returns 2 separate Polygons (one for the
+        # expanded outer contour, one for the shrunk inner hole contour) because
+        # _offset loses hole topology.  With the fix, mixed-orientation contours
+        # are recombined via union2d and flattened with interior cuts.
+        result = offset(ring, 5nm)
+        @test length(result) == 1  # single ring polygon with interior cut
+
+        # The result should be larger than the original outer rectangle
+        # (offset expands outward by 5nm on each side)
+        b = bounds(result[1])
+        @test width(b) > 100nm
+        @test height(b) > 100nm
+
+        # Also test with unitless integers (same bug path)
+        outer_i = Rectangle(100, 100)
+        inner_i = Rectangle(60, 60) + Point(20, 20)
+        ring_i = difference2d(outer_i, inner_i)
+        result_i = offset(ring_i, 5)
+        @test length(result_i) == 1
+    end
 end
 
 @testitem "Clipping CurvilinearPolygon" setup = [CommonTestSetup] begin
