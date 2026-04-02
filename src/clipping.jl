@@ -1094,47 +1094,19 @@ swap(x) = x[1] > x[2] ? (x[2], x[1]) : x
 
 ### Layerwise
 function xor2d_layerwise(obj::GeometryStructure, tool::GeometryStructure; kwargs...)
-    return clip_layerwise(
-        Clipper.ClipTypeXor,
-        obj,
-        tool;
-        pfs=Clipper.PolyFillTypePositive,
-        pfc=Clipper.PolyFillTypePositive,
-        kwargs...
-    )
+    return clip_layerwise(Clipper.ClipTypeXor, obj, tool; kwargs...)
 end
 
 function difference2d_layerwise(obj::GeometryStructure, tool::GeometryStructure; kwargs...)
-    return clip_layerwise(
-        Clipper.ClipTypeDifference,
-        obj,
-        tool;
-        pfs=Clipper.PolyFillTypePositive,
-        pfc=Clipper.PolyFillTypePositive,
-        kwargs...
-    )
+    return clip_layerwise(Clipper.ClipTypeDifference, obj, tool; kwargs...)
 end
 
 function intersect2d_layerwise(obj::GeometryStructure, tool::GeometryStructure; kwargs...)
-    return clip_layerwise(
-        Clipper.ClipTypeIntersection,
-        obj,
-        tool;
-        pfs=Clipper.PolyFillTypePositive,
-        pfc=Clipper.PolyFillTypePositive,
-        kwargs...
-    )
+    return clip_layerwise(Clipper.ClipTypeIntersection, obj, tool; kwargs...)
 end
 
 function union2d_layerwise(obj::GeometryStructure, tool::GeometryStructure; kwargs...)
-    return clip_layerwise(
-        Clipper.ClipTypeUnion,
-        obj,
-        tool;
-        pfs=Clipper.PolyFillTypePositive,
-        pfc=Clipper.PolyFillTypePositive,
-        kwargs...
-    )
+    return clip_layerwise(Clipper.ClipTypeUnion, obj, tool; kwargs...)
 end
 
 for func in ("union2d", "difference2d", "intersect2d", "xor2d")
@@ -1144,8 +1116,6 @@ for func in ("union2d", "difference2d", "intersect2d", "xor2d")
             only_layers=[],
             ignore_layers=[],
             depth=-1,
-            pfs=Clipper.PolyFillTypePositive,
-            pfc=Clipper.PolyFillTypePositive,
             tile_size=nothing
         )
 
@@ -1189,8 +1159,8 @@ function clip_layerwise(
     ignore_layers=[],
     tile_size=nothing,
     depth=-1,
-    pfs=Clipper.PolyFillTypeEvenOdd,
-    pfc=Clipper.PolyFillTypeEvenOdd
+    pfs=Clipper.PolyFillTypePositive,
+    pfc=Clipper.PolyFillTypePositive
 )
     metadata_filter = DeviceLayout.layer_inclusion(only_layers, ignore_layers)
     if metadata_filter == DeviceLayout.trivial_inclusion
@@ -1264,8 +1234,8 @@ end
         ents1::AbstractArray{<:GeometryEntity{T}},
         ents2::AbstractArray{<:GeometryEntity{T}},
         tile_size=1000 * DeviceLayout.onemicron(T);
-        pfs=Clipper.PolyFillTypeEvenOdd,
-        pfc=Clipper.PolyFillTypeEvenOdd
+        pfs=Clipper.PolyFillTypePositive,
+        pfc=Clipper.PolyFillTypePositive
     )
 
 Return a lazy iterator that applies `op(ents1, ents2)` tile by tile.
@@ -1287,8 +1257,8 @@ function clip_tiled(
     ents1::AbstractArray{<:GeometryEntity{T}},
     ents2::AbstractArray{<:GeometryEntity{T}},
     tile_size=1000 * DeviceLayout.onemicron(T);
-    pfs=Clipper.PolyFillTypeEvenOdd,
-    pfc=Clipper.PolyFillTypeEvenOdd
+    pfs=Clipper.PolyFillTypePositive,
+    pfc=Clipper.PolyFillTypePositive
 ) where {T}
     # Create spatial index for each set of polygons
     tree1 = DeviceLayout.mbr_spatial_index(ents1)
