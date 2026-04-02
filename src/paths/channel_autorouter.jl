@@ -702,10 +702,24 @@ function segments_overlap(ar, seg1, seg2)
     low1, high1 = interval(ar, seg1)
     low2, high2 = interval(ar, seg2)
     if low1 <= low2 # segments are in ascending order
-        return low2 < high1 # no overlap for '==' means knock-knees are OK
-    else # descending order
-        return low1 < high2
+        low2 < high1 && return true
+        low2 == high1 || return false
+        # Boundary case: check if knock-knee is actually possible
+        return _same_tendency_at_boundary(ar, seg1, seg2)
+    else # descending order, just reverse the roles
+        low1 < high2 && return true
+        low1 == high2 || return false
+        return _same_tendency_at_boundary(ar, seg2, seg1)
     end
+end
+
+function _same_tendency_at_boundary(ar, seg1, seg2)
+    p1, n1 = bounding_channels(seg1)
+    p2, n2 = bounding_channels(seg2)
+    shared_boundary = [2 - 1*(p1 == p2 || p1 == n2), 2 - 1*(p2 == p1 || p2 == n1)]
+    t1 = prev_next_tendency(ar, seg1)
+    t2 = prev_next_tendency(ar, seg2)
+    return t1[shared_boundary[1]] == t2[shared_boundary[2]]
 end
 
 function best_matching!(merging_graph, vcg)
