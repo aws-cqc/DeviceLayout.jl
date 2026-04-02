@@ -1149,28 +1149,31 @@ function track_path_segments(rule::AutoChannelRouting, pa::Path, _)
         for channel in rule.channels[channels_taken(rule.router, pa)]]
 end
 
-function track_path_segment(r::ChannelRouter{T}, ch::RouteChannel, pa::Path; margin=zero(T)) where {T}
+function track_path_segment(ar::ChannelRouter{T}, ch::RouteChannel, pa::Path; margin=zero(T)) where {T}
     # Get the track wire segment from the router
     # Assume there is exactly one wire segment belonging to this path in the channel
     # Channel node might have been converted to store in router, so just check start point/direction
-    channel_idx = findfirst(chn -> p0(chn.seg) ≈ p0(ch.path) && α0(chn.seg) == α0(ch.path), r.channels)
-    wireseg_idx = findfirst(ws -> running_channel(ws) == channel_idx, channel_segments(r, channel_idx))
-    wireseg = channel_segments(r, channel_idx)[wireseg_idx]
-    track_idx = segment_track(r, wireseg)
+    channel_idx = findfirst(chn -> p0(chn.seg) ≈ p0(ch.path) && α0(chn.seg) == α0(ch.path), ar.channels)
+    net_idx = indexin(pa, ar.net_paths)
+    wireseg_idx = findfirst(ws -> running_channel(ws) == channel_idx, net_wire(ar, net_idx))
+    wireseg = channel_segments(ar, channel_idx)[wireseg_idx]
+    track_idx = segment_track(ar, wireseg)
     # Get the starting and ending pathlengths
     start_channel, stop_channel = bounding_channels(wireseg)
     wireseg_start = pathlength_at_intersection(ar, channel_idx, start_channel)
     wireseg_stop = pathlength_at_intersection(ar, channel_idx, stop_channel)
     prev_width = width_at_intersection(ar, start_channel, channel_idx)
     next_width = width_at_intersection(ar, stop_channel, channel_idx)
-    channel_section = segment_channel_section(channel, wireseg_start, wireseg_stop, prev_width, next_width; margin)
+    channel_section = segment_channel_section(channel,
+        wireseg_start, wireseg_stop, prev_width, next_width; margin)
     # Return channel section segment offset by width according to track
-    return track_path_segment(length(channel_tracks(ar, channel_idx)), channel_section, track_idx)
+    return track_path_segment(length(channel_tracks(ar, channel_idx)),
+        channel_section, track_idx; reversed=wireseg_start > wireseg_stop)
 end
 
 function channels_taken(r::ChannelRouter, pa::Path)
     net_idx = only(indexin(pa, r.net_paths))
-    channels_taken = [running_channel(wireseg) for wireseg in net_wire(r, net_idx)]
+    return [running_channel(wireseg) for wireseg in net_wire(r, net_idx)]
 end
 
 function _update_with_graph!(rule::AutoChannelRouting, route_node, graph; kwargs...)
