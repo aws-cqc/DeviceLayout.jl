@@ -129,7 +129,6 @@
         # If you skip the connecting rectangle you get 3 groups
         disconnected = unique(vcat(dtmap[1], dtmap[3], dtmap[4], dtmap[5]))
         result2 = connected_components(2, last.(disconnected))
-        @show result2
         @test length(result2) == 3
         sizes = sort([length(c) for c in result2])
         @test sizes == [1, 1, 2]
