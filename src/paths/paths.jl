@@ -709,8 +709,8 @@ end
 Generic fallback, approximating a [`Paths.Segment`](@ref) using many
 [`Polygons.LineSegment`](@ref) objects. Returns a vector of `LineSegment`s.
 """
-function line_segments(seg::Paths.Segment)
-    return Polygons.segmentize(seg.(discretization(seg)), false)
+function line_segments(seg::Paths.Segment{T}) where {T}
+    return Polygons.segmentize(DeviceLayout.discretize_curve(seg, DeviceLayout.onenanometer(T)), false)
 end
 
 """
