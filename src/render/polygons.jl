@@ -1,5 +1,65 @@
 using IntervalTrees
 
+# Find a balanced guillotine cut rectangle from polygon contours.
+# Samples random vertex-aligned cuts and scores by edge-count balance.
+function _best_guillotine_cut(contours)
+    rng = MersenneTwister(1234)
+    allpoints = reduce(vcat, contours)
+    T = eltype(eltype(allpoints))
+
+    xtree = IntervalTree{T, IntervalValue{T, Int}}()
+    ytree = IntervalTree{T, IntervalValue{T, Int}}()
+    seg_idx = 0
+    for pts in contours
+        lsview = Polygons.LineSegmentView(pts)
+        for i in eachindex(lsview)
+            seg_idx += 1
+            push!(xtree, IntervalValue(Polygons.xinterval(lsview[i])..., seg_idx))
+            push!(ytree, IntervalValue(Polygons.yinterval(lsview[i])..., seg_idx))
+        end
+    end
+
+    b = Rectangle(lowerleft(allpoints), upperright(allpoints))
+    bestclip = b
+    bestscore = typemax(Int)
+    for _ = 1:200
+        x1 = getx(allpoints[rand(rng, 1:length(allpoints))])
+        clipPoly = Rectangle(lowerleft(b), Point(x1, upperright(b).y))
+        left, right = Interval(b.ll.x, x1), Interval(x1, b.ur.x)
+        nleft = nright = 0
+        for _ in intersect(xtree, left)
+            nleft += 1
+        end
+        for _ in intersect(xtree, right)
+            nright += 1
+        end
+        score = abs(nleft - nright)
+        if bestscore > score
+            bestscore = score
+            bestclip = clipPoly
+        end
+    end
+    for _ = 1:200
+        y1 = gety(allpoints[rand(rng, 1:length(allpoints))])
+        clipPoly = Rectangle(lowerleft(b), Point(upperright(b).x, y1))
+        left, right = Interval(b.ll.y, y1), Interval(y1, b.ur.y)
+        nleft = nright = 0
+        for _ in intersect(ytree, left)
+            nleft += 1
+        end
+        for _ in intersect(ytree, right)
+            nright += 1
+        end
+        score = abs(nleft - nright)
+        if bestscore > score
+            bestscore = score
+            bestclip = clipPoly
+        end
+    end
+
+    return bestclip
+end
+
 """
     render!(c::Cell, p::Polygon, meta::GDSMeta=GDSMeta())
 
@@ -21,64 +81,48 @@ function render!(c::Cell{S}, p::Polygon, meta::GDSMeta=GDSMeta(); kwargs...) whe
         return c
     end
 
-    # for determinism
-    rng = MersenneTwister(1234)
-
-    # idea will be to make a cut that balances the number of line segments
-    # on one side of the cut or the other. should be cheaper than clipping.
-
-    T = eltype(eltype(points(p)))
-    xtree = IntervalTree{T, IntervalValue{T, Int}}()
-    ytree = IntervalTree{T, IntervalValue{T, Int}}()
-    lsview = Polygons.LineSegmentView(points(p))
-    for i in eachindex(lsview)
-        push!(xtree, IntervalValue(Polygons.xinterval(lsview[i])..., i))
-        push!(ytree, IntervalValue(Polygons.yinterval(lsview[i])..., i))
-    end
-
-    b = bounds(p)
-    bestclip = b
-    bestscore = typemax(Int)
-    for _ = 1:200
-        x1 = getx(points(p)[rand(rng, 1:end)])
-        clipPoly = Rectangle(lowerleft(b), Point(x1, upperright(b).y))
-        left, right = Interval(b.ll.x, x1), Interval(x1, b.ur.x)
-        nleft = nright = 0
-        for i in intersect(xtree, left)
-            nleft += 1
-        end
-        for _ in intersect(xtree, right)
-            nright += 1
-        end
-        score = abs(nleft - nright)
-        if bestscore > score
-            bestscore = score
-            bestclip = clipPoly
-        end
-    end
-    for _ = 1:200
-        y1 = gety(points(p)[rand(rng, 1:end)])
-        clipPoly = Rectangle(lowerleft(b), Point(upperright(b).x, y1))
-        left, right = Interval(b.ll.y, y1), Interval(y1, b.ur.y)
-        nleft = nright = 0
-        for i in intersect(ytree, left)
-            nleft += 1
-        end
-        for _ in intersect(ytree, right)
-            nright += 1
-        end
-        score = abs(nleft - nright)
-        if bestscore > score
-            bestscore = score
-            bestclip = clipPoly
-        end
-    end
-
+    bestclip = _best_guillotine_cut((points(p),))
     for q in [
         clip(Clipper.ClipTypeIntersection, p, bestclip)
         clip(Clipper.ClipTypeDifference, p, bestclip)
     ]
         render!(c, q, meta)
+    end
+    return c
+end
+
+"""
+    render!(c::Cell, cp::ClippedPolygon, meta::GDSMeta=GDSMeta())
+
+Render a `ClippedPolygon`, applying guillotine cutting at the PolyNode level
+to preserve hole topology. Only converts to keyhole polygons (via `interiorcuts`)
+when sub-polygons are small enough to fit within `GDS_POLYGON_MAX`.
+"""
+function render!(
+    c::Cell{S},
+    cp::ClippedPolygon{T},
+    meta::GDSMeta=GDSMeta();
+    kwargs...
+) where {S, T}
+    gds_max =
+        haskey(ENV, "GDS_POLYGON_MAX") ? parse(Int, ENV["GDS_POLYGON_MAX"]) :
+        GDS_POLYGON_MAX
+
+    # Check if any outer contour (with its holes) would produce a keyhole polygon
+    # exceeding the point limit
+    if all(Polygons.total_points(child) <= gds_max for child in Clipper.children(cp.tree))
+        for poly in to_polygons(cp)
+            render!(c, poly, meta; kwargs...)
+        end
+        return c
+    end
+
+    bestclip = _best_guillotine_cut(Polygons._all_contours(cp.tree))
+    for q in [
+        clip(Clipper.ClipTypeIntersection, cp, bestclip)
+        clip(Clipper.ClipTypeDifference, cp, bestclip)
+    ]
+        render!(c, q, meta; kwargs...)
     end
     return c
 end
