@@ -334,7 +334,7 @@ function segment_midpoint(ar::ChannelRouter{T}, ws::TrackWireSegment) where {T}
     end
     channel_midpoint = channel_coordinates(ar, channel_idx, s)
 
-    offset_distance = segment_offset(ar, ws)
+    offset_distance = segment_offset(ar, ws; use_wire_direction=false)
 
     channel_dir = channel_direction(ar, channel_idx, s)
     return channel_midpoint + offset_distance * Point(-sin(channel_dir), cos(channel_dir))
@@ -346,7 +346,7 @@ end
 The angle with the x-axis made by segment `ws` directed along its wire toward its end pin.
 """
 function segment_direction(ar::ChannelRouter, ws::TrackWireSegment, s)
-    off = segment_offset(ar, ws, s)
+    off = segment_offset(ar, ws)
     seg = Paths.offset(ar.channels[running_channel(ws)].node.seg, off)
     return direction(seg, s)
 end
@@ -356,11 +356,14 @@ function segment_mid_direction(ar::ChannelRouter, ws::TrackWireSegment)
     return segment_direction(ar, ws, (s0+s1)/2)
 end
 
-function segment_offset(ar::ChannelRouter{T}, ws::TrackWireSegment, s...) where {T}
-    is_pin(ar, running_channel(ws)) && return zero(T)
-    c = segment_track(ar, ws)
-    isnothing(c) && return zero(T)
-    return track_offset(ar, running_channel(ws), c, s...)
+function segment_offset(ar::ChannelRouter{T}, ws::TrackWireSegment, s...; use_wire_direction=true) where {T}
+    channel_idx = running_channel(ws)
+    is_pin(ar, channel_idx) && return zero(T)
+    track_idx = segment_track(ar, ws)
+    isnothing(track_idx) && return zero(T)
+    reversed = use_wire_direction && against_channel(ar, ws)
+    return track_section_offset(length(ar.channel_tracks[channel_idx]),
+        Paths.width(ar.channels[channel_idx].node.sty, s...), track_idx; reversed)
 end
 
 """
@@ -373,7 +376,7 @@ function track_offset(ar::ChannelRouter{T}, channel_idx, track_idx, s...) where 
     n_tracks = length(channel_tracks(ar, channel_idx))
     w = Paths.width(ar.channels[channel_idx].node.sty, zero(T))
     spacing = w / (n_tracks + 1)
-    return spacing * (track_idx - (1 + n_tracks) / 2)
+    return spacing * ((1 + n_tracks) / 2 - track_idx)
 end
 
 """
@@ -395,12 +398,11 @@ function interval(ar::ChannelRouter, ws::TrackWireSegment; use_track=true)
     s2 = pathlength_at_intersection(ar, channel_idx, stop_channel)
     (!use_track || is_pin(ar, channel_idx)) && return _swap(s1, s2)
     # Could just do that for all cases
-    # But if we want to break ties we would use offsets from previous/next segments, like:
-    # return _swap(s1 + segment_offset(ar, prev(ws)), s2 - segment_offset(ar, next(ws)))
-    # But sign needs to take into account relative orientations of channels
-    pt, nt = prev_next_tendency(ar, ws; use_segment_direction=false)
+    # But if we want to break ties we use offsets from previous/next segments
+    # Offset sign needs to take into account relative directions of segments in channels
     s_start = pathlength_at_intersection(ar, start_channel, channel_idx)
     s_stop = pathlength_at_intersection(ar, stop_channel, channel_idx)
+    pt, nt = prev_next_tendency(ar, ws)
     return _swap(s1 + pt*segment_offset(ar, prev(ar, ws), s_start),
                  s2 - nt*segment_offset(ar, next(ar, ws), s_stop))
 end
@@ -683,14 +685,13 @@ function assign_tracks_matching!(ar, channel)
     # The longest directed path gives a representative of each merged group where track height is max
     # But VCG may be a partial order so use topological sort
     high_to_low = topological_sort_by_dfs(vcg) # If vcg was acyclic to begin with, it is still acyclic
-    num_tracks = length(high_to_low)
     for v in 1:nv(vcg)
         if !haskey(merged_groups, v)
             merged_groups[v] = [v]
         end
     end
     assigned = Int[]
-    for v in reverse(high_to_low)
+    for v in high_to_low # high in vcg => low track index
         # Create a track with `v` and all others merged with it
         v in assigned && continue
         push!(tracks, wiresegs_ascending[merged_groups[v]])
@@ -888,7 +889,7 @@ function is_avoidable(low1, high1, low2, high2, low1_tend, high1_tend, low2_tend
 end
 
 # +1 if segment crosses over low track index in ws's channel
-function prev_next_tendency(ar, ws; use_segment_direction=true)
+function prev_next_tendency(ar, ws; use_wire_direction=true)
     channel_idx = running_channel(ws)
     start_channel, stop_channel = bounding_channels(ws)
     # Distances along bounding and running channels
@@ -907,7 +908,7 @@ function prev_next_tendency(ar, ws; use_segment_direction=true)
     ### Signs of angles made by channel intersections
     sgn_bend1 = sign(rem2pi(uconvert(NoUnits, dir1 - start_dir), RoundNearest))
     sgn_bend2 = sign(rem2pi(uconvert(NoUnits, stop_dir - dir2), RoundNearest))
-    !use_segment_direction && return (sgn_bend1, sgn_bend2)
+    !use_wire_direction && return (sgn_bend1, sgn_bend2)
     ### Need to multiply according to direction in channel
     ### Is prev upper-bounded by ws? Then it goes along with channel
     sgn_start = s_along_start >= last(interval(ar, prev(ar, ws), use_track=false)) ? 1 : -1
@@ -1135,7 +1136,7 @@ function track_rectangle(ar::ChannelRouter{T}, channel_idx, track_idx) where {T}
 end
 
 ######## Actually doing the path construction
-struct AutoChannelRouting{T <: Coordinate} <: AbstractMultiRouting
+struct AutoChannelRouting{T <: Coordinate} <: AbstractChannelRouting
     channels::Vector{RouteChannel{T}}
     transition_rule::RouteRule
     transition_margin::T
@@ -1153,10 +1154,10 @@ function track_path_segment(ar::ChannelRouter{T}, ch::RouteChannel, pa::Path; ma
     # Get the track wire segment from the router
     # Assume there is exactly one wire segment belonging to this path in the channel
     # Channel node might have been converted to store in router, so just check start point/direction
-    channel_idx = findfirst(chn -> p0(chn.seg) ≈ p0(ch.path) && α0(chn.seg) == α0(ch.path), ar.channels)
-    net_idx = indexin(pa, ar.net_paths)
+    channel_idx = findfirst(chn -> p0(chn.node.seg) ≈ p0(ch.path) && α0(chn.node.seg) == α0(ch.path), ar.channels)
+    net_idx = findfirst(p -> p === pa, ar.net_paths)
     wireseg_idx = findfirst(ws -> running_channel(ws) == channel_idx, net_wire(ar, net_idx))
-    wireseg = channel_segments(ar, channel_idx)[wireseg_idx]
+    wireseg = net_wire(ar, net_idx)[wireseg_idx]
     track_idx = segment_track(ar, wireseg)
     # Get the starting and ending pathlengths
     start_channel, stop_channel = bounding_channels(wireseg)
@@ -1164,7 +1165,7 @@ function track_path_segment(ar::ChannelRouter{T}, ch::RouteChannel, pa::Path; ma
     wireseg_stop = pathlength_at_intersection(ar, channel_idx, stop_channel)
     prev_width = width_at_intersection(ar, start_channel, channel_idx)
     next_width = width_at_intersection(ar, stop_channel, channel_idx)
-    channel_section = segment_channel_section(channel,
+    channel_section = segment_channel_section(ch,
         wireseg_start, wireseg_stop, prev_width, next_width; margin)
     # Return channel section segment offset by width according to track
     return track_path_segment(length(channel_tracks(ar, channel_idx)),
@@ -1172,7 +1173,7 @@ function track_path_segment(ar::ChannelRouter{T}, ch::RouteChannel, pa::Path; ma
 end
 
 function channels_taken(r::ChannelRouter, pa::Path)
-    net_idx = only(indexin(pa, r.net_paths))
+    net_idx = findfirst(p -> p === pa, r.net_paths)
     return [running_channel(wireseg) for wireseg in net_wire(r, net_idx)]
 end
 
