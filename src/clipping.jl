@@ -1260,20 +1260,31 @@ function clip_tiled(
     pfs=Clipper.PolyFillTypePositive,
     pfc=Clipper.PolyFillTypePositive
 ) where {T}
+    (isempty(ents1) && isempty(ents2)) &&
+        return Iterators.map(identity, ClippedPolygon{T}[])
     # Create spatial index for each set of polygons
-    tree1 = DeviceLayout.mbr_spatial_index(ents1)
-    tree2 = DeviceLayout.mbr_spatial_index(ents2)
+    if isempty(ents2)
+        tree1 = DeviceLayout.mbr_spatial_index(ents1)
+        bnds = mbr(tree1)
+    elseif isempty(ents2)
+        tree2 = DeviceLayout.mbr_spatial_index(ents2)
+        bnds = mbr(tree2)
+    else
+        tree1 = DeviceLayout.mbr_spatial_index(ents1)
+        tree2 = DeviceLayout.mbr_spatial_index(ents2)
+        bnds = SpatialIndexing.combine(mbr(tree1), mbr(tree2))
+    end
 
     # Get tiles and indices of polygons intersecting tiles
-    bnds = SpatialIndexing.combine(mbr(tree1), mbr(tree2))
     bnds_dl = Rectangle(
         Point(bnds.low...) * DeviceLayout.onemicron(T),
         Point(bnds.high...) * DeviceLayout.onemicron(T)
     )
     tiles, edges = tiles_and_edges(bnds_dl, tile_size) # DeviceLayout Rectangles
     tile_poly_indices = map(tiles) do tile
-        idx1 = DeviceLayout.findbox(tile, tree1; intersects=true)
-        idx2 = DeviceLayout.findbox(tile, tree2; intersects=true)
+        idx1 = isempty(ents1) ? Int[] : DeviceLayout.findbox(tile, tree1; intersects=true)
+        idx2 =
+            isempty(ents2) ? Int[] : DeviceLayout.findbox(tile, tree2; intersects=true)
         return (idx1, idx2)
     end
     # Clip within each tile
