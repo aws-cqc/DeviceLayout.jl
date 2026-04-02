@@ -74,4 +74,21 @@ end
     @test length(SolidModels.dimtags(sm["port_1", 2])) == 1
     @test length(SolidModels.dimtags(sm["port_2", 2])) == 1
     @test length(SolidModels.dimtags(sm["lumped_element", 2])) == 1
+    metal_conn_comps = SolidModels.connected_components(sm, "metal")
+    active_conn_comps = SolidModels.connected_components(
+        sm,
+        ["metal", "lumped_element", "port_1", "port_2"]
+    )
+    @test length(metal_conn_comps) == 3  # Ground, island, transmission line
+    @test length(active_conn_comps) == 1 # Ports and lumped elements connect metal components
+    # Assign to new groups
+    metal_comp_tags = []
+    for i in eachindex(metal_conn_comps)
+        sm["metal_island_$i"] = metal_conn_comps[i]
+        push!(metal_comp_tags, SolidModels.entitytags(sm["metal_island_$i", 2]))
+    end
+    sort!(metal_comp_tags, by=length)
+    @test length(metal_comp_tags[1]) == 1 # Transmission line
+    @test length(metal_comp_tags[2]) == 2 # Transmon island + junction top lead
+    @test length(metal_comp_tags[3]) == 4 # Ground plane + bottom lead + TL ends
 end
