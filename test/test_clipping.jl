@@ -1031,4 +1031,10 @@ end
     @test length(xa_tiled[lyr_b]) == 3 * 3
     @test length(vcat(to_polygons.(xa_tiled[lyr_a])...)) == 3 * 3 * 2
     @test isempty(to_polygons(xor2d(vcat(xa_tiled[lyr_a]...), xa[lyr_a])))
+
+    # Tiling with empty layers
+    uae = union2d_layerwise(ca_1, CoordinateSystem("empty"))
+    uae_tiled = union2d_layerwise(ca_1, CoordinateSystem("empty"), tile_size=99μm)
+    @test length(vcat(to_polygons.(uae_tiled[lyr_a])...)) == 3 * 3
+    @test isempty(to_polygons(xor2d(vcat(uae_tiled[lyr_a]...), ca_1 => lyr_a)))
 end
