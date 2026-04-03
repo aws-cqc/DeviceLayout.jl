@@ -393,6 +393,10 @@ taken into account. Otherwise, the start and stop are at the centre line of the 
 The interval is always a tuple with the lower bound as the first element.
 """
 function interval(ar::ChannelRouter, ws::TrackWireSegment; use_track=true)
+    return _swap(unsorted_interval(ar, ws; use_track)...)
+end
+
+function unsorted_interval(ar::ChannelRouter, ws::TrackWireSegment; use_track=true)
     start_channel, stop_channel = bounding_channels(ws)
     channel_idx = running_channel(ws)
     
@@ -419,8 +423,8 @@ function interval(ar::ChannelRouter, ws::TrackWireSegment; use_track=true)
     start_offset_proj = -segment_offset(ar, ws, s_start; use_wire_direction=false) / tan(α_ixn_start)
     stop_offset_proj = -segment_offset(ar, ws, s_stop; use_wire_direction=false) / tan(α_ixn_stop)
     # This is approximate on bending or tapered tracks
-    return _swap(s1 + (prev_offset_proj + start_offset_proj),
-                 s2 - (next_offset_proj + stop_offset_proj))
+    return s1 + (prev_offset_proj + start_offset_proj),
+            s2 - (next_offset_proj + stop_offset_proj)
 end
 
 """
@@ -664,7 +668,7 @@ function assign_tracks_matching!(ar, channel)
                         push!(group, v)
                         merged_groups[v] = group
                         # Replace match with v as representative of merged group in L
-                        pop!(L, matching[v]) # match must have been in L
+                        matching[v] in L && pop!(L, matching[v]) # match must have been in L
                     end
                     v in R && pop!(R, v)
                 end
@@ -832,8 +836,9 @@ end
 function against_channel(ar, wireseg)
     channel_idx = running_channel(wireseg)
     start_channel, stop_channel = bounding_channels(wireseg)
-    s1 = pathlength_at_intersection(ar, channel_idx, start_channel)
-    s2 = pathlength_at_intersection(ar, channel_idx, stop_channel)
+    s1, s2 = unsorted_interval(ar, wireseg)
+    # s1 = pathlength_at_intersection(ar, channel_idx, start_channel)
+    # s2 = pathlength_at_intersection(ar, channel_idx, stop_channel)
     return s1 > s2
 end
 
