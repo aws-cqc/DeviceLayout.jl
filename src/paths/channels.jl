@@ -48,8 +48,8 @@ function segment_channel_section(
         channel_section = split(
             ch.node,
             [
-                wireseg_start + margin + prev_width / 2,
-                wireseg_stop - margin - next_width / 2
+                max(zero(T), wireseg_start + margin + prev_width / 2),
+                min(pathlength(ch.node.seg), wireseg_stop - margin - next_width / 2)
             ]
         )[2]
     elseif d < zero(d) # segment is counter to channel direction
@@ -57,8 +57,8 @@ function segment_channel_section(
             split(
                 ch.node,
                 [
-                    wireseg_stop + margin + next_width / 2,
-                    wireseg_start - margin - prev_width / 2
+                    max(zero(T), wireseg_stop + margin + next_width / 2,)
+                    min(pathlength(ch.node.seg), wireseg_start - margin - prev_width / 2)
                 ]
             )[2]
         )
@@ -177,7 +177,7 @@ function _route!(
                 sty;
                 waypoints
             )
-            push!(p, Node(resolve_offset(track_path_seg), sty), reconcile=false) # p0, α0 reconciled by construction
+            push!(p, Node(resolve_offset(track_path_seg), sty))
             p[end - 1].next = p[end]
             p[end].prev = p[end - 1]
             # Note `auto_curvature` BSpline uses curvature from end of previous segment
