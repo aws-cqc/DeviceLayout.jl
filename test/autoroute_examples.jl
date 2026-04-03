@@ -45,6 +45,7 @@ tpin(x, y) = PointHook(Point(Float64(x), Float64(y)), 90°)
 
 const R = Paths.StraightAnd90(0.1)
 const WW = 0.05
+const MARGIN = 0.1
 
 # ── Example 1: Simple ────────────────────────────────────────────────────────
 # 1 horizontal channel, 2 pins, 1 net.
@@ -63,7 +64,7 @@ function example_simple()
     nets = [(1, 2)]
 
     ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
-    autoroute!(ar, R)
+    autoroute!(ar, R, MARGIN)
     c = visualize_router_state(ar; wire_width=WW)
 
     @assert length(ar.net_wires) == 1
@@ -101,7 +102,7 @@ function example_parallel()
     nets = [(1, 4), (2, 5), (3, 6)]
 
     ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
-    routes = autoroute!(ar, R)
+    routes = autoroute!(ar, R, MARGIN)
     paths = Path.(routes, Ref(Paths.Trace(WW)))
     c = visualize_router_state(ar; wire_width=WW)
     @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
@@ -134,7 +135,7 @@ function example_crossing()
     nets = [(1, 4), (2, 3)]
 
     ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
-    routes = autoroute!(ar, R)
+    routes = autoroute!(ar, R, MARGIN)
     paths = Path.(routes, Ref(Paths.Trace(WW)))
     c = visualize_router_state(ar; wire_width=WW)
 
@@ -177,13 +178,14 @@ function example_fanin_fanout()
     nets = [(1, 5), (2, 6), (3, 7), (4, 8)]
 
     ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
-    routes = autoroute!(ar, R)
-    paths = Path.(routes, Ref(Paths.Trace(WW)))
+    routes = autoroute!(ar, R, MARGIN)
     c = visualize_router_state(ar; wire_width=WW)
 
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
-    # @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
-    # @assert length(ar.channel_tracks[3]) == 3 "Last vertical channel only needs 3 tracks"
+    paths = Path.(routes, Ref(Paths.Trace(WW)))
+    @show Intersect.prepared_intersections(paths)
+    @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
+    @assert length(ar.channel_tracks[3]) == 3 "Last vertical channel only needs 3 tracks"
     return c, ar
 end
 
@@ -220,7 +222,7 @@ function example_multichannel_fanout()
     nets = [(1, 5), (2, 6), (3, 7), (4, 8)]
 
     ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
-    routes = autoroute!(ar, R)
+    routes = autoroute!(ar, R, MARGIN)
     paths = Path.(routes, Ref(Paths.Trace(WW)))
     c = visualize_router_state(ar; wire_width=WW)
 
@@ -275,7 +277,7 @@ function example_grid()
     ]
 
     ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
-    autoroute!(ar, R)
+    autoroute!(ar, R, MARGIN)
     c = visualize_router_state(ar; wire_width=WW)
 
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
@@ -315,12 +317,12 @@ function example_angled()
     nets = [(1, 2), (3, 4)]
 
     ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
-    routes = autoroute!(ar, R)
-    paths = Path.(routes, Ref(Paths.Trace(WW)))
-    c = visualize_router_state(ar; wire_width=WW, rule=StraightAnd45(0.1))
+    routes = autoroute!(ar, Paths.StraightAnd45(0.1), MARGIN)
+    c = visualize_router_state(ar; wire_width=WW)
 
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     @assert all(length.(ar.channel_tracks) .== 2) "Each channel needs two tracks"
+    paths = Path.(routes, Ref(Paths.Trace(WW)))
     @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
     return c, ar
 end
@@ -354,7 +356,7 @@ function example_dense()
     nets = [(i, i + 6) for i in 1:6]
 
     ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
-    routes = autoroute!(ar, R)
+    routes = autoroute!(ar, R, MARGIN)
     paths = Path.(routes, Ref(Paths.Trace(WW)))
     c = visualize_router_state(ar; wire_width=WW)
 
@@ -395,28 +397,15 @@ function example_bspline()
 
     ar = Paths.ChannelRouter(nets, hooks, RouteChannel.(channels))
     transition_rule = Paths.BSplineRouting(auto_speed=true, auto_curvature=true, endpoints_speed=1, endpoints_curvature=0)
-    autoroute!(ar, transition_rule)
-    rule = Paths.AutoChannelRouting(
-        ar.channels,
-        transition_rule,
-        0.2,
-        ar
-    )
-    c = visualize_router_state(ar; wire_width=WW, rule=transition_rule)
-    for i in 1:4
-        pa = path_out(hooks[i])
-        ar.net_paths[i] = pa
-        pa = ar.net_paths[i]
-        route!(pa, hooks[i+4].p, hooks[i+4].in_direction, rule, Paths.Trace(WW))
-        render!(c, pa, GDSMeta(1))
-    end
+    
+    routes = autoroute!(ar, transition_rule, 1.0)
+    c = visualize_router_state(ar, wire_width=WW)
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
-    # prepared_intersections doesn't work (trying to differentiate through adapted_grid)
-    # @assert isempty(Intersect.prepared_intersections(ar.net_paths)) "No crossings"
-    # @assert length(ar.channel_tracks[3]) == 3 "Last vertical channel only needs 3 tracks"
+    paths = Path.(routes, Ref(Paths.Trace(WW)))
+    @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
+    @assert length(ar.channel_tracks[3]) == 3 "Last vertical channel only needs 3 tracks"
     return c, ar
 end
-
 
 # ── Example 10: Schematic integration ────────────────────────────────────────
 # TODO: AutoChannelRouting with schematic workflow.
