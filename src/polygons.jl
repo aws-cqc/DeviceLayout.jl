@@ -11,6 +11,8 @@ import CoordinateTransformations: AffineMap, LinearMap, Translation, Transformat
 import Clipper
 import Clipper: children, contour
 import StaticArrays
+import SpatialIndexing
+import SpatialIndexing: mbr
 
 import DeviceLayout
 import DeviceLayout:
@@ -82,6 +84,9 @@ export circle,
     unfold,
     union2d,
     xor2d
+
+export difference2d_layerwise,
+    intersect2d_layerwise, union2d_layerwise, xor2d_layerwise, clip_tiled
 
 const USCALE = 1.0 * Unitful.fm
 const SCALE  = 10.0^9
@@ -520,6 +525,20 @@ function perimeter(e::Ellipse)
     b = minimum(e.radii)
     return π * ((a + b) + 3 * (a - b)^2 / (10 * (a + b) + sqrt(a^2 + 14 * a * b + b^2)))
 end
+
+function signed_area(p::Polygon) # Can be negative
+    return sum(
+        (gety.(p.p) + gety.(circshift(p.p, -1))) .*
+        (getx.(p.p) - getx.(circshift(p.p, -1)))
+    ) / 2
+end
+
+"""
+    area(poly::Polygon)
+
+Area of a non-self-intersecting polygon. Always positive.
+"""
+area(p::Polygon) = abs(signed_area(p))
 
 """
     circle_polygon(r, Δθ=10°)
@@ -967,7 +986,7 @@ These arguments may include:
 See the [`Clipper` docs](http://www.angusj.com/delphi/clipper/documentation/Docs/Units/ClipperLib/Types/PolyFillType.htm)
 for further information.
 
-See also [union2d](@ref), [difference2d](@ref), and [intersect2d](@ref).
+See also [union2d](@ref), [difference2d](@ref), [intersect2d](@ref), and [xor2d](@ref).
 """
 function clip(op::Clipper.ClipType, s, c; kwargs...)
     return clip(op, _normalize_clip_arg(s), _normalize_clip_arg(c); kwargs...)
@@ -983,6 +1002,8 @@ _normalize_clip_arg(p::Union{GeometryStructure, GeometryReference}) =
     _normalize_clip_arg(flat_elements(p))
 _normalize_clip_arg(p::Pair{<:Union{GeometryStructure, GeometryReference}}) =
     _normalize_clip_arg(flat_elements(p))
+_normalize_clip_arg(p::AbstractArray) =
+    reduce(vcat, _normalize_clip_arg.(p); init=Polygon{DeviceLayout.coordinatetype(p)}[])
 
 # Clipping arrays of AbstractPolygons
 function clip(
@@ -1133,7 +1154,8 @@ end
 Return the geometric union of `p` or all entities in `p`.
 """
 union2d(p::AbstractGeometry{T}) where {T} = union2d(p, Polygon{T}[])
-union2d(p::AbstractArray{<:AbstractGeometry{T}}) where {T} = union2d(p, Polygon{T}[])
+union2d(p::AbstractArray) = union2d(p, Polygon{DeviceLayout.coordinatetype(p)}[])
+union2d(p::Pair{<:AbstractGeometry{T}}) where {T} = union2d(p, Polygon{T}[])
 
 """
     difference2d(p1, p2)
@@ -2274,6 +2296,208 @@ function transform(d::StyleDict, f::Transformation)
         newdict[idx] = transform(s, f)
     end
     return newdict
+end
+
+### Layerwise
+function xor2d_layerwise(obj::GeometryStructure, tool::GeometryStructure; kwargs...)
+    return clip_layerwise(Clipper.ClipTypeXor, obj, tool; kwargs...)
+end
+
+function difference2d_layerwise(obj::GeometryStructure, tool::GeometryStructure; kwargs...)
+    return clip_layerwise(Clipper.ClipTypeDifference, obj, tool; kwargs...)
+end
+
+function intersect2d_layerwise(obj::GeometryStructure, tool::GeometryStructure; kwargs...)
+    return clip_layerwise(Clipper.ClipTypeIntersection, obj, tool; kwargs...)
+end
+
+function union2d_layerwise(obj::GeometryStructure, tool::GeometryStructure; kwargs...)
+    return clip_layerwise(Clipper.ClipTypeUnion, obj, tool; kwargs...)
+end
+
+for func in ("union2d", "difference2d", "intersect2d", "xor2d")
+    func_layerwise = Symbol(string(func) * "_layerwise")
+    doc = """
+        $(func)_layerwise(obj::GeometryStructure, tool::GeometryStructure;
+            only_layers=[],
+            ignore_layers=[],
+            depth=-1,
+            tile_size=nothing
+        )
+
+    Return a `Dict` of `meta => [$(func)(obj => meta, tool => meta)]` for each unique element metadata `meta` in `obj` and `tool`.
+
+    Entities with metadata matching `only_layers` or `ignore_layers` are included or excluded based on [`layer_inclusion`](@ref).
+
+    Entities in references up to a depth of `depth` are included, where `depth=0` uses only top-level entities in `obj` and `tool`.
+    Depth is unlimited by default.
+
+    See also [`$(func)`](@ref).
+
+    # Tiling
+
+    Providing a `tile_size` can significantly speed up operations and reduce maximum memory usage for large geometries.
+    It does this by breaking up the geometry into smaller portions ("tiles") and operating on them one at a time.
+
+    If a length is provided to `tile_size`, the bounds of the combined geometries are tiled with squares with that
+    edge length, starting from the lower left corner. For each tile, all entities with bounding box touching that tile 
+    (including those touching edge-to-edge) are selected.
+    The values in the returned `Dict` are then lazy iterators over the results for each tile.
+
+    Because entities touching more than one tile will be included in multiple operations,
+    resulting polygons may be duplicated or incorrect. This is often acceptable, as in the case of `xor2d_layerwise` when the goal
+    is to find small differences between layouts: layouts are never incorrectly identified as identical,
+    and false positives are rare. In other cases, you may need to do some postprocessing or of the results.
+
+    A rough guideline for choosing tile size is to aim for ~100 polygons per tile, but you may want to
+    benchmark your use case.
+    """
+    eval(quote
+        @doc $doc $func_layerwise
+    end)
+end
+
+function clip_layerwise(
+    op::Clipper.ClipType,
+    obj::GeometryStructure,
+    tool::GeometryStructure;
+    only_layers=[],
+    ignore_layers=[],
+    tile_size=nothing,
+    depth=-1,
+    pfs=Clipper.PolyFillTypePositive,
+    pfc=Clipper.PolyFillTypePositive
+)
+    metadata_filter = DeviceLayout.layer_inclusion(only_layers, ignore_layers)
+    if metadata_filter == DeviceLayout.trivial_inclusion
+        metadata_filter = nothing
+    end
+    obj_flat = DeviceLayout.flatten(obj; metadata_filter, depth)
+    tool_flat = DeviceLayout.flatten(tool; metadata_filter, depth)
+    obj_metas = unique(DeviceLayout.element_metadata(obj_flat))
+    tool_metas = unique(DeviceLayout.element_metadata(tool_flat))
+    all_metas = unique([obj_metas; tool_metas])
+    if isnothing(tile_size)
+        res = Dict(
+            meta => [
+                clip(
+                    op,
+                    DeviceLayout.elements(obj_flat)[DeviceLayout.element_metadata(
+                        obj_flat
+                    ) .== meta],
+                    DeviceLayout.elements(tool_flat)[DeviceLayout.element_metadata(
+                        tool_flat
+                    ) .== meta],
+                    pfs=pfs,
+                    pfc=pfc
+                )
+            ] for meta in all_metas
+        )
+    else
+        res = Dict(
+            meta => clip_tiled(
+                op,
+                DeviceLayout.elements(obj_flat)[DeviceLayout.element_metadata(
+                    obj_flat
+                ) .== meta],
+                DeviceLayout.elements(tool_flat)[DeviceLayout.element_metadata(
+                    tool_flat
+                ) .== meta],
+                tile_size,
+                pfs=pfs,
+                pfc=pfc
+            ) for meta in all_metas
+        )
+    end
+    return res
+end
+
+### Tiling
+function tiles_and_edges(r::Rectangle, tile_size)
+    nx = ceil(width(r) / tile_size)
+    ny = ceil(height(r) / tile_size)
+    tile0 = r.ll + Rectangle(tile_size, tile_size)
+    tiles =
+        [tile0 + Point((i - 1) * tile_size, (j - 1) * tile_size) for i = 1:nx for j = 1:ny]
+    h_edges = [
+        Rectangle(
+            Point(r.ll.x, r.ll.y + (i - 1) * tile_size),
+            Point(r.ur.x, r.ll.y + (i - 1) * tile_size)
+        ) for i = 2:ny
+    ]
+    v_edges = [
+        Rectangle(
+            Point(r.ll.x + (i - 1) * tile_size, r.ll.y),
+            Point(r.ll.x + (i - 1) * tile_size, r.ur.y)
+        ) for i = 2:nx
+    ]
+    return tiles, vcat(h_edges, v_edges) # Edges could be used for healing
+end
+
+"""
+    function clip_tiled(
+        op,
+        ents1::AbstractArray{<:GeometryEntity{T}},
+        ents2::AbstractArray{<:GeometryEntity{T}},
+        tile_size=1000 * DeviceLayout.onemicron(T);
+        pfs=Clipper.PolyFillTypePositive,
+        pfc=Clipper.PolyFillTypePositive
+    )
+
+Return a lazy iterator that applies `op(ents1, ents2)` tile by tile.
+
+The bounds of the combined geometries are tiled with squares with edge length `tile_size`, starting at the bottom left
+corner. For each tile, all entities with bounding box touching that tile (including those touching edge-to-edge) are selected.
+The return value is the lazy iterator over selected entities per tile.
+
+Because entities touching more than one tile will be included in multiple operations,
+resulting polygons may be duplicated or incorrect. This is often acceptable, as in the case of `xor2d_layerwise` when the goal
+is to find small differences between layouts: layouts are never incorrectly identified as identical,
+and false positives are rare. In other cases, you may need to do some postprocessing or of the results.
+
+A rough guideline for choosing tile size is to aim for 100 polygons per tile, but you may want to
+benchmark your use case.
+"""
+function clip_tiled(
+    op,
+    ents1::AbstractArray{<:GeometryEntity{T}},
+    ents2::AbstractArray{<:GeometryEntity{T}},
+    tile_size=1000 * DeviceLayout.onemicron(T);
+    pfs=Clipper.PolyFillTypePositive,
+    pfc=Clipper.PolyFillTypePositive
+) where {T}
+    (isempty(ents1) && isempty(ents2)) &&
+        return Iterators.map(identity, ClippedPolygon{T}[])
+    # Create spatial index for each set of polygons
+    if isempty(ents2)
+        tree1 = DeviceLayout.mbr_spatial_index(ents1)
+        bnds = mbr(tree1)
+    elseif isempty(ents2)
+        tree2 = DeviceLayout.mbr_spatial_index(ents2)
+        bnds = mbr(tree2)
+    else
+        tree1 = DeviceLayout.mbr_spatial_index(ents1)
+        tree2 = DeviceLayout.mbr_spatial_index(ents2)
+        bnds = SpatialIndexing.combine(mbr(tree1), mbr(tree2))
+    end
+
+    # Get tiles and indices of polygons intersecting tiles
+    bnds_dl = Rectangle(
+        Point(bnds.low...) * DeviceLayout.onemicron(T),
+        Point(bnds.high...) * DeviceLayout.onemicron(T)
+    )
+    tiles, edges = tiles_and_edges(bnds_dl, tile_size) # DeviceLayout Rectangles
+    tile_poly_indices = map(tiles) do tile
+        idx1 = isempty(ents1) ? Int[] : DeviceLayout.findbox(tile, tree1; intersects=true)
+        idx2 =
+            isempty(ents2) ? Int[] : DeviceLayout.findbox(tile, tree2; intersects=true)
+        return (idx1, idx2)
+    end
+    # Clip within each tile
+    res = Iterators.map(tile_poly_indices) do (idx1, idx2)
+        return clip(op, ents1[idx1], ents2[idx2]; pfs, pfc)
+    end
+    return res
 end
 
 end # module
