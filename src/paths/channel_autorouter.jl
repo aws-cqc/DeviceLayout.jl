@@ -14,7 +14,6 @@ import Graphs:
     inneighbors,
     neighbors,
     outneighbors,
-    dag_longest_path,
     maximal_cliques,
     yen_k_shortest_paths,
     dijkstra_shortest_paths,
@@ -261,7 +260,7 @@ function build_channel_graph(pins, channels, T)
             end
         else # record intersection as edge in channel graph, with info in dict
             haskey(intersection_dict, (v1_idx, v2_idx)) && 
-                error("Spaces $v1_idx and $v2_idx have multiple intersections")
+                error("Channels $v1_idx and $v2_idx have multiple intersections")
             dir1 = direction(channels[v1_idx][node1_idx].seg, s1)
             dir2 = direction(channels[v2_idx][node2_idx].seg, s2)
             s1 = pathlength_from_start(channels[v1_idx], node1_idx, s1)
@@ -668,7 +667,7 @@ function assign_tracks_matching!(ar, channel)
                         push!(group, v)
                         merged_groups[v] = group
                         # Replace match with v as representative of merged group in L
-                        matching[v] in L && pop!(L, matching[v]) # match must have been in L
+                        pop!(L, matching[v]) # match must have been in L
                     end
                     v in R && pop!(R, v)
                 end
@@ -682,16 +681,15 @@ function assign_tracks_matching!(ar, channel)
             end
         end
         # Remove all edges in merging graph, start fresh this iteration
-        for edge in edges(merging_graph)
-            rem_edge!(merging_graph, edge)
-        end
+        merging_graph = SimpleGraph(length(wiresegs_ascending))
         # Add edges between left and right when they can be merged
         for l in L
             # Only use rightmost in any merged group
             haskey(merged_into, l) && continue
             for r in R
                 if !segments_overlap(ar, wiresegs_ascending[l], wiresegs_ascending[r])
-                    mergeable = isempty(yen_k_shortest_paths(vcg, l, r).paths) && isempty(yen_k_shortest_paths(vcg, r, l).paths)
+                    mergeable = dijkstra_shortest_paths(vcg, [l]).dists[r] == typemax(Int) && 
+                        dijkstra_shortest_paths(vcg, [r]).dists[l] == typemax(Int)
                     mergeable && add_edge!(merging_graph, l, r)
                 end
             end
@@ -1035,7 +1033,8 @@ function autoroute!(
         margin,
         ar
     )
-    return make_routes!(ar, rule)
+    routes = make_routes!(ar, rule)
+    return routes
 end
 
 ######## Modification
