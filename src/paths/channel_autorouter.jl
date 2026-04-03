@@ -655,7 +655,7 @@ function assign_tracks_matching!(ar, channel)
     for (zone, nextzone) in zip(zones, [zones[2:end]..., Int[]]) # Extra empty zone at end
         # Merge nets terminating in current zone to left side
         if length(zones) > 1
-            for v in active # v was in nextzone last round
+            for v in collect(active) # v was in nextzone last round
                 if !(v in nextzone) # v terminates in current zone
                     pop!(active, v) # no longer active
                     push!(L, v)     # add to left side
