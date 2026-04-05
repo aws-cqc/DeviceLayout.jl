@@ -683,14 +683,18 @@ function assign_tracks_matching!(ar, channel)
         # Remove all edges in merging graph, start fresh this iteration
         merging_graph = SimpleGraph(length(wiresegs_ascending))
         # Add edges between left and right when they can be merged
+        high_to_low = topological_sort_by_dfs(vcg)
+        dists_from_r = Dict(r => dag_shortest_paths(vcg, high_to_low, r) for r in R)
         for l in L
             # Only use rightmost in any merged group
             haskey(merged_into, l) && continue
+            dists_from_l = dag_shortest_paths(vcg, high_to_low, l)
             for r in R
+                mergeable = dists_from_l[r] >= nv(vcg) &&
+                    dists_from_r[r][l] >= nv(vcg)
+                !mergeable && continue
                 if !segments_overlap(ar, wiresegs_ascending[l], wiresegs_ascending[r])
-                    mergeable = dijkstra_shortest_paths(vcg, [l]).dists[r] == typemax(Int) && 
-                        dijkstra_shortest_paths(vcg, [r]).dists[l] == typemax(Int)
-                    mergeable && add_edge!(merging_graph, l, r)
+                    add_edge!(merging_graph, l, r)
                 end
             end
         end
@@ -829,6 +833,22 @@ end
 function merge_segments!(zone_ig, vcg, ws1, ws2)
     merge_vertices!(zone_ig, [ws1, ws2])
     return merge_vertices(vcg, [ws1, ws2]) # No in-place for directed graph
+end
+
+function dag_shortest_paths(dag, v_sorted, s)
+    # p = zeros(Int, length(v_sorted))
+    d = fill(nv(dag), nv(dag))
+    d[s] = 0
+    for i in findfirst(v -> v == s, v_sorted):nv(dag)
+        u = v_sorted[i]
+        for v in outneighbors(dag, u)
+            if d[v] > d[u] + 1
+                d[v] = d[u] + 1
+                # p[v] = u
+            end
+        end
+    end
+    return d
 end
 
 function against_channel(ar, wireseg)
