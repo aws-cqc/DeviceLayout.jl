@@ -2502,7 +2502,7 @@ function clip_tiled(
     if isempty(ents2)
         tree1 = DeviceLayout.mbr_spatial_index(ents1)
         bnds = mbr(tree1)
-    elseif isempty(ents2)
+    elseif isempty(ents1)
         tree2 = DeviceLayout.mbr_spatial_index(ents2)
         bnds = mbr(tree2)
     else

@@ -1037,6 +1037,9 @@ end
     uae_tiled = union2d_layerwise(ca_1, CoordinateSystem("empty"), tile_size=99μm)
     @test length(vcat(to_polygons.(uae_tiled[lyr_a])...)) == 3 * 3
     @test isempty(to_polygons(xor2d(vcat(uae_tiled[lyr_a]...), ca_1 => lyr_a)))
+    uae_tiled = union2d_layerwise(CoordinateSystem("empty"), ca_1, tile_size=99μm)
+    @test length(vcat(to_polygons.(uae_tiled[lyr_a])...)) == 3 * 3
+    @test isempty(to_polygons(xor2d(vcat(uae_tiled[lyr_a]...), ca_1 => lyr_a)))
 
     # Auto tile size
     ca_3 = CoordinateSystem("array1")
