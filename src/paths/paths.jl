@@ -207,8 +207,14 @@ function convert(::Type{Node{T}}, n::Node{S}) where {S, T}
     # Breaks linked list but can at least have dummies on either side
     # to preserve info about whether the node started/ended a path
     cur = Node{T}(convert(Segment{T}, n.seg), n.sty)
-    n.prev !== n && (cur.prev = Node{T}(convert(Segment{T}, n.prev.seg), n.prev.sty))
-    n.next !== n && (cur.next = Node{T}(convert(Segment{T}, n.next.seg), n.next.sty))
+    if n.prev !== n
+        cur.prev = Node{T}(convert(Segment{T}, n.prev.seg), n.prev.sty)
+        cur.prev.next = cur
+    end
+    if n.next !== n
+        cur.next = Node{T}(convert(Segment{T}, n.next.seg), n.next.sty)
+        cur.next.prev = cur
+    end
     return cur
 end
 convert(::Type{GeometryEntity{T}}, n::Node) where {T} = convert(Node{T}, n)
@@ -492,8 +498,9 @@ Path{T}(p0::Point=zero(Point{T}), α0=0.0°, meta::Meta=UNDEF_META) where {T} =
 
 # Return "preferred" path length coordinate type
 # for consistency with non-explicit unit choice
-_to_preferred(x::Length) = 1.0UPREFERRED isa Length ? typeof(1.0UPREFERRED) : typeof(x)
-_to_preferred(_) = Float64
+_preferred_coordinatetype(x::Length) =
+    1.0UPREFERRED isa Length ? typeof(1.0UPREFERRED) : typeof(x)
+_preferred_coordinatetype(::Coordinate) = Float64
 
 function Path(
     p0::Point{T}=zero(Point{typeof(1.0UPREFERRED)});
@@ -501,7 +508,7 @@ function Path(
     name=uniquename("path"),
     metadata=UNDEF_META
 ) where {T}
-    S = _to_preferred(oneunit(T))
+    S = _preferred_coordinatetype(oneunit(T))
     return Path{S}(name, p0, α0, metadata)
 end
 
