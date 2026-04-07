@@ -33,8 +33,6 @@
     lowerleft(::DeviceLayout.GeometryEntity)
     upperright(::DeviceLayout.GeometryEntity)
     transform
-    findbox
-    mbr_spatial_index
 ```
 
 ### [GeometryEntity](@id api-geometryentity)
