@@ -80,14 +80,8 @@ function render!(c::Cell{S}, p::Polygon, meta::GDSMeta=GDSMeta(); kwargs...) whe
         push!(c.element_metadata, meta)
         return c
     end
-
-    bestclip = _best_guillotine_cut((points(p),))
-    for q in [
-        clip(Clipper.ClipTypeIntersection, p, bestclip)
-        clip(Clipper.ClipTypeDifference, p, bestclip)
-    ]
-        render!(c, q, meta)
-    end
+    # Reconstruct ClippedPolygon with topology info to make safe guillotine cuts
+    render!(c, union2d(p), meta)
     return c
 end
 
