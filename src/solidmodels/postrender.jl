@@ -307,6 +307,8 @@ function union_geom!(
         if length(dt) <= 1
             length(dt) == 1 &&
                 @info "union_geom!(sm, $object, $d): ($object, $d) is a single entity, skipping union"
+            length(dt) == 0 &&
+                @info "union_geom!(sm, $object, $d): ($object, $d) is empty, skipping union"
             return dt
         end
     end

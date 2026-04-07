@@ -1144,10 +1144,10 @@ Render `cs` to `sm`.
   - `skip_postrender`: Whether or not to return early without performing any postrendering
     operations. This can be particularly helpful during debugging, as all two dimensional
     entities will be placed appropriately but will not have been combined.
-  - `auto_union`: If `true`, union each physical group in dimensions 2 and 3
+  - `auto_union`: If `true`, union each 2D physical group
     as the first postrender step, before extrusions and user-defined `postrender_ops`. This
     consolidates overlapping entities within each group, reducing the cost of subsequent
-    pairwise fragmentation.
+    pairwise fragmentation. Default is `false`.
   - `skip_unused_layers`: If `true`, skip rendering layers whose names are not referenced by
     `postrender_ops` or `retained_physical_groups`. A layer is considered referenced if either
     its mapped name or its base layer name (from `layer(meta)`) appears in the referenced set.
@@ -1316,10 +1316,8 @@ function render!(
     # Doing this before extrusions/booleans reduces the cost of pairwise fragmentation.
     if auto_union
         auto_union_ops = Tuple[]
-        for dim in (2, 3)
-            for groupname in collect(keys(dimgroupdict(sm, dim)))
-                push!(auto_union_ops, (groupname, union_geom!, (groupname, dim)))
-            end
+        for groupname in collect(keys(dimgroupdict(sm, 2))) # Only dim 2 will be present
+            push!(auto_union_ops, (groupname, union_geom!, (groupname, 2)))
         end
         _postrender!(sm, auto_union_ops)
         _synchronize!(sm)
@@ -1786,7 +1784,7 @@ function _used_group_names(postrender_ops, retained_physical_groups)
         # op = (destination, func, args, kwargs...)
         push!(names, string(op[1]))  # destination name
         if length(op) >= 3
-            _extract_op_names!(names, op[3])  # args tuple
+            _extract_op_names!(names, op[3])  # args tuple (kwargs are never layer names)
         end
     end
     return names
