@@ -1015,10 +1015,10 @@ end
     @test intersect2d_layerwise(c1, c2)[lyr_b][1] == overlap
 
     # Findbox
-    @test findbox(r1, [r1, r2]) == [1]
-    @test findbox(r1, [r1, r2]; intersects=true) == [1, 2]
-    @test findbox(r1, [c1]) == []
-    @test findbox(r1, [r1, c1], intersects=true) == [1, 2]
+    @test DeviceLayout.findbox(r1, [r1, r2]) == [1]
+    @test DeviceLayout.findbox(r1, [r1, r2]; intersects=true) == [1, 2]
+    @test DeviceLayout.findbox(r1, [c1]) == []
+    @test DeviceLayout.findbox(r1, [r1, c1], intersects=true) == [1, 2]
 
     # Tiling
     ca_1 = CoordinateSystem("array1")
@@ -1037,4 +1037,25 @@ end
     uae_tiled = union2d_layerwise(ca_1, CoordinateSystem("empty"), tile_size=99μm)
     @test length(vcat(to_polygons.(uae_tiled[lyr_a])...)) == 3 * 3
     @test isempty(to_polygons(xor2d(vcat(uae_tiled[lyr_a]...), ca_1 => lyr_a)))
+
+    # Auto tile size
+    ca_3 = CoordinateSystem("array1")
+    ca_4 = CoordinateSystem("array2")
+    addref!(ca_3, aref(c1, 100μm * (-10:10), 100μm * (-10:10)))
+    addref!(ca_4, aref(c2, 100μm * (-10:10), 100μm * (-10:10)))
+    xa_auto_tiled = xor2d_layerwise(ca_3, ca_4, tiled=true)
+    @test all(length.(values(xa_auto_tiled)) .== 9) # 9 tiles for about 900 entities
+
+    # Auto tile size is decent for large n
+    for n in [12000, 20000, 33000]
+        w, l, n = (10mm, 4mm, n)
+        l_tile = Polygons._auto_tile_size(Rectangle(w, l), n)
+        num_tiles = ceil(w / l_tile) * ceil(l / l_tile)
+        @test abs(100 - n / num_tiles) <= 10
+    end
+    # Works for sub-single-tile
+    w, l, n = (400μm, 400μm, 40)
+    l_tile = Polygons._auto_tile_size(Rectangle(w, l), n)
+    num_tiles = ceil(w / l_tile) * ceil(l / l_tile)
+    @test num_tiles == 1
 end

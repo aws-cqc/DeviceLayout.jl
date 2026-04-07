@@ -2339,6 +2339,7 @@ for func in ("union2d", "difference2d", "intersect2d", "xor2d")
             only_layers=[],
             ignore_layers=[],
             depth=-1,
+            tiled=false,
             tile_size=nothing
         )
 
@@ -2353,11 +2354,16 @@ for func in ("union2d", "difference2d", "intersect2d", "xor2d")
 
     # Tiling
 
-    Providing a `tile_size` can significantly speed up operations and reduce maximum memory usage for large geometries.
+    Using `tiled=true` or manually setting a `tile_size` can significantly speed up operations and reduce maximum memory usage for large geometries.
     It does this by breaking up the geometry into smaller portions ("tiles") and operating on them one at a time.
 
     If a length is provided to `tile_size`, the bounds of the combined geometries are tiled with squares with that
-    edge length, starting from the lower left corner. For each tile, all entities with bounding box touching that tile 
+    edge length, starting from the lower left corner.
+
+    If `tiled` is `true` but `tile_size` is not specified, a tile size will be set automatically based on the total number of entities in the operation,
+    such that there is about one square tile per 100 entities. This is usually a reasonable choice, but you may want to benchmark your use case.
+
+    For each tile, all entities with bounding box touching that tile 
     (including those touching edge-to-edge) are selected.
     The values in the returned `Dict` are then lazy iterators over the results for each tile.
 
@@ -2365,9 +2371,6 @@ for func in ("union2d", "difference2d", "intersect2d", "xor2d")
     resulting polygons may be duplicated or incorrect. This is often acceptable, as in the case of `xor2d_layerwise` when the goal
     is to find small differences between layouts: layouts are never incorrectly identified as identical,
     and false positives are rare. In other cases, you may need to do some postprocessing or of the results.
-
-    A rough guideline for choosing tile size is to aim for ~100 polygons per tile, but you may want to
-    benchmark your use case.
     """
     eval(quote
         @doc $doc $func_layerwise
@@ -2380,6 +2383,7 @@ function clip_layerwise(
     tool::GeometryStructure;
     only_layers=[],
     ignore_layers=[],
+    tiled=false,
     tile_size=nothing,
     depth=-1,
     pfs=Clipper.PolyFillTypePositive,
@@ -2394,7 +2398,7 @@ function clip_layerwise(
     obj_metas = unique(DeviceLayout.element_metadata(obj_flat))
     tool_metas = unique(DeviceLayout.element_metadata(tool_flat))
     all_metas = unique([obj_metas; tool_metas])
-    if isnothing(tile_size)
+    if !tiled && isnothing(tile_size)
         res = Dict(
             meta => [
                 clip(
@@ -2451,12 +2455,20 @@ function tiles_and_edges(r::Rectangle, tile_size)
     return tiles, vcat(h_edges, v_edges) # Edges could be used for healing
 end
 
+function _auto_tile_size(bnds::Rectangle, num_ents)
+    target_ents_per_tile = 100
+    target_num_tiles = max(1.0, round(num_ents / target_ents_per_tile))
+    target_size = sqrt(width(bnds) * height(bnds) / target_num_tiles)
+    # Return the closest tile size that evenly divides width
+    return width(bnds) / max(1.0, round(width(bnds) / target_size))
+end
+
 """
     function clip_tiled(
         op,
         ents1::AbstractArray{<:GeometryEntity{T}},
         ents2::AbstractArray{<:GeometryEntity{T}},
-        tile_size=1000 * DeviceLayout.onemicron(T);
+        tile_size=nothing;
         pfs=Clipper.PolyFillTypePositive,
         pfc=Clipper.PolyFillTypePositive
     )
@@ -2473,13 +2485,14 @@ is to find small differences between layouts: layouts are never incorrectly iden
 and false positives are rare. In other cases, you may need to do some postprocessing or of the results.
 
 A rough guideline for choosing tile size is to aim for 100 polygons per tile, but you may want to
-benchmark your use case.
+benchmark your use case. If an explicit tile size is not provided, then tile size will be set automatically
+based on the total number of entities in the operation, such that there is about one square tile per 100 entities.
 """
 function clip_tiled(
     op,
     ents1::AbstractArray{<:GeometryEntity{T}},
     ents2::AbstractArray{<:GeometryEntity{T}},
-    tile_size=1000 * DeviceLayout.onemicron(T);
+    tile_size=nothing;
     pfs=Clipper.PolyFillTypePositive,
     pfc=Clipper.PolyFillTypePositive
 ) where {T}
@@ -2503,6 +2516,11 @@ function clip_tiled(
         Point(bnds.low...) * DeviceLayout.onemicron(T),
         Point(bnds.high...) * DeviceLayout.onemicron(T)
     )
+
+    if isnothing(tile_size)
+        tile_size = _auto_tile_size(bnds_dl, length(ents1) + length(ents2))
+    end
+
     tiles, edges = tiles_and_edges(bnds_dl, tile_size) # DeviceLayout Rectangles
     tile_poly_indices = map(tiles) do tile
         idx1 = isempty(ents1) ? Int[] : DeviceLayout.findbox(tile, tree1; intersects=true)
