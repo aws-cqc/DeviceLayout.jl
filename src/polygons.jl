@@ -1540,7 +1540,20 @@ function _offset(
         add_path!(c, s0.p, j, e)
     end
     result = Clipper.execute(c, Float64(ustrip(delta))) #TODO: fix in clipper
-    return [Polygon(reinterpret(Point{T}, p)) for p in result]
+    polys = [Polygon(reinterpret(Point{T}, p)) for p in result]
+    # Fast path: single or zero contours cannot contain holes
+    if length(polys) <= 1
+        return polys
+    end
+    # Check whether Clipper returned mixed orientations (holes among outer contours).
+    # CW contours are holes in Clipper's convention; CCW are outer boundaries.
+    orientations = [orientation(p) for p in polys]
+    if all(==(first(orientations)), orientations)
+        return polys  # All same orientation — no holes
+    end
+    # Mixed orientations mean holes are present — recombine via union2d so that the
+    # PolyTree keeps hole topology, then flatten back to Polygons with interior cuts.
+    return to_polygons(union2d(polys))
 end
 
 ### cutting algorithm
