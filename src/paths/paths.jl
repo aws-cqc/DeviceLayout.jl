@@ -204,7 +204,18 @@ mutable struct Node{T} <: GeometryEntity{T}
 end
 convert(::Type{Node{T}}, n::Node{T}) where {T} = n
 function convert(::Type{Node{T}}, n::Node{S}) where {S, T}
-    return Node{T}(convert(Segment{T}, n.seg), n.sty)
+    # Breaks linked list but can at least have dummies on either side
+    # to preserve info about whether the node started/ended a path
+    cur = Node{T}(convert(Segment{T}, n.seg), n.sty)
+    if n.prev !== n
+        cur.prev = Node{T}(convert(Segment{T}, n.prev.seg), n.prev.sty)
+        cur.prev.next = cur
+    end
+    if n.next !== n
+        cur.next = Node{T}(convert(Segment{T}, n.next.seg), n.next.sty)
+        cur.next.prev = cur
+    end
+    return cur
 end
 convert(::Type{GeometryEntity{T}}, n::Node) where {T} = convert(Node{T}, n)
 
@@ -362,14 +373,19 @@ end
 Type for abstracting an arbitrary styled path in the plane. Iterating returns
 [`Paths.Node`](@ref) objects.
 
-Convenience constructors for `Path{T}` object:
+The most common convenience constructors:
 
-    Path{T}(p0::Point=zero(Point{T}), α0::typeof(1.0°)=0.0°, metadata::Meta=UNDEF_META)
-    Path{T}(name::String, p0::Point{T}=zero(Point{T}), α0=0.0°, meta::Meta=UNDEF_META, nodes::Vector{Node{T}}=Node{T}[])
-    Path(p0::Point=zero(Point{typeof(1.0UPREFERRED)}); α0=0.0, name=uniquename("path"), metadata=UNDEF_META)
-    Path(p0x::Coordinate, p0y::Coordinate; α0=0.0, name=uniquename("path"), metadata=UNDEF_META)
-    Path(u::CoordinateUnits; α0=0.0, name=uniquename("path"), metadata=UNDEF_META)
+    Path(p0::Point=zero(Point{typeof(1.0UPREFERRED)}); α0=0.0°, name=uniquename("path"), metadata=UNDEF_META)
+    Path(p0x::Coordinate, p0y::Coordinate; α0=0.0°, name=uniquename("path"), metadata=UNDEF_META)
+
+Paths constructed via those constructors with `p0` in `Length` units will have coordinate type
+`typeof(1.0UPREFERRED)`.
+For explicit control over the coordinate type, use one of the other constructors:
+
+    Path{T}(p0::Point=zero(Point{T}), α0=0.0°, metadata::Meta=UNDEF_META)
+    Path{T}(name::String, p0::Point=zero(Point{T}), α0=0.0°, metadata::Meta=UNDEF_META, nodes::Vector{Node{T}}=Node{T}[])
     Path(v::Vector{Node{T}}; name=uniquename("path"), metadata=UNDEF_META) where {T}
+    Path(u::CoordinateUnits, p0=zero(Point{typeof(1.0u)}); α0=0.0°, name=uniquename("path"), metadata=UNDEF_META)
 """
 mutable struct Path{T} <: AbstractComponent{T}
     name::String
@@ -381,7 +397,7 @@ mutable struct Path{T} <: AbstractComponent{T}
 
     Path{T}(
         name::String,
-        p0::Point{T}=zero(Point{T}),
+        p0::Point=zero(Point{T}),
         α0=0.0°,
         meta::Meta=UNDEF_META,
         nodes::Vector{Node{T}}=Node{T}[]
@@ -477,8 +493,14 @@ function show(io::IO, x::Node)
     return print(io, "$(segment(x)) styled as $(style(x))")
 end
 
-Path{T}(p0::Point{T}=zero(Point{T}), α0=0.0°, meta::Meta=UNDEF_META) where {T} =
+Path{T}(p0::Point=zero(Point{T}), α0=0.0°, meta::Meta=UNDEF_META) where {T} =
     Path{T}(uniquename("path"), p0, α0, meta, Node{T}[])
+
+# Return "preferred" path length coordinate type
+# for consistency with non-explicit unit choice
+_preferred_coordinatetype(x::Length) =
+    1.0UPREFERRED isa Length ? typeof(1.0UPREFERRED) : typeof(x)
+_preferred_coordinatetype(::Coordinate) = Float64
 
 function Path(
     p0::Point{T}=zero(Point{typeof(1.0UPREFERRED)});
@@ -486,17 +508,21 @@ function Path(
     name=uniquename("path"),
     metadata=UNDEF_META
 ) where {T}
-    return Path{float(T)}(name, float.(p0), α0, metadata)
+    S = _preferred_coordinatetype(oneunit(T))
+    return Path{S}(name, p0, α0, metadata)
 end
 
-Path(p0x::T, p0y::T; kwargs...) where {T <: Coordinate} =
-    Path(Point{float(T)}(p0x, p0y); kwargs...)
+Path(p0x::Coordinate, p0y::Coordinate; kwargs...) = Path(Point(p0x, p0y); kwargs...)
 
-Path(p0x::S, p0y::T; kwargs...) where {S <: Coordinate, T <: Coordinate} =
-    Path(promote(p0x, p0y)...; kwargs...)
-
-function Path(u::DeviceLayout.CoordinateUnits; kwargs...)
-    return Path(Point(0.0u, 0.0u); kwargs...)
+function Path(
+    u::DeviceLayout.CoordinateUnits,
+    p0=zero(Point{typeof(1.0u)});
+    α0=0.0°,
+    name=uniquename("path"),
+    metadata=UNDEF_META
+)
+    T = typeof(1.0u)
+    return Path{T}(name, p0, α0, metadata)
 end
 function Path(v::Vector{Node{T}}; name=uniquename("path"), metadata=UNDEF_META) where {T}
     isempty(v) && return Path{T}(zero(Point{T}), 0.0°, v)
