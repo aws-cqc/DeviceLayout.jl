@@ -410,18 +410,7 @@ Return the array of `Point` objects that make up the contour of the `PolyNode`
 """
 points(x::Clipper.PolyNode) = x.contour
 
-# Estimate keyhole polygon point count for an outer contour PolyNode.
-# Each immediate hole child adds its contour points, duplicates an inner contour point,
-# and a duplicated new point where the cut intersects the outer contour.
-function total_points(node::Clipper.PolyNode)
-    n = length(contour(node))
-    for child in children(node)
-        n += length(contour(child)) + 3
-    end
-    return n
-end
-
-# Collect all contour point arrays from a PolyNode tree (no keyhole conversion).
+# Collect all contour point arrays from a PolyNode tree (no keyhole conversion)
 function _all_contours(node::Clipper.PolyNode{S}) where {S}
     contours = Vector{S}[]
     _collect_contours!(contours, node)
@@ -2014,12 +2003,6 @@ function interiorcuts(nodeortree::Clipper.PolyNode, outpolys::Vector{Polygon{T}}
                     round(getx(best_intersection_point)),
                     round(gety(best_intersection_point))
                 )
-                if w == Point(3950000000000, 0)
-                    @show w
-                    @show ray.p0
-                    @show length(enclosing_contour)
-                    @show length.(contour.(children(enclosing)))
-                end
 
                 # We are going to replace `best_node`
                 # need to do all of the following...
