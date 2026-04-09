@@ -940,13 +940,7 @@ end
 
 @testitem "Hole sorting" setup = [CommonTestSetup] begin
     # Issue #175
-    # Shoelace formula for signed polygon area
-    area(p) =
-        sum(
-            (gety.(p.p) + gety.(circshift(p.p, -1))) .*
-            (getx.(p.p) - getx.(circshift(p.p, -1)))
-        ) / 2
-
+    import .Polygons: area
     @testset "Hole sorting" begin
         c1 = rotate(centered(Rectangle(0.5mm, 0.5mm)), 45°) - Point(0mm, 0.5mm)
         c2 = c1 + Point(0mm, 1mm)
