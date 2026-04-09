@@ -4,6 +4,12 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Upcoming
+
+  - Added layerwise Booleans `union2d_layerwise`, `difference2d_layerwise`, `intersect2d_layerwise`, and `xor2d_layerwise`
+  - Added `Polygons.area`
+  - Fixed overly-strict argument types for polygon clipping methods
+
 ## 1.11.2 (2026-03-31)
 
   - Fix unit promotion in rounding that could hit a Unitful bug (Unitful.jl#845)
