@@ -304,8 +304,11 @@ function union_geom!(
         @error "union_geom!(sm, $object, $d): ($object, $d) is not a physical group."
     else
         dt = dimtags(sm[object, d])
-        if length(dt) == 1
-            @info "union_geom!(sm, $object, $d): ($object, $d) is a single entity, skipping union"
+        if length(dt) <= 1
+            length(dt) == 1 &&
+                @info "union_geom!(sm, $object, $d): ($object, $d) is a single entity, skipping union"
+            length(dt) == 0 &&
+                @info "union_geom!(sm, $object, $d): ($object, $d) is empty, skipping union"
             return dt
         end
     end
