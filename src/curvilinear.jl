@@ -470,8 +470,7 @@ end
 # Only indices that don't start or end a curve are available for rounding.
 # cornerindices(p::CurvilinearPolygon, s::GeometryEntityStyle) = cornerindices(p, p0(s))
 function cornerindices(p::CurvilinearPolygon{T}) where {T}
-    curve_bound_ind =
-        vcat((x -> [x, (x % length(p.p)) + 1]).(p.curve_start_idx)...)
+    curve_bound_ind = vcat((x -> [x, (x % length(p.p)) + 1]).(p.curve_start_idx)...)
     valid_ind = setdiff(1:length(p.p), curve_bound_ind)
     return valid_ind
 end
