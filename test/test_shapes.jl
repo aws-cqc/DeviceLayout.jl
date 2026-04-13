@@ -448,6 +448,16 @@ end
     @test length(cpt_pts) == length(tcp_pts)
     @test all(isapprox.(cpt_pts, tcp_pts; atol=0.01nm))
 
+    # Negative csi must be normalized before duplicate-point cleanup, otherwise
+    # -3 ∉ [3] and the curve between duplicate points survives deletion.
+    dup_pts = [Point(0.0μm, 0.0μm), Point(1.0μm, 0.0μm),
+               Point(0.5μm, 1.0μm), Point(0.5μm, 1.0μm)]
+    dup_seg = Paths.Turn(90°, 1.0μm, α0=0°, p0=dup_pts[4])
+    dup_cp = CurvilinearPolygon(dup_pts, [dup_seg], [-3])
+    @test length(dup_cp.p) == 3
+    @test isempty(dup_cp.curves)
+    @test isempty(dup_cp.curve_start_idx)
+
     # Convert a SimpleTrace to a CurvilinearRegion
     pa = Path(0nm, 0nm)
     straight!(pa, 100μm, Paths.SimpleTrace(10.0μm))

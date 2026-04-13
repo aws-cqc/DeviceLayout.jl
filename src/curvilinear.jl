@@ -52,8 +52,8 @@ struct CurvilinearPolygon{T} <: GeometryEntity{T}
     p::Vector{Point{T}}
     curves::Vector{<:Paths.Segment} # Only need to store non-line-segment curves
     curve_start_idx::Vector{Int} # And the indices at which they start
-    # A negative start idx like -3 means that the corresponding curve
-    # between p[3] and p[4] is actually parameterized from p[4] to p[3]
+    # Backward-parameterized curves (negative start idx) are normalized in the constructor:
+    # the segment is reversed and the index flipped positive.
     function CurvilinearPolygon{T}(p, c, csi) where {T} # Make sure you don't have zero-length curves
         # Normalize backward-parameterized curves: reverse segment, flip index positive.
         for i in eachindex(csi)
@@ -107,24 +107,24 @@ function to_polygons(
 
     for (idx, (csi, c)) ∈ enumerate(zip(e.curve_start_idx, e.curves))
         # Add the points from current to start of curve
-        append!(p, e.p[i:abs(csi)])
+        append!(p, e.p[i:csi])
 
         # Discretize segment using tolerance-based adaptive grid.
-        wrapped_i = mod1(abs(csi) + 1, length(e.p))
+        wrapped_i = mod1(csi + 1, length(e.p))
         pp = DeviceLayout.discretize_curve(c, atol)
 
         # Remove the calculated points corresponding to start and end.
-        term_p = csi < 0 ? popfirst!(pp) : pop!(pp)
-        init_p = csi < 0 ? pop!(pp) : popfirst!(pp)
+        term_p = pop!(pp)
+        init_p = popfirst!(pp)
 
         # Add interior points and bump counter.
-        append!(p, csi < 0 ? reverse(pp) : pp)
-        i = abs(csi) + 1
+        append!(p, pp)
+        i = csi + 1
 
         # Ensure that the calculated start and end points match the non-calculated points.
         @assert !isapprox(init_p, term_p; atol=1e-3 * DeviceLayout.onenanometer(T)) "Curve $idx must have non-zero length!"
-        @assert isapprox(term_p, e.p[wrapped_i]; atol=1e-3 * DeviceLayout.onenanometer(T)) "Curve $idx must $(csi < 0 ? "start" : "end") at point $(wrapped_i)!"
-        @assert isapprox(init_p, e.p[abs(csi)]; atol=1e-3 * DeviceLayout.onenanometer(T)) "Curve $idx must $(csi < 0 ? "end" : "start") at point $(abs(csi))!"
+        @assert isapprox(term_p, e.p[wrapped_i]; atol=1e-3 * DeviceLayout.onenanometer(T)) "Curve $idx must end at point $(wrapped_i)!"
+        @assert isapprox(init_p, e.p[csi]; atol=1e-3 * DeviceLayout.onenanometer(T)) "Curve $idx must start at point $(csi)!"
     end
     append!(p, e.p[i:end])
 
@@ -471,7 +471,7 @@ end
 # cornerindices(p::CurvilinearPolygon, s::GeometryEntityStyle) = cornerindices(p, p0(s))
 function cornerindices(p::CurvilinearPolygon{T}) where {T}
     curve_bound_ind =
-        vcat((x -> [abs(x), (abs(x) % length(p.p)) + 1]).(p.curve_start_idx)...)
+        vcat((x -> [x, (x % length(p.p)) + 1]).(p.curve_start_idx)...)
     valid_ind = setdiff(1:length(p.p), curve_bound_ind)
     return valid_ind
 end
@@ -549,9 +549,9 @@ Returns a NamedTuple `(incoming=..., outgoing=...)` where each field is either
 `:straight` or the `Paths.Segment` (e.g., `Paths.Turn`) for that edge.
 
   - **Outgoing edge** (from `p[i]` to `p[i+1]`): curved if any
-    `abs(curve_start_idx[k]) == i`
+    `curve_start_idx[k] == i`
   - **Incoming edge** (from `p[i-1]` to `p[i]`): curved if any
-    `abs(curve_start_idx[k]) == mod1(i-1, n)`
+    `curve_start_idx[k] == mod1(i-1, n)`
 """
 function edge_type_at_vertex(p::CurvilinearPolygon, i::Int)
     n = length(p.p)
@@ -559,16 +559,12 @@ function edge_type_at_vertex(p::CurvilinearPolygon, i::Int)
 
     incoming = :straight
     outgoing = :straight
-    # k = index into curves array, csi = vertex index where curve k starts.
-    # Negative csi means the curve is parameterized in reverse; use reverse(curve)
-    # so p0/p1 match the vertex order expected by downstream rounding code.
     for (k, csi) in enumerate(p.curve_start_idx)
-        curve = csi < 0 ? reverse(p.curves[k]) : p.curves[k]
-        if abs(csi) == prev_i
-            incoming = curve
+        if csi == prev_i
+            incoming = p.curves[k]
         end
-        if abs(csi) == i
-            outgoing = curve
+        if csi == i
+            outgoing = p.curves[k]
         end
     end
     return (; incoming=incoming, outgoing=outgoing)
@@ -603,7 +599,7 @@ function to_polygons(
     la_corners = Set(line_arc_cornerindices(ent, sty))
 
     # Precompute vertex for curve index lookup
-    vertex_to_curve = Dict(abs(csi) => k for (k, csi) in enumerate(ent.curve_start_idx))
+    vertex_to_curve = Dict(csi => k for (k, csi) in enumerate(ent.curve_start_idx))
 
     # Round corners, tracking which original vertex maps to which output range.
     # Also track T_arc for each line-arc corner so we can trim the curves.
@@ -703,19 +699,13 @@ function to_polygons(
             csi = ent.curve_start_idx[curve_k]
             arc_len = pathlength(c)
 
-            # Determine trim parameters: find t values for trim points on the arc.
-            # For negative csi, the curve is parameterized in reverse, so trim_start
-            # (at the forward-start vertex) maps to a high t value and trim_end to a
-            # low t value. Swap them so t_start < t_end for correct discretization.
             t_start = zero(S)
             t_end = arc_len
-            ts_dict = csi < 0 ? trim_end : trim_start
-            te_dict = csi < 0 ? trim_start : trim_end
-            if haskey(ts_dict, curve_k)
-                t_start = Paths.pathlength_nearest(c, ts_dict[curve_k])
+            if haskey(trim_start, curve_k)
+                t_start = Paths.pathlength_nearest(c, trim_start[curve_k])
             end
-            if haskey(te_dict, curve_k)
-                t_end = Paths.pathlength_nearest(c, te_dict[curve_k])
+            if haskey(trim_end, curve_k)
+                t_end = Paths.pathlength_nearest(c, trim_end[curve_k])
             end
 
             # Discretize the trimmed portion of the curve.
@@ -732,7 +722,7 @@ function to_polygons(
                 )
                 # Remove endpoints (already present as fillet tangent points)
                 inner = grid[(begin + 1):(end - 1)] .* l
-                pp = c.(csi < 0 ? reverse(inner) : inner)
+                pp = c.(inner)
                 append!(final_points, pp)
             end
         end

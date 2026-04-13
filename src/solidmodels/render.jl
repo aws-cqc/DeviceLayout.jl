@@ -296,7 +296,7 @@ function round_to_curvilinearpolygon(
                 push!(new_points, Paths.p1(result.fillet))
                 # Record trim for the original arc
                 arc_start_vtx = arc_is_outgoing ? i : mod1(i - 1, len)
-                curve_k = findfirst(csi -> abs(csi) == arc_start_vtx, pol.curve_start_idx)
+                curve_k = findfirst(isequal(arc_start_vtx), pol.curve_start_idx)
                 if !isnothing(curve_k)
                     if arc_is_outgoing
                         trim_start_pts[curve_k] = result.T_arc
@@ -366,7 +366,7 @@ function round_to_curvilinearpolygon(
 
     # Sort curves by start index so to_polygons can iterate in vertex order
     if length(new_curve_start_idx) > 1
-        perm = sortperm(new_curve_start_idx, by=abs)
+        perm = sortperm(new_curve_start_idx)
         new_curves = new_curves[perm]
         new_curve_start_idx = new_curve_start_idx[perm]
     end
@@ -1652,17 +1652,9 @@ function _add_loop!(
     endpoint_pairs = zip(pts, circshift(pts, -1))
     curves = map(enumerate(endpoint_pairs)) do (i, endpoints)
         curve_idx = findfirst(isequal(i), cl.curve_start_idx)
-        if isnothing(curve_idx) # not found
-            # see if the negative of the index is in there
-            curve_idx = findfirst(isequal(-i), cl.curve_start_idx)
-            if isnothing(curve_idx) # nope, just a line
-                return k.add_line(endpoints[1], endpoints[2])
-            else # negative index => reverse endpoints
-                c = _add_curve!(reverse(endpoints), cl.curves[curve_idx], k, z; atol)
-                !isempty(size(c)) && return reverse(c)
-                return c
-            end
-        else # add the curve whose start index is i
+        if isnothing(curve_idx)
+            return k.add_line(endpoints[1], endpoints[2])
+        else
             return _add_curve!(endpoints, cl.curves[curve_idx], k, z; atol)
         end
     end
