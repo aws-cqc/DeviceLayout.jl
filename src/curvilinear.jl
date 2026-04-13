@@ -55,6 +55,13 @@ struct CurvilinearPolygon{T} <: GeometryEntity{T}
     # A negative start idx like -3 means that the corresponding curve
     # between p[3] and p[4] is actually parameterized from p[4] to p[3]
     function CurvilinearPolygon{T}(p, c, csi) where {T} # Make sure you don't have zero-length curves
+        # Normalize backward-parameterized curves: reverse segment, flip index positive.
+        for i in eachindex(csi)
+            if csi[i] < 0
+                c[i] = reverse(c[i])
+                csi[i] = -csi[i]
+            end
+        end
         # Don't treat duplicates in any different fashion -> view as user error
         # Some endpoint pairs may be identical; delete the duplicates
         # Maybe inefficient but least confusing to iterate to find them and then delete

@@ -447,7 +447,7 @@
         [neg_arc],
         [-3]  # negative: curve between p[3] and p[4], parameterized from p[4] to p[3]
     )
-    @test neg_cp.curve_start_idx[1] < 0
+    @test neg_cp.curve_start_idx[1] > 0  # constructor normalizes to positive
 
     # Plain rendering must work (catches invalid vertex/curve mismatch)
     neg_plain = to_polygons(neg_cp)

@@ -429,6 +429,9 @@ end
     c = Cell("main", nm)
     @test_nowarn render!(c, cs)
 
+    # Constructor normalizes negative curve_start_idx to positive via reverse()
+    @test cp.curve_start_idx[1] == 2
+
     # Reverse parameterized and forward parameterized should produce same number of points
     @test length(points(to_polygons(cp))) == length(pgen)
     @test length(points(to_polygons(t(cp)))) == length(ptgen)
@@ -438,10 +441,12 @@ end
     c = Cell("main", nm)
     @test_nowarn render!(c, cs)
 
-    # Clipping the transformed inverse and forward should give negligible difference.
-    # Adaptive discretization may produce thin slivers rather than exactly empty.
-    diff_poly = difference2d(to_polygons(cpt), to_polygons(t(cp)))
-    @test perimeter(diff_poly) < 0.1μm
+    # Transformed forward and reverse should give identical geometry.
+    # (Constructor normalization makes them internally equivalent.)
+    cpt_pts = points(to_polygons(cpt))
+    tcp_pts = points(to_polygons(t(cp)))
+    @test length(cpt_pts) == length(tcp_pts)
+    @test all(isapprox.(cpt_pts, tcp_pts; atol=0.01nm))
 
     # Convert a SimpleTrace to a CurvilinearRegion
     pa = Path(0nm, 0nm)
