@@ -4,16 +4,26 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## 1.12.0 (2026-04-13)
+
+  - Added `auto_union` SolidModel rendering option; if `true`, self-unions every 2D group before any other postrendering (default `false`)
+  - Added `skip_unused_layers` SolidModel rendering option; if `true`, entities in layers not referenced by postrendering operations or `retained_physical_groups` are not rendered (default `false`)
+  - Added `SolidModels.connected_components`, which takes a group or collection of groups and returns the connected components of entities in those groups as vectors of `(dim, tag)` tuples
+  - Added tolerance-based `to_polygons` rendering for CurvilinearPolygon and CurvilinearRegion (no longer using a fixed 181 points per curve)
+  - Improved efficiency of autofill point-in-polygon algorithm
+  - Fixed `uniquename` not being called on default route names in some schematic routing methods
+  - Fixed ClippedPolygon rendering bug that allowed keyhole cuts to pass through other holes
+
 ## 1.11.2 (2026-03-31)
 
-  - Fix unit promotion in rounding that could hit a Unitful bug (Unitful.jl#845)
-  - Fix `kwargs...` forwarding for CurvilinearRegion `to_polygons`
+  - Fixed unit promotion in rounding that could hit a Unitful bug (Unitful.jl#845)
+  - Fixed `kwargs...` forwarding for CurvilinearRegion `to_polygons`
 
 ## 1.11.1 (2026-03-30)
 
-  - Fix dispatch error for rounding of styled entities introduced by 1.11.0
-  - Fix relative radius handling in line-arc rounding
-  - Fix `circular_arc([θ1, θ2], ...)` method so `θ1 = θ2` gives a vector with a single point rather than `nothing`
+  - Fixed dispatch error for rounding of styled entities introduced by 1.11.0
+  - Fixed relative radius handling in line-arc rounding
+  - Fixed `circular_arc([θ1, θ2], ...)` method so `θ1 = θ2` gives a vector with a single point rather than `nothing`
 
 ## 1.11.0 (2026-03-23)
 
