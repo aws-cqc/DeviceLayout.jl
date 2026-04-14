@@ -2522,6 +2522,15 @@ function clip_tiled(
     end
 
     tiles, edges = tiles_and_edges(bnds_dl, tile_size) # DeviceLayout Rectangles
+    # Get single vector of all entity indices touching any edge
+    edge_touching_idx1 = mapreduce(vcat, edges, init=Int[]) do edge
+        return isempty(ents1) ? Int[] : DeviceLayout.findbox(edge, tree1; intersects=true)
+    end
+    # Same for ents2
+    edge_touching_idx2 = mapreduce(vcat, edges, init=Int[]) do edge
+        return isempty(ents2) ? Int[] : DeviceLayout.findbox(edge, tree2; intersects=true)
+    end
+    # Get vector of (ents1 indices, ents2 indices) for each tile
     tile_poly_indices = map(tiles) do tile
         idx1 = isempty(ents1) ? Int[] : DeviceLayout.findbox(tile, tree1; intersects=true)
         idx2 =
@@ -2529,8 +2538,19 @@ function clip_tiled(
         return (idx1, idx2)
     end
     # Clip within each tile
-    res = Iterators.map(tile_poly_indices) do (idx1, idx2)
-        return clip(op, ents1[idx1], ents2[idx2]; pfs, pfc)
+    res = Iterators.map(enumerate(tile_poly_indices)) do (tile_idx, poly_idxs)
+        idx1, idx2 = poly_idxs
+        # If an entity is touching a tile edge, clip it to the tile with intersect2d
+        idx1_on_edge = in.(idx1, Ref(edge_touching_idx1))
+        idx2_on_edge = in.(idx2, Ref(edge_touching_idx2))
+        edge_idx1 = idx1[idx1_on_edge]
+        bulk_idx1 = idx1[(!).(idx1_on_edge)]
+        edge_idx2 = idx2[idx2_on_edge]
+        bulk_idx2 = idx2[(!).(idx2_on_edge)]
+        tile = tiles[tile_idx]
+        ents1_clipped_to_tile = vcat(ents1[bulk_idx1], intersect2d(tile, ents1[edge_idx1]))
+        ents2_clipped_to_tile = vcat(ents2[bulk_idx2], intersect2d(tile, ents2[edge_idx2]))
+        return clip(op, ents1_clipped_to_tile, ents2_clipped_to_tile; pfs, pfc)
     end
     return res
 end

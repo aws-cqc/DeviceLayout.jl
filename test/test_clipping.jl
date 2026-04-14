@@ -1026,6 +1026,19 @@ end
     @test length(vcat(to_polygons.(xa_tiled[lyr_a])...)) == 3 * 3 * 2
     @test isempty(to_polygons(xor2d(vcat(xa_tiled[lyr_a]...), xa[lyr_a])))
 
+    # Tiling with entities on edges
+    xa_tiled_edges = xor2d_layerwise(ca_1, ca_2, tile_size=106μm)
+    @test length(xa_tiled_edges[lyr_a]) == 3 * 3
+    @test length(xa_tiled_edges[lyr_b]) == 3 * 3
+    all_polys = vcat(to_polygons.(xa_tiled_edges[lyr_a])...)
+    # EvenOdd union to remove regions where polygons overlap
+    all_no_overlap = clip(Polygons.Clipper.ClipTypeUnion, all_polys, Polygon{typeof(1.0nm)}[],
+        pfs=Polygons.Clipper.PolyFillTypeEvenOdd, pfc=Polygons.Clipper.PolyFillTypeEvenOdd)
+    @test length(all_polys) > 3 * 3 * 2 # Some polygons were split
+    @test isempty(to_polygons(xor2d(all_polys, xa[lyr_a]))) # Split polygons are still correct
+    @test length(to_polygons(all_no_overlap)) == 3 * 3 * 2 # Split polygons are not overlapping
+    @test isempty(to_polygons(xor2d(all_no_overlap, xa[lyr_a]))) # Split polygons add up correctly
+
     # Tiling with empty layers
     uae = union2d_layerwise(ca_1, CoordinateSystem("empty"))
     uae_tiled = union2d_layerwise(ca_1, CoordinateSystem("empty"), tile_size=99μm)
