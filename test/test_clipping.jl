@@ -1020,14 +1020,14 @@ end
     addref!(ca_1, aref(c1, 100μm * (-1:1), 100μm * (-1:1)))
     addref!(ca_2, aref(c2, 100μm * (-1:1), 100μm * (-1:1)))
     xa = xor2d_layerwise(ca_1, ca_2)
-    xa_tiled = xor2d_layerwise(ca_1, ca_2, tile_size=99μm)
+    xa_tiled = xor2d_layerwise(ca_1, ca_2, tile_size=99μm2nm)
     @test length(xa_tiled[lyr_a]) == 3 * 3
     @test length(xa_tiled[lyr_b]) == 3 * 3
     @test length(vcat(to_polygons.(xa_tiled[lyr_a])...)) == 3 * 3 * 2
     @test isempty(to_polygons(xor2d(vcat(xa_tiled[lyr_a]...), xa[lyr_a])))
 
     # Tiling with entities on edges
-    xa_tiled_edges = xor2d_layerwise(ca_1, ca_2, tile_size=106μm)
+    xa_tiled_edges = xor2d_layerwise(ca_1, ca_2, tile_size=106μm2nm)
     @test length(xa_tiled_edges[lyr_a]) == 3 * 3
     @test length(xa_tiled_edges[lyr_b]) == 3 * 3
     all_polys = vcat(to_polygons.(xa_tiled_edges[lyr_a])...)
@@ -1046,10 +1046,10 @@ end
 
     # Tiling with empty layers
     uae = union2d_layerwise(ca_1, CoordinateSystem("empty"))
-    uae_tiled = union2d_layerwise(ca_1, CoordinateSystem("empty"), tile_size=99μm)
+    uae_tiled = union2d_layerwise(ca_1, CoordinateSystem("empty"), tile_size=99μm2nm)
     @test length(vcat(to_polygons.(uae_tiled[lyr_a])...)) == 3 * 3
     @test isempty(to_polygons(xor2d(vcat(uae_tiled[lyr_a]...), ca_1 => lyr_a)))
-    uae_tiled = union2d_layerwise(CoordinateSystem("empty"), ca_1, tile_size=99μm)
+    uae_tiled = union2d_layerwise(CoordinateSystem("empty"), ca_1, tile_size=99μm2nm)
     @test length(vcat(to_polygons.(uae_tiled[lyr_a])...)) == 3 * 3
     @test isempty(to_polygons(xor2d(vcat(uae_tiled[lyr_a]...), ca_1 => lyr_a)))
 
