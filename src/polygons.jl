@@ -2548,8 +2548,10 @@ function clip_tiled(
         edge_idx2 = idx2[idx2_on_edge]
         bulk_idx2 = idx2[(!).(idx2_on_edge)]
         tile = tiles[tile_idx]
-        ents1_clipped_to_tile = vcat(ents1[bulk_idx1], intersect2d(tile, ents1[edge_idx1]))
-        ents2_clipped_to_tile = vcat(ents2[bulk_idx2], intersect2d(tile, ents2[edge_idx2]))
+        ents1_clipped_to_tile =
+            vcat(ents1[bulk_idx1], intersect2d(tile, ents1[edge_idx1]))
+        ents2_clipped_to_tile =
+            vcat(ents2[bulk_idx2], intersect2d(tile, ents2[edge_idx2]))
         return clip(op, ents1_clipped_to_tile, ents2_clipped_to_tile; pfs, pfc)
     end
     return res
