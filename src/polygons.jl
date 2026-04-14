@@ -2363,14 +2363,10 @@ for func in ("union2d", "difference2d", "intersect2d", "xor2d")
     If `tiled` is `true` but `tile_size` is not specified, a tile size will be set automatically based on the total number of entities in the operation,
     such that there is about one square tile per 100 entities. This is usually a reasonable choice, but you may want to benchmark your use case.
 
-    For each tile, all entities with bounding box touching that tile 
-    (including those touching edge-to-edge) are selected.
-    The values in the returned `Dict` are then lazy iterators over the results for each tile.
-
-    Because entities touching more than one tile will be included in multiple operations,
-    resulting polygons may be duplicated or incorrect. This is often acceptable, as in the case of `xor2d_layerwise` when the goal
-    is to find small differences between layouts: layouts are never incorrectly identified as identical,
-    and false positives are rare. In other cases, you may need to do some postprocessing or of the results.
+    Entities crossing between tiles are split into their intersections with each tile before clipping.
+    For each tile, those intersection results and all entities inside that tile are selected.
+    The values for each layer in the returned `Dict` are then lazy iterators over clipping results for
+    selected entities in each tile.
     """
     eval(quote
         @doc $doc $func_layerwise
@@ -2476,13 +2472,9 @@ end
 Return a lazy iterator that applies `op(ents1, ents2)` tile by tile.
 
 The bounds of the combined geometries are tiled with squares with edge length `tile_size`, starting at the bottom left
-corner. For each tile, all entities with bounding box touching that tile (including those touching edge-to-edge) are selected.
-The return value is the lazy iterator over selected entities per tile.
-
-Because entities touching more than one tile will be included in multiple operations,
-resulting polygons may be duplicated or incorrect. This is often acceptable, as in the case of `xor2d_layerwise` when the goal
-is to find small differences between layouts: layouts are never incorrectly identified as identical,
-and false positives are rare. In other cases, you may need to do some postprocessing or of the results.
+corner. Entities crossing between tiles are split into their intersections with each tile before clipping.
+For each tile, those intersection results and all entities and inside that tile are selected.
+The return value is a lazy iterator over clipping results for selected entities per tile.
 
 A rough guideline for choosing tile size is to aim for 100 polygons per tile, but you may want to
 benchmark your use case. If an explicit tile size is not provided, then tile size will be set automatically
