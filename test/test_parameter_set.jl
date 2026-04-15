@@ -40,9 +40,12 @@
         @test ps.components.qubit.cap_gap == 20
         @test ps.global.version == 1
 
-        # Missing key auto-vivifies an empty namespace
-        @test ps.nonexistent isa ParameterSet
-        @test ps.components.qubit.missing_ns isa ParameterSet
+        # Reading a missing key shows error (no exception from show)
+        @test contains(string(ps.nonexistent), "ParameterKeyError")
+        @test contains(string(ps.components.qubit.missing_param), "ParameterKeyError")
+
+        # Using a missing key as a value throws
+        @test_throws DeviceLayout.ParameterKeyError iterate(ps.nonexistent)
     end
 
     @testset "resolve" begin
@@ -130,12 +133,40 @@
 
     @testset "show" begin
         ps = ParameterSet()
+        ps.components.qubit.cap_width = 300
+
+        # Compact show (single line)
         io = IOBuffer()
         show(io, ps)
         s = String(take!(io))
         @test contains(s, "ParameterSet")
         @test contains(s, "global")
         @test contains(s, "components")
+
+        # text/plain — indented tree (top namespaces indented)
+        io = IOBuffer()
+        show(io, MIME("text/plain"), ps)
+        s = String(take!(io))
+        @test contains(s, "ParameterSet")
+        @test contains(s, "  components")
+        @test contains(s, "    qubit")
+        @test contains(s, "      cap_width = 300")
+
+        # text/markdown — nested list
+        io = IOBuffer()
+        show(io, MIME("text/markdown"), ps)
+        s = String(take!(io))
+        @test contains(s, "**ParameterSet**")
+        @test contains(s, "- **components**")
+        @test contains(s, "    - cap_width = `300`")
+
+        # text/html — nested <ul>
+        io = IOBuffer()
+        show(io, MIME("text/html"), ps)
+        s = String(take!(io))
+        @test contains(s, "<b>ParameterSet</b>")
+        @test contains(s, "<b>qubit</b>")
+        @test contains(s, "cap_width = <code>300</code>")
     end
 end
 

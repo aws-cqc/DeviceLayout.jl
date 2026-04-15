@@ -202,14 +202,14 @@ function SchematicDrivenLayout._build_subcomponents(tr::SimpleTransmon)
     @component island = create_component(
         ExampleRectangleIsland, ps, "components.transmon.island"
     )
-    # Forward shared parameter to island
-    island = set_parameters(island; junction_gap=tr.junction_gap)
+    # Forward shared parameter from parameter set to island
+    island = set_parameters(island; junction_gap=ps.components.transmon.junction_gap)
 
     @component junction = create_component(
         ExampleSimpleJunction, ps, "components.transmon.junction"
     )
     # Forward shared parameter under the subcomponent's own name
-    junction = set_parameters(junction; h_ground_island=tr.junction_gap)
+    junction = set_parameters(junction; h_ground_island=ps.components.transmon.junction_gap)
 
     return (island, junction)
 end
