@@ -961,8 +961,8 @@ end
         kwargs...) where {S, T, A<:Polygon{S}, B<:Polygon{T}}
     clip(op::Clipper.ClipType,
         s::AbstractVector{Polygon{T}}, c::AbstractVector{Polygon{T}};
-        pfs::Clipper.PolyFillType=Clipper.PolyFillTypeEvenOdd,
-        pfc::Clipper.PolyFillType=Clipper.PolyFillTypeEvenOdd) where {T}
+        pfs::Clipper.PolyFillType=Clipper.PolyFillTypePositive,
+        pfc::Clipper.PolyFillType=Clipper.PolyFillTypePositive) where {T}
 
 Return the `ClippedPolygon` resulting from a polygon clipping operation.
 
@@ -1045,8 +1045,8 @@ function clip(
     op::Clipper.ClipType,
     s::AbstractVector{Polygon{T}},
     c::AbstractVector{Polygon{T}};
-    pfs::Clipper.PolyFillType=Clipper.PolyFillTypeEvenOdd,
-    pfc::Clipper.PolyFillType=Clipper.PolyFillTypeEvenOdd
+    pfs::Clipper.PolyFillType=Clipper.PolyFillTypePositive,
+    pfc::Clipper.PolyFillType=Clipper.PolyFillTypePositive
 ) where {T}
     sc, cc = clipperize(s), clipperize(c)
     polys = _clip(op, sc, cc; pfs, pfc)
@@ -1060,8 +1060,8 @@ end
         kwargs...) where {S, T, A<:AbstractPolygon{S}, B<:AbstractPolygon{T}}
     cliptree(op::Clipper.ClipType,
         s::AbstractVector{Polygon{T}}, c::AbstractVector{Polygon{T}};
-        pfs::Clipper.PolyFillType=Clipper.PolyFillTypeEvenOdd,
-        pfc::Clipper.PolyFillType=Clipper.PolyFillTypeEvenOdd) where {T}
+        pfs::Clipper.PolyFillType=Clipper.PolyFillTypePositive,
+        pfc::Clipper.PolyFillType=Clipper.PolyFillTypePositive) where {T}
 
 Return a `Clipper.PolyNode` representing parent-child relationships between polygons and
 interior holes. The units and number type may need to be converted.
@@ -1125,8 +1125,8 @@ function cliptree(
     op::Clipper.ClipType,
     s::AbstractVector{Polygon{T}},
     c::AbstractVector{Polygon{T}};
-    pfs::Clipper.PolyFillType=Clipper.PolyFillTypeEvenOdd,
-    pfc::Clipper.PolyFillType=Clipper.PolyFillTypeEvenOdd
+    pfs::Clipper.PolyFillType=Clipper.PolyFillTypePositive,
+    pfc::Clipper.PolyFillType=Clipper.PolyFillTypePositive
 ) where {T}
     sc, cc = clipperize(s), clipperize(c)
     cpoly = _clip(op, sc, cc; pfs, pfc)
@@ -1276,8 +1276,8 @@ function _clip(
     op::Clipper.ClipType,
     s::AbstractVector{Polygon{T}},
     c::AbstractVector{Polygon{T}};
-    pfs::Clipper.PolyFillType=Clipper.PolyFillTypeEvenOdd,
-    pfc::Clipper.PolyFillType=Clipper.PolyFillTypeEvenOdd
+    pfs::Clipper.PolyFillType=Clipper.PolyFillTypePositive,
+    pfc::Clipper.PolyFillType=Clipper.PolyFillTypePositive
 ) where {T <: Union{Int64, Unitful.Quantity{Int64}}}
     clip = clipper()
     Clipper.clear!(clip)
