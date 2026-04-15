@@ -126,11 +126,11 @@ function _ensure_required_namespaces!(data::Dict{String, Any})
     return data
 end
 
-function ParameterSet(data::Dict{String, Any})
+function ParameterSet(path::String, data::Dict{String, Any})
     _ensure_required_namespaces!(data)
-    return ParameterSet("", data, Set{String}())
+    return ParameterSet(path, data, Set{String}())
 end
-
+ParameterSet(data::Dict{String, Any}) = ParameterSet("", data)
 ParameterSet() = ParameterSet(Dict{String, Any}())
 
 function Base.getproperty(ps::ParameterSet, s::Symbol)
@@ -292,3 +292,22 @@ function leaf_params(d::Dict)
 end
 
 leaf_params(ps::ParameterSet) = leaf_params(getfield(ps, :data))
+
+"""
+    save_parameter_set(path::String, ps::ParameterSet)
+    save_parameter_set(io::IO, ps::ParameterSet)
+
+Save a `ParameterSet` to a YAML file at `path` or write YAML to an `IO` stream.
+
+`Unitful.Quantity` values are serialized as `"<value><unit>"` (e.g. `"150μm"`)
+for lossless round-tripping.
+
+Requires `YAML.jl` to be loaded (`using YAML`).
+
+    ParameterSet(io::IO)
+
+Load a `ParameterSet` from a YAML IO stream.
+
+Requires `YAML.jl` to be loaded (`using YAML`).
+"""
+function save_parameter_set end

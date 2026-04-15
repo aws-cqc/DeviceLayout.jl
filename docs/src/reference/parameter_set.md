@@ -30,14 +30,14 @@ ps = ParameterSet()
 ps.global.version = 1
 ps.global.process_node = "fab_v3"
 
-# Define component parameters using Pair syntax
-ps.components.capacitor.finger_length = 150
-ps.components.capacitor.finger_width = 5
-ps.components.capacitor.finger_gap = 3
+# Define component parameters with units
+ps.components.capacitor.finger_length = 150μm
+ps.components.capacitor.finger_width = 5μm
+ps.components.capacitor.finger_gap = 3μm
 ps.components.capacitor.finger_count = 6
 
-ps.components.junction.w_jj = 1
-ps.components.junction.h_jj = 1
+ps.components.junction.w_jj = 1μm
+ps.components.junction.h_jj = 1μm
 ```
 
 If you have the `YAML` package installed, you can load directly from a file:
@@ -50,13 +50,13 @@ global:
 
 components:
   capacitor:
-    finger_length: 150
-    finger_width: 5
-    finger_gap: 3
+    finger_length: 150μm
+    finger_width: 5μm
+    finger_gap: 3μm
     finger_count: 6
   junction:
-    w_jj: 1
-    h_jj: 1
+    w_jj: 1μm
+    h_jj: 1μm
 ```
 
 ```julia
@@ -71,13 +71,13 @@ Use dot syntax to navigate the hierarchy:
 ```julia
 ps.global.version              # => 1
 ps.components.capacitor        # => ParameterSet scoped to capacitor subtree
-ps.components.capacitor.finger_length  # => 150
+ps.components.capacitor.finger_length  # => 150μm
 ```
 
 Or use `resolve` with a dot-separated address:
 
 ```julia
-resolve(ps, "components.capacitor.finger_length")  # => 150
+resolve(ps, "components.capacitor.finger_length")  # => 150μm
 resolve(ps, "components.capacitor")                 # => scoped ParameterSet
 ```
 
@@ -85,7 +85,7 @@ Extract all leaf parameters at a level as a `NamedTuple`:
 
 ```julia
 leaf_params(ps.components.capacitor)
-# => (finger_length = 150, finger_width = 5, finger_gap = 3, finger_count = 6)
+# => (finger_length = 150μm, finger_width = 5μm, finger_gap = 3μm, finger_count = 6)
 ```
 
 ### Simple Components with ParameterSet
@@ -129,7 +129,7 @@ in the graph can access it:
 g = SchematicGraph("my_design", ps)
 
 # The parameter set is accessible from the graph
-g.parameter_set.components.capacitor.finger_length  # => 150
+g.parameter_set.components.capacitor.finger_length  # => 150μm
 ```
 
 A full example with simple components:
@@ -137,9 +137,9 @@ A full example with simple components:
 ```julia
 # Load parameters
 ps = ParameterSet()
-ps.components.cap1.finger_length = 150
+ps.components.cap1.finger_length = 150μm
 ps.components.cap1.finger_count = 6
-ps.components.cap2.finger_length = 200
+ps.components.cap2.finger_length = 200μm
 ps.components.cap2.finger_count = 8
 
 # Create graph with parameter set
@@ -180,14 +180,14 @@ subcomponents in `_build_subcomponents`:
 ```julia
 ps = ParameterSet()
 
-ps.components.transmon.junction_gap = 12
+ps.components.transmon.junction_gap = 12μm
 
-ps.components.transmon.island.cap_width = 24
-ps.components.transmon.island.cap_length = 520
-ps.components.transmon.island.cap_gap = 30
+ps.components.transmon.island.cap_width = 24μm
+ps.components.transmon.island.cap_length = 520μm
+ps.components.transmon.island.cap_gap = 30μm
 
-ps.components.transmon.junction.w_jj = 1
-ps.components.transmon.junction.h_jj = 1
+ps.components.transmon.junction.w_jj = 1μm
+ps.components.transmon.junction.h_jj = 1μm
 ```
 
 Inside `_build_subcomponents`, use `parameter_set(g)` to access the graph's
@@ -239,19 +239,19 @@ of unused or missing parameters:
 
 ```julia
 ps = ParameterSet()
-ps.components.qubit.cap_width = 300
-ps.components.qubit.cap_gap = 20
+ps.components.qubit.cap_width = 300μm
+ps.components.qubit.cap_gap = 20μm
 
 # Nothing accessed yet
 isempty(ps.accessed)  # => true
 
 # Read a parameter
-ps.components.qubit.cap_width  # => 300
+ps.components.qubit.cap_width  # => 300μm
 "cap_width" in ps.accessed     # => true
 
 # Tracking is shared across scoped views
 sub = ps.components.qubit
-sub.cap_gap                    # => 20
+sub.cap_gap                    # => 20μm
 "cap_gap" in ps.accessed       # => true
 ```
 

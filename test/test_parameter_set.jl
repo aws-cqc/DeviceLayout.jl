@@ -253,3 +253,115 @@ end
         @test "components.island.cap_length" in ps.accessed
     end
 end
+
+@testitem "ParameterSet YAML IO" setup = [CommonTestSetup] begin
+    using DeviceLayout: ParameterSet, resolve, leaf_params, save_parameter_set
+    using YAML
+    using Unitful: μm, ustrip, unit
+
+    @testset "save_parameter_set to IO" begin
+        ps = ParameterSet()
+        ps.global.version = 1
+        ps.components.cap.finger_length = 150μm
+        ps.components.cap.finger_count = 6
+
+        io = IOBuffer()
+        save_parameter_set(io, ps)
+        yaml_str = String(take!(io))
+
+        # Unitful quantities serialized as quoted unit strings
+        @test contains(yaml_str, "finger_length: \"150μm\"") ||
+              contains(yaml_str, "finger_length: \"150.0μm\"")
+        # Plain numbers stay as numbers
+        @test contains(yaml_str, "finger_count: 6")
+        @test contains(yaml_str, "version: 1")
+    end
+
+    @testset "ParameterSet from IO" begin
+        yaml_str = """
+        global:
+          version: 2
+        components:
+          qubit:
+            cap_width: 300μm
+            cap_gap: 20μm
+            finger_count: 4
+        """
+        io = IOBuffer(yaml_str)
+        ps = ParameterSet(io)
+
+        @test ps.global.version == 2
+        @test ps.components.qubit.cap_width == 300μm
+        @test ps.components.qubit.cap_gap == 20μm
+        @test ps.components.qubit.finger_count == 4
+    end
+
+    @testset "IO round-trip with Unitful" begin
+        ps = ParameterSet()
+        ps.global.process_node = "fab_v3"
+        ps.components.jj.w_jj = 1μm
+        ps.components.jj.h_jj = 0.5μm
+        ps.components.jj.count = 2
+
+        # Write
+        io = IOBuffer()
+        save_parameter_set(io, ps)
+        yaml_bytes = take!(io)
+
+        # Read back
+        ps2 = ParameterSet(IOBuffer(yaml_bytes))
+
+        @test ps2.global.process_node == "fab_v3"
+        @test ps2.components.jj.w_jj == 1μm
+        @test ps2.components.jj.h_jj == 0.5μm
+        @test ps2.components.jj.count == 2
+    end
+
+    @testset "ParameterSet from IO with path" begin
+        yaml_str = """
+        global:
+          version: 1
+        components:
+          res:
+            length: 500μm
+        """
+        io = IOBuffer(yaml_str)
+        ps = ParameterSet(io, "my_design.yaml")
+
+        @test ps.path == "my_design.yaml"
+        @test ps.components.res.length == 500μm
+    end
+
+    @testset "File round-trip" begin
+        ps = ParameterSet()
+        ps.global.version = 1
+        ps.components.cap.width = 150μm
+        ps.components.cap.gap = 3μm
+        ps.components.cap.count = 6
+
+        path = joinpath(tdir, "test_ps.yaml")
+        save_parameter_set(path, ps)
+
+        ps2 = ParameterSet(path)
+        @test ps2.path == path
+        @test ps2.global.version == 1
+        @test ps2.components.cap.width == 150μm
+        @test ps2.components.cap.gap == 3μm
+        @test ps2.components.cap.count == 6
+    end
+
+    @testset "Nested namespaces round-trip" begin
+        ps = ParameterSet()
+        ps.components.transmon.island.cap_length = 520μm
+        ps.components.transmon.island.cap_width = 24μm
+        ps.components.transmon.junction.w_jj = 1μm
+
+        io = IOBuffer()
+        save_parameter_set(io, ps)
+        ps2 = ParameterSet(IOBuffer(take!(io)))
+
+        @test ps2.components.transmon.island.cap_length == 520μm
+        @test ps2.components.transmon.island.cap_width == 24μm
+        @test ps2.components.transmon.junction.w_jj == 1μm
+    end
+end
