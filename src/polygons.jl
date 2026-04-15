@@ -2473,7 +2473,7 @@ Return a lazy iterator that applies `op(ents1, ents2)` tile by tile.
 
 The bounds of the combined geometries are tiled with squares with edge length `tile_size`, starting at the bottom left
 corner. Entities crossing between tiles are split into their intersections with each tile before clipping.
-For each tile, those intersection results and all entities and inside that tile are selected.
+For each tile, those intersection results and all entities inside that tile are selected.
 The return value is a lazy iterator over clipping results for selected entities per tile.
 
 A rough guideline for choosing tile size is to aim for 100 polygons per tile, but you may want to
@@ -2515,13 +2515,17 @@ function clip_tiled(
 
     tiles, edges = tiles_and_edges(bnds_dl, tile_size) # DeviceLayout Rectangles
     # Get single vector of all entity indices touching any edge
-    edge_touching_idx1 = mapreduce(vcat, edges, init=Int[]) do edge
-        return isempty(ents1) ? Int[] : DeviceLayout.findbox(edge, tree1; intersects=true)
-    end
+    edge_touching_idx1 = Set( # Use Set because we'll be testing membership
+        mapreduce(vcat, edges, init=Int[]) do edge
+            return isempty(ents1) ? Int[] : DeviceLayout.findbox(edge, tree1; intersects=true)
+        end
+    )
     # Same for ents2
-    edge_touching_idx2 = mapreduce(vcat, edges, init=Int[]) do edge
-        return isempty(ents2) ? Int[] : DeviceLayout.findbox(edge, tree2; intersects=true)
-    end
+    edge_touching_idx2 = Set(
+        mapreduce(vcat, edges, init=Int[]) do edge
+            return isempty(ents2) ? Int[] : DeviceLayout.findbox(edge, tree2; intersects=true)
+        end
+    )
     # Get vector of (ents1 indices, ents2 indices) for each tile
     tile_poly_indices = map(tiles) do tile
         idx1 = isempty(ents1) ? Int[] : DeviceLayout.findbox(tile, tree1; intersects=true)
