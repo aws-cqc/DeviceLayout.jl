@@ -82,18 +82,14 @@ struct ChannelRouter{T <: Coordinate}
     net_paths::Vector{Path{T}}        # [Internals] Persistent path objects to populate after routing
 end
 
-""""
+"""
     ChannelRouter(
         nets::Vector{Tuple{Int, Int}},
         pin_hooks::Vector{<:Hook},
         channels::Vector{<:RouteChannel}
     )
 """
-function ChannelRouter(
-    nets,
-    pin_hooks::Vector{<:Hook},
-    channels::Vector{<:RouteChannel}
-)
+function ChannelRouter(nets, pin_hooks::Vector{<:Hook}, channels::Vector{<:RouteChannel})
     T = promote_type(coordinatetype(pin_hooks), coordinatetype(channels))
     net_wires = [NetWire() for i in eachindex(nets)]
     channel_segments = [TrackWireSegment[] for i in eachindex(channels)]
@@ -124,7 +120,7 @@ function ChannelRouter(channels::Vector{RouteChannel{T}}) where {T}
     segment_waypoints = Dict{TrackWireSegment, PointHook{T}}()
     return ChannelRouter{T}(
         SimpleGraph(),
-        Tuple{Int,Int}[],
+        Tuple{Int, Int}[],
         NetWire[],
         PointHook{T}[],
         channels,
@@ -166,9 +162,11 @@ is_pin(ar::ChannelRouter, graphidx) = graphidx > num_channels(ar)
 adjoining_channel(ar::ChannelRouter, pin) =
     neighbors(channel_graph(ar), pin_to_graphidx(ar, pin))[1]
 channel_intersection(ar, s1, s2) = ar.channel_intersections[_swap(s1, s2)]
-function pathlength_at_intersection(ar::ChannelRouter{T},
+function pathlength_at_intersection(
+    ar::ChannelRouter{T},
     running_channel,
-    intersecting_channel) where {T}
+    intersecting_channel
+) where {T}
     # Intersecting channel is zero where a wire segment hits a pin
     if iszero(running_channel) || iszero(intersecting_channel)
         return zero(T)
@@ -178,9 +176,7 @@ function pathlength_at_intersection(ar::ChannelRouter{T},
     return ixn_info[2]
 end
 
-function direction_at_intersection(ar::ChannelRouter,
-    running_channel,
-    intersecting_channel)
+function direction_at_intersection(ar::ChannelRouter, running_channel, intersecting_channel)
     # Intersecting channel is zero where a wire segment hits a pin
     if iszero(running_channel) || iszero(intersecting_channel)
         return 0.0°
@@ -193,15 +189,15 @@ end
 segment_waypoint(ar::ChannelRouter, ws::TrackWireSegment) = ar.segment_waypoints[ws]
 _swap(x, y) = (y > x ? (x, y) : (y, x))
 
-function _shared_vertex(edge_a::Tuple{Int,Int}, edge_b::Tuple{Int,Int})
+function _shared_vertex(edge_a::Tuple{Int, Int}, edge_b::Tuple{Int, Int})
     a1, a2 = edge_a
     b1, b2 = edge_b
     a1 in (b1, b2) && return a1
     a2 in (b1, b2) && return a2
-    error("Edges $edge_a and $edge_b share no vertex")
+    return error("Edges $edge_a and $edge_b share no vertex")
 end
 
-pathlength_from_start(channel, node, s) = pathlength(channel[1:node-1]) + s
+pathlength_from_start(channel, node, s) = pathlength(channel[1:(node - 1)]) + s
 
 # Build graph with pins/channels as vertices and intersections as edges
 function build_channel_graph(pins, channels, T)
@@ -210,7 +206,7 @@ function build_channel_graph(pins, channels, T)
 
     # Create segments extending from pins
     bbox = bounds(bounds(channels), bounds(Polygon(DeviceLayout.getp.(pins))))
-    ray_length = max(DeviceLayout.width(bbox), DeviceLayout.height(bbox))*sqrt(2)
+    ray_length = max(DeviceLayout.width(bbox), DeviceLayout.height(bbox)) * sqrt(2)
     pin_rays = Path{T}[]
     for pin in pins
         path = Path{T}(pin.p, pin.in_direction)
@@ -219,8 +215,8 @@ function build_channel_graph(pins, channels, T)
     end
 
     # Add edges for intersections between channels
-    intersections = DeviceLayout.Intersect.prepared_intersections(
-        [channels..., pin_rays...])
+    intersections =
+        DeviceLayout.Intersect.prepared_intersections([channels..., pin_rays...])
     pin_ixns = Dict{Int, Tuple{Int, IntersectionInfo{T}}}()
     for ixn in intersections
         location_1, location_2, p = ixn
@@ -241,14 +237,13 @@ function build_channel_graph(pins, channels, T)
             s1 = pathlength_from_start(channels[v1_idx], node1_idx, s1)
             # Record intersection if it's the closest so far
             ixn_info = (s1, s2, dir1, dir2, p)
-            _, old_ixn_info = get(pin_ixns, v2_idx,
-                (v1_idx, ixn_info))
+            _, old_ixn_info = get(pin_ixns, v2_idx, (v1_idx, ixn_info))
             old_distance = old_ixn_info[2]
             if s2 <= old_distance
                 pin_ixns[v2_idx] = (v1_idx, ixn_info)
             end
         else # record intersection as edge in channel graph, with info in dict
-            haskey(intersection_dict, (v1_idx, v2_idx)) && 
+            haskey(intersection_dict, (v1_idx, v2_idx)) &&
                 error("Channels $v1_idx and $v2_idx have multiple intersections")
             dir1 = direction(channels[v1_idx][node1_idx].seg, s1)
             dir2 = direction(channels[v2_idx][node2_idx].seg, s2)
@@ -261,9 +256,11 @@ function build_channel_graph(pins, channels, T)
         end
     end
     # Add min distance edge for each pin
-    for pin_idx in (length(channels)+1):(length(channels) + length(pins))
+    for pin_idx = (length(channels) + 1):(length(channels) + length(pins))
         orig_idx = pin_idx - length(channels)
-        !haskey(pin_ixns, pin_idx) && error("The ray from pin $(orig_idx) ($(pins[orig_idx])) does not intersect any channel")
+        !haskey(pin_ixns, pin_idx) && error(
+            "The ray from pin $(orig_idx) ($(pins[orig_idx])) does not intersect any channel"
+        )
         channel_idx, ixn_info = pin_ixns[pin_idx]
         add_edge!(g, (channel_idx, pin_idx))
         intersection_dict[(channel_idx, pin_idx)] = ixn_info
@@ -318,14 +315,23 @@ function segment_direction(ar::ChannelRouter, ws::TrackWireSegment, s)
     return direction(seg, s)
 end
 
-function segment_offset(ar::ChannelRouter{T}, ws::TrackWireSegment, s...; use_wire_direction=true) where {T}
+function segment_offset(
+    ar::ChannelRouter{T},
+    ws::TrackWireSegment,
+    s...;
+    use_wire_direction=true
+) where {T}
     channel_idx = running_channel(ws)
     is_pin(ar, channel_idx) && return zero(T)
     track_idx = segment_track(ar, ws)
     isnothing(track_idx) && return zero(T)
     reversed = use_wire_direction && against_channel(ar, ws)
-    return track_section_offset(length(ar.channel_tracks[channel_idx]),
-        Paths.width(ar.channels[channel_idx].node.sty, s...), track_idx; reversed)
+    return track_section_offset(
+        length(ar.channel_tracks[channel_idx]),
+        Paths.width(ar.channels[channel_idx].node.sty, s...),
+        track_idx;
+        reversed
+    )
 end
 
 """
@@ -345,7 +351,7 @@ end
 function unsorted_interval(ar::ChannelRouter, ws::TrackWireSegment; use_track=true)
     start_channel, stop_channel = bounding_channels(ws)
     channel_idx = running_channel(ws)
-    
+
     start_channel, stop_channel = bounding_channels(ws)
     s1 = pathlength_at_intersection(ar, channel_idx, start_channel)
     s2 = pathlength_at_intersection(ar, channel_idx, stop_channel)
@@ -363,14 +369,19 @@ function unsorted_interval(ar::ChannelRouter, ws::TrackWireSegment; use_track=tr
     # Offset also depends neighbor track offsets 
     α_ixn_start = (dir1 - start_dir)
     α_ixn_stop = (stop_dir - dir2)
-    prev_offset_proj = segment_offset(ar, prev(ar, ws), s_start; use_wire_direction=false) / sin(α_ixn_start)
-    next_offset_proj = segment_offset(ar, next(ar, ws), s_stop; use_wire_direction=false) / sin(α_ixn_stop)
+    prev_offset_proj =
+        segment_offset(ar, prev(ar, ws), s_start; use_wire_direction=false) /
+        sin(α_ixn_start)
+    next_offset_proj =
+        segment_offset(ar, next(ar, ws), s_stop; use_wire_direction=false) / sin(α_ixn_stop)
     # Offset *also* depends on this wire segment's offset at a non-90° intersection
-    start_offset_proj = -segment_offset(ar, ws, s_start; use_wire_direction=false) / tan(α_ixn_start)
-    stop_offset_proj = -segment_offset(ar, ws, s_stop; use_wire_direction=false) / tan(α_ixn_stop)
+    start_offset_proj =
+        -segment_offset(ar, ws, s_start; use_wire_direction=false) / tan(α_ixn_start)
+    stop_offset_proj =
+        -segment_offset(ar, ws, s_stop; use_wire_direction=false) / tan(α_ixn_stop)
     # This is approximate on bending or tapered tracks
     return s1 + (prev_offset_proj + start_offset_proj),
-            s2 - (next_offset_proj + stop_offset_proj)
+    s2 - (next_offset_proj + stop_offset_proj)
 end
 
 """
@@ -384,10 +395,7 @@ function next(ar::ChannelRouter, ws::TrackWireSegment)
     idx = findfirst(isequal(ws), segs)
     if idx == length(segs)
         final_pin_idx = pin_to_graphidx(ar, last(net_pins(ar, net_idx)))
-        return TrackWireSegment(net_idx,
-            final_pin_idx,
-            running_channel(ws),
-            0)
+        return TrackWireSegment(net_idx, final_pin_idx, running_channel(ws), 0)
     end
     return segs[idx + 1]
 end
@@ -403,10 +411,7 @@ function prev(ar::ChannelRouter, ws::TrackWireSegment)
     idx = findfirst(isequal(ws), segs)
     if idx == 1
         first_pin_idx = pin_to_graphidx(ar, first(net_pins(ar, net_idx)))
-        return TrackWireSegment(net_idx,
-            first_pin_idx,
-            0,
-            running_channel(ws))
+        return TrackWireSegment(net_idx, first_pin_idx, 0, running_channel(ws))
     end
     return segs[idx - 1]
 end
@@ -423,8 +428,8 @@ function build_auxiliary_graph(ar::ChannelRouter{T}) where {T}
     n_aux = ne(g)
 
     # Map channel-graph edges to auxiliary vertices
-    aux_to_edge = Vector{Tuple{Int,Int}}(undef, n_aux)
-    edge_to_aux = Dict{Tuple{Int,Int}, Int}()
+    aux_to_edge = Vector{Tuple{Int, Int}}(undef, n_aux)
+    edge_to_aux = Dict{Tuple{Int, Int}, Int}()
     for (i, e) in enumerate(edges(g))
         key = _swap(e.src, e.dst)
         aux_to_edge[i] = key
@@ -436,25 +441,29 @@ function build_auxiliary_graph(ar::ChannelRouter{T}) where {T}
     I = Int[]
     J = Int[]
     V = T[]
-    for ch in 1:num_channels(ar)
+    for ch = 1:num_channels(ar)
         nbs = neighbors(g, ch)
         length(nbs) < 2 && continue
 
         # Collect (pathlength_along_ch, aux_vertex) for each intersection on this channel
         ch_ixns = Tuple{T, Int}[
-            (pathlength_at_intersection(ar, ch, nb), edge_to_aux[_swap(ch, nb)])
-            for nb in nbs
+            (pathlength_at_intersection(ar, ch, nb), edge_to_aux[_swap(ch, nb)]) for
+            nb in nbs
         ]
         sort!(ch_ixns, by=first)
 
         # Connect consecutive intersection points
-        for k in 1:(length(ch_ixns) - 1)
+        for k = 1:(length(ch_ixns) - 1)
             s1, aux1 = ch_ixns[k]
             s2, aux2 = ch_ixns[k + 1]
             add_edge!(aux_g, aux1, aux2)
             w = abs(s2 - s1)
-            push!(I, aux1); push!(J, aux2); push!(V, w)
-            push!(I, aux2); push!(J, aux1); push!(V, w)
+            push!(I, aux1)
+            push!(J, aux2)
+            push!(V, w)
+            push!(I, aux2)
+            push!(J, aux1)
+            push!(V, w)
         end
     end
 
@@ -471,7 +480,12 @@ intersection points), using a precomputed [`AuxiliaryGraph`](@ref).
 In both cases, the returned path is a list of vertex indices
 `[pin_gidx, ch1, ..., chN, pin_gidx]`.
 """
-function shortest_path_between_pins(ar::ChannelRouter, p0::Int, p1::Int, aux::AuxiliaryGraph)
+function shortest_path_between_pins(
+    ar::ChannelRouter,
+    p0::Int,
+    p1::Int,
+    aux::AuxiliaryGraph
+)
     pin0_gidx = pin_to_graphidx(ar, p0)
     pin1_gidx = pin_to_graphidx(ar, p1)
     src_aux = aux.edge_to_aux[_swap(pin0_gidx, adjoining_channel(ar, p0))]
@@ -485,9 +499,8 @@ function shortest_path_between_pins(ar::ChannelRouter, p0::Int, p1::Int, aux::Au
     # Skip consecutive duplicates: the aux path may traverse multiple intersections on
     # the same channel, which just means a longer segment on that channel.
     path = Int[pin0_gidx]
-    for i in 1:(length(aux_path) - 1)
-        ch = _shared_vertex(aux.aux_to_edge[aux_path[i]],
-                            aux.aux_to_edge[aux_path[i + 1]])
+    for i = 1:(length(aux_path) - 1)
+        ch = _shared_vertex(aux.aux_to_edge[aux_path[i]], aux.aux_to_edge[aux_path[i + 1]])
         if ch != last(path)
             push!(path, ch)
         end
@@ -623,8 +636,7 @@ function assign_tracks_matching!(ar, channel)
             haskey(merged_into, l) && continue
             dists_from_l = dag_shortest_paths(vcg, high_to_low, l)
             for r in R
-                mergeable = dists_from_l[r] >= nv(vcg) &&
-                    dists_from_r[r][l] >= nv(vcg)
+                mergeable = dists_from_l[r] >= nv(vcg) && dists_from_r[r][l] >= nv(vcg)
                 !mergeable && continue
                 if !segments_overlap(ar, wiresegs_ascending[l], wiresegs_ascending[r])
                     add_edge!(merging_graph, l, r)
@@ -640,7 +652,7 @@ function assign_tracks_matching!(ar, channel)
     # The longest directed path gives a representative of each merged group where track height is max
     # But VCG may be a partial order so use topological sort
     high_to_low = topological_sort_by_dfs(vcg) # If vcg was acyclic to begin with, it is still acyclic
-    for v in 1:nv(vcg)
+    for v = 1:nv(vcg)
         if !haskey(merged_groups, v)
             merged_groups[v] = [v]
         end
@@ -672,7 +684,7 @@ end
 function _same_tendency_at_boundary(ar, seg1, seg2)
     p1, n1 = bounding_channels(seg1)
     p2, n2 = bounding_channels(seg2)
-    shared_boundary = [2 - 1*(p1 == p2 || p1 == n2), 2 - 1*(p2 == p1 || p2 == n1)]
+    shared_boundary = [2 - 1 * (p1 == p2 || p1 == n2), 2 - 1 * (p2 == p1 || p2 == n1)]
     t1 = prev_next_tendency(ar, seg1)
     t2 = prev_next_tendency(ar, seg2)
     return t1[shared_boundary[1]] == t2[shared_boundary[2]]
@@ -686,7 +698,7 @@ function best_matching!(merging_graph, vcg)
     working_vcg = copy(vcg)
     # Collect "deleted" vertices in edge_selection_graph 
     # Vertices aren't labelled, just indexed, so we don't actually delete them
-    ignored = Set{Int}() 
+    ignored = Set{Int}()
     # While working graphs have vertices, keep collecting edges to remove from merging graph
     while length(ignored) < nv(edge_selection_graph)
         # 1. Find nodes with no VCG ancestors, remove edges between them
@@ -705,9 +717,10 @@ function best_matching!(merging_graph, vcg)
             # Remove edges between vertices with no ancestors
             # Then they will not be selected for removal from `merging_graph`
             no_ancestors = Int[]
-            for v in 1:nv(edge_selection_graph)
+            for v = 1:nv(edge_selection_graph)
                 v in ignored && continue
-                if isempty(inneighbors(working_vcg, v)) || all([w in ignored for w in inneighbors(working_vcg, v)])
+                if isempty(inneighbors(working_vcg, v)) ||
+                   all([w in ignored for w in inneighbors(working_vcg, v)])
                     # v has no surviving ancestors, remove edges to other such vertices
                     for w in no_ancestors
                         rem_edge!(edge_selection_graph, v, w)
@@ -716,7 +729,7 @@ function best_matching!(merging_graph, vcg)
                 end
             end
             # Find nodes with minimum number of edges
-            for v in 1:nv(edge_selection_graph)
+            for v = 1:nv(edge_selection_graph)
                 v in ignored && continue
                 nbs = neighbors(edge_selection_graph, v)
                 if length(nbs) < min_neighbors
@@ -759,14 +772,14 @@ function best_matching!(merging_graph, vcg)
     end
     # Any matching is feasible now that we've removed marked edges
     return BipartiteMatching.findmaxcardinalitybipartitematching(
-            BitMatrix(adjacency_matrix(merging_graph))
-        )
+        BitMatrix(adjacency_matrix(merging_graph))
+    )
 end
 
 function dag_shortest_paths(dag, v_sorted, s)
     d = fill(nv(dag), nv(dag))
     d[s] = 0
-    for i in findfirst(v -> v == s, v_sorted):nv(dag)
+    for i = findfirst(v -> v == s, v_sorted):nv(dag)
         u = v_sorted[i]
         for v in outneighbors(dag, u)
             if d[v] > d[u] + 1
@@ -792,7 +805,7 @@ function channel_problem_graphs(ar::ChannelRouter, channel)
     vcg = SimpleDiGraph(length(wiresegs_ascending)) # just a fresh graph
     for (idx1, seg1) in pairs(wiresegs_ascending)
         low1, high1 = interval(ar, seg1)
-        for (idx2, seg2) in collect(pairs(wiresegs_ascending))[idx1+1:end]
+        for (idx2, seg2) in collect(pairs(wiresegs_ascending))[(idx1 + 1):end]
             low2, high2 = interval(ar, seg2)
 
             # If there is no overlap, break and move on to next seg1
@@ -808,8 +821,16 @@ function channel_problem_graphs(ar::ChannelRouter, channel)
             (low1 == high1 && low2 == high2 && pt1 == pt2 && nt1 == nt2) && break
             low1_tend, high1_tend = against_channel(ar, seg1) ? (nt1, pt1) : (pt1, nt1)
             low2_tend, high2_tend = against_channel(ar, seg2) ? (nt2, pt2) : (pt2, nt2)
-            avoidable = is_avoidable(low1, high1, low2, high2,
-                low1_tend, high1_tend, low2_tend, high2_tend)
+            avoidable = is_avoidable(
+                low1,
+                high1,
+                low2,
+                high2,
+                low1_tend,
+                high1_tend,
+                low2_tend,
+                high2_tend
+            )
             !avoidable && continue
 
             # Crossing is avoidable, so add a constraint
@@ -824,7 +845,16 @@ function channel_problem_graphs(ar::ChannelRouter, channel)
     return vcg, zone_ig
 end
 
-function is_avoidable(low1, high1, low2, high2, low1_tend, high1_tend, low2_tend, high2_tend)
+function is_avoidable(
+    low1,
+    high1,
+    low2,
+    high2,
+    low1_tend,
+    high1_tend,
+    low2_tend,
+    high2_tend
+)
     if high1 < high2
         # 1 ____
         # 2   ____
@@ -841,12 +871,15 @@ function is_avoidable(low1, high1, low2, high2, low1_tend, high1_tend, low2_tend
     ccw_order = [reverse(order[up]); order[down]]
     # Crossing is avoidable if same net has both endpoints adjacent
     # on the clock
-    avoidable = (ccw_order[1] == ccw_order[2] ||
-        ccw_order[2] == ccw_order[3])
-    # Also, if seg1 and seg2 have an endpoint at the same place,
+    avoidable = (ccw_order[1] == ccw_order[2] || ccw_order[2] == ccw_order[3])
+    # Also, if seg1 and seg2 have an endpoint at the same place and don't make an X,
     # then crossing in this channel may be avoidable but depends on
     # other channel; assume other channel will agree
-    avoidable = (avoidable || (low1 == low2 || high1 == high2))
+    depends =
+        ((low1 == low2) || high1 == high2) &&
+        ((low1_tend == low2_tend) || (high1_tend == high2_tend))
+    avoidable = (avoidable || depends)
+    return avoidable
 end
 
 # +1 if segment crosses over low track index in ws's channel
@@ -857,7 +890,7 @@ function prev_next_tendency(ar, ws; use_wire_direction=true)
     s_along_start = pathlength_at_intersection(ar, start_channel, channel_idx)
     s1 = pathlength_at_intersection(ar, channel_idx, start_channel)
     s2 = pathlength_at_intersection(ar, channel_idx, stop_channel)
-    s_along_stop = pathlength_at_intersection(ar, stop_channel,  channel_idx)
+    s_along_stop = pathlength_at_intersection(ar, stop_channel, channel_idx)
     # Directions of bounding and running channels
     start_dir = direction_at_intersection(ar, start_channel, channel_idx)
     dir1 = direction_at_intersection(ar, channel_idx, start_channel)
@@ -885,10 +918,7 @@ end
 
 Using channel and track assignments, create `Route`s for the nets in `net_indices`.
 """
-function make_routes!(
-    ar::ChannelRouter{T},
-    rule
-) where {T}
+function make_routes!(ar::ChannelRouter{T}, rule) where {T}
     empty!(ar.net_routes)
     for idx_net in eachindex(ar.net_pins)
         p0, p1 = pin_coordinates.(ar, net_pins(ar, idx_net))
@@ -1008,10 +1038,7 @@ Pins are labeled as `P/N` where `P` is the pin index and `N` is the net index.
 
 Segment waypoints are marked with circles and numbered sequentially within each net.
 """
-function visualize_router_state(
-    ar::ChannelRouter{T};
-    wire_width=0.1*oneunit(T)
-) where {T}
+function visualize_router_state(ar::ChannelRouter{T}; wire_width=0.1 * oneunit(T)) where {T}
     c = DeviceLayout.Cell{T}("track_viz")
 
     paths = Path.(ar.net_routes, Ref(Paths.Trace(wire_width)))
@@ -1023,8 +1050,12 @@ function visualize_router_state(
     trlab = track_labels(ar, tracks)
     DeviceLayout.text!.(c, trlab, GDSMeta(4))
     for pa in paths
-        for node in pa[1:end-1]
-            DeviceLayout.render!(c, DeviceLayout.Circle(1.5wire_width) + p1(node.seg), GDSMeta(5))
+        for node in pa[1:(end - 1)]
+            DeviceLayout.render!(
+                c,
+                DeviceLayout.Circle(1.5wire_width) + p1(node.seg),
+                GDSMeta(5)
+            )
         end
     end
     plab = pin_labels(ar)
@@ -1035,9 +1066,7 @@ function visualize_router_state(
 end
 
 function track_paths(ar::ChannelRouter)
-    return [
-        track_path(ar, s, c) for s = 1:num_channels(ar) for c = 1:num_tracks(ar, s)
-    ]
+    return [track_path(ar, s, c) for s = 1:num_channels(ar) for c = 1:num_tracks(ar, s)]
 end
 
 channel_paths(ar::ChannelRouter) = [channel_path(ar, s) for s = 1:num_channels(ar)]
@@ -1067,10 +1096,12 @@ end
 
 function track_path(ar::ChannelRouter{T}, channel_idx, track_idx) where {T}
     n_tracks = length(channel_tracks(ar, channel_idx))
-    seg = track_path_segment(n_tracks,
-        ar.channels[channel_idx].node, track_idx)
+    seg = track_path_segment(n_tracks, ar.channels[channel_idx].node, track_idx)
     w = Paths.width(ar.channels[channel_idx].node.sty, zero(T))
-    pa = Path([Paths.Node(seg, Paths.Trace(0.9*w / (n_tracks+1)))]; name="$channel_idx:$track_idx")
+    pa = Path(
+        [Paths.Node(seg, Paths.Trace(0.9 * w / (n_tracks + 1)))];
+        name="$channel_idx:$track_idx"
+    )
     return pa
 end
 
@@ -1089,16 +1120,29 @@ entry_rules(r::AutoChannelRouting) = Iterators.repeated(r.transition_rule)
 exit_rule(r::AutoChannelRouting) = r.transition_rule
 
 function track_path_segments(rule::AutoChannelRouting, pa::Path, _)
-    return [track_path_segment(rule.router, channel, pa; margin=rule.transition_margin)
-        for channel in rule.channels[channels_taken(rule.router, pa)]]
+    return [
+        track_path_segment(rule.router, channel, pa; margin=rule.transition_margin) for
+        channel in rule.channels[channels_taken(rule.router, pa)]
+    ]
 end
 
-function track_path_segment(ar::ChannelRouter{T}, ch::RouteChannel, pa::Path; margin=zero(T)) where {T}
+function track_path_segment(
+    ar::ChannelRouter{T},
+    ch::RouteChannel,
+    pa::Path;
+    margin=zero(T)
+) where {T}
     # Get the track wire segment from the router
     # Assume there is exactly one wire segment belonging to this path in the channel
     # Channel node might have been converted to store in router, so just check start point/direction
-    channel_idx = findfirst(chn -> p0(chn.node.seg) ≈ p0(ch.path) && α0(chn.node.seg) == α0(ch.path), ar.channels)
-    net_idx = findfirst(pin -> pin.p ≈ p0(pa) && isapprox_angle(in_direction(pin), α0(pa)), ar.pins[first.(ar.net_pins)])
+    channel_idx = findfirst(
+        chn -> p0(chn.node.seg) ≈ p0(ch.path) && α0(chn.node.seg) == α0(ch.path),
+        ar.channels
+    )
+    net_idx = findfirst(
+        pin -> pin.p ≈ p0(pa) && isapprox_angle(in_direction(pin), α0(pa)),
+        ar.pins[first.(ar.net_pins)]
+    )
     wireseg_idx = findfirst(ws -> running_channel(ws) == channel_idx, net_wire(ar, net_idx))
     wireseg = net_wire(ar, net_idx)[wireseg_idx]
     track_idx = segment_track(ar, wireseg)
@@ -1107,20 +1151,33 @@ function track_path_segment(ar::ChannelRouter{T}, ch::RouteChannel, pa::Path; ma
     wireseg_start, wireseg_stop = unsorted_interval(ar, wireseg)
     prev_width = zero(T) # Autorouter just uses margin
     next_width = zero(T) # Interval already takes into account actual neighbor track offsets so we don't need this precaution
-    channel_section = segment_channel_section(ch,
-        wireseg_start, wireseg_stop, prev_width, next_width; margin)
+    channel_section = segment_channel_section(
+        ch,
+        wireseg_start,
+        wireseg_stop,
+        prev_width,
+        next_width;
+        margin
+    )
     # Return channel section segment offset by width according to track
-    return track_path_segment(length(channel_tracks(ar, channel_idx)),
-        channel_section, track_idx; reversed=against_channel(ar, wireseg))
+    return track_path_segment(
+        length(channel_tracks(ar, channel_idx)),
+        channel_section,
+        track_idx;
+        reversed=against_channel(ar, wireseg)
+    )
 end
 
 function channels_taken(ar::ChannelRouter, pa::Path)
-    net_idx = findfirst(pin -> pin.p ≈ p0(pa) && isapprox_angle(in_direction(pin), α0(pa)), ar.pins[first.(ar.net_pins)])
+    net_idx = findfirst(
+        pin -> pin.p ≈ p0(pa) && isapprox_angle(in_direction(pin), α0(pa)),
+        ar.pins[first.(ar.net_pins)]
+    )
     return [running_channel(wireseg) for wireseg in net_wire(ar, net_idx)]
 end
 
 function _update_with_graph!(rule::AutoChannelRouting, route_node, graph; kwargs...)
-    push!(rule.router.net_paths, route_node.component._path)
+    return push!(rule.router.net_paths, route_node.component._path)
 end
 
 function _update_with_plan!(rule::AutoChannelRouting{T}, route_node, sch) where {T}

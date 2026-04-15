@@ -1,35 +1,53 @@
 using DeviceLayout
 using FileIO
 
-import .Paths: ChannelRouter, RouteChannel, AutoChannelRouting, autoroute!, visualize_router_state
+import .Paths:
+    ChannelRouter, RouteChannel, AutoChannelRouting, autoroute!, visualize_router_state
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-"Horizontal channel at height `y`, from `x0` to `x1`."
+"""
+Horizontal channel at height `y`, from `x0` to `x1`.
+"""
 function hchannel(x0, x1, y; width=2.0)
     pa = Path(Float64(x0), Float64(y))
     straight!(pa, Float64(x1 - x0), Paths.Trace(Float64(width)))
     return pa
 end
 
-"Vertical channel at `x`, from `y0` to `y1`."
+"""
+Vertical channel at `x`, from `y0` to `y1`.
+"""
 function vchannel(x, y0, y1; width=2.0)
     pa = Path(Float64(x), Float64(y0), α0=90°)
     straight!(pa, Float64(y1 - y0), Paths.Trace(Float64(width)))
     return pa
 end
 
-"Diagonal channel from `(x0,y0)` at angle `α` for length `len`."
+"""
+Diagonal channel from `(x0,y0)` at angle `α` for length `len`.
+"""
 function dchannel(x0, y0, α, len; width=2.0)
     pa = Path(Float64(x0), Float64(y0), α0=α)
     straight!(pa, Float64(len), Paths.Trace(Float64(width)))
     return pa
 end
 
-"B-spline channel from `(x0,y0)` to `(x1, y1)` at angle `α` at endpoints."
+"""
+B-spline channel from `(x0,y0)` to `(x1, y1)` at angle `α` at endpoints.
+"""
 function bchannel(x0, y0, α, x1, y1; width=2.0)
     pa = Path(Float64(x0), Float64(y0), α0=α)
-    bspline!(pa, [Point(x1, y1)], α, Paths.Trace(Float64(width)), auto_speed=true, auto_curvature=true, endpoints_speed=1, endpoints_curvature=0)
+    bspline!(
+        pa,
+        [Point(x1, y1)],
+        α,
+        Paths.Trace(Float64(width)),
+        auto_speed=true,
+        auto_curvature=true,
+        endpoints_speed=1,
+        endpoints_curvature=0
+    )
     return pa
 end
 
@@ -59,7 +77,7 @@ function example_simple()
     channels = [hchannel(0, 10, 0)]
     hooks = [
         bpin(2, -0.5),   # pin 1: below channel, ray goes up
-        tpin(8, 0.5),    # pin 2: above channel, ray goes down
+        tpin(8, 0.5)    # pin 2: above channel, ray goes down
     ]
     nets = [(1, 2)]
 
@@ -89,7 +107,7 @@ function example_parallel()
         vchannel(10, -1, 9),     # v_right
         hchannel(-1, 11, 0),     # h_bot
         hchannel(-1, 11, 4),     # h_mid
-        hchannel(-1, 11, 8),     # h_top
+        hchannel(-1, 11, 8)     # h_top
     ]
     hooks = [
         lpin(-0.5, 0),   # p1: left, at h_bot level
@@ -97,7 +115,7 @@ function example_parallel()
         lpin(-0.5, 8),   # p3: left, at h_top level
         rpin(10.5, 0),   # p4: right, at h_bot level
         rpin(10.5, 4),   # p5: right, at h_mid level
-        rpin(10.5, 8),   # p6: right, at h_top level
+        rpin(10.5, 8)   # p6: right, at h_top level
     ]
     nets = [(1, 4), (2, 5), (3, 6)]
 
@@ -123,13 +141,13 @@ function example_crossing()
     channels = [
         vchannel(5, -1, 7),     # v_mid
         hchannel(-1, 9, 0),     # h_bot
-        hchannel(-1, 9, 6),     # h_top
+        hchannel(-1, 9, 6)     # h_top
     ]
     hooks = [
         bpin(2, -0.5),   # p1: below h_bot, left side
         bpin(8, -0.5),   # p2: below h_bot, right side
         tpin(2, 6.5),    # p3: above h_top, left side
-        tpin(8, 6.5),    # p4: above h_top, right side
+        tpin(8, 6.5)    # p4: above h_top, right side
     ]
     # Crossed: bottom-left↔top-right, bottom-right↔top-left
     nets = [(1, 4), (2, 3)]
@@ -161,7 +179,7 @@ function example_fanin_fanout()
     channels = [
         vchannel(0, -2, 11),     # v_left
         hchannel(-2, 12, 7),     # h_mid
-        vchannel(10, -2, 11),    # v_right
+        vchannel(10, -2, 11)    # v_right
     ]
     # Left pins clustered at y=3,4,5,6 — all cross v_left
     # Right pins spread at y=0,3,6,9 — all cross v_right
@@ -173,7 +191,7 @@ function example_fanin_fanout()
         rpin(11, 0),   # p5
         rpin(11, 3),   # p6
         rpin(11, 6),   # p7
-        rpin(11, 9),   # p8
+        rpin(11, 9)   # p8
     ]
     nets = [(1, 5), (2, 6), (3, 7), (4, 8)]
 
@@ -183,7 +201,6 @@ function example_fanin_fanout()
 
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     paths = Path.(routes, Ref(Paths.Trace(WW)))
-    @show Intersect.prepared_intersections(paths)
     @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
     @assert length(ar.channel_tracks[3]) == 3 "Last vertical channel only needs 3 tracks"
     return c, ar
@@ -205,7 +222,7 @@ function example_multichannel_fanout()
         hchannel(-2, 12, 3.5),     # h_2
         hchannel(-2, 12, 5.5),     # h_3
         hchannel(-2, 12, 7.5),     # h_4
-        vchannel(10, -2, 11),    # v_right
+        vchannel(10, -2, 11)    # v_right
     ]
     # Left pins clustered at y=3,4,5,6 — all cross v_left
     # Right pins spread at y=0,3,6,9 — all cross v_right
@@ -217,7 +234,7 @@ function example_multichannel_fanout()
         rpin(11, 0),   # p5
         rpin(11, 3),   # p6
         rpin(11, 6),   # p7
-        rpin(11, 9),   # p8
+        rpin(11, 9)   # p8
     ]
     nets = [(1, 5), (2, 6), (3, 7), (4, 8)]
 
@@ -260,7 +277,7 @@ function example_grid()
         hchannel(-2, 11, 0),
         hchannel(-2, 11, 3),
         hchannel(-2, 11, 6),
-        hchannel(-2, 11, 9),
+        hchannel(-2, 11, 9)
     ]
     hooks = [
         lpin(-0.5, 3),    # p1: left edge, at h2 level → adj to v1
@@ -268,12 +285,12 @@ function example_grid()
         bpin(1.5, -0.5),  # p3: bottom edge → adj to h1
         bpin(7.5, -0.5),  # p4: bottom edge → adj to h1
         lpin(-0.5, 9),    # p5: left edge, at h4 level → adj to v1
-        rpin(9.5, 0),     # p6: right edge, at h1 level → adj to v4
+        rpin(9.5, 0)     # p6: right edge, at h1 level → adj to v4
     ]
     nets = [
         (1, 2),  # left(y=3) → right(y=6): diagonal traverse
         (3, 5),  # bottom(x=1.5) → left(y=9): corner path
-        (4, 6),  # bottom(x=7.5) → right(y=0): short path
+        (4, 6)  # bottom(x=7.5) → right(y=0): short path
     ]
 
     ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
@@ -301,16 +318,16 @@ end
 
 function example_angled()
     channels = [
-        dchannel(-1, 0, 45°, 10*sqrt(2); width=2.0),   # d1: NE from (-1,0)
+        dchannel(-1, 0, 45°, 10 * sqrt(2); width=2.0),   # d1: NE from (-1,0)
         hchannel(-2, 12, 3; width=2.0),                # h1 (y=3)
-        dchannel(-1, 10, -45°, 10*sqrt(2); width=2.0), # d2: SE from (-1,10)
+        dchannel(-1, 10, -45°, 10 * sqrt(2); width=2.0) # d2: SE from (-1,10)
     ]
     # Pins offset so rays cross diagonal
     hooks = [
         bpin(0, -2),     # p1: below d1, left side
         bpin(8, -2),     # p2: below d2, right side
         rpin(12, 1),     # p4: above d2, right side
-        lpin(-2, 1),     # p3: below d1, left side
+        lpin(-2, 1)     # p3: below d1, left side
     ]
     # Net 1 goes left→right via h1 and diagonals
     # Net 2 goes right→left via h1 and diagonals
@@ -344,16 +361,16 @@ function example_dense()
         vchannel(0, -2, 7),      # v_left  (idx 1)
         hchannel(-2, 10, -1),     # h1      (idx 3)
         hchannel(-2, 10, 6),     # h2      (idx 4)
-        vchannel(8, -2, 7),      # v_right (idx 2)
+        vchannel(8, -2, 7)      # v_right (idx 2)
     ]
     # 6 left pins, tightly spaced, all crossing v_left
     # 6 right pins, same y-positions, all crossing v_right
     ys = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
     hooks = [
         [lpin(-1, y) for y in ys]...,   # p1-p6
-        [rpin(9, y) for y in ys]...,    # p7-p12
+        [rpin(9, y) for y in ys]...    # p7-p12
     ]
-    nets = [(i, i + 6) for i in 1:6]
+    nets = [(i, i + 6) for i = 1:6]
 
     ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
     routes = autoroute!(ar, R, MARGIN)
@@ -379,7 +396,7 @@ function example_bspline()
     channels = [
         bchannel(0, -2, 30°, 1, 12),     # v_left
         bchannel(-1, 2, -30°, 12, 9),    # h_mid
-        bchannel(10, -2, 30°, 11, 12),   # v_right
+        bchannel(10, -2, 30°, 11, 12)   # v_right
     ]
     # Left pins clustered at y=3,4,5,6 — all cross v_left
     # Right pins spread at y=0,3,6,9 — all cross v_right
@@ -391,13 +408,18 @@ function example_bspline()
         rpin(14, 0),   # p5
         rpin(14, 3),   # p6
         rpin(14, 6),   # p7
-        rpin(14, 9),   # p8
+        rpin(14, 9)   # p8
     ]
     nets = [(1, 5), (2, 6), (3, 7), (4, 8)]
 
     ar = Paths.ChannelRouter(nets, hooks, RouteChannel.(channels))
-    transition_rule = Paths.BSplineRouting(auto_speed=true, auto_curvature=true, endpoints_speed=1, endpoints_curvature=0)
-    
+    transition_rule = Paths.BSplineRouting(
+        auto_speed=true,
+        auto_curvature=true,
+        endpoints_speed=1,
+        endpoints_curvature=0
+    )
+
     routes = autoroute!(ar, transition_rule, 1.0)
     c = visualize_router_state(ar, wire_width=WW)
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
@@ -413,22 +435,19 @@ function example_fanout40nets()
     lx_outer = ly_outer = 10e6nm
     lx_inner = ly_inner = 5e6nm
 
-    fanout_space_bottom = Path(Point(-lx_outer/2, -(ly_inner/2 + (ly_outer - ly_inner)/4)))
-    straight!(fanout_space_bottom, lx_outer, Paths.Trace(0.8*(ly_outer - ly_inner)/4))
+    fanout_space_bottom =
+        Path(Point(-lx_outer / 2, -(ly_inner / 2 + (ly_outer - ly_inner) / 4)))
+    straight!(fanout_space_bottom, lx_outer, Paths.Trace(0.8 * (ly_outer - ly_inner) / 4))
 
     n_nets = 40
-    x0s = range(-lx_outer/2, stop=lx_outer/2, length=n_nets+2)[2:end-1]
-    x1s = range(-lx_inner/2, stop=lx_inner/2, length=n_nets+2)[2:end-1]
-    p0s = [PointHook(x, -ly_outer/2, -90°) for x in x0s]
-    p1s = [PointHook(x, -ly_inner/2, 90°) for x in x1s]
+    x0s = range(-lx_outer / 2, stop=lx_outer / 2, length=n_nets + 2)[2:(end - 1)]
+    x1s = range(-lx_inner / 2, stop=lx_inner / 2, length=n_nets + 2)[2:(end - 1)]
+    p0s = [PointHook(x, -ly_outer / 2, -90°) for x in x0s]
+    p1s = [PointHook(x, -ly_inner / 2, 90°) for x in x1s]
     mynets = [(i, i + n_nets) for i = 1:n_nets]
-    ar = ChannelRouter(
-        mynets,
-        vcat(p0s, p1s),
-        [RouteChannel(fanout_space_bottom)]
-    )
+    ar = ChannelRouter(mynets, vcat(p0s, p1s), [RouteChannel(fanout_space_bottom)])
     routes = Paths.autoroute!(ar, Paths.StraightAnd90(10μm), 10μm)
-    c = Paths.visualize_router_state(ar, wire_width=1μm);
+    c = Paths.visualize_router_state(ar, wire_width=1μm)
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     paths = Path.(routes, Ref(Paths.Trace(WW)))
     @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
@@ -447,15 +466,18 @@ end
 
 # ── Assembly ─────────────────────────────────────────────────────────────────
 
-function run_all_examples(; save_gds=true)
+function run_all_examples(; save_gds=true, save_png=true)
     examples = [
-        "simple"    => example_simple,
-        "parallel"  => example_parallel,
-        "crossing"  => example_crossing,
-        "fanout"    => example_fanout,
-        "grid"      => example_grid,
-        "angled"    => example_angled,
-        "dense"     => example_dense,
+        "simple" => example_simple,
+        "parallel" => example_parallel,
+        "crossing" => example_crossing,
+        "fanin_fanout" => example_fanin_fanout,
+        "multichannel_fanout" => example_multichannel_fanout,
+        "grid" => example_grid,
+        "angled" => example_angled,
+        "dense" => example_dense,
+        "bspline" => example_bspline,
+        "fanout40" => example_fanout40nets
     ]
     results = Pair{String, Tuple{Cell, ChannelRouter}}[]
     for (name, fn) in examples
@@ -467,6 +489,12 @@ function run_all_examples(; save_gds=true)
             save("autoroute_$name.gds", c; spec_warnings=false)
         end
         @info "Saved $(length(results)) GDS files"
+    end
+    if save_png
+        for (name, (c, _)) in results
+            save("autoroute_$name.png", c; spec_warnings=false)
+        end
+        @info "Saved $(length(results)) PNG files"
     end
     return results
 end
