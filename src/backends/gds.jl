@@ -533,6 +533,8 @@ end
 
 Writes bytes to the IO stream (if needed) to encode x-reflection, magnification,
 and rotation settings of a reference or array. Returns the number of bytes written.
+
+Rotation angles are normalized to [0, 360) via `mod` before writing.
 """
 function strans(io::IO, ref)
     bits = 0x0000
@@ -547,7 +549,10 @@ function strans(io::IO, ref)
     bytes = 0
     (ref.xrefl || ref.mag != 1.0 || ref.rot != 0.0) && (bytes += gdswrite(io, STRANS, bits))
     ref.mag != 1.0 && (bytes += gdswrite(io, MAG, ref.mag))
-    ref.rot != 0.0 && (bytes += gdswrite(io, ANGLE, ustrip(ref.rot |> °)))
+    if ref.rot != 0.0
+        angle_deg = mod(ustrip(ref.rot |> °), 360)
+        bytes += gdswrite(io, ANGLE, angle_deg)
+    end
     return bytes
 end
 
