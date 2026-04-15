@@ -40,9 +40,9 @@
         @test ps.components.qubit.cap_gap == 20
         @test ps.global.version == 1
 
-        # Error on missing key
-        @test_throws ErrorException ps.nonexistent
-        @test_throws ErrorException ps.components.qubit.missing_param
+        # Missing key auto-vivifies an empty namespace
+        @test ps.nonexistent isa ParameterSet
+        @test ps.components.qubit.missing_ns isa ParameterSet
     end
 
     @testset "resolve" begin
@@ -112,6 +112,11 @@
         # Overwrite a leaf value
         ps.components.qubit.cap_width = 500
         @test ps.components.qubit.cap_width == 500
+
+        # Chained auto-vivification for deep paths
+        ps2 = ParameterSet()
+        ps2.components.transmon.island.cap_length = 520
+        @test ps2.components.transmon.island.cap_length == 520
     end
 
     @testset "propertynames" begin
@@ -136,7 +141,8 @@ end
 
 @testitem "SchematicGraph with ParameterSet" setup = [CommonTestSetup] begin
     using DeviceLayout: ParameterSet
-    using DeviceLayout.SchematicDrivenLayout: SchematicGraph
+    using DeviceLayout.SchematicDrivenLayout:
+        SchematicGraph, parameter_set, create_component
 
     @testset "Default constructor" begin
         g = SchematicGraph("test")
@@ -180,5 +186,39 @@ end
 
         # Copy creates a fresh graph (independent nodes/edges)
         @test g_copy !== g
+    end
+
+    @testset "parameter_set function" begin
+        # Returns nothing for graph without ParameterSet
+        g = SchematicGraph("test")
+        @test parameter_set(g) === nothing
+
+        # Returns the ParameterSet for graph with one
+        ps = ParameterSet()
+        ps.components.qubit = ("cap_width" => 300)
+        g = SchematicGraph("test", ps)
+        @test parameter_set(g) === ps
+        @test parameter_set(g).components.qubit.cap_width == 300
+    end
+
+    @testset "create_component with ParameterSet" begin
+        using DeviceLayout.SchematicDrivenLayout: parameters
+        using DeviceLayout.SchematicDrivenLayout.ExamplePDK.Transmons:
+            ExampleRectangleIsland
+
+        ps = ParameterSet()
+        ps.components.island = ("cap_width" => 30)
+        ps.components.island.cap_length = 400
+
+        # Create component from parameter set subtree
+        island = create_component(ExampleRectangleIsland, ps, "components.island")
+        @test island isa ExampleRectangleIsland
+        p = parameters(island)
+        @test p.cap_width == 30
+        @test p.cap_length == 400
+
+        # Accessed parameters are tracked
+        @test "components.island.cap_width" in ps.accessed
+        @test "components.island.cap_length" in ps.accessed
     end
 end

@@ -53,7 +53,10 @@ function Base.getproperty(ps::ParameterSet, s::Symbol)
 
     d = getfield(ps, :data)
     key = String(s)
-    haskey(d, key) || error("ParameterSet has no key :$s. Available keys: $(keys(d))")
+    if !haskey(d, key)
+        # Auto-vivify: create intermediate namespace so chained dot-access works
+        d[key] = Dict{String, Any}()
+    end
 
     val = d[key]
     if val isa Dict

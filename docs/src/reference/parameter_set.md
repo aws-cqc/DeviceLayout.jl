@@ -1,10 +1,10 @@
 # ParameterSet
 
-A `ParameterSet` is a mutable parameter source for data-driven design. It holds a nested dictionary of parameters — typically loaded from a YAML file — and provides dot-access syntax for reading and writing values.
+A `ParameterSet` is a mutable parameter source for data-driven design. It holds a nested dictionary of parameters - typically loaded from a YAML file - and provides dot-access syntax for reading and writing values.
 
 Every `ParameterSet` contains two required top-level namespaces:
-- **`global`** — parameters shared across the design (e.g., version, process node)
-- **`components`** — per-component parameter trees
+- **`global`** - parameters shared across the design (e.g., version, process node)
+- **`components`** - per-component parameter trees
 
 ## Tutorial: Using External Parameters
 
@@ -31,12 +31,12 @@ ps.global.version = 1
 ps.global.process_node = "fab_v3"
 
 # Define component parameters using Pair syntax
-ps.components.capacitor = ("finger_length" => 150)
+ps.components.capacitor.finger_length = 150
 ps.components.capacitor.finger_width = 5
 ps.components.capacitor.finger_gap = 3
 ps.components.capacitor.finger_count = 6
 
-ps.components.junction = ("w_jj" => 1)
+ps.components.junction.w_jj = 1
 ps.components.junction.h_jj = 1
 ```
 
@@ -137,9 +137,9 @@ A full example with simple components:
 ```julia
 # Load parameters
 ps = ParameterSet()
-ps.components.cap1 = ("finger_length" => 150)
+ps.components.cap1.finger_length = 150
 ps.components.cap1.finger_count = 6
-ps.components.cap2 = ("finger_length" => 200)
+ps.components.cap2.finger_length = 200
 ps.components.cap2.finger_count = 8
 
 # Create graph with parameter set
@@ -162,80 +162,64 @@ For composite components, the `ParameterSet` propagates through the graph
 hierarchy. When you attach a `ParameterSet` to a top-level `SchematicGraph`, it
 is available inside `_build_subcomponents` via the graph.
 
-Consider a composite transmon with island and junction subcomponents:
+With a `ParameterSet`, subcomponent parameters live in the parameter set
+rather than in the composite struct. The composite only declares parameters
+that are shared across multiple subcomponents:
 
 ```julia
 @compdef struct SimpleTransmon <: CompositeComponent
     name = "transmon"
-    cap_width = 24μm
-    cap_length = 520μm
-    cap_gap = 30μm
-    junction_gap = 12μm
-    w_jj = 1μm
-    h_jj = 1μm
+    junction_gap = 12μm  # shared: controls both island gap and junction height
 end
 ```
 
-Define the parameter set with nested component trees — including subcomponent
-parameters under the transmon namespace:
+Define the parameter set with a namespace per subcomponent. Note that
+`junction_gap` only appears on the composite - it will be forwarded to
+subcomponents in `_build_subcomponents`:
 
 ```julia
 ps = ParameterSet()
 
-# Top-level transmon parameters
-ps.components.transmon = ("cap_width" => 24)
-ps.components.transmon.cap_length = 520
-ps.components.transmon.cap_gap = 30
 ps.components.transmon.junction_gap = 12
 
-# Subcomponent parameters nested under transmon
-ps.components.transmon.island = ("cap_width" => 24)
+ps.components.transmon.island.cap_width = 24
 ps.components.transmon.island.cap_length = 520
 ps.components.transmon.island.cap_gap = 30
-ps.components.transmon.island.junction_gap = 12
 
-ps.components.transmon.junction = ("w_jj" => 1)
+ps.components.transmon.junction.w_jj = 1
 ps.components.transmon.junction.h_jj = 1
-ps.components.transmon.junction.h_ground_island = 12
 ```
 
-Inside `_build_subcomponents`, use the graph's `parameter_set` to create
-subcomponents from their respective parameter subtrees:
+Inside `_build_subcomponents`, use `parameter_set(g)` to access the graph's
+`ParameterSet`, then `create_component` to instantiate each subcomponent from
+its subtree. The shared `junction_gap` is read from the composite instance and
+forwarded to both subcomponents under their respective parameter names:
 
 ```julia
 function SchematicDrivenLayout._build_subcomponents(tr::SimpleTransmon)
     ps = parameter_set(tr._graph)
 
-    if !isnothing(ps)
-        # Create subcomponents from parameter set subtrees
-        @component island = create_component(
-            ExampleRectangleIsland, ps, "components.transmon.island"
-        )
-        @component junction = create_component(
-            ExampleSimpleJunction, ps, "components.transmon.junction"
-        )
-    else
-        # Fallback to direct parameter forwarding
-        @component island = ExampleRectangleIsland(
-            cap_width=tr.cap_width, cap_length=tr.cap_length,
-            cap_gap=tr.cap_gap, junction_gap=tr.junction_gap,
-        )
-        @component junction = ExampleSimpleJunction(
-            w_jj=tr.w_jj, h_jj=tr.h_jj,
-            h_ground_island=tr.junction_gap,
-        )
-    end
+    @component island = create_component(
+        ExampleRectangleIsland, ps, "components.transmon.island"
+    )
+    # Forward shared parameter to island
+    island = set_parameters(island; junction_gap=tr.junction_gap)
+
+    @component junction = create_component(
+        ExampleSimpleJunction, ps, "components.transmon.junction"
+    )
+    # Forward shared parameter under the subcomponent's own name
+    junction = set_parameters(junction; h_ground_island=tr.junction_gap)
 
     return (island, junction)
 end
 ```
 
-When a `ParameterSet` is attached, each subcomponent is instantiated from its
-own subtree (`"components.transmon.island"`, `"components.transmon.junction"`).
-The fallback path preserves backward compatibility for cases where no
-`ParameterSet` is provided.
+`create_component(T, ps, address)` resolves the address, extracts leaf
+parameters via `leaf_params`, and passes them as keyword arguments to the
+component constructor. Parameters not in the `ParameterSet` keep their defaults.
 
-Create the top-level graph and the composite component:
+Create the top-level graph and composite component:
 
 ```julia
 g = SchematicGraph("chip", ps)
@@ -244,7 +228,7 @@ transmon = create_component(SimpleTransmon, ps, "components.transmon")
 transmon_node = add_node!(g, transmon)
 ```
 
-The `ParameterSet` is preserved when graphs are copied — for example, inside
+The `ParameterSet` is preserved when graphs are copied - for example, inside
 `BasicCompositeComponent` or during `_flatten` operations. This means
 subcomponents at any depth can access the same parameter set.
 
@@ -255,7 +239,7 @@ of unused or missing parameters:
 
 ```julia
 ps = ParameterSet()
-ps.components.qubit = ("cap_width" => 300)
+ps.components.qubit.cap_width = 300
 ps.components.qubit.cap_gap = 20
 
 # Nothing accessed yet
