@@ -407,6 +407,35 @@ function example_bspline()
     return c, ar
 end
 
+# ── Example 9: Fan-out with 40 nets ──────────────────────────────────
+# 40 nets must fan out with a ratio of 2
+function example_fanout40nets()
+    lx_outer = ly_outer = 10e6nm
+    lx_inner = ly_inner = 5e6nm
+
+    fanout_space_bottom = Path(Point(-lx_outer/2, -(ly_inner/2 + (ly_outer - ly_inner)/4)))
+    straight!(fanout_space_bottom, lx_outer, Paths.Trace(0.8*(ly_outer - ly_inner)/4))
+
+    n_nets = 40
+    x0s = range(-lx_outer/2, stop=lx_outer/2, length=n_nets+2)[2:end-1]
+    x1s = range(-lx_inner/2, stop=lx_inner/2, length=n_nets+2)[2:end-1]
+    p0s = [PointHook(x, -ly_outer/2, -90°) for x in x0s]
+    p1s = [PointHook(x, -ly_inner/2, 90°) for x in x1s]
+    mynets = [(i, i + n_nets) for i = 1:n_nets]
+    ar = ChannelRouter(
+        mynets,
+        vcat(p0s, p1s),
+        [RouteChannel(fanout_space_bottom)]
+    )
+    routes = Paths.autoroute!(ar, Paths.StraightAnd90(10μm), 10μm)
+    c = Paths.visualize_router_state(ar, wire_width=1μm);
+    @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
+    paths = Path.(routes, Ref(Paths.Trace(WW)))
+    @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
+    @assert length(ar.channel_tracks[1]) <= 20 "Left and right halves share tracks"
+    return c, ar
+end
+
 # ── Example 10: Schematic integration ────────────────────────────────────────
 # TODO: AutoChannelRouting with schematic workflow.
 # Requires components with hooks, route! calls, and schematic compilation.
