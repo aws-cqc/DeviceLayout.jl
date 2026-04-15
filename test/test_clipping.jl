@@ -68,12 +68,28 @@
             small_square = Polygon(square_pts)
             big_square = Polygon(2 .* square_pts)
             mask = first(
-                to_polygons(clip(Clipper.ClipTypeDifference, big_square, small_square))
+                to_polygons(
+                    clip(
+                        Clipper.ClipTypeDifference,
+                        big_square,
+                        small_square,
+                        pfs=Clipper.PolyFillTypeEvenOdd,
+                        pfc=Clipper.PolyFillTypeEvenOdd
+                    )
+                )
             )
             c = Cell{Float64}("test")
             render!(c, mask)
             canvas = Polygon(5 .* square_pts)
-            x = to_polygons(clip(Clipper.ClipTypeDifference, canvas, mask))
+            x = to_polygons(
+                clip(
+                    Clipper.ClipTypeDifference,
+                    canvas,
+                    mask,
+                    pfs=Clipper.PolyFillTypeEvenOdd,
+                    pfc=Clipper.PolyFillTypeEvenOdd
+                )
+            )
             c2 = Cell{Float64}("squares")
             for z in x
                 render!(c2, z, GDSMeta(0))
@@ -85,11 +101,23 @@
             square_pts = Point.([(-1, -1), (-1, 1), (1, 1), (1, -1)])
             small_square = Polygon(square_pts)
             big_square = Polygon(2 .* square_pts)
-            mask = clip(Clipper.ClipTypeDifference, big_square, small_square)
+            mask = clip(
+                Clipper.ClipTypeDifference,
+                big_square,
+                small_square,
+                pfs=Clipper.PolyFillTypeEvenOdd,
+                pfc=Clipper.PolyFillTypeEvenOdd
+            )
             c = Cell{Float64}("test")
             render!(c, mask)
             canvas = Polygon(5 .* square_pts)
-            x = clip(Clipper.ClipTypeDifference, canvas, mask)
+            x = clip(
+                Clipper.ClipTypeDifference,
+                canvas,
+                mask,
+                pfs=Clipper.PolyFillTypeEvenOdd,
+                pfc=Clipper.PolyFillTypeEvenOdd
+            )
             c2 = Cell{Float64}("squares")
             render!(c2, x, GDSMeta(0))
 
