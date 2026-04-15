@@ -375,34 +375,6 @@ end
         return c
     end
 
-    function test_fanout()
-        lx_outer = ly_outer = 10e6nm
-        lx_inner = ly_inner = 5e6nm
-
-        fanout_space_bottom = Path(Point(-lx_outer/2, -(ly_inner/2 + (ly_outer - ly_inner)/4)))
-        straight!(fanout_space_bottom, lx_outer, Paths.Trace(0.8*(ly_outer - ly_inner)/4))
-
-        n_nets = 40
-        x0s = range(-lx_outer/2, stop=lx_outer/2, length=n_nets+2)[2:end-1]
-        x1s = range(-lx_inner/2, stop=lx_inner/2, length=n_nets+2)[2:end-1]
-        p0s = [PointHook(x, -ly_outer/2, -90°) for x in x0s]
-        p1s = [PointHook(x, -ly_inner/2, 90°) for x in x1s]
-        # n_nets=10
-        mynets = [(i, i + n_nets) for i = 1:n_nets]
-        ar = ChannelRouter(
-            mynets,
-            vcat(p0s, p1s),
-            [RouteChannel(fanout_space_bottom)]
-        )
-
-        Paths.assign_channels!(ar)
-        Paths.assign_tracks!(ar)
-
-        c = Paths.visualize_router_state(ar);
-
-        save("autoroute_test.png", c, width=10DeviceLayout.Graphics.inch)
-        return c
-    end
     function test_grid_escape()
         # Grid of sites
         dx = 1.5

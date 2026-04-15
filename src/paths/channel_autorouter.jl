@@ -15,11 +15,9 @@ import Graphs:
     neighbors,
     outneighbors,
     maximal_cliques,
-    yen_k_shortest_paths,
     dijkstra_shortest_paths,
     enumerate_paths,
     topological_sort_by_dfs
-import LinearAlgebra: norm
 import SparseArrays: sparse
 import BipartiteMatching
 
@@ -192,15 +190,6 @@ function direction_at_intersection(ar::ChannelRouter,
     return ixn_info[4]
 end
 
-function width_at_intersection(ar::ChannelRouter{T},
-    running_channel,
-    intersecting_channel) where {T}
-
-    ixn_info = channel_intersection(ar, running_channel, intersecting_channel)
-    running_channel < intersecting_channel && return channel_width(ar, running_channel, ixn_info[1])
-    return channel_width(ar, running_channel, ixn_info[2])
-end
-
 segment_waypoint(ar::ChannelRouter, ws::TrackWireSegment) = ar.segment_waypoints[ws]
 _swap(x, y) = (y > x ? (x, y) : (y, x))
 
@@ -319,30 +308,6 @@ function segment_track(ar::ChannelRouter, ws::TrackWireSegment)
 end
 
 """
-    segment_midpoint(ar::ChannelRouter, ws::TrackWireSegment)
-
-The midpoint of the segment `ws` between `bounding_channels(ws)`.
-
-If `ws` has been assigned a track, uses the segment along that track.
-"""
-function segment_midpoint(ar::ChannelRouter{T}, ws::TrackWireSegment) where {T}
-    channel_idx = running_channel(ws)
-    s0, s1 = interval(ar, ws)
-    s = (s0+s1)/2
-    if is_pin(ar, channel_idx)
-        dir = pin_direction(ar, graphidx_to_pin(ar, channel_idx))
-        return pin_coordinates(ar, graphidx_to_pin(ar, channel_idx)) +
-            s * Point(cos(dir), sin(dir))
-    end
-    channel_midpoint = channel_coordinates(ar, channel_idx, s)
-
-    offset_distance = segment_offset(ar, ws; use_wire_direction=false)
-
-    channel_dir = channel_direction(ar, channel_idx, s)
-    return channel_midpoint + offset_distance * Point(-sin(channel_dir), cos(channel_dir))
-end
-
-"""
     segment_direction(ar::ChannelRouter, ws::TrackWireSegment)
 
 The angle with the x-axis made by segment `ws` directed along its wire toward its end pin.
@@ -353,11 +318,6 @@ function segment_direction(ar::ChannelRouter, ws::TrackWireSegment, s)
     return direction(seg, s)
 end
 
-function segment_mid_direction(ar::ChannelRouter, ws::TrackWireSegment)
-    s0, s1 = interval(ar, ws)
-    return segment_direction(ar, ws, (s0+s1)/2)
-end
-
 function segment_offset(ar::ChannelRouter{T}, ws::TrackWireSegment, s...; use_wire_direction=true) where {T}
     channel_idx = running_channel(ws)
     is_pin(ar, channel_idx) && return zero(T)
@@ -366,19 +326,6 @@ function segment_offset(ar::ChannelRouter{T}, ws::TrackWireSegment, s...; use_wi
     reversed = use_wire_direction && against_channel(ar, ws)
     return track_section_offset(length(ar.channel_tracks[channel_idx]),
         Paths.width(ar.channels[channel_idx].node.sty, s...), track_idx; reversed)
-end
-
-"""
-    track_offset(ar::ChannelRouter, channel_idx, track_idx, s)
-
-The offset of the centerline of track `track_idx` in channel `channel_idx`,
-measured at pathlength `s` in the channel.
-"""
-function track_offset(ar::ChannelRouter{T}, channel_idx, track_idx, s...) where {T}
-    n_tracks = length(channel_tracks(ar, channel_idx))
-    w = Paths.width(ar.channels[channel_idx].node.sty, zero(T))
-    spacing = w / (n_tracks + 1)
-    return spacing * ((1 + n_tracks) / 2 - track_idx)
 end
 
 """
@@ -516,11 +463,6 @@ function build_auxiliary_graph(ar::ChannelRouter{T}) where {T}
 end
 
 """
-    shortest_path_between_pins(ar::ChannelRouter, pin_1::Int, pin_2::Int)
-
-A shortest path in the router's channel graph from `pin_1` to `pin_2`, minimizing
-hop count (number of channel transitions).
-
     shortest_path_between_pins(ar::ChannelRouter, pin_1::Int, pin_2::Int, aux::AuxiliaryGraph)
 
 A shortest path minimizing physical distance (sum of arclengths along channels between
@@ -529,15 +471,6 @@ intersection points), using a precomputed [`AuxiliaryGraph`](@ref).
 In both cases, the returned path is a list of vertex indices
 `[pin_gidx, ch1, ..., chN, pin_gidx]`.
 """
-function shortest_path_between_pins(ar::ChannelRouter, p0::Int, p1::Int)
-    ys = yen_k_shortest_paths(
-        channel_graph(ar),
-        pin_to_graphidx(ar, p0),
-        pin_to_graphidx(ar, p1)
-    )
-    return ys.paths[1]
-end
-
 function shortest_path_between_pins(ar::ChannelRouter, p0::Int, p1::Int, aux::AuxiliaryGraph)
     pin0_gidx = pin_to_graphidx(ar, p0)
     pin1_gidx = pin_to_graphidx(ar, p1)
@@ -830,13 +763,7 @@ function best_matching!(merging_graph, vcg)
         )
 end
 
-function merge_segments!(zone_ig, vcg, ws1, ws2)
-    merge_vertices!(zone_ig, [ws1, ws2])
-    return merge_vertices(vcg, [ws1, ws2]) # No in-place for directed graph
-end
-
 function dag_shortest_paths(dag, v_sorted, s)
-    # p = zeros(Int, length(v_sorted))
     d = fill(nv(dag), nv(dag))
     d[s] = 0
     for i in findfirst(v -> v == s, v_sorted):nv(dag)
@@ -844,7 +771,6 @@ function dag_shortest_paths(dag, v_sorted, s)
         for v in outneighbors(dag, u)
             if d[v] > d[u] + 1
                 d[v] = d[u] + 1
-                # p[v] = u
             end
         end
     end
@@ -852,11 +778,7 @@ function dag_shortest_paths(dag, v_sorted, s)
 end
 
 function against_channel(ar, wireseg)
-    channel_idx = running_channel(wireseg)
-    start_channel, stop_channel = bounding_channels(wireseg)
     s1, s2 = unsorted_interval(ar, wireseg)
-    # s1 = pathlength_at_intersection(ar, channel_idx, start_channel)
-    # s2 = pathlength_at_intersection(ar, channel_idx, stop_channel)
     return s1 > s2
 end
 
@@ -1027,7 +949,7 @@ function reset_nets!(ar; net_indices=eachindex(ar.net_pins), reset_tracks=true)
 end
 
 """
-    autoroute!(ar::ChannelRouter, rule; net_indices=eachindex(ar.net_pins),
+    autoroute!(ar::ChannelRouter, transition_rule; net_indices=eachindex(ar.net_pins),
         fixed_channel_paths::Dict{Int,Vector{Int}}=Dict())
 
 Perform channel and track assigment, then make routes.
@@ -1047,12 +969,7 @@ function autoroute!(
     reset_nets!(ar, net_indices=net_indices)
     assign_channels!(ar; net_indices=net_indices, fixed_paths=fixed_channel_paths)
     assign_tracks!(ar)
-    rule = Paths.AutoChannelRouting(
-        ar.channels,
-        transition_rule,
-        margin,
-        ar
-    )
+    rule = AutoChannelRouting(ar, transition_rule, margin)
     routes = make_routes!(ar, rule)
     return routes
 end
@@ -1144,13 +1061,6 @@ function pin_labels(ar::ChannelRouter)
     ]
 end
 
-function waypoint_labels(ar::ChannelRouter)
-    return [
-        ("$i", segment_waypoint(ar, segs[i]).p) for segs in ar.net_wires for
-        i = 1:length(segs)
-    ]
-end
-
 function channel_path(ar::ChannelRouter, channel_idx)
     return ar.channels[channel_idx].path
 end
@@ -1171,6 +1081,10 @@ struct AutoChannelRouting{T <: Coordinate} <: AbstractChannelRouting
     transition_margin::T
     router::ChannelRouter{T}
 end
+
+function AutoChannelRouting(ar::ChannelRouter{T}, transition_rule, margin) where {T}
+    return AutoChannelRouting{T}(ar.channels, transition_rule, convert(T, margin), ar)
+end
 entry_rules(r::AutoChannelRouting) = Iterators.repeated(r.transition_rule)
 exit_rule(r::AutoChannelRouting) = r.transition_rule
 
@@ -1189,17 +1103,10 @@ function track_path_segment(ar::ChannelRouter{T}, ch::RouteChannel, pa::Path; ma
     wireseg = net_wire(ar, net_idx)[wireseg_idx]
     track_idx = segment_track(ar, wireseg)
     # Get the starting and ending pathlengths
-    # Not accounting for track offsets
-    # start_channel, stop_channel = bounding_channels(wireseg)
-    # wireseg_start = pathlength_at_intersection(ar, channel_idx, start_channel)
-    # wireseg_stop = pathlength_at_intersection(ar, channel_idx, stop_channel)
-    # Account for track offsets
-    s1, s2 = interval(ar, wireseg)
-    wireseg_start = against_channel(ar, wireseg) ? s2 : s1
-    wireseg_stop = against_channel(ar, wireseg) ? s1 : s2
-
-    prev_width = zero(T)#width_at_intersection(ar, start_channel, channel_idx)
-    next_width = zero(T)#width_at_intersection(ar, stop_channel, channel_idx)
+    # Accounting for track offsets
+    wireseg_start, wireseg_stop = unsorted_interval(ar, wireseg)
+    prev_width = zero(T) # Autorouter just uses margin
+    next_width = zero(T) # Interval already takes into account actual neighbor track offsets so we don't need this precaution
     channel_section = segment_channel_section(ch,
         wireseg_start, wireseg_stop, prev_width, next_width; margin)
     # Return channel section segment offset by width according to track
