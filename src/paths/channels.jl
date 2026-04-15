@@ -57,7 +57,7 @@ function segment_channel_section(
             split(
                 ch.node,
                 [
-                    max(zero(T), wireseg_stop + margin + next_width / 2,)
+                    max(zero(T), wireseg_stop + margin + next_width / 2)
                     min(pathlength(ch.node.seg), wireseg_start - margin - prev_width / 2)
                 ]
             )[2]

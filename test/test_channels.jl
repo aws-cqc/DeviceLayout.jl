@@ -293,7 +293,6 @@ end
     using .SchematicDrivenLayout
 
     function test_simple(; split=false)
-
         mypins = [
             Point(4.0, 3.0),
             Point(6.0, 3.0),
@@ -324,10 +323,10 @@ end
         for y0 in [1.0, 5.0, 9.0]
             pa = Path(0.0, y0)
             if split && y0 == 5.0
-                pa = Path(0.0, y0+0.7)
+                pa = Path(0.0, y0 + 0.7)
                 straight!(pa, 10.0, Paths.Trace(1.0))
                 push!(space_paths, pa)
-                pa = Path(0.0, y0-0.7)
+                pa = Path(0.0, y0 - 0.7)
                 straight!(pa, 10.0, Paths.Trace(1.0))
                 push!(space_paths, pa)
                 continue
@@ -338,12 +337,7 @@ end
 
         n_wires = 4
         mynets = [(i, i + 4) for i = 1:n_wires]
-        ar = ChannelRouter(
-            mynets,
-            pins,
-            RouteChannel.(space_paths)
-        )
-
+        ar = ChannelRouter(mynets, pins, RouteChannel.(space_paths))
 
         # # # # Split space demo
         # # # Cut space 2 in half
@@ -369,7 +363,7 @@ end
         # rts = make_routes!(ar, rule)
         # paths = [Path(rt, Paths.Trace(0.1)) for rt in rts]
 
-        c = Paths.visualize_router_state(ar);
+        c = Paths.visualize_router_state(ar)
 
         save("autoroute_test.svg", c, width=10DeviceLayout.Graphics.inch)
         return c
@@ -381,7 +375,7 @@ end
         dy = 1.5
         nx = 20
         ny = 20
-        grid = [(ix, iy) for ix in 1:nx for iy in 1:ny]
+        grid = [(ix, iy) for ix = 1:nx for iy = 1:ny]
         sites = [Point(dx * (ix - 1), dy * (iy - 1)) for (ix, iy) in grid]
         site_size = 0.5
 
@@ -416,8 +410,8 @@ end
             return iy_delta > 0 ? pi / 2 : -pi / 2
         end
         site_pin_pos = [
-            site + 0.5site_size * Point(cos(d), sin(d))
-            for (site, d) in zip(sites, site_dirs)
+            site + 0.5site_size * Point(cos(d), sin(d)) for
+            (site, d) in zip(sites, site_dirs)
         ]
         # PointHook in_direction points inward (away from channel); site_dirs point toward channel
         site_hooks = [PointHook(p, d + pi) for (p, d) in zip(site_pin_pos, site_dirs)]
@@ -437,7 +431,7 @@ end
 
         # Pre-compute edge assignments and per-edge coordinate ranges
         edge_assignments = [edge_index(edir) for edir in edge_dirs]
-        pins_per_edge = [count(==(ei), edge_assignments) for ei in 1:4]
+        pins_per_edge = [count(==(ei), edge_assignments) for ei = 1:4]
         coord_span = (-dx / 2, -dx / 2 + nx * dx)
         coord_ranges = [range(coord_span..., length=n) for n in pins_per_edge]
 
@@ -458,13 +452,9 @@ end
         # Assemble: each site pin connects to its corresponding edge pin
         all_hooks = [site_hooks; edge_hooks]
         n_wires = length(sites)
-        mynets = [(i, i + n_wires) for i in 1:n_wires]
+        mynets = [(i, i + n_wires) for i = 1:n_wires]
 
-        ar = ChannelRouter(
-            mynets,
-            all_hooks,
-            RouteChannel.(space_paths)
-        )
+        ar = ChannelRouter(mynets, all_hooks, RouteChannel.(space_paths))
 
         Paths.assign_channels!(ar)
         Paths.assign_tracks!(ar)
