@@ -52,6 +52,33 @@ function create_component(
 end
 
 """
+    create_component(::Type{T}, ps::ParameterSet, address::String) where {T <: AbstractComponent}
+
+Create an instance of type `T` using parameters from a `ParameterSet` at the given `address`.
+
+The address is resolved within the `ParameterSet` to locate a parameter subtree.
+Leaf parameters (non-`Dict` values) at that level are extracted and merged with
+`default_parameters(T)` via recursive merge.
+
+Consumed parameters are tracked in `ps.accessed`.
+"""
+function create_component(
+    ::Type{T},
+    ps::ParameterSet,
+    address::String
+) where {T <: AbstractComponent}
+    sub = resolve(ps, address)
+    kw = leaf_params(sub)
+    # Track accessed parameter paths
+    for k in keys(kw)
+        if k in parameter_names(T)
+            push!(ps.accessed, address * "." * String(k))
+        end
+    end
+    return create_component(T; pairs(kw)...)
+end
+
+"""
     (c::AbstractComponent)(
         name::String=name(c),
         params::NamedTuple=parameters(c);

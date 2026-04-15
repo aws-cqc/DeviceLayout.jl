@@ -222,7 +222,7 @@ struct BasicCompositeComponent{T} <: AbstractCompositeComponent{T}
     _schematic::Schematic{T}
     _hooks::Dict{Symbol, Union{Hook, Vector{<:Hook}}}
     function BasicCompositeComponent(g::SchematicGraph; coordtype=typeof(1.0UPREFERRED))
-        newg = SchematicGraph(name(g))
+        newg = SchematicGraph(g)
         add_graph!(newg, g; id_prefix="")
         sch = Schematic{coordtype}(newg; log_dir=nothing)
         sch.coordinate_system.name = uniquename(name(g))
@@ -239,7 +239,9 @@ function (cc::BasicCompositeComponent)(
 )
     length(param_sets) == 0 && (param_sets = Tuple(repeat([(;)], length(components(cc)))))
     idx_param_values = [(decompose_basic_composite(k)..., v) for (k, v) in kwargs]
-    cc2 = BasicCompositeComponent(SchematicGraph(compname); coordtype=coordinatetype(cc))
+    ps = cc.graph.parameter_set
+    new_g = isnothing(ps) ? SchematicGraph(compname) : SchematicGraph(compname, ps)
+    cc2 = BasicCompositeComponent(new_g; coordtype=coordinatetype(cc))
     g2 = graph(cc2)
     add_graph!(g2, cc.graph; id_prefix="")
     for (idx, p) in enumerate(param_sets)

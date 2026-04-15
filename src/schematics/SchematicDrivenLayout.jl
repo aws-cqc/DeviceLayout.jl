@@ -30,9 +30,11 @@ import DeviceLayout:
     GeometryStructure,
     Hook,
     Meta,
+    ParameterSet,
     PointHook,
     Transformation,
     UPREFERRED
+import DeviceLayout: resolve, leaf_params
 import DeviceLayout:
     attach!,
     autofill!,
@@ -104,12 +106,14 @@ export @component,
     origin,
     parameters,
     parameter_names,
+    parameter_set,
     plan,
     position_dependent_replace!,
     rem_node!,
     replace_component!,
     route!,
     set_parameters
+export ParameterSet
 export ProcessTechnology, SimulationTarget, ArtworkTarget, SolidModelTarget
 export base_variant, flipchip!, map_metadata!, @composite_variant, @variant
 

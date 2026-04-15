@@ -628,6 +628,9 @@ export PolyText,
     referenced_characters_demo,
     scripted_demo
 
+include("parameter_set.jl")
+export ParameterSet
+
 include("schematics/SchematicDrivenLayout.jl")
 export SchematicDrivenLayout
 

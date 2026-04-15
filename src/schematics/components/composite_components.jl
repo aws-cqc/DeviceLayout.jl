@@ -273,7 +273,7 @@ function DeviceLayout.flatten(g::SchematicGraph; depth=-1)
 end
 
 function _flatten(g::SchematicGraph, depth)
-    g2 = SchematicGraph(g.name)
+    g2 = SchematicGraph(g)
     for (k, v) in g.namecounter
         g2.namecounter[k] = v
     end
