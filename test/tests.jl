@@ -1042,6 +1042,18 @@ end
             rm(path, force=true)
         end
 
+        # Round-trip test: out-of-range rotation is normalized to [0, 360)
+        let c = Cell("main", nm), c2 = Cell("sub", nm)
+            render!(c2, Rectangle(1μm, 1μm), GDSMeta(0))
+            c2ref = CellReference(c2, rot=540°)
+            push!(c.refs, c2ref)
+            path = joinpath(tdir, "test_normalize.gds")
+            save(path, c)
+            gds = load(path)
+            @test gds["main"].refs[1].rot == 180°
+            rm(path, force=true)
+        end
+
         # test we can recognize PROPATTR and PROPVALUE tags (though ignored)
         @test_logs (:info, r"PROPATTR: 0") match_mode = :any load(
             joinpath(@__DIR__, "propattr.gds");
