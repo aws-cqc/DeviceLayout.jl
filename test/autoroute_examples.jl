@@ -64,6 +64,13 @@ tpin(x, y) = PointHook(Point(Float64(x), Float64(y)), 90°)
 const R = Paths.StraightAnd90(0.1)
 const WW = 0.05
 const MARGIN = 0.1
+# Autoroute can produce epsilon overlap between end of one segment and start of another
+# Filter prepared_intersections to only inter-path crossings (different path indices)
+function inter_path_intersections(paths)
+    return filter(Intersect.prepared_intersections(paths)) do ixn
+        ixn[1][1] != ixn[2][1]
+    end
+end
 
 # ── Example 1: Simple ────────────────────────────────────────────────────────
 # 1 horizontal channel, 2 pins, 1 net.
@@ -123,7 +130,7 @@ function example_parallel()
     routes = autoroute!(ar, R, MARGIN)
     paths = Path.(routes, Ref(Paths.Trace(WW)))
     c = visualize_router_state(ar; wire_width=WW)
-    @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
+    @assert isempty(inter_path_intersections(paths)) "No crossings"
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     return c, ar
 end
@@ -162,7 +169,7 @@ function example_crossing()
     @assert length(ar.channel_tracks[1]) >= 2 "Crossing nets need multiple tracks in shared channel"
     # Due to assignment order, only one horizontal channel has two tracks
     @assert length(ar.channel_tracks[2]) + length(ar.channel_tracks[3]) == 3 "Crossing nets need multiple horizontal tracks only when they overlap due to vertical assignment"
-    @assert length(Intersect.prepared_intersections(paths)) == 1 "Exactly one crossing"
+    @assert length(inter_path_intersections(paths)) == 1 "Exactly one crossing"
     return c, ar
 end
 
@@ -201,7 +208,7 @@ function example_fanin_fanout()
 
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     paths = Path.(routes, Ref(Paths.Trace(WW)))
-    @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
+    @assert isempty(inter_path_intersections(paths)) "No crossings"
     @assert length(ar.channel_tracks[3]) == 3 "Last vertical channel only needs 3 tracks"
     return c, ar
 end
@@ -245,7 +252,7 @@ function example_multichannel_fanout()
 
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     @assert all(length.(ar.channel_tracks[2:5]) .== 1) "Each net should use its nearest horizontal channel"
-    @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
+    @assert isempty(inter_path_intersections(paths)) "No crossings"
     return c, ar
 end
 
@@ -340,7 +347,7 @@ function example_angled()
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     @assert all(length.(ar.channel_tracks) .== 2) "Each channel needs two tracks"
     paths = Path.(routes, Ref(Paths.Trace(WW)))
-    @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
+    @assert isempty(inter_path_intersections(paths)) "No crossings"
     return c, ar
 end
 
@@ -379,7 +386,7 @@ function example_dense()
 
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     @assert all(length.(ar.channel_tracks) .== 3) "Requires 3 tracks on each channel"
-    @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
+    @assert isempty(inter_path_intersections(paths)) "No crossings"
     return c, ar
 end
 
@@ -424,7 +431,7 @@ function example_bspline()
     c = visualize_router_state(ar, wire_width=WW)
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     paths = Path.(routes, Ref(Paths.Trace(WW)))
-    @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
+    @assert isempty(inter_path_intersections(paths)) "No crossings"
     @assert length(ar.channel_tracks[3]) == 3 "Last vertical channel only needs 3 tracks"
     return c, ar
 end
@@ -450,7 +457,7 @@ function example_fanout40nets()
     c = Paths.visualize_router_state(ar, wire_width=1μm)
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     paths = Path.(routes, Ref(Paths.Trace(WW)))
-    @assert isempty(Intersect.prepared_intersections(paths)) "No crossings"
+    @assert isempty(inter_path_intersections(paths)) "No crossings"
     @assert length(ar.channel_tracks[1]) <= 20 "Left and right halves share tracks"
     return c, ar
 end

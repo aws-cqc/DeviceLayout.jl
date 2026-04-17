@@ -156,7 +156,7 @@ function _route!(
                 sty;
                 waypoints
             )
-            push!(p, Node(resolve_offset(track_path_seg), sty))
+            push!(p, Node(resolve_offset(track_path_seg), sty), reconcile=false)
             p[end - 1].next = p[end]
             p[end].prev = p[end - 1]
             # Note `auto_curvature` BSpline uses curvature from end of previous segment
