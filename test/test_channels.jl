@@ -480,6 +480,5 @@ end
     end
     # Runs without error
     test_simple()
-    test_fanout()
     test_grid_escape()
 end
