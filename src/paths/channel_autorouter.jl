@@ -273,8 +273,7 @@ function segment_direction(ar::ChannelRouter, ws::TrackWireSegment, s)
 end
 
 """
-    autoroute!(ar::ChannelRouter, transition_rule; net_indices=eachindex(ar.net_pins),
-        fixed_channel_paths::Dict{Int,Vector{Int}}=Dict())
+    autoroute!(ar::ChannelRouter, transition_rule, margin; net_indices, fixed_channel_paths, verbose)
 
 Perform channel and track assigment, then make routes.
 
@@ -282,19 +281,37 @@ Routes only the nets in `net_indices`. If the net is already routed, it is reset
 for a net can be specified in `fixed_channel_paths` by the indices of the channels the route
 takes. For example, `fixed_channel_paths=Dict(1 => [2, 4, 1, 5])` will force net 1 to be
 routed from its source pin, through channels 2, 4, 1, 5 in order, then to its destination pin.
+
+If `verbose=true`, prints a summary of routing results including net count and track usage.
 """
 function autoroute!(
     ar::ChannelRouter,
     transition_rule,
     margin;
     net_indices=eachindex(ar.net_pins),
-    fixed_channel_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}()
+    fixed_channel_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}(),
+    verbose=false
 )
     reset_nets!(ar, net_indices=net_indices)
     assign_channels!(ar; net_indices=net_indices, fixed_paths=fixed_channel_paths)
     assign_tracks!(ar)
     rule = AutoChannelRouting(ar, transition_rule, margin)
     routes = make_routes!(ar, rule)
+
+    if verbose
+        n_routed = count(!isempty, ar.net_wires[collect(net_indices)])
+        n_total = length(net_indices)
+        max_tracks = maximum(num_tracks(ar, ch) for ch in 1:num_channels(ar))
+        @info "Autorouting complete" nets_routed=n_routed nets_total=n_total max_tracks_per_channel=max_tracks
+        for idx in net_indices
+            for (seg_i, ws) in enumerate(net_wire(ar, idx))
+                if isnothing(segment_track(ar, ws))
+                    @warn "Net $idx segment $seg_i: no track assigned" channel=running_channel(ws)
+                end
+            end
+        end
+    end
+
     return routes
 end
 
@@ -497,9 +514,24 @@ function _update_with_plan!(rule::AutoChannelRouting{T}, route_node, sch) where 
     push!(rule.router.pins, hooks(route_node.component).p0)
     push!(rule.router.pins, hooks(route_node.component).p1)
     push!(rule.router.net_pins, (pin_idx, pin_idx + 1))
+    push!(rule.router.net_wires, NetWire())
     # If all paths have been added, go ahead and run autorouting
     if length(rule.router.net_pins) == length(rule.router.net_paths)
-        build_channel_graph(rule.router.pins, getproperty.(rule.router.channels, :path), T)
+        g, ixns = build_channel_graph(
+            rule.router.pins,
+            getproperty.(rule.router.channels, :path),
+            T
+        )
+        # Populate the router's graph and intersection dict in-place
+        # (ChannelRouter is immutable, but its mutable fields can be mutated)
+        ar_g = rule.router.channel_graph
+        for _ in 1:(nv(g) - nv(ar_g))
+            add_vertex!(ar_g)
+        end
+        for e in edges(g)
+            add_edge!(ar_g, e.src, e.dst)
+        end
+        merge!(rule.router.channel_intersections, ixns)
         assign_channels!(rule.router)
         assign_tracks!(rule.router)
     end

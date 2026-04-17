@@ -12,6 +12,7 @@ import Graphs:
     nv,
     ne,
     add_edge!,
+    add_vertex!,
     rem_edge!,
     adjacency_matrix,
     edges,
@@ -785,5 +786,29 @@ function reset_nets!(ar; net_indices=eachindex(ar.net_pins), reset_tracks=true)
             _delete_segment!(ar, ws, reset_tracks=reset_tracks, from_net=false)
         end
         empty!(segs)
+    end
+end
+
+# ──── Diagnostics ────────────────────────────────────────────────────────────
+
+"""
+    routing_summary(ar::AbstractChannelProblem)
+
+Print a per-net summary of routing results: pin pair, channel path, and track assignments.
+
+Segments with unassigned tracks are flagged.
+"""
+function routing_summary(ar::AbstractChannelProblem)
+    for idx = 1:num_nets(ar)
+        wire = net_wire(ar, idx)
+        pins = net_pins(ar, idx)
+        channels_used = [running_channel(ws) for ws in wire]
+        tracks = [segment_track(ar, ws) for ws in wire]
+        has_unassigned = any(isnothing, tracks)
+        println(
+            "Net $idx: pins $(pins[1])→$(pins[2]), $(length(wire)) segments, " *
+            "channels $channels_used, tracks $tracks" *
+            (has_unassigned ? " [UNASSIGNED TRACKS]" : "")
+        )
     end
 end
