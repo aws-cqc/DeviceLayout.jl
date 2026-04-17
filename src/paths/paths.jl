@@ -814,6 +814,7 @@ include("segments/bspline_optimization.jl")
 
 include("routes.jl")
 
+include("channel_routing_core.jl")
 include("channels.jl")
 include("channel_autorouter.jl")
 
