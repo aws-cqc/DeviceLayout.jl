@@ -1,4 +1,4 @@
-using DeviceLayout
+using DeviceLayout, .PreferredUnits
 using FileIO
 
 import .Paths:
@@ -255,7 +255,7 @@ end
 #
 #            v1   v2   v3   v4
 #             |    |    |    |
-#   p5 →  ════╪════╪════╪════╪════  ← p6   h4 (y=9)
+#   p5 →  ════╪════╪════╪════╪════  ← p6    h4 (y=9)
 #             |    |    |    |
 #         ════╪════╪════╪════╪════          h3 (y=6)
 #             |    |    |    |
@@ -486,13 +486,13 @@ function run_all_examples(; save_gds=true, save_png=true)
     end
     if save_gds
         for (name, (c, _)) in results
-            save("autoroute_$name.gds", c; spec_warnings=false)
+            save("autoroute_$(name).gds", c; spec_warnings=false)
         end
         @info "Saved $(length(results)) GDS files"
     end
     if save_png
         for (name, (c, _)) in results
-            save("autoroute_$name.png", c; spec_warnings=false)
+            save("autoroute_$(name).png", c; spec_warnings=false)
         end
         @info "Saved $(length(results)) PNG files"
     end

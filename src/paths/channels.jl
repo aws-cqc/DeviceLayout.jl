@@ -74,27 +74,6 @@ function track_path_segment(n_tracks, channel_section, track_idx; reversed=false
     )
 end
 
-# Offset coordinate or function for the section of track with given width
-function track_section_offset(
-    n_tracks,
-    section_width::Coordinate,
-    track_idx;
-    reversed=false
-)
-    # (spacing) * number of tracks away from middle track
-    sgn = reversed ? -1 : 1
-    spacing = section_width / (n_tracks + 1)
-    return sgn * spacing * ((1 + n_tracks) / 2 - track_idx)
-end
-
-function track_section_offset(n_tracks, section_width::Function, track_idx; reversed=false)
-    # (spacing) * number of tracks away from middle track
-    return t ->
-        (reversed ? -1 : 1) *
-        (section_width(t) / (n_tracks + 1)) *
-        ((1 + n_tracks) / 2 - track_idx)
-end
-
 reverse(n::Node) = Paths.Node(reverse(n.seg), reverse(n.sty, pathlength(n.seg)))
 ######## Methods required to use segments and styles as RouteChannels
 function reverse(b::BSpline{T}) where {T}
