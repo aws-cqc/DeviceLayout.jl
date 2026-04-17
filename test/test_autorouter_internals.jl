@@ -162,4 +162,65 @@
         # No channel should need more than 1 track (non-crossing parallel routes)
         @test all(length.(ar.channel_tracks) .<= 1)
     end
+
+    # ── routing_summary ──────────────────────────────────────────────────────
+    @testset "routing_summary" begin
+        channels = [vchannel(5, -1, 7), hchannel(-1, 9, 0), hchannel(-1, 9, 6)]
+        hooks = [bpin(2, -0.5), bpin(8, -0.5), tpin(2, 6.5), tpin(8, 6.5)]
+        ar = ChannelRouter([(1, 4), (2, 3)], hooks, RouteChannel.(channels))
+        autoroute!(ar, Paths.StraightAnd90(0.1), 0.1)
+
+        output = sprint(Paths.routing_summary, ar)
+        @test occursin("Net 1:", output)
+        @test occursin("Net 2:", output)
+        @test !occursin("UNASSIGNED", output)
+    end
+
+    # ── validate_routes ──────────────────────────────────────────────────────
+    @testset "validate_routes" begin
+        channels = [vchannel(5, -1, 7), hchannel(-1, 9, 0), hchannel(-1, 9, 6)]
+        hooks = [bpin(2, -0.5), bpin(8, -0.5), tpin(2, 6.5), tpin(8, 6.5)]
+        ar = ChannelRouter([(1, 4), (2, 3)], hooks, RouteChannel.(channels))
+        autoroute!(ar, Paths.StraightAnd90(0.1), 0.1)
+
+        ok = Paths.validate_routes(ar, Paths.Trace(0.05))
+        @test ok isa BitVector
+        @test length(ok) == 2
+        @test all(ok)
+    end
+
+    # ── verbose autoroute! ───────────────────────────────────────────────────
+    @testset "verbose autoroute!" begin
+        channels = [hchannel(0, 10, 0)]
+        hooks = [bpin(2, -0.5), tpin(8, 0.5)]
+        ar = ChannelRouter([(1, 2)], hooks, RouteChannel.(channels))
+
+        # verbose=true should not error and should produce log output
+        routes = autoroute!(ar, Paths.StraightAnd90(0.1), 0.1; verbose=true)
+        @test length(routes) == 1
+        @test all(length.(ar.net_wires) .> 0)
+    end
+
+    # ── reroute_nets! ────────────────────────────────────────────────────────
+    @testset "reroute_nets!" begin
+        channels = [vchannel(5, -1, 7), hchannel(-1, 9, 0), hchannel(-1, 9, 6)]
+        hooks = [bpin(2, -0.5), bpin(8, -0.5), tpin(2, 6.5), tpin(8, 6.5)]
+        ar = ChannelRouter([(1, 4), (2, 3)], hooks, RouteChannel.(channels))
+        autoroute!(ar, Paths.StraightAnd90(0.1), 0.1)
+
+        # Record original track assignments
+        orig_tracks_net1 = [Paths.segment_track(ar, ws) for ws in Paths.net_wire(ar, 1)]
+        @test all(!isnothing, orig_tracks_net1)
+
+        # Reroute net 1 with a fixed channel path
+        affected = Paths.reroute_nets!(ar, [1]; fixed_paths=Dict(1 => [2, 1, 3]))
+        @test 1 in affected
+        @test 2 in affected  # net 2 shares all channels with net 1
+
+        # Net 1 should still be routed
+        @test length(Paths.net_wire(ar, 1)) > 0
+        # Track assignments should still be valid
+        new_tracks_net1 = [Paths.segment_track(ar, ws) for ws in Paths.net_wire(ar, 1)]
+        @test all(!isnothing, new_tracks_net1)
+    end
 end

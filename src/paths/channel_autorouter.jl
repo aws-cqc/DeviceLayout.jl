@@ -292,9 +292,7 @@ function autoroute!(
     fixed_channel_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}(),
     verbose=false
 )
-    reset_nets!(ar, net_indices=net_indices)
-    assign_channels!(ar; net_indices=net_indices, fixed_paths=fixed_channel_paths)
-    assign_tracks!(ar)
+    affected_nets = reroute_nets!(ar, net_indices; fixed_paths=fixed_channel_paths)
     rule = AutoChannelRouting(ar, transition_rule, margin)
     routes = make_routes!(ar, rule)
 
@@ -352,6 +350,27 @@ function make_routes!(ar::ChannelRouter{T}, rule) where {T}
         push!(ar.net_routes, rt)
     end
     return ar.net_routes
+end
+
+"""
+    validate_routes(ar::ChannelRouter{T}, sty; atol=onenanometer(T)) where {T}
+
+Construct `Path` objects from the router's `Route`s and check whether each one
+reaches its destination point and angle.
+
+Returns a `BitVector` of length `num_nets(ar)` where `true` means the route
+produced valid geometry.  When a route fails, the corresponding `@error` from
+`route!()` is still emitted to the logging system.
+"""
+function validate_routes(ar::ChannelRouter{T}, sty; atol=DeviceLayout.onenanometer(T)) where {T}
+    success = trues(num_nets(ar))
+    for (idx, rt) in enumerate(ar.net_routes)
+        pa = Path(rt.p0, α0=rt.α0)
+        ok = route!(pa, rt.p1, rt.α1, rt.rule, sty;
+                     waypoints=rt.waypoints, waydirs=rt.waydirs, atol=atol)
+        success[idx] = something(ok, false) # route! currently returns nothing on failure
+    end
+    return success
 end
 
 ######## Visualization

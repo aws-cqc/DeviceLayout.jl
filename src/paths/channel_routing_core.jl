@@ -471,7 +471,10 @@ end
 """
     assign_tracks!(ar::AbstractChannelProblem)
 
-Performs track assigment for `ar`.
+Performs track assignment for all channels in `ar`.
+
+Track assignment operates on **all** channels, not a subset. Re-running after modifying
+a single net will reassign tracks globally in every channel that contains wire segments.
 """
 function assign_tracks!(ar::AbstractChannelProblem)
     # Order of channels will change results
@@ -775,8 +778,10 @@ end
 
 Resets the nets with `net_indices` to their unrouted state.
 
-If `reset_tracks` is `true`, then all channels used by nets being reset will also have their
-track assignments removed.
+If `reset_tracks` is `true` (the default), then **all** track assignments in every channel
+that contained a deleted segment are cleared — not just the tracks for the deleted nets.
+This affects other nets sharing those channels. This is intentional: track assignment must be
+globally consistent within a channel.
 """
 function reset_nets!(ar; net_indices=eachindex(ar.net_pins), reset_tracks=true)
     for segs in net_wire.(ar, net_indices)
@@ -789,26 +794,59 @@ function reset_nets!(ar; net_indices=eachindex(ar.net_pins), reset_tracks=true)
     end
 end
 
+"""
+    reroute_nets!(ar::AbstractChannelProblem, net_indices; fixed_paths=Dict{Int,Vector{Int}}())
+
+Reset and re-route specific nets, then reassign tracks globally.
+
+Returns the set of all net indices affected by the track reassignment (i.e., nets that
+shared a channel with any re-routed net). This set always includes `net_indices` and may
+include additional nets whose track assignments changed as a side effect.
+
+See also [`reset_nets!`](@ref), [`assign_channels!`](@ref), [`assign_tracks!`](@ref).
+"""
+function reroute_nets!(
+    ar::AbstractChannelProblem,
+    net_indices;
+    fixed_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}()
+)
+    # Identify all nets sharing channels with the target nets (for caller awareness)
+    affected_nets = Set{Int}(net_indices)
+    for idx in net_indices
+        for ws in net_wire(ar, idx)
+            for other_ws in channel_segments(ar, running_channel(ws))
+                push!(affected_nets, net_index(other_ws))
+            end
+        end
+    end
+
+    reset_nets!(ar; net_indices=net_indices, reset_tracks=true)
+    assign_channels!(ar; net_indices=net_indices, fixed_paths)
+    assign_tracks!(ar)
+    return affected_nets
+end
+
 # ──── Diagnostics ────────────────────────────────────────────────────────────
 
 """
-    routing_summary(ar::AbstractChannelProblem)
+    routing_summary([io::IO,] ar::AbstractChannelProblem)
 
 Print a per-net summary of routing results: pin pair, channel path, and track assignments.
 
 Segments with unassigned tracks are flagged.
 """
-function routing_summary(ar::AbstractChannelProblem)
+function routing_summary(io::IO, ar::AbstractChannelProblem)
     for idx = 1:num_nets(ar)
         wire = net_wire(ar, idx)
         pins = net_pins(ar, idx)
         channels_used = [running_channel(ws) for ws in wire]
         tracks = [segment_track(ar, ws) for ws in wire]
         has_unassigned = any(isnothing, tracks)
-        println(
+        println(io,
             "Net $idx: pins $(pins[1])→$(pins[2]), $(length(wire)) segments, " *
             "channels $channels_used, tracks $tracks" *
             (has_unassigned ? " [UNASSIGNED TRACKS]" : "")
         )
     end
 end
+routing_summary(ar::AbstractChannelProblem) = routing_summary(stdout, ar)
