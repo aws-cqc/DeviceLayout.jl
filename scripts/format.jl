@@ -1,5 +1,8 @@
 # Usage: julia format.jl <action>
 using Pkg
+# Use fresh temp env to ensure that JuliaFormatter version run locally
+# is the same as that being run by CI pipeline
+Pkg.activate(; temp=true)
 Pkg.add(name="JuliaFormatter", version="1")
 using JuliaFormatter
 # Directories to format (recursive); paths relative to repo root
