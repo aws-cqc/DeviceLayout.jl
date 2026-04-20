@@ -1707,12 +1707,12 @@ function _add_curve!(endpoints, seg::Paths.Turn, k::OpenCascade, z; kwargs...)
     try
         return k.add_circle_arc(endpoints[1], cen, endpoints[2], -1)
     catch e
-        # Arc too small or degenerate for GMSH — fall back to straight line.
-        # This typically happens with fillet arcs at nearly-tangent corners
-        # where the sagitta is below GMSH's internal tolerance.
-        @debug "addCircleArc failed, falling back to line" p0 = seg.p0 r = seg.r α = seg.α α0 =
-            seg.α0
-        return k.add_line(endpoints[1], endpoints[2])
+        if e isa ErrorException && contains(e.msg, "Could not create circle arc")
+            @debug "addCircleArc failed, falling back to line" p0 = seg.p0 r = seg.r α =
+                seg.α α0 = seg.α0
+            return k.add_line(endpoints[1], endpoints[2])
+        end
+        rethrow()
     end
 end
 
