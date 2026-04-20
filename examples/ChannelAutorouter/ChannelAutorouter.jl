@@ -1,3 +1,11 @@
+"""
+Channel autorouter examples demonstrating various routing scenarios.
+
+Each `example_*` function returns `(cell::Cell, router::ChannelRouter)`.
+`run_all_examples()` runs all examples and optionally saves GDS/PNG output.
+"""
+module ChannelAutorouter
+
 using DeviceLayout, .PreferredUnits
 using FileIO
 
@@ -213,7 +221,7 @@ function example_fanin_fanout()
     return c, ar
 end
 
-# ── Example 5: Fan-out ───────────────────────────────────────────────────────
+# ── Example 5: Multichannel fan-out ──────────────────────────────────────────
 # Left pins clustered (simulating component outputs), right pins spread out.
 # 2 vertical + 4 horizontal channels.
 #
@@ -390,15 +398,10 @@ function example_dense()
     return c, ar
 end
 
-# ── Example 9: Fan-in/fan-out with B-splines ──────────────────────────────────
-# Left and right pins spread out, must fan in/out asymmetrically to horizontal channel
-# 2 quasi-vertical + 1 quasi-horizontal channels.
-#
-#            v_left                    v_right
-#  p4 → (-0.5, 6)  ║                    ║  (10.5, 9) ← p8   h4 (y=9)
-#  p3 → (-0.5, 5)  ║════════════════════║  (10.5, 6) ← p7   h3 (y=6)
-#  p2 → (-0.5, 4)  ║                    ║  (10.5, 3) ← p6   h2 (y=3)
-#  p1 → (-0.5, 3)  ║                    ║  (10.5, 0) ← p5   h1 (y=0)
+# ── Example 9: B-spline channels ─────────────────────────────────────────────
+# Curved channels using B-spline geometry. Same fan-in/fan-out topology as
+# example 4 but with non-straight channels and BSplineRouting transitions.
+
 function example_bspline()
     channels = [
         bchannel(0, -2, 30°, 1, 12),     # v_left
@@ -436,9 +439,10 @@ function example_bspline()
     return c, ar
 end
 
-# ── Example 9: Fan-out with 40 nets ──────────────────────────────────
-# 40 nets must fan out with a ratio of 2
-function example_fanout40nets()
+# ── Example 10: 40-net fan-out ───────────────────────────────────────────────
+# 40 nets fan out through a single wide channel from inner to outer pin rows.
+
+function example_fanout40()
     lx_outer = ly_outer = 10e6nm
     lx_inner = ly_inner = 5e6nm
 
@@ -462,46 +466,40 @@ function example_fanout40nets()
     return c, ar
 end
 
-# ── Example 10: Schematic integration ────────────────────────────────────────
-# TODO: AutoChannelRouting with schematic workflow.
-# Requires components with hooks, route! calls, and schematic compilation.
-# Placeholder for now.
-
-# function example_schematic()
-#     ...
-# end
-
 # ── Assembly ─────────────────────────────────────────────────────────────────
 
-function run_all_examples(; save_gds=true, save_png=true)
-    examples = [
-        "simple" => example_simple,
-        "parallel" => example_parallel,
-        "crossing" => example_crossing,
-        "fanin_fanout" => example_fanin_fanout,
-        "multichannel_fanout" => example_multichannel_fanout,
-        "grid" => example_grid,
-        "angled" => example_angled,
-        "dense" => example_dense,
-        "bspline" => example_bspline,
-        "fanout40" => example_fanout40nets
-    ]
+const ALL_EXAMPLES = [
+    "simple" => example_simple,
+    "parallel" => example_parallel,
+    "crossing" => example_crossing,
+    "fanin_fanout" => example_fanin_fanout,
+    "multichannel_fanout" => example_multichannel_fanout,
+    "grid" => example_grid,
+    "angled" => example_angled,
+    "dense" => example_dense,
+    "bspline" => example_bspline,
+    "fanout40" => example_fanout40
+]
+
+function run_all_examples(; save_gds=true, save_png=true, dir=@__DIR__)
     results = Pair{String, Tuple{Cell, ChannelRouter}}[]
-    for (name, fn) in examples
+    for (name, fn) in ALL_EXAMPLES
         @info "Running $name..."
         push!(results, name => fn())
     end
     if save_gds
         for (name, (c, _)) in results
-            save("autoroute_$(name).gds", c; spec_warnings=false)
+            save(joinpath(dir, "autoroute_$(name).gds"), c; spec_warnings=false)
         end
         @info "Saved $(length(results)) GDS files"
     end
     if save_png
         for (name, (c, _)) in results
-            save("autoroute_$(name).png", c; spec_warnings=false)
+            save(joinpath(dir, "autoroute_$(name).png"), c; spec_warnings=false)
         end
         @info "Saved $(length(results)) PNG files"
     end
     return results
 end
+
+end # module
