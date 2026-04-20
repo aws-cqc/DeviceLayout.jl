@@ -567,9 +567,6 @@ function rounded_corner_segment_line_arc(
     # When the fillet sweep angle is tiny, the arc sagitta
     # (r·(1 - cos(dα/2))) is sub-nanometer — GMSH can't distinguish it from
     # a line and rejects it. Skip rounding this corner.
-    # TODO: instead of skipping, fall through to line-line rounding
-    # (rounded_corner_segment) by treating the arc edge as a straight line.
-    # This requires restructuring the caller (round_to_curvilinearpolygon).
     abs(dα) < min_angle && return nothing
 
     # Tangent direction at start: perpendicular to radius, rotated by sweep direction

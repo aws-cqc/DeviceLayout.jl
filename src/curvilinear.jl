@@ -939,9 +939,6 @@ function rounded_corner_line_arc(
 
     # When the fillet sweep angle is tiny, the arc is indistinguishable from
     # a line — skip rounding this corner.
-    # TODO: instead of skipping, fall through to line-line rounding
-    # (rounded_corner) by treating the arc edge as a straight line.
-    # This requires restructuring the caller (to_polygons for CurvilinearPolygon).
     dα =
         arc_is_outgoing ? rem2pi(α_T_arc - α_T_line, RoundNearest) :
         rem2pi(α_T_line - α_T_arc, RoundNearest)

@@ -717,8 +717,6 @@ end
 
     # Polygon with a tiny-angle Turn rendered into a SolidModel.
     # GMSH rejects arcs with very small sweep angles; the fix falls back to a line.
-    # TODO: instead of skipping, fall through to line-line rounding
-    # (rounded_corner) by treating the arc edge as a straight line.
     tiny_arc = Paths.Turn(2.0°, 175.0μm; p0=Point(0.0μm, 0.0μm), α0=0.0°)
     tiny_end = Paths.p1(tiny_arc)
     margin = 20.0μm
