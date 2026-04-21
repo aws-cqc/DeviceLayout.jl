@@ -539,7 +539,11 @@ function rounded_corner_segment_line_arc(
     T_line = p_line + t_proj * v_line
 
     # Tangent point on arc: point on arc in direction of fillet center
-    cf_dir = (C_f - O) / norm(C_f - O)
+    # When C_f ≈ O (fillet_r ≈ arc_r), the direction is undefined
+    # and the fillet geometry is degenerate — skip rounding this corner.
+    norm_cf_o = norm(C_f - O)
+    norm_cf_o < atol && return nothing
+    cf_dir = (C_f - O) / norm_cf_o
     T_arc_pt = O + R * cf_dir
 
     # Construct fillet Turn segment
@@ -548,12 +552,22 @@ function rounded_corner_segment_line_arc(
     #   arc_is_outgoing=false: ...arc → T_arc → [fillet] → T_line → line...
     start_pt, end_pt = arc_is_outgoing ? (T_line, T_arc_pt) : (T_arc_pt, T_line)
 
-    d_start = (start_pt - C_f) / norm(start_pt - C_f)
-    d_end = (end_pt - C_f) / norm(end_pt - C_f)
+    # When tangent points coincide with C_f (fillet_r < atol),
+    # the direction vectors are undefined — skip rounding this corner.
+    norm_start = norm(start_pt - C_f)
+    norm_end = norm(end_pt - C_f)
+    (norm_start < atol || norm_end < atol) && return nothing
+    d_start = (start_pt - C_f) / norm_start
+    d_end = (end_pt - C_f) / norm_end
 
     cross_val = d_start.x * d_end.y - d_start.y * d_end.x
     dot_val = d_start.x * d_end.x + d_start.y * d_end.y
     dα = atan(cross_val, dot_val)
+
+    # When the fillet sweep angle is tiny, the arc sagitta
+    # (r·(1 - cos(dα/2))) is sub-nanometer — GMSH can't distinguish it from
+    # a line and rejects it. Skip rounding this corner.
+    abs(dα) < min_angle && return nothing
 
     # Tangent direction at start: perpendicular to radius, rotated by sweep direction
     angle_start = atan(d_start.y, d_start.x)
@@ -1690,7 +1704,16 @@ function _add_curve!(endpoints, seg::Paths.Turn, k::OpenCascade, z; kwargs...)
         return k.add_circle_arc.(tags[1:(end - 1)], cen, tags[2:end], -1)
     end
 
-    return k.add_circle_arc(endpoints[1], cen, endpoints[2], -1)
+    try
+        return k.add_circle_arc(endpoints[1], cen, endpoints[2], -1)
+    catch e
+        if e isa ErrorException && contains(e.msg, "Could not create circle arc")
+            @debug "addCircleArc failed, falling back to line" p0 = seg.p0 r = seg.r α =
+                seg.α α0 = seg.α0
+            return k.add_line(endpoints[1], endpoints[2])
+        end
+        rethrow()
+    end
 end
 
 # Exact *interpolating* cubic BSpline in OCC

@@ -915,15 +915,36 @@ function rounded_corner_line_arc(
     T_line = p_line + t_proj * v_line
 
     # Tangent point on arc: point on the arc in the direction of the fillet center
-    cf_dir = (C_f - O) / norm(C_f - O)
+    # When C_f ≈ O (fillet_r ≈ arc_r), the direction is undefined
+    # and the fillet geometry is degenerate — skip rounding this corner.
+    norm_cf_o = norm(C_f - O)
+    if norm_cf_o < atol
+        return (; points=[p_corner], T_arc=nothing)
+    end
+    cf_dir = (C_f - O) / norm_cf_o
     T_arc = O + R * cf_dir
 
     ## Fillet arc angles
     # The fillet arc must follow the polygon winding order:
     #   arc_is_outgoing=true:  polygon goes ...line → T_line → [fillet] → T_arc → arc...
     #   arc_is_outgoing=false: polygon goes ...arc → T_arc → [fillet] → T_line → line...
+
+    # When tangent points coincide with C_f (fillet_r < atol),
+    # the direction vectors are undefined — skip rounding this corner.
+    if norm(T_line - C_f) < atol || norm(T_arc - C_f) < atol
+        return (; points=[p_corner], T_arc=nothing)
+    end
     α_T_line = atan((T_line - C_f).y, (T_line - C_f).x)
     α_T_arc = atan((T_arc - C_f).y, (T_arc - C_f).x)
+
+    # When the fillet sweep angle is tiny, the arc is indistinguishable from
+    # a line — skip rounding this corner.
+    dα =
+        arc_is_outgoing ? rem2pi(α_T_arc - α_T_line, RoundNearest) :
+        rem2pi(α_T_line - α_T_arc, RoundNearest)
+    if abs(dα) < min_angle
+        return (; points=[p_corner], T_arc=nothing)
+    end
 
     fillet_pts = if arc_is_outgoing
         DeviceLayout.circular_arc([α_T_line, α_T_arc], r, atol, center=C_f)

@@ -686,3 +686,56 @@ end
     @test horseshoe_sm isa CurvilinearPolygon
     @test length(horseshoe_sm.curves) > length(horseshoe.curves)
 end
+
+@testitem "Degenerate line-arc fillet" setup = [CommonTestSetup] begin
+    using LinearAlgebra
+    using DeviceLayout.SolidModels
+
+    # CurvilinearPolygon with a nearly-tangent line-arc corner.
+    # When fillet_r ≈ arc_r, the fillet center C_f coincides with the arc
+    # center O, producing NaN from (C_f - O) / norm(C_f - O).
+    R = 150.0μm
+    δ = 0.002  # rad, just above min_angle (1e-3)
+    fillet_r = R * cos(δ)
+
+    arc = Paths.Turn(90.0°, R; p0=Point(0.0μm, 0.0μm), α0=(rad2deg(δ))°)
+    arc_end = Paths.p1(arc)
+    top_y = max(arc_end.y, Paths.curvaturecenter(arc).y) + 200.0μm
+    poly = CurvilinearPolygon(
+        [
+            Point(-500.0μm, 0.0μm),
+            Point(0.0μm, 0.0μm),
+            arc_end,
+            Point(arc_end.x, top_y),
+            Point(-500.0μm, top_y)
+        ],
+        [arc],
+        [2]
+    )
+
+    @test_nowarn to_polygons(poly, Rounded(fillet_r))
+
+    # Polygon with a tiny-angle Turn rendered into a SolidModel.
+    # GMSH rejects arcs with very small sweep angles; the fix falls back to a line.
+    tiny_arc = Paths.Turn(2.0°, 175.0μm; p0=Point(0.0μm, 0.0μm), α0=0.0°)
+    tiny_end = Paths.p1(tiny_arc)
+    margin = 20.0μm
+    tiny_poly = CurvilinearPolygon(
+        [
+            Point(-margin, -margin),
+            Point(0.0μm, -margin),
+            Point(0.0μm, 0.0μm),
+            tiny_end,
+            Point(tiny_end.x, tiny_end.y + margin),
+            Point(-margin, tiny_end.y + margin)
+        ],
+        [tiny_arc],
+        [3]
+    )
+
+    sm = SolidModel("tiny_arc_test"; overwrite=true)
+    SolidModels.gmsh.option.setNumber("General.Verbosity", 0)
+    cs_sm = CoordinateSystem("tiny_arc_sm", nm)
+    place!(cs_sm, tiny_poly, GDSMeta(0, 0))
+    @test_nowarn render!(sm, cs_sm)
+end
