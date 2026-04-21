@@ -71,7 +71,8 @@ makedocs(
         "Examples" => [
             "ExamplePDK" => "examples/examplepdk.md",
             "Quantum Processor" => "examples/qpu17.md",
-            "Single-Transmon Simulation" => "examples/singletransmon.md"
+            "Single-Transmon Simulation" => "examples/singletransmon.md",
+            "Channel Autorouter" => "examples/autorouter.md"
         ],
         "Reference" => [
             "Overview" => "reference/index.md",

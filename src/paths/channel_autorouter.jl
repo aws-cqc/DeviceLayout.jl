@@ -34,10 +34,7 @@ struct ChannelRouter{T <: Coordinate} <: AbstractChannelProblem{T}
     channel_segments::Vector{Vector{TrackWireSegment}}
     # Vector of vectors of all tracks in each channel [where each track is a vector of wire segments]
     channel_tracks::Vector{Vector{Track}}
-    # Waypoints for each segment (used for visualizing router state)
-    segment_waypoints::Dict{TrackWireSegment, PointHook{T}}
     net_routes::Vector{Route{T}}
-    net_paths::Vector{Path{T}}        # [Internals] Persistent path objects to populate after routing
 end
 
 """
@@ -52,7 +49,6 @@ function ChannelRouter(nets, pin_hooks::Vector{<:Hook}, channels::Vector{<:Route
     net_wires = [NetWire() for i in eachindex(nets)]
     channel_segments = [TrackWireSegment[] for i in eachindex(channels)]
     channel_tracks = [Track[] for i in eachindex(channels)]
-    segment_waypoints = Dict{TrackWireSegment, PointHook{T}}()
     pins = [PointHook{T}(pin.p, pin.in_direction + 180°) for pin in pin_hooks]
     # Build channel graphs with full paths to avoid compound operations
     channel_paths = [ch.path for ch in channels]
@@ -66,16 +62,13 @@ function ChannelRouter(nets, pin_hooks::Vector{<:Hook}, channels::Vector{<:Route
         ixns,
         channel_segments,
         channel_tracks,
-        segment_waypoints,
-        Route{T}[],
-        [Path{T}() for net in nets]
+        Route{T}[]
     )
 end
 
 function ChannelRouter(channels::Vector{RouteChannel{T}}) where {T}
     channel_segments = [TrackWireSegment[] for i in eachindex(channels)]
     channel_tracks = [Track[] for i in eachindex(channels)]
-    segment_waypoints = Dict{TrackWireSegment, PointHook{T}}()
     return ChannelRouter{T}(
         SimpleGraph(),
         Tuple{Int, Int}[],
@@ -85,9 +78,7 @@ function ChannelRouter(channels::Vector{RouteChannel{T}}) where {T}
         Dict{Tuple{Int, Int}, IntersectionInfo{T}}(),
         channel_segments,
         channel_tracks,
-        segment_waypoints,
-        Route{T}[],
-        Path{T}[]
+        Route{T}[]
     )
 end
 
@@ -142,8 +133,6 @@ function direction_at_intersection(ar::ChannelRouter, running_channel, intersect
     angle_unitful = running_channel < intersecting_channel ? ixn_info[3] : ixn_info[4]
     return rem2pi(uconvert(NoUnits, angle_unitful), RoundNearest)
 end
-
-segment_waypoint(ar::ChannelRouter, ws::TrackWireSegment) = ar.segment_waypoints[ws]
 
 function segment_offset(
     ar::ChannelRouter{T},
@@ -255,7 +244,6 @@ function print_segments(ar::ChannelRouter, net)
     Segment $i:
         Runs along Channel $(running_channel(ws)), Track $(segment_track(ar, ws))
         From $(channel_names[1]) to $(channel_names[2])
-        Through waypoint $(segment_waypoint(ar, ws)[1]) at $(segment_waypoint(ar, ws)[2])
     """
         )
     end
@@ -311,27 +299,6 @@ function autoroute!(
     end
 
     return routes
-end
-
-######## Modification
-
-"""
-    set_waypoint!(ar::ChannelRouter, net_idx, seg_idx, new_point)
-    set_waypoint!(ar::ChannelRouter, net_idx, seg_idx, new_point, new_direction)
-
-Sets the waypoint for the segment at `seg_idx` in net `net_idx` to `new_point`.
-
-A `new_direction` can also be specified for advanced usage.
-"""
-function set_waypoint!(
-    ar::ChannelRouter,
-    net_idx,
-    seg_idx,
-    new_point,
-    dir=segment_waypoints(ar, net_wire(ar, net_idx)[seg_idx])[2]
-)
-    ws = net_wire(ar, net_idx)[seg_idx]
-    return ar.segment_waypoints[ws] = (new_point, dir)
 end
 
 ######## Route construction
@@ -522,36 +489,4 @@ function channels_taken(ar::ChannelRouter, pa::Path)
         ar.pins[first.(ar.net_pins)]
     )
     return [running_channel(wireseg) for wireseg in net_wire(ar, net_idx)]
-end
-
-function _update_with_graph!(rule::AutoChannelRouting, route_node, graph; kwargs...)
-    return push!(rule.router.net_paths, route_node.component._path)
-end
-
-function _update_with_plan!(rule::AutoChannelRouting{T}, route_node, sch) where {T}
-    pin_idx = length(rule.router.pins) + 1
-    push!(rule.router.pins, hooks(route_node.component).p0)
-    push!(rule.router.pins, hooks(route_node.component).p1)
-    push!(rule.router.net_pins, (pin_idx, pin_idx + 1))
-    push!(rule.router.net_wires, NetWire())
-    # If all paths have been added, go ahead and run autorouting
-    if length(rule.router.net_pins) == length(rule.router.net_paths)
-        g, ixns = build_channel_graph(
-            rule.router.pins,
-            getproperty.(rule.router.channels, :path),
-            T
-        )
-        # Populate the router's graph and intersection dict in-place
-        # (ChannelRouter is immutable, but its mutable fields can be mutated)
-        ar_g = rule.router.channel_graph
-        for _ in 1:(nv(g) - nv(ar_g))
-            add_vertex!(ar_g)
-        end
-        for e in edges(g)
-            add_edge!(ar_g, e.src, e.dst)
-        end
-        merge!(rule.router.channel_intersections, ixns)
-        assign_channels!(rule.router)
-        assign_tracks!(rule.router)
-    end
 end

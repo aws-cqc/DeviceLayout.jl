@@ -38,7 +38,7 @@ RouteComponent(
     sty::Paths.Style,
     meta::Meta
 ) where {T} = RouteComponent{T}(name, r, gw, [sty], meta)
-hooks(rc::RouteComponent) = (p0=PointHook(rc.r.p0, rc.r.α0), p1=PointHook(rc.r.p1, rc.r.α1))
+hooks(rc::RouteComponent) = (p0=PointHook(rc.r.p0, rc.r.α0), p1=PointHook(rc.r.p1, rc.r.α1 + 180°))
 
 function redecorate!(path::Path, sty::Paths.Style) end
 function redecorate!(path::Path, sty::Paths.DecoratedStyle)
@@ -267,4 +267,35 @@ function _update_with_plan!(rule::Paths.SingleChannelRouting, route_node, sch)
     trans = transformation(sch, only(idx))
     global_node = trans(rule.channel.node)
     return rule.global_channel = Paths.RouteChannel(Path([global_node]))
+end
+
+# AutoChannelRouting
+# No update when `route!` is called on graph
+# Only when planning
+function _update_with_plan!(rule::Paths.AutoChannelRouting{T}, route_node, sch) where {T}
+    pin_idx = length(rule.router.pins) + 1
+    push!(rule.router.pins, hooks(route_node.component).p0)
+    push!(rule.router.pins, hooks(route_node.component).p1)
+    push!(rule.router.net_pins, (pin_idx, pin_idx + 1))
+    push!(rule.router.net_wires, Paths.NetWire())
+    # If all paths have been added, go ahead and run autorouting
+    if length(rule.router.net_pins) == length(rule.router.net_paths)
+        g, ixns = Paths.build_channel_graph(
+            rule.router.pins,
+            getproperty.(rule.router.channels, :path),
+            T
+        )
+        # Populate the router's graph and intersection dict in-place
+        # (ChannelRouter is immutable, but its mutable fields can be mutated)
+        ar_g = rule.router.channel_graph
+        for _ in 1:(Paths.nv(g) - Paths.nv(ar_g))
+            Paths.add_vertex!(ar_g)
+        end
+        for e in edges(g)
+            Paths.add_edge!(ar_g, e.src, e.dst)
+        end
+        merge!(rule.router.channel_intersections, ixns)
+        Paths.assign_channels!(rule.router)
+        Paths.assign_tracks!(rule.router)
+    end
 end
