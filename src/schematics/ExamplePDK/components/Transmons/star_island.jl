@@ -153,17 +153,8 @@ function SchematicDrivenLayout.hooks(isl::ExampleStarIsland)
 end
 
 # Define custom exclusion zone/footprint
-function DeviceLayout.halo(
-    isl::ExampleStarIsland,
-    outer_delta,
-    inner_delta=nothing;
-    kwargs...
-)
-    c = to_polygons(footprint(isl))
-    temp_cs = CoordinateSystem{coordinatetype(isl)}(uniquename(name(isl)))
-    place!(temp_cs, c, first(geometry(isl).element_metadata))
-    return halo(temp_cs, outer_delta, inner_delta; kwargs...)
-end
+DeviceLayout.halo(isl::ExampleStarIsland, d, d_i=nothing; kw...) =
+    footprint_halo(isl, d, d_i; kw...)
 
 function DeviceLayout.footprint(isl::ExampleStarIsland)
     return Circle(isl.island_outer_radius + isl.island_ground_gap)

@@ -277,6 +277,62 @@ function halo(c::AbstractComponent, outer_delta, inner_delta=nothing; kwargs...)
     return halo(cs, outer_delta, inner_delta; kwargs...)
 end
 
+"""
+    footprint_halo(comp::AbstractComponent, outer_delta, inner_delta=nothing; kwargs...)
+
+Compute a component's halo from its [`footprint`](@ref) rather than from all geometry elements.
+
+This is much cheaper than the default `halo(::AbstractComponent, ...)` when the component has
+a simple bounding entity (e.g., a `Circle` or `Rectangle`) that covers all its geometry.
+The footprint is offset once and replicated across all matching layers.
+
+Component authors opt in by defining a `footprint` method and delegating:
+
+```julia
+DeviceLayout.footprint(c::MyComponent) = Circle(c.outer_radius + c.gap)
+DeviceLayout.halo(c::MyComponent, d, d_i=nothing; kw...) = footprint_halo(c, d, d_i; kw...)
+```
+
+Keyword arguments `only_layers`, `ignore_layers`, and `memoized_halos` are forwarded with
+the same semantics as [`halo(::CoordinateSystem, ...)`](@ref).
+"""
+function footprint_halo(
+    comp::AbstractComponent,
+    outer_delta,
+    inner_delta=nothing;
+    only_layers=[],
+    ignore_layers=[],
+    memoized_halos=Dict{GeometryStructure, GeometryStructure}()
+)
+    cs = geometry(comp)
+    haskey(memoized_halos, cs) && return memoized_halos[cs]
+
+    T = coordinatetype(comp)
+    halo_cs = CoordinateSystem{T}(uniquename("halo_" * name(comp)))
+    memoized_halos[cs] = halo_cs
+
+    fp_halo = halo(footprint(comp), outer_delta, inner_delta)
+
+    all_meta = unique(_collect_metadata(cs))
+    halo_meta = filter(layer_inclusion(only_layers, ignore_layers), all_meta)
+    for meta in halo_meta
+        place!.(halo_cs, fp_halo, meta)
+    end
+
+    return halo_cs
+end
+
+function _collect_metadata(cs::GeometryStructure, seen=Set{UInt}())
+    id = objectid(cs)
+    id in seen && return eltype(element_metadata(cs))[]
+    push!(seen, id)
+    result = collect(element_metadata(cs))
+    for ref in refs(cs)
+        append!(result, _collect_metadata(structure(ref), seen))
+    end
+    return result
+end
+
 ##### Macros
 """
     @component comp = MyComponent param1=val1 param2=val2 ...
