@@ -140,7 +140,8 @@ function transform(e::CurvilinearPolygon, f::Transformation)
         f.(xrefl(f) ? reverse(e.p) : e.p),
         isempty(e.curves) ? deepcopy(e.curves) :
         transform.(xrefl(f) ? reverse(e.curves) : e.curves, Ref(f)),
-        xrefl(f) ? reverse(csi_rev.(e.curve_start_idx, length(e.p))) : copy(e.curve_start_idx)
+        xrefl(f) ? reverse(csi_rev.(e.curve_start_idx, length(e.p))) :
+        copy(e.curve_start_idx)
     )
 end
 
