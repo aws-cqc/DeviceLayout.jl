@@ -270,16 +270,18 @@ function _update_with_plan!(rule::Paths.SingleChannelRouting, route_node, sch)
 end
 
 # AutoChannelRouting
-# No update when `route!` is called on graph
+function _update_with_graph!(rule::Paths.AutoChannelRouting, route_node, graph; kwargs...)
+    push!(rule.router.net_wires, Paths.NetWire()) # So we know how many routes to expect in planning
+    return
+end
 # Only when planning
 function _update_with_plan!(rule::Paths.AutoChannelRouting{T}, route_node, sch) where {T}
     pin_idx = length(rule.router.pins) + 1
     push!(rule.router.pins, hooks(route_node.component).p0)
     push!(rule.router.pins, hooks(route_node.component).p1)
     push!(rule.router.net_pins, (pin_idx, pin_idx + 1))
-    push!(rule.router.net_wires, Paths.NetWire())
     # If all paths have been added, go ahead and run autorouting
-    if length(rule.router.net_pins) == length(rule.router.net_paths)
+    if length(rule.router.net_pins) == length(rule.router.net_wires)
         g, ixns = Paths.build_channel_graph(
             rule.router.pins,
             getproperty.(rule.router.channels, :path),
