@@ -51,7 +51,9 @@ There are a few details worth pointing out above:
 - We defined `SchematicDrivenLayout._geometry!` rather than just `_geometry!`, and likewise for `hooks`. In Julia, when we extend an existing function with a new method for our custom type, we need to specify the module it comes from. If we just define `function _geometry!(...)`, then DeviceLayout won't know to call that method internally. Making this mistake will result in an empty geometry and no hooks, since SchematicDrivenLayout will fall back on generic implementations of those methods.
 - `hooks` returns a `NamedTuple` with a single element using a leading semicolon. If we wrote `(p0 = PointHook(...))`, then this would be interepreted as a variable assignment. Our [style guide](./styleguide.md) recommends defining literal `NamedTuple`s with a leading semicolon.
 
-`@compdef` creates the keyword constructor with defaults, like [`Base.@kwdef`](https://docs.julialang.org/en/v1/base/base/#Base.@kwdef) does, as well as a `default_parameters` method. It also creates a private field for geometry, which is computed the first time `geometry` is called and stored thereafter. Parameter defaults should not depend on the values of other parameters. Validation or reconciling of parameters should be done in an inner constructor. At least one
+`@compdef` creates the keyword constructor with defaults, like [`Base.@kwdef`](https://docs.julialang.org/en/v1/base/base/#Base.@kwdef) does, as well as a `default_parameters` method. It also creates a private field for geometry, which is computed the first time `geometry` is called and stored thereafter. Parameter defaults may reference earlier parameters with defaults (evaluated in
+declaration order). Use this only for simple derived defaults that may be overridden.
+To enforce invariants, use an inner constructor. At least one
 inner constructor should accept arguments in the
 same form as the default inner constructor (i.e. one positional argument per field) in
 order to function correctly with the keyword outer constructor. 
