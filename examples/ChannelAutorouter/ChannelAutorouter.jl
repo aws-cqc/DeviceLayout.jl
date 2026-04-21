@@ -495,7 +495,7 @@ function example_crossing_schematic()
     r2 = route!(g, rule, comp_nodes[2]=>:p1_south, comp_nodes[3]=>:p1_north, Paths.Trace(WW*1mm), GDSMeta())
 
     sch = plan(g)
-    paths = [SchematicDrivenLayout.path(r1), SchematicDrivenLayout.path(r2)]
+    paths = [SchematicDrivenLayout.path(r1.component), SchematicDrivenLayout.path(r2.component)]
     c = Cell(sch.coordinate_system)
     # c = visualize_router_state(ar; wire_width=WW)
 

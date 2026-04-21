@@ -762,8 +762,6 @@ function _delete_segment!(ar, ws; reset_tracks=true, from_net=true)
             )
         end
     end
-    # Delete the segment waypoint
-    delete!(ar.segment_waypoints, ws)
 
     # if from_net, delete ws from net_wires
     # We set from_net to false when looping over net segments so it's not changing under us
