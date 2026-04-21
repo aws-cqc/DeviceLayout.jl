@@ -378,6 +378,7 @@ function to_polygons(p::ClippedPolygon{Int})
     return interiorcuts(p.tree, Polygon{Int}[])
 end
 function to_polygons(p::ClippedPolygon{T}; kwargs...) where {T}
+    isempty(p.tree.children) && return Polygon{T}[]
     pc = clipperize(p)
     S = typeof(pc).parameters[1]
     pci = recast(Clipper.PolyNode{Point{Int64}}, pc.tree)
@@ -525,7 +526,8 @@ end
 
 The (Euclidean) perimeter of the outermost contour of a `ClippedPolygon`
 """
-function perimeter(p::ClippedPolygon)
+function perimeter(p::ClippedPolygon{T}) where {T}
+    isempty(p.tree.children) && return zero(T)
     return sum(norm.(points(p[1]) .- circshift(points(p[1]), -1)))
 end
 
@@ -681,7 +683,8 @@ function transform(sty::Rounded{T}, f::Transformation) where {T}
         min_side_len=mag(f) * sty.min_side_len,
         min_angle=sty.min_angle,
         p0=f.(sty.p0),
-        inverse_selection=sty.inverse_selection
+        inverse_selection=sty.inverse_selection,
+        selection_tolerance=mag(f) * sty.selection_tolerance
     )
 end
 
@@ -1377,6 +1380,7 @@ declipperize(p, ::Type{T}) where {T <: Union{Int64, Unitful.Quantity{Int64}}} =
 
 # Prepare a ClippedPolygon for use with Clipper.
 function clipperize(p::ClippedPolygon)
+    isempty(p.tree.children) && return p
     R = typeof(clipperize(p.tree.children[1].contour[1]))
     t = deepcopy(p.tree)
     function prescale(p::Clipper.PolyNode)
