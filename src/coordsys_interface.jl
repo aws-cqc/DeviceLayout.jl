@@ -157,7 +157,7 @@ function order!(a::AbstractArray)
 end
 
 """
-    flatten!(c::AbstractCoordinateSystem, depth::Integer=-1, metadata_filter=nothing, max_copy=Inf)
+    flatten!(c::AbstractCoordinateSystem; depth::Integer=-1, metadata_filter=nothing, max_copy=Inf)
 
 Recursively flatten references and arrays up to a hierarchical `depth`, adding their elements to `c` with appropriate transformations.
 
@@ -180,7 +180,7 @@ function flatten!(
 end
 
 """
-    flatten(c::GeometryStructure; depth::Integer=-1, name=uniquename("flatten_"*name(c)))
+    flatten(c::GeometryStructure; depth::Integer=-1, name=uniquename("flatten_"*name(c)), metadata_filter=nothing, max_copy=Inf)
 
 Return a new coordinate system with name `name` with recursively flattened references and arrays up to a hierarchical `depth`.
 
