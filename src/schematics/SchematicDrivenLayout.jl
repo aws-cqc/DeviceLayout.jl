@@ -112,11 +112,7 @@ export @component,
     route!,
     set_parameters
 export ParameterSet,
-    MissingNamespace,
-    ParameterKeyError,
-    resolve,
-    leaf_params,
-    save_parameter_set
+    MissingNamespace, ParameterKeyError, resolve, leaf_params, save_parameter_set
 export ProcessTechnology, SimulationTarget, ArtworkTarget, SolidModelTarget
 export base_variant, flipchip!, map_metadata!, @composite_variant, @variant
 

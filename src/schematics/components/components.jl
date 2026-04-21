@@ -90,14 +90,12 @@ set as qualified paths (e.g. `"components.transmon.junction.w_jj"`), matching th
 behavior of the address-string form.
 
 # Example
+
 ```julia
 junction = create_component(ExampleSimpleJunction, ps.components.transmon.junction)
 ```
 """
-function create_component(
-    ::Type{T},
-    sub::ParameterSet
-) where {T <: AbstractComponent}
+function create_component(::Type{T}, sub::ParameterSet) where {T <: AbstractComponent}
     kw = leaf_params(sub)
     # Track accessed parameter leaves with the scoped ParameterSet's qualified prefix
     accessed = getfield(sub, :accessed)
@@ -177,11 +175,13 @@ island = set_parameters(island, ps.components.transmon.junction_gap => :junction
 
 Additional `kwargs` are forwarded to the main `set_parameters` method.
 """
-function set_parameters(
-    c::AbstractComponent,
-    pairs::Pair{<:Any, Symbol}...;
-    kwargs...
-)
+function set_parameters(c::AbstractComponent, pairs::Pair{<:Any, Symbol}...; kwargs...)
+    # Surface missing ParameterSet lookups at the call site rather than silently
+    # storing a MissingNamespace in the component and erroring later.
+    for p in pairs
+        p.first isa MissingNamespace &&
+            throw(ParameterKeyError(getfield(p.first, :key), _namespace_path(p.first)))
+    end
     return set_parameters(c; (p.second => p.first for p in pairs)..., kwargs...)
 end
 

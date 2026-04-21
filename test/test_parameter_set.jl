@@ -322,7 +322,6 @@ end
         ps2.components.island.cap_width = 50
         island2 = create_component(ExampleRectangleIsland, ps2.components.island)
         @test parameters(island2).cap_width == 50
-
     end
 
     @testset "set_parameters with value => :name pairs" begin
@@ -336,7 +335,8 @@ end
 
         island = ExampleRectangleIsland()
         # Reversed pair: value => :param_name
-        island2 = set_parameters(island, ps.components.transmon.junction_gap => :junction_gap)
+        island2 =
+            set_parameters(island, ps.components.transmon.junction_gap => :junction_gap)
         @test parameters(island2).junction_gap == 15μm
 
         # Forwarding a value under a different parameter name
@@ -346,11 +346,7 @@ end
         @test parameters(island3).cap_width == parameters(island).cap_width
 
         # Multiple pairs
-        island4 = set_parameters(
-            island,
-            40μm => :cap_width,
-            600μm => :cap_length
-        )
+        island4 = set_parameters(island, 40μm => :cap_width, 600μm => :cap_length)
         @test parameters(island4).cap_width == 40μm
         @test parameters(island4).cap_length == 600μm
 
@@ -362,6 +358,33 @@ end
         # Zero pairs is a no-op copy
         island6 = set_parameters(island)
         @test parameters(island6).cap_width == parameters(island).cap_width
+
+        # Reading a value from the ParameterSet for forwarding records it in
+        # `accessed` with the fully qualified path — so `set_parameters` with a
+        # `value => :name` pair sourced from `ps` contributes to the audit trail.
+        ps_audit = ParameterSet()
+        ps_audit.components.transmon.junction_gap = 15μm
+        @test isempty(ps_audit.accessed)
+
+        _ = set_parameters(
+            island,
+            ps_audit.components.transmon.junction_gap => :junction_gap
+        )
+        @test "components.transmon.junction_gap" in ps_audit.accessed
+
+        # Forwarding a MissingNamespace (lookup in the ParameterSet failed) must
+        # throw ParameterKeyError at the set_parameters call site, not silently
+        # store the MissingNamespace as the component's parameter value.
+        using DeviceLayout.SchematicDrivenLayout: ParameterKeyError
+        ps_missing = ParameterSet()
+        err = try
+            set_parameters(island, ps_missing.components.transmon.junction_gap => :junction_gap)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ParameterKeyError
+        @test err.path == "components.transmon.junction_gap"
     end
 end
 
