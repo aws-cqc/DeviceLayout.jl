@@ -20,6 +20,9 @@ struct PointHook{T} <: Hook{T}
 end
 PointHook(p, in_direction) = PointHook{eltype(p)}(p, in_direction) # Otherwise can't infer if in_direction is in degrees
 PointHook(x, y, in_direction) = PointHook(Point(promote(x, y)...), in_direction)
+Base.convert(::Type{PointHook{T}}, h::PointHook{T}) where {T} = h
+Base.convert(::Type{PointHook{T}}, h::PointHook{S}) where {T, S} =
+    PointHook{T}(h.p, h.in_direction)
 
 """
     in_direction(h::Hook)
@@ -110,6 +113,10 @@ HandedPointHook(p0::Point, in_direction, rh::Bool) =
     HandedPointHook(PointHook(p0, in_direction), rh)
 HandedPointHook(x0::Coordinate, y0::Coordinate, in_direction, right_handed=true) =
     HandedPointHook(PointHook(x0, y0, in_direction), right_handed)
+
+Base.convert(::Type{HandedPointHook{T}}, h::HandedPointHook{T}) where {T} = h
+Base.convert(::Type{HandedPointHook{T}}, h::HandedPointHook{S}) where {T, S} =
+    HandedPointHook{T}(PointHook{T}(h.h.p, h.h.in_direction), h.right_handed)
 
 function transformation(h1::HandedPointHook, h2::HandedPointHook)
     f = transformation(h1.h, h2.h)

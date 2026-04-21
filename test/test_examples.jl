@@ -1,3 +1,14 @@
+@testitem "Channel Autorouter Examples" setup = [CommonTestSetup] begin
+    include("../examples/ChannelAutorouter/ChannelAutorouter.jl")
+    for (name, fn) in ChannelAutorouter.ALL_EXAMPLES
+        @testset "$name" begin
+            c, ar = fn()
+            @test c isa DeviceLayout.Cell
+            @test all(length.(ar.net_wires) .> 0)
+        end
+    end
+end
+
 @testitem "ExamplePDK" setup = [CommonTestSetup] begin
     include("../examples/DemoQPU17/DemoQPU17.jl")
     @time "Total" schematic, artwork = DemoQPU17.qpu17_demo(dir=tdir)

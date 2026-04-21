@@ -50,6 +50,8 @@ save("autoroute_crossing.png", c); nothing # hide
 <img src="../autoroute_crossing.png"/>
 ```
 
+There is also a variant of this example using the schematic routing interface.
+
 ## Fan-in / fan-out
 
 Clustered pins on one side, spread-out pins on the other, routed through a single shared horizontal channel. The router assigns multiple tracks to accommodate the asymmetric spacing.

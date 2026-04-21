@@ -6,7 +6,7 @@ Each `example_*` function returns `(cell::Cell, router::ChannelRouter)`.
 """
 module ChannelAutorouter
 
-using DeviceLayout, .PreferredUnits
+using DeviceLayout, .PreferredUnits, .SchematicDrivenLayout
 using FileIO
 
 import .Paths:
@@ -466,6 +466,48 @@ function example_fanout40()
     return c, ar
 end
 
+# ── Example 11: Schematic interface ───────────────────────────────────────────
+# Same as `example_crossing` but using the schematic interface to set up the routing problem.
+
+function example_crossing_schematic()
+    channels = RouteChannel.([
+        vchannel(5mm, -1mm, 7mm, width=2.0mm),     # v_mid
+        hchannel(-1mm, 9mm, 0mm, width=2.0mm),     # h_bot
+        hchannel(-1mm, 9mm, 6mm, width=2.0mm)     # h_top
+    ])
+
+    hooks = [
+        bpin(2mm, -0.5mm),   # p1: below h_bot, left side
+        bpin(8mm, -0.5mm),   # p2: below h_bot, right side
+        tpin(2mm, 6.5mm),    # p3: above h_top, left side
+        tpin(8mm, 6.5mm)    # p4: above h_top, right side
+    ]
+    # Crossed: bottom-left↔top-right, bottom-right↔top-left
+    nets = [(1, 4), (2, 3)]
+    # Set up schematic
+    g = SchematicGraph("example")
+    # Start/end components
+    comps = [Spacer(; p1=h.p) for h in hooks]
+    comp_nodes = add_node!.(g, comps)
+    ar = ChannelRouter(channels)
+    rule = AutoChannelRouting(ar, Paths.StraightAnd90(MARGIN*1mm), MARGIN*1mm)
+    r1 = route!(g, rule, comp_nodes[1]=>:p1_south, comp_nodes[4]=>:p1_north, Paths.Trace(WW*1mm), GDSMeta())
+    r2 = route!(g, rule, comp_nodes[2]=>:p1_south, comp_nodes[3]=>:p1_north, Paths.Trace(WW*1mm), GDSMeta())
+
+    sch = plan(g)
+    paths = [SchematicDrivenLayout.path(r1), SchematicDrivenLayout.path(r2)]
+    c = Cell(sch.coordinate_system)
+    # c = visualize_router_state(ar; wire_width=WW)
+
+    @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
+    # Both nets traverse v_mid, so it needs ≥2 tracks
+    @assert length(ar.channel_tracks[1]) >= 2 "Crossing nets need multiple tracks in shared channel"
+    # Due to assignment order, only one horizontal channel has two tracks
+    @assert length(ar.channel_tracks[2]) + length(ar.channel_tracks[3]) == 3 "Crossing nets need multiple horizontal tracks only when they overlap due to vertical assignment"
+    @assert length(inter_path_intersections(paths)) == 1 "Exactly one crossing"
+    return c, ar
+end
+
 # ── Assembly ─────────────────────────────────────────────────────────────────
 
 const ALL_EXAMPLES = [
@@ -478,7 +520,8 @@ const ALL_EXAMPLES = [
     "angled" => example_angled,
     "dense" => example_dense,
     "bspline" => example_bspline,
-    "fanout40" => example_fanout40
+    "fanout40" => example_fanout40,
+    "crossing_schematic" => example_crossing_schematic,
 ]
 
 function run_all_examples(; save_gds=true, save_png=true, dir=@__DIR__)
