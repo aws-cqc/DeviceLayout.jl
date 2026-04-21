@@ -68,12 +68,28 @@
             small_square = Polygon(square_pts)
             big_square = Polygon(2 .* square_pts)
             mask = first(
-                to_polygons(clip(Clipper.ClipTypeDifference, big_square, small_square))
+                to_polygons(
+                    clip(
+                        Clipper.ClipTypeDifference,
+                        big_square,
+                        small_square,
+                        pfs=Clipper.PolyFillTypeEvenOdd,
+                        pfc=Clipper.PolyFillTypeEvenOdd
+                    )
+                )
             )
             c = Cell{Float64}("test")
             render!(c, mask)
             canvas = Polygon(5 .* square_pts)
-            x = to_polygons(clip(Clipper.ClipTypeDifference, canvas, mask))
+            x = to_polygons(
+                clip(
+                    Clipper.ClipTypeDifference,
+                    canvas,
+                    mask,
+                    pfs=Clipper.PolyFillTypeEvenOdd,
+                    pfc=Clipper.PolyFillTypeEvenOdd
+                )
+            )
             c2 = Cell{Float64}("squares")
             for z in x
                 render!(c2, z, GDSMeta(0))
@@ -85,11 +101,23 @@
             square_pts = Point.([(-1, -1), (-1, 1), (1, 1), (1, -1)])
             small_square = Polygon(square_pts)
             big_square = Polygon(2 .* square_pts)
-            mask = clip(Clipper.ClipTypeDifference, big_square, small_square)
+            mask = clip(
+                Clipper.ClipTypeDifference,
+                big_square,
+                small_square,
+                pfs=Clipper.PolyFillTypeEvenOdd,
+                pfc=Clipper.PolyFillTypeEvenOdd
+            )
             c = Cell{Float64}("test")
             render!(c, mask)
             canvas = Polygon(5 .* square_pts)
-            x = clip(Clipper.ClipTypeDifference, canvas, mask)
+            x = clip(
+                Clipper.ClipTypeDifference,
+                canvas,
+                mask,
+                pfs=Clipper.PolyFillTypeEvenOdd,
+                pfc=Clipper.PolyFillTypeEvenOdd
+            )
             c2 = Cell{Float64}("squares")
             render!(c2, x, GDSMeta(0))
 
@@ -478,6 +506,23 @@
         # Floating point coordinates must be clipperized to get the right answer
         pp = Point.([(185.0, -100.0), (300.0, -215.0), (300.0, -185.0), (215.0, -100.0)])
         @test Polygons.orientation(Polygon(pp)) == 1
+    end
+
+    @testset "> Mixed argument types" begin
+        p1 = Rectangle(1mm, 1mm)
+        p2 = centered(Rectangle(1µm, 1µm))
+        # Clipped polygons with mixed units
+        p1_clip = union2d(p1)
+        p2_clip = union2d(p2)
+        @test union2d([p1_clip, p2_clip]) == union2d([p1, p2])
+        # add in a GeometryStructure
+        cs = CoordinateSystem("test")
+        place!(cs, p2, :test)
+        @test coordinatetype(cs => :test) == coordinatetype(cs)
+        @test union2d(cs => :test) == p2_clip
+        @test union2d([p1, cs => :test]) == union2d([p1, p2])
+        @test union2d(p1, cs => :test) == union2d([p1, p2])
+        @test union2d(p1, [cs => :test]) == union2d([p1, p2])
     end
 end
 
@@ -923,13 +968,7 @@ end
 
 @testitem "Hole sorting" setup = [CommonTestSetup] begin
     # Issue #175
-    # Shoelace formula for signed polygon area
-    area(p) =
-        sum(
-            (gety.(p.p) + gety.(circshift(p.p, -1))) .*
-            (getx.(p.p) - getx.(circshift(p.p, -1)))
-        ) / 2
-
+    import .Polygons: area
     @testset "Hole sorting" begin
         c1 = rotate(centered(Rectangle(0.5mm, 0.5mm)), 45°) - Point(0mm, 0.5mm)
         c2 = c1 + Point(0mm, 1mm)
@@ -969,4 +1008,97 @@ end
         @test area(off[1]) ≈ (0.35mm)^2
         @test area(off[2]) ≈ (3.1mm)^2 - 2 * (0.4mm)^2
     end
+end
+
+@testitem "Layerwise clipping" setup = [CommonTestSetup] begin
+    c1 = CoordinateSystem("test1")
+    c2 = CoordinateSystem("test2")
+    r1 = Rectangle(10μm, 10μm)
+    r2 = r1 + Point(5μm, 5μm)
+    overlap = intersect2d(r1, r2)
+    x = xor2d(r1, r2)
+    d1 = difference2d(r1, r2)
+    d2 = difference2d(r2, r1)
+    uni = union2d(r1, r2)
+    lyr_a = SemanticMeta(:a)
+    lyr_b = SemanticMeta(:b)
+    place!(c1, r1, lyr_a)
+    place!(c1, r2, lyr_b)
+    place!(c2, r1, lyr_b)
+    place!(c2, r2, lyr_a)
+
+    @test isempty(to_polygons(xor2d_layerwise(c1, c1)[lyr_a][1]))
+    @test isempty(to_polygons(xor2d_layerwise(c1, c1)[lyr_b][1]))
+    @test xor2d_layerwise(c1, c2)[lyr_a][1] == x
+    @test xor2d_layerwise(c1, c2)[lyr_b][1] == x
+    @test difference2d_layerwise(c1, c2)[lyr_a][1] == d1
+    @test difference2d_layerwise(c1, c2)[lyr_b][1] == d2
+    @test union2d_layerwise(c1, c2)[lyr_a][1] == uni
+    @test intersect2d_layerwise(c1, c2)[lyr_b][1] == overlap
+
+    # Findbox
+    @test DeviceLayout.findbox(r1, [r1, r2]) == [1]
+    @test DeviceLayout.findbox(r1, [r1, r2]; intersects=true) == [1, 2]
+    @test DeviceLayout.findbox(r1, [c1]) == []
+    @test DeviceLayout.findbox(r1, [r1, c1], intersects=true) == [1, 2]
+
+    # Tiling
+    ca_1 = CoordinateSystem("array1")
+    ca_2 = CoordinateSystem("array2")
+    addref!(ca_1, aref(c1, 100μm * (-1:1), 100μm * (-1:1)))
+    addref!(ca_2, aref(c2, 100μm * (-1:1), 100μm * (-1:1)))
+    xa = xor2d_layerwise(ca_1, ca_2)
+    xa_tiled = xor2d_layerwise(ca_1, ca_2, tile_size=99μm2nm)
+    @test length(xa_tiled[lyr_a]) == 3 * 3
+    @test length(xa_tiled[lyr_b]) == 3 * 3
+    @test length(vcat(to_polygons.(xa_tiled[lyr_a])...)) == 3 * 3 * 2
+    @test isempty(to_polygons(xor2d(vcat(xa_tiled[lyr_a]...), xa[lyr_a])))
+
+    # Tiling with entities on edges
+    xa_tiled_edges = xor2d_layerwise(ca_1, ca_2, tile_size=106μm2nm)
+    @test length(xa_tiled_edges[lyr_a]) == 3 * 3
+    @test length(xa_tiled_edges[lyr_b]) == 3 * 3
+    all_polys = vcat(to_polygons.(xa_tiled_edges[lyr_a])...)
+    # EvenOdd union to remove regions where polygons overlap
+    all_no_overlap = clip(
+        Polygons.Clipper.ClipTypeUnion,
+        all_polys,
+        Polygon{typeof(1.0nm)}[],
+        pfs=Polygons.Clipper.PolyFillTypeEvenOdd,
+        pfc=Polygons.Clipper.PolyFillTypeEvenOdd
+    )
+    @test length(all_polys) > 3 * 3 * 2 # Some polygons were split
+    @test isempty(to_polygons(xor2d(all_polys, xa[lyr_a]))) # Split polygons are still correct
+    @test length(to_polygons(all_no_overlap)) == 3 * 3 * 2 # Split polygons are not overlapping
+    @test isempty(to_polygons(xor2d(all_no_overlap, xa[lyr_a]))) # Split polygons add up correctly
+
+    # Tiling with empty layers
+    uae = union2d_layerwise(ca_1, CoordinateSystem("empty"))
+    uae_tiled = union2d_layerwise(ca_1, CoordinateSystem("empty"), tile_size=99μm2nm)
+    @test length(vcat(to_polygons.(uae_tiled[lyr_a])...)) == 3 * 3
+    @test isempty(to_polygons(xor2d(vcat(uae_tiled[lyr_a]...), ca_1 => lyr_a)))
+    uae_tiled = union2d_layerwise(CoordinateSystem("empty"), ca_1, tile_size=99μm2nm)
+    @test length(vcat(to_polygons.(uae_tiled[lyr_a])...)) == 3 * 3
+    @test isempty(to_polygons(xor2d(vcat(uae_tiled[lyr_a]...), ca_1 => lyr_a)))
+
+    # Auto tile size
+    ca_3 = CoordinateSystem("array1")
+    ca_4 = CoordinateSystem("array2")
+    addref!(ca_3, aref(c1, 100μm * (-10:10), 100μm * (-10:10)))
+    addref!(ca_4, aref(c2, 100μm * (-10:10), 100μm * (-10:10)))
+    xa_auto_tiled = xor2d_layerwise(ca_3, ca_4, tiled=true)
+    @test all(length.(values(xa_auto_tiled)) .== 9) # 9 tiles for about 900 entities
+
+    # Auto tile size is decent for large n
+    for n in [12000, 20000, 33000]
+        w, l, n = (10mm, 4mm, n)
+        l_tile = Polygons._auto_tile_size(Rectangle(w, l), n)
+        num_tiles = ceil(w / l_tile) * ceil(l / l_tile)
+        @test abs(100 - n / num_tiles) <= 10
+    end
+    # Works for sub-single-tile
+    w, l, n = (400μm, 400μm, 40)
+    l_tile = Polygons._auto_tile_size(Rectangle(w, l), n)
+    num_tiles = ceil(w / l_tile) * ceil(l / l_tile)
+    @test num_tiles == 1
 end

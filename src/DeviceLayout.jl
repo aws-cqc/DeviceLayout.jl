@@ -19,6 +19,8 @@ import Unitful: Length, LengthUnits, DimensionlessQuantity, NoUnits, DimensionEr
 import Unitful: ustrip, unit, inch
 Unitful.@derived_dimension InverseLength inv(Unitful.𝐋)
 
+import SpatialIndexing
+
 function render! end
 export render!
 
@@ -195,6 +197,7 @@ coordinatetype(::AbstractArray{S}) where {T, S <: AbstractGeometry{T}} = T
 coordinatetype(iterable) = promote_type(coordinatetype.(iterable)...)
 coordinatetype(::Point{T}) where {T} = T
 coordinatetype(::Type{Point{T}}) where {T} = T
+coordinatetype(::Pair{<:AbstractGeometry{T}}) where {T} = T
 
 # Entity interface
 include("entities.jl")
@@ -378,10 +381,13 @@ import .Polygons:
     circle,
     circle_polygon,
     clip,
+    clip_tiled,
     cliptree,
     difference2d,
+    difference2d_layerwise,
     gridpoints_in_polygon,
     intersect2d,
+    intersect2d_layerwise,
     offset,
     perimeter,
     points,
@@ -390,7 +396,9 @@ import .Polygons:
     sweep_poly,
     unfold,
     union2d,
-    xor2d
+    union2d_layerwise,
+    xor2d,
+    xor2d_layerwise
 export Polygons,
     Polygon,
     Ellipse,
@@ -406,8 +414,10 @@ export Polygons,
     clip,
     cliptree,
     difference2d,
+    difference2d_layerwise,
     gridpoints_in_polygon,
     intersect2d,
+    intersect2d_layerwise,
     offset,
     perimeter,
     points,
@@ -416,7 +426,9 @@ export Polygons,
     sweep_poly,
     unfold,
     union2d,
-    xor2d
+    union2d_layerwise,
+    xor2d,
+    xor2d_layerwise
 
 include("align.jl")
 using .Align

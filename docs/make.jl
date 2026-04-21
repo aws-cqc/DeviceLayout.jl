@@ -30,7 +30,7 @@ makedocs(
     format=Documenter.HTML(
         prettyurls=true,
         assets=["assets/favicon.ico"],
-        size_threshold=300_000,
+        size_threshold=400_000,
         collapselevel=1
     ),
     sitename="DeviceLayout.jl",

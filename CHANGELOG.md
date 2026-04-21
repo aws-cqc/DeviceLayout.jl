@@ -6,7 +6,10 @@ The format of this changelog is based on
 
 ## Unreleased
 
-  - Normalize rotation angles to [0, 360) when writing GDS files
+  - Normalized rotation angles to [0, 360) when writing GDS files
+  - Added layerwise Booleans `union2d_layerwise`, `difference2d_layerwise`, `intersect2d_layerwise`, and `xor2d_layerwise`
+  - Added `Polygons.area`
+  - Fixed overly-strict argument types for polygon clipping methods
 
 ## 1.12.0 (2026-04-13)
 
