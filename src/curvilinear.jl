@@ -152,7 +152,7 @@ convert(::Type{CurvilinearPolygon{T}}, e::CurvilinearPolygon{T}) where {T} = e
 function convert(::Type{CurvilinearPolygon{T}}, e::CurvilinearPolygon{S}) where {T, S}
     return CurvilinearPolygon{T}(
         convert(Vector{Point{T}}, e.p),
-        [convert(Paths.Segment{T}, c) for c in e.curves],
+        convert(Vector{Paths.Segment{T}}, e.curves),
         copy(e.curve_start_idx)
     )
 end
