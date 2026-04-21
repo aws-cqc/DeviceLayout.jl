@@ -79,6 +79,36 @@ function create_component(
 end
 
 """
+    create_component(::Type{T}, sub::ParameterSet) where {T <: AbstractComponent}
+
+Create an instance of type `T` from a scoped `ParameterSet`, typically obtained by
+chained-dot access like `ps.components.transmon.junction`.
+
+Leaf parameters (non-`Dict` values) at `sub` are extracted via `leaf_params` and
+passed as keyword arguments. Consumed leaf keys are recorded in the shared `accessed`
+set by leaf name only (unlike the address-string form, which records the qualified path).
+
+# Example
+```julia
+junction = create_component(ExampleSimpleJunction, ps.components.transmon.junction)
+```
+"""
+function create_component(
+    ::Type{T},
+    sub::ParameterSet
+) where {T <: AbstractComponent}
+    kw = leaf_params(sub)
+    # Track accessed parameter leaf names (scoped ParameterSet carries no prefix)
+    accessed = getfield(sub, :accessed)
+    for k in keys(kw)
+        if k in parameter_names(T)
+            push!(accessed, String(k))
+        end
+    end
+    return create_component(T; pairs(kw)...)
+end
+
+"""
     (c::AbstractComponent)(
         name::String=name(c),
         params::NamedTuple=parameters(c);
@@ -127,6 +157,29 @@ function set_parameters(
     kwargs...
 )
     return create_component(typeof(c), name, params; kwargs...)
+end
+
+"""
+    set_parameters(c::AbstractComponent, pairs::Pair{<:Any, Symbol}...; kwargs...)
+
+Create an instance of type `typeof(c)` with selected parameters overridden using
+reversed `value => :name` pairs. Each pair's first element is the value to assign
+and its second element is the parameter name (a `Symbol`) on the component.
+This ordering makes it natural to forward a value from one source into a parameter
+with a different name, e.g. to route `ParameterSet` entries into subcomponent fields.
+
+```julia
+island = set_parameters(island, ps.components.transmon.junction_gap => :junction_gap)
+```
+
+Additional `kwargs` are forwarded to the main `set_parameters` method.
+"""
+function set_parameters(
+    c::AbstractComponent,
+    pairs::Pair{<:Any, Symbol}...;
+    kwargs...
+)
+    return set_parameters(c; (p.second => p.first for p in pairs)..., kwargs...)
 end
 
 Base.show(io::IO, ::MIME"text/plain", c::T) where {T <: AbstractComponent} =

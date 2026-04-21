@@ -1,3 +1,5 @@
+const REQUIRED_NAMESPACES = ("global", "components")
+
 """
     ParameterSet
 
@@ -15,8 +17,8 @@ ps.components.qubit.cap_width = 350  # write
 
 Every `ParameterSet` contains two required top-level namespaces:
 
-  - `"global"` — parameters shared across the design
-  - `"components"` — per-component parameter trees
+  - `global` — parameters shared across the design
+  - `components` — per-component parameter trees
 
 # Fields
 
@@ -24,10 +26,32 @@ Every `ParameterSet` contains two required top-level namespaces:
   - `data::Dict{String, Any}`: nested parameter dictionary
   - `accessed::Set{String}`: tracks which parameter paths were consumed (for auditing)
 """
-mutable struct ParameterSet
+struct ParameterSet
     path::String
     data::Dict{String, Any}
     accessed::Set{String}
+
+    # Public inner constructor: guarantees required top-level namespaces exist.
+    # All outer constructors route through here so callers can rely on the invariant.
+    function ParameterSet(path::String, data::Dict{String, Any}, accessed::Set{String})
+        for ns in REQUIRED_NAMESPACES
+            haskey(data, ns) || (data[ns] = Dict{String, Any}())
+        end
+        return new(path, data, accessed)
+    end
+
+    # Internal inner constructor for scoped views (e.g. `ps.components.qubit`).
+    # The `Val{:scoped}` tag marks that `data` is an interior subtree which must
+    # NOT be polluted with "global"/"components" keys. Only `getproperty` should
+    # call this form.
+    function ParameterSet(
+        path::String,
+        data::Dict{String, Any},
+        accessed::Set{String},
+        ::Val{:scoped}
+    )
+        return new(path, data, accessed)
+    end
 end
 
 """
@@ -114,22 +138,10 @@ Base.show(io::IO, d::MissingNamespace) = print(
 Base.convert(::Type{T}, d::MissingNamespace) where {T <: Number} = _missing_error(d)
 Base.iterate(d::MissingNamespace) = _missing_error(d)
 Base.length(d::MissingNamespace) = _missing_error(d)
+Base.ismissing(::MissingNamespace) = true
 
-const _REQUIRED_NAMESPACES = ("global", "components")
-
-function _ensure_required_namespaces!(data::Dict{String, Any})
-    for ns in _REQUIRED_NAMESPACES
-        if !haskey(data, ns)
-            data[ns] = Dict{String, Any}()
-        end
-    end
-    return data
-end
-
-function ParameterSet(path::String, data::Dict{String, Any})
-    _ensure_required_namespaces!(data)
-    return ParameterSet(path, data, Set{String}())
-end
+ParameterSet(path::String, data::Dict{String, Any}) =
+    ParameterSet(path, data, Set{String}())
 ParameterSet(data::Dict{String, Any}) = ParameterSet("", data)
 ParameterSet() = ParameterSet(Dict{String, Any}())
 
@@ -144,7 +156,14 @@ function Base.getproperty(ps::ParameterSet, s::Symbol)
 
     val = d[key]
     if val isa Dict
-        return ParameterSet(getfield(ps, :path), val, getfield(ps, :accessed))
+        # Scoped view: skip namespace-ensuring so the subtree isn't polluted
+        # with "global"/"components" keys.
+        return ParameterSet(
+            getfield(ps, :path),
+            val,
+            getfield(ps, :accessed),
+            Val(:scoped)
+        )
     end
     # Track leaf access
     push!(getfield(ps, :accessed), key)

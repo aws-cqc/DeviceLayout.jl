@@ -9,6 +9,7 @@ These tutorials are designed to help you learn DeviceLayout.jl progressively, bu
 | [Building a Component: Interdigital Capacitor](building_a_component.md) | Reusable, parameterized geometry |
 | [Schematic Basics](schematic_basics.md) | Introduction to schematic-driven layout |
 | [Composite Components](composite_components.md) | Transmon with island and junction subcomponents |
+| [Data-Driven Design with ParameterSet](parameter_set.md) | Drive designs from external YAML parameters |
 | [Creating a PDK](creating_a_pdk.md) | Build a simple process design kit |
 
 In each tutorial, you'll build on what you've learned in previous ones. We recommend following them in order if you're new to DeviceLayout.jl.

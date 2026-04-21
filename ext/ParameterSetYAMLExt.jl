@@ -1,7 +1,7 @@
 module ParameterSetYAMLExt
 
-import DeviceLayout: ParameterSet
 import DeviceLayout
+import DeviceLayout.SchematicDrivenLayout: ParameterSet
 import YAML
 import Unitful
 
@@ -49,24 +49,24 @@ end
 function ParameterSet(io::IO, path::String="")
     data = YAML.load(io; dicttype=Dict{String, Any})
     _parse_units!(data)
-    return DeviceLayout.ParameterSet(path, data)
+    return DeviceLayout.SchematicDrivenLayout.ParameterSet(path, data)
 end
 
 function ParameterSet(path::String)
     return open(path) do io
-        DeviceLayout.ParameterSet(io, path)
+        DeviceLayout.SchematicDrivenLayout.ParameterSet(io, path)
     end
 end
 
-function DeviceLayout.save_parameter_set(io::IO, ps::ParameterSet)
+function DeviceLayout.SchematicDrivenLayout.save_parameter_set(io::IO, ps::ParameterSet)
     data = _serialize_units(getfield(ps, :data))
     YAML.write(io, data)
     return io
 end
 
-function DeviceLayout.save_parameter_set(path::String, ps::ParameterSet)
+function DeviceLayout.SchematicDrivenLayout.save_parameter_set(path::String, ps::ParameterSet)
     open(path, "w") do io
-        DeviceLayout.save_parameter_set(io, ps)
+        DeviceLayout.SchematicDrivenLayout.save_parameter_set(io, ps)
     end
     return path
 end

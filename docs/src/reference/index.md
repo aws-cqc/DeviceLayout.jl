@@ -28,7 +28,7 @@ Docstrings are split up over a few pages:
 - [Geometry-Level Layout API](api.md)
 - [Path API](path_api.md)
 - [Schematic-Driven Design API](schematic_api.md)
-- [ParameterSet API Reference](parameter_set.md)
+- [ParameterSet API Reference](parameter_set_api.md)
 - [Shape Library](shapes.md)
 
 Or jump straight to a particular topic:

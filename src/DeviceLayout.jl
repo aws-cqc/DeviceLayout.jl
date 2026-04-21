@@ -628,9 +628,6 @@ export PolyText,
     referenced_characters_demo,
     scripted_demo
 
-include("parameter_set.jl")
-export ParameterSet, MissingNamespace, ParameterKeyError
-
 include("schematics/SchematicDrivenLayout.jl")
 export SchematicDrivenLayout
 

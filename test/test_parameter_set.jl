@@ -1,6 +1,6 @@
 @testitem "ParameterSet" setup = [CommonTestSetup] begin
-    using DeviceLayout: ParameterSet, resolve, leaf_params
-    using DeviceLayout.SchematicDrivenLayout: SchematicGraph
+    using DeviceLayout.SchematicDrivenLayout:
+        ParameterSet, ParameterKeyError, resolve, leaf_params, SchematicGraph
 
     @testset "Construction" begin
         # Empty ParameterSet has required namespaces
@@ -45,7 +45,7 @@
         @test contains(string(ps.components.qubit.missing_param), "ParameterKeyError")
 
         # Using a missing key as a value throws
-        @test_throws DeviceLayout.ParameterKeyError iterate(ps.nonexistent)
+        @test_throws ParameterKeyError iterate(ps.nonexistent)
     end
 
     @testset "resolve" begin
@@ -131,6 +131,25 @@
         @test :extra in pnames
     end
 
+    @testset "Scoped views skip namespace injection" begin
+        # Scoped ParameterSets (from `ps.components.qubit` etc.) must NOT have
+        # "global"/"components" keys injected into the interior subtree. Only
+        # the top-level ParameterSet carries the required-namespace invariant.
+        ps = ParameterSet()
+        ps.components.qubit.cap_width = 300
+
+        sub = ps.components.qubit
+        @test sub isa ParameterSet
+        # Scoped view exposes only the qubit subtree's own keys
+        @test Set(propertynames(sub)) == Set([:cap_width])
+        @test !haskey(sub.data, "global")
+        @test !haskey(sub.data, "components")
+
+        # And the top-level data wasn't polluted by the scoped lookup
+        @test !haskey(ps.data["components"]["qubit"], "global")
+        @test !haskey(ps.data["components"]["qubit"], "components")
+    end
+
     @testset "show" begin
         ps = ParameterSet()
         ps.components.qubit.cap_width = 300
@@ -171,9 +190,8 @@
 end
 
 @testitem "SchematicGraph with ParameterSet" setup = [CommonTestSetup] begin
-    using DeviceLayout: ParameterSet
     using DeviceLayout.SchematicDrivenLayout:
-        SchematicGraph, parameter_set, create_component
+        ParameterSet, SchematicGraph, parameter_set, create_component
 
     @testset "Default constructor" begin
         g = SchematicGraph("test")
@@ -252,10 +270,83 @@ end
         @test "components.island.cap_width" in ps.accessed
         @test "components.island.cap_length" in ps.accessed
     end
+
+    @testset "create_component with scoped ParameterSet" begin
+        using DeviceLayout.SchematicDrivenLayout: parameters
+        using DeviceLayout.SchematicDrivenLayout.ExamplePDK.Transmons:
+            ExampleRectangleIsland
+
+        ps = ParameterSet()
+        ps.components.island.cap_width = 30
+        ps.components.island.cap_length = 400
+
+        # Scoped dot-chain access returns a ParameterSet that can be passed directly
+        sub = ps.components.island
+        @test sub isa ParameterSet
+
+        island = create_component(ExampleRectangleIsland, sub)
+        @test island isa ExampleRectangleIsland
+        p = parameters(island)
+        @test p.cap_width == 30
+        @test p.cap_length == 400
+        # Defaults preserved for unset leaves
+        @test p.cap_gap == parameters(ExampleRectangleIsland()).cap_gap
+
+        # Accessed tracking: leaf-only keys (scoped ParameterSet has no prefix)
+        @test "cap_width" in ps.accessed
+        @test "cap_length" in ps.accessed
+
+        # Inline chained form works identically
+        ps2 = ParameterSet()
+        ps2.components.island.cap_width = 50
+        island2 = create_component(ExampleRectangleIsland, ps2.components.island)
+        @test parameters(island2).cap_width == 50
+
+    end
+
+    @testset "set_parameters with value => :name pairs" begin
+        using DeviceLayout.SchematicDrivenLayout: parameters, set_parameters
+        using DeviceLayout.SchematicDrivenLayout.ExamplePDK.Transmons:
+            ExampleRectangleIsland
+        using Unitful: μm
+
+        ps = ParameterSet()
+        ps.components.transmon.junction_gap = 15μm
+
+        island = ExampleRectangleIsland()
+        # Reversed pair: value => :param_name
+        island2 = set_parameters(island, ps.components.transmon.junction_gap => :junction_gap)
+        @test parameters(island2).junction_gap == 15μm
+
+        # Forwarding a value under a different parameter name
+        island3 = set_parameters(island, ps.components.transmon.junction_gap => :cap_gap)
+        @test parameters(island3).cap_gap == 15μm
+        # Untouched parameters keep their previous values
+        @test parameters(island3).cap_width == parameters(island).cap_width
+
+        # Multiple pairs
+        island4 = set_parameters(
+            island,
+            40μm => :cap_width,
+            600μm => :cap_length
+        )
+        @test parameters(island4).cap_width == 40μm
+        @test parameters(island4).cap_length == 600μm
+
+        # Pairs combine with trailing kwargs (distinct keys)
+        island5 = set_parameters(island, 40μm => :cap_width; cap_length=600μm)
+        @test parameters(island5).cap_width == 40μm
+        @test parameters(island5).cap_length == 600μm
+
+        # Zero pairs is a no-op copy
+        island6 = set_parameters(island)
+        @test parameters(island6).cap_width == parameters(island).cap_width
+    end
 end
 
 @testitem "ParameterSet YAML IO" setup = [CommonTestSetup] begin
-    using DeviceLayout: ParameterSet, resolve, leaf_params, save_parameter_set
+    using DeviceLayout.SchematicDrivenLayout:
+        ParameterSet, resolve, leaf_params, save_parameter_set
     using YAML
     using Unitful: μm, ustrip, unit
 

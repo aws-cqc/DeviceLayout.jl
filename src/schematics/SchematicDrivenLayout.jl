@@ -30,11 +30,9 @@ import DeviceLayout:
     GeometryStructure,
     Hook,
     Meta,
-    ParameterSet,
     PointHook,
     Transformation,
     UPREFERRED
-import DeviceLayout: resolve, leaf_params
 import DeviceLayout:
     attach!,
     autofill!,
@@ -113,7 +111,12 @@ export @component,
     replace_component!,
     route!,
     set_parameters
-export ParameterSet
+export ParameterSet,
+    MissingNamespace,
+    ParameterKeyError,
+    resolve,
+    leaf_params,
+    save_parameter_set
 export ProcessTechnology, SimulationTarget, ArtworkTarget, SolidModelTarget
 export base_variant, flipchip!, map_metadata!, @composite_variant, @variant
 
@@ -131,6 +134,7 @@ const Component = AbstractComponent{typeof(1.0UPREFERRED)}
 include("technologies.jl")
 include("utils.jl")
 include("targets.jl")
+include("parameter_set.jl")
 include("schematics.jl")
 include("components/components.jl")
 include("components/compdef.jl")
