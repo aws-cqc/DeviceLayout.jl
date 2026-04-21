@@ -234,12 +234,12 @@ ps.components.qubit.cap_gap = 20μm
 # Nothing accessed yet
 isempty(ps.accessed)  # => true
 
-# Read a parameter
-ps.components.qubit.cap_width  # => 300μm
-"cap_width" in ps.accessed     # => true
+# Read a parameter — the fully qualified path is recorded
+ps.components.qubit.cap_width                    # => 300μm
+"components.qubit.cap_width" in ps.accessed      # => true
 
-# Tracking is shared across scoped views
+# Tracking is shared across scoped views and still fully qualified
 sub = ps.components.qubit
-sub.cap_gap                    # => 20μm
-"cap_gap" in ps.accessed       # => true
+sub.cap_gap                                      # => 20μm
+"components.qubit.cap_gap" in ps.accessed        # => true
 ```

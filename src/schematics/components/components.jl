@@ -85,8 +85,9 @@ Create an instance of type `T` from a scoped `ParameterSet`, typically obtained 
 chained-dot access like `ps.components.transmon.junction`.
 
 Leaf parameters (non-`Dict` values) at `sub` are extracted via `leaf_params` and
-passed as keyword arguments. Consumed leaf keys are recorded in the shared `accessed`
-set by leaf name only (unlike the address-string form, which records the qualified path).
+passed as keyword arguments. Consumed leaves are recorded in the shared `accessed`
+set as qualified paths (e.g. `"components.transmon.junction.w_jj"`), matching the
+behavior of the address-string form.
 
 # Example
 ```julia
@@ -98,11 +99,13 @@ function create_component(
     sub::ParameterSet
 ) where {T <: AbstractComponent}
     kw = leaf_params(sub)
-    # Track accessed parameter leaf names (scoped ParameterSet carries no prefix)
+    # Track accessed parameter leaves with the scoped ParameterSet's qualified prefix
     accessed = getfield(sub, :accessed)
+    prefix = getfield(sub, :prefix)
     for k in keys(kw)
         if k in parameter_names(T)
-            push!(accessed, String(k))
+            name = String(k)
+            push!(accessed, isempty(prefix) ? name : prefix * "." * name)
         end
     end
     return create_component(T; pairs(kw)...)

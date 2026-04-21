@@ -91,14 +91,35 @@
         # Tracked set is initially empty
         @test isempty(ps.accessed)
 
-        # Accessing a leaf tracks it
+        # Accessing a leaf tracks it with the fully qualified path
         _ = ps.components.qubit.cap_width
-        @test "cap_width" in ps.accessed
+        @test "components.qubit.cap_width" in ps.accessed
 
-        # Tracking is shared across scoped views
+        # Tracking is shared across scoped views and still qualified
         sub = ps.components.qubit
         _ = sub.cap_gap
-        @test "cap_gap" in ps.accessed
+        @test "components.qubit.cap_gap" in ps.accessed
+    end
+
+    @testset "MissingNamespace error path includes scope prefix" begin
+        ps = ParameterSet()
+        ps.components.qubit.cap_width = 300
+
+        # Missing key on a scoped view — the error path should include the scope
+        sub = ps.components.qubit
+        @test contains(string(sub.missing_param), "components.qubit.missing_param")
+
+        # Chained missing across the scope boundary keeps the prefix
+        @test contains(string(sub.a.b.c), "components.qubit.a.b.c")
+
+        # Thrown ParameterKeyError also carries the qualified path
+        err = try
+            iterate(sub.missing_param)
+        catch e
+            e
+        end
+        @test err isa ParameterKeyError
+        @test err.path == "components.qubit.missing_param"
     end
 
     @testset "Dot-access mutation" begin
@@ -292,9 +313,9 @@ end
         # Defaults preserved for unset leaves
         @test p.cap_gap == parameters(ExampleRectangleIsland()).cap_gap
 
-        # Accessed tracking: leaf-only keys (scoped ParameterSet has no prefix)
-        @test "cap_width" in ps.accessed
-        @test "cap_length" in ps.accessed
+        # Accessed tracking: qualified paths (scoped ParameterSet carries its prefix)
+        @test "components.island.cap_width" in ps.accessed
+        @test "components.island.cap_length" in ps.accessed
 
         # Inline chained form works identically
         ps2 = ParameterSet()

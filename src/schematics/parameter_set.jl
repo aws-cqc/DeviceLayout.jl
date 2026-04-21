@@ -25,19 +25,26 @@ Every `ParameterSet` contains two required top-level namespaces:
   - `path::String`: source file path (empty string if constructed from a Dict)
   - `data::Dict{String, Any}`: nested parameter dictionary
   - `accessed::Set{String}`: tracks which parameter paths were consumed (for auditing)
+  - `prefix::String`: dot-separated namespace prefix for scoped views (empty at root)
 """
 struct ParameterSet
     path::String
     data::Dict{String, Any}
     accessed::Set{String}
+    prefix::String
 
     # Public inner constructor: guarantees required top-level namespaces exist.
     # All outer constructors route through here so callers can rely on the invariant.
-    function ParameterSet(path::String, data::Dict{String, Any}, accessed::Set{String})
+    function ParameterSet(
+        path::String,
+        data::Dict{String, Any},
+        accessed::Set{String},
+        prefix::String=""
+    )
         for ns in REQUIRED_NAMESPACES
             haskey(data, ns) || (data[ns] = Dict{String, Any}())
         end
-        return new(path, data, accessed)
+        return new(path, data, accessed, prefix)
     end
 
     # Internal inner constructor for scoped views (e.g. `ps.components.qubit`).
@@ -48,9 +55,10 @@ struct ParameterSet
         path::String,
         data::Dict{String, Any},
         accessed::Set{String},
+        prefix::String,
         ::Val{:scoped}
     )
-        return new(path, data, accessed)
+        return new(path, data, accessed, prefix)
     end
 end
 
@@ -83,11 +91,17 @@ struct MissingNamespace
     parent  # ::Union{Dict{String, Any}, MissingNamespace}
     key::String
     accessed::Set{String}
+    prefix::String  # namespace prefix inherited from the scoped ParameterSet that spawned this chain
 end
 
 function _namespace_path(d::MissingNamespace)
+    chain = _key_chain(d)
+    return isempty(d.prefix) ? chain : d.prefix * "." * chain
+end
+
+function _key_chain(d::MissingNamespace)
     if d.parent isa MissingNamespace
-        return _namespace_path(d.parent) * "." * d.key
+        return _key_chain(d.parent) * "." * d.key
     end
     return d.key
 end
@@ -109,12 +123,12 @@ function _materialize!(d::MissingNamespace)
 end
 
 function Base.getproperty(d::MissingNamespace, s::Symbol)
-    s in (:parent, :key, :accessed) && return getfield(d, s)
-    return MissingNamespace(d, String(s), getfield(d, :accessed))
+    s in (:parent, :key, :accessed, :prefix) && return getfield(d, s)
+    return MissingNamespace(d, String(s), getfield(d, :accessed), getfield(d, :prefix))
 end
 
 function Base.setproperty!(d::MissingNamespace, s::Symbol, value)
-    s in (:parent, :key, :accessed) && return setfield!(d, s, value)
+    s in (:parent, :key, :accessed, :prefix) && return setfield!(d, s, value)
     materialized = _materialize!(d)
     if value isa Pair
         value = Dict{String, Any}(String(value.first) => value.second)
@@ -146,27 +160,31 @@ ParameterSet(data::Dict{String, Any}) = ParameterSet("", data)
 ParameterSet() = ParameterSet(Dict{String, Any}())
 
 function Base.getproperty(ps::ParameterSet, s::Symbol)
-    s in (:path, :data, :accessed) && return getfield(ps, s)
+    s in (:path, :data, :accessed, :prefix) && return getfield(ps, s)
 
     d = getfield(ps, :data)
     key = String(s)
+    prefix = getfield(ps, :prefix)
+    qualified = isempty(prefix) ? key : prefix * "." * key
+
     if !haskey(d, key)
-        return MissingNamespace(d, key, getfield(ps, :accessed))
+        return MissingNamespace(d, key, getfield(ps, :accessed), prefix)
     end
 
     val = d[key]
     if val isa Dict
         # Scoped view: skip namespace-ensuring so the subtree isn't polluted
-        # with "global"/"components" keys.
+        # with "global"/"components" keys. Extend prefix with the stepped-into key.
         return ParameterSet(
             getfield(ps, :path),
             val,
             getfield(ps, :accessed),
+            qualified,
             Val(:scoped)
         )
     end
-    # Track leaf access
-    push!(getfield(ps, :accessed), key)
+    # Track leaf access with qualified path
+    push!(getfield(ps, :accessed), qualified)
     return val
 end
 
