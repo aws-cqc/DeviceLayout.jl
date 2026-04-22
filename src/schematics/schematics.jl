@@ -74,7 +74,7 @@ SchematicGraph(name::String, ps::ParameterSet) = SchematicGraph(
 """
     SchematicGraph(g::SchematicGraph)
 
-Copy constructor — creates a new empty `SchematicGraph` with the same name
+Creates a new empty `SchematicGraph` with the same name
 and `ParameterSet` as `g`.
 """
 SchematicGraph(g::SchematicGraph) =

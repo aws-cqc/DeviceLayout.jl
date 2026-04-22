@@ -56,11 +56,15 @@ end
 
 Create an instance of type `T` using parameters from a `ParameterSet` at the given `address`.
 
-The address is resolved within the `ParameterSet` to locate a parameter subtree.
-Leaf parameters (non-`Dict` values) at that level are extracted and merged with
-`default_parameters(T)` via recursive merge.
+The address is resolved to a scoped `ParameterSet`, and the call is delegated to
+[`create_component(T, sub::ParameterSet)`](@ref). That overload splats the
+leaves at `sub` as keyword arguments into the keyword-only `create_component(T; kwargs...)`,
+which merges them recursively with `default_parameters(T)`. Nested namespaces
+below `address` are not merged - scope at the level whose leaves match `T`'s
+parameters.
 
-Consumed parameters are tracked in `ps.accessed`.
+Consumed leaves (those matching `parameter_names(T)`) are recorded in `ps.accessed`
+as qualified paths rooted at the original PS.
 """
 function create_component(
     ::Type{T},

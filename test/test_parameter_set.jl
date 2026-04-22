@@ -23,6 +23,26 @@
         ps.components.qubit = ("cap_width" => 300)
         @test ps.global.version == 1
         @test ps.components.qubit.cap_width == 300
+
+        # Constructing a ParameterSet from a caller-held dict must not mutate
+        # that dict (the REQUIRED_NAMESPACES injection is done on a copy).
+        user_dict = Dict{String, Any}("custom" => 42)
+        _ = ParameterSet(user_dict)
+        @test !haskey(user_dict, "global")
+        @test !haskey(user_dict, "components")
+        @test collect(keys(user_dict)) == ["custom"]
+
+        # If the caller's dict already has both required namespaces, no copy
+        # is needed and we may keep using the same storage (either behavior is
+        # fine — just check no new keys get sneaked in).
+        user_dict2 = Dict{String, Any}(
+            "global" => Dict{String, Any}(),
+            "components" => Dict{String, Any}(),
+            "extra" => "hello"
+        )
+        original_keys = sort(collect(keys(user_dict2)))
+        _ = ParameterSet(user_dict2)
+        @test sort(collect(keys(user_dict2))) == original_keys
     end
 
     @testset "Dot access" begin
@@ -151,6 +171,38 @@
         @test ps2.components.transmon.island.cap_length == 520
     end
 
+    @testset "setproperty! returns the original RHS" begin
+        # Julia convention: `a.b = x` evaluates to `x`. Even when we wrap a
+        # `Pair` RHS into a nested Dict for storage, the expression's value
+        # must be the user's original Pair — otherwise chained assignment and
+        # any code that captures the RHS behaves surprisingly.
+        ps = ParameterSet()
+
+        # Scalar RHS on ParameterSet
+        rv_ps_scalar = (ps.components.foo = 10)
+        @test rv_ps_scalar === 10
+
+        # Pair RHS on ParameterSet: returns original Pair, not wrapped Dict
+        p = "cap_width" => 300
+        rv_ps_pair = (ps.components.bar = p)
+        @test rv_ps_pair === p
+        @test ps.components.bar.cap_width == 300  # storage still works
+
+        # Same guarantee on MissingNamespace writes. `ps2.missing_root` returns
+        # a MissingNamespace (root-level key absent), so `.foo = ...` dispatches
+        # to setproperty!(::MissingNamespace, ...).
+        ps2 = ParameterSet()
+        rv_mn_scalar = (ps2.missing_root.foo = 42)
+        @test rv_mn_scalar === 42
+        @test ps2.missing_root.foo == 42
+
+        p2 = "k" => 1
+        ps3 = ParameterSet()
+        rv_mn_pair = (ps3.missing_root.nested = p2)
+        @test rv_mn_pair === p2
+        @test ps3.missing_root.nested.k == 1
+    end
+
     @testset "Auto-vivification collides with existing leaf" begin
         # Normal dot-access can't reach _materialize! on a path that already holds
         # a leaf — getproperty short-circuits at the leaf and returns its value.
@@ -224,6 +276,21 @@
         @test contains(s, "ParameterSet")
         @test contains(s, "global")
         @test contains(s, "components")
+
+        # Key order in compact show is sorted (not Dict iteration order) so
+        # output is deterministic for tests and stable for humans.
+        ps_sorted = ParameterSet()
+        ps_sorted.zeta = 1
+        ps_sorted.alpha = 1
+        ps_sorted.mu = 1
+        io2 = IOBuffer()
+        show(io2, ps_sorted)
+        s2 = String(take!(io2))
+        # Extract the keys substring and confirm alphabetical order
+        m = match(r"keys: (.+)\)$", s2)
+        @test m !== nothing
+        keys_listed = split(m.captures[1], ", ")
+        @test keys_listed == sort(keys_listed)
 
         # text/plain — indented tree (top namespaces indented)
         io = IOBuffer()

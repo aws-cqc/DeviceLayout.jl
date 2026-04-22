@@ -17,8 +17,8 @@ ps.components.qubit.cap_width = 350  # write
 
 Every `ParameterSet` contains two required top-level namespaces:
 
-  - `global` — parameters shared across the design
-  - `components` — per-component parameter trees
+  - `global` - parameters shared across the design
+  - `components` - per-component parameter trees
 
 # Fields
 
@@ -44,7 +44,11 @@ struct ParameterSet
         accessed::Set{String},
         prefix::String=""
     )
-        if isempty(prefix)
+        if isempty(prefix) && !all(haskey(data, ns) for ns in REQUIRED_NAMESPACES)
+            # Shallow copy before injecting required namespaces so we don't
+            # mutate the caller's dict. Nested dicts stay shared - we only add
+            # new top-level keys here.
+            data = copy(data)
             for ns in REQUIRED_NAMESPACES
                 haskey(data, ns) || (data[ns] = Dict{String, Any}())
             end
@@ -144,7 +148,7 @@ ps.components.new_qubit.cap_width = 300  # "new_qubit" need not exist
 Julia lowers that assignment to `setproperty!(mn, :cap_width, 300)` where `mn`
 is the `MissingNamespace` returned by `ps.components.new_qubit`. Before the
 write can land, every missing segment along the chain must be created as an
-empty `Dict{String, Any}` in the underlying `ParameterSet.data` — the actual
+empty `Dict{String, Any}` in the underlying `ParameterSet.data` - the actual
 walking-and-creating is done by `_materialize!`. This method then places
 `value` under `s` in the materialized dict.
 
@@ -160,10 +164,10 @@ function Base.setproperty!(d::MissingNamespace, s::Symbol, value)
     s in (:parent, :key, :accessed, :prefix) &&
         error("MissingNamespace.$s is an internal field and cannot be assigned")
     materialized = _materialize!(d)
-    if value isa Pair
-        value = Dict{String, Any}(String(value.first) => value.second)
-    end
-    materialized[String(s)] = value
+    # Julia convention: `a.b = x` evaluates to `x`, so return the original RHS
+    # even when we wrap a `Pair` into a nested namespace Dict for storage.
+    stored = value isa Pair ? Dict{String, Any}(String(value.first) => value.second) : value
+    materialized[String(s)] = stored
     return value
 end
 
@@ -219,10 +223,10 @@ end
 function Base.setproperty!(ps::ParameterSet, s::Symbol, value)
     s in (:path, :data, :accessed, :prefix) && return setfield!(ps, s, value)
     d = getfield(ps, :data)
-    if value isa Pair
-        value = Dict{String, Any}(String(value.first) => value.second)
-    end
-    d[String(s)] = value
+    # Julia convention: `a.b = x` evaluates to `x`, so return the original RHS
+    # even when we wrap a `Pair` into a nested namespace Dict for storage.
+    stored = value isa Pair ? Dict{String, Any}(String(value.first) => value.second) : value
+    d[String(s)] = stored
     return value
 end
 
@@ -230,8 +234,10 @@ function Base.propertynames(ps::ParameterSet)
     return Symbol.(keys(getfield(ps, :data)))
 end
 
-Base.show(io::IO, ps::ParameterSet) =
-    print(io, "ParameterSet($(length(ps.data)) keys: $(join(keys(ps.data), ", ")))")
+Base.show(io::IO, ps::ParameterSet) = print(
+    io,
+    "ParameterSet($(length(ps.data)) keys: $(join(sort!(collect(keys(ps.data))), ", ")))"
+)
 
 function _show_tree(io::IO, d::Dict{String, Any}, indent::Int)
     for (k, v) in sort(collect(d); by=first)
@@ -306,7 +312,7 @@ end
 
 Navigate a dot-separated address within the `ParameterSet`.
 
-Returns the value at the address — either a scoped `ParameterSet` (if the value is a `Dict`)
+Returns the value at the address - either a scoped `ParameterSet` (if the value is a `Dict`)
 or a leaf value.
 
 # Examples
