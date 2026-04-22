@@ -889,6 +889,7 @@
     end
 
     @testset "footprint_halo" begin
+        import .SchematicDrivenLayout: footprint_halo
         # Component with geometry in two layers
         cs_fp = CoordinateSystem("fp_test", nm)
         render!(cs_fp, centered(Rectangle(10μm, 10μm)), BASE_NEGATIVE)

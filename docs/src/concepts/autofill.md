@@ -6,7 +6,8 @@ Components can implement their own `halo` function to customize or simply to spe
 
 ```julia
 DeviceLayout.footprint(comp::MyComponent) = Circle(comp.outer_radius + comp.gap)
-DeviceLayout.halo(comp::MyComponent, d, d_i=nothing; kw...) = footprint_halo(comp, d, d_i; kw...)
+DeviceLayout.halo(comp::MyComponent, d, d_i=nothing; kw...) =
+    SchematicDrivenLayout.footprint_halo(comp, d, d_i; kw...)
 ```
 
 `footprint_halo` offsets the footprint once and replicates it across all matching layers in the component, handling memoization and layer filtering automatically. This avoids the per-element, per-layer Clipper calls of the default `halo`.
