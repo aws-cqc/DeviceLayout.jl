@@ -154,7 +154,7 @@ end
 
 # Define custom exclusion zone/footprint
 DeviceLayout.halo(isl::ExampleStarIsland, d, d_i=nothing; kw...) =
-    footprint_halo(isl, d, d_i; kw...)
+    SchematicDrivenLayout.footprint_halo(isl, d, d_i; kw...)
 
 function DeviceLayout.footprint(isl::ExampleStarIsland)
     return Circle(isl.island_outer_radius + isl.island_ground_gap)

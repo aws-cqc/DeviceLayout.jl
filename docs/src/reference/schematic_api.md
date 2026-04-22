@@ -12,6 +12,7 @@
     SchematicDrivenLayout.create_component
     SchematicDrivenLayout.matching_hooks
     SchematicDrivenLayout.matching_hook
+    SchematicDrivenLayout.footprint_halo
     SchematicDrivenLayout.geometry
     SchematicDrivenLayout.hooks
     SchematicDrivenLayout.default_parameters
