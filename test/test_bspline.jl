@@ -353,7 +353,7 @@ end
 
     ### Unbounded optimization (issue #135)
     pa = Path(Point(-5.8, 3.9)mm, α0=-90°)
-    @test_warn "increasing speed without bound" bspline!(
+    @test_logs (:warn, r"increasing speed without bound") bspline!(
         pa,
         [Point(-0.55, 1.8)mm],
         180°,

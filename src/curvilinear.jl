@@ -140,18 +140,20 @@ function transform(e::CurvilinearPolygon, f::Transformation)
         f.(xrefl(f) ? reverse(e.p) : e.p),
         isempty(e.curves) ? deepcopy(e.curves) :
         transform.(xrefl(f) ? reverse(e.curves) : e.curves, Ref(f)),
-        xrefl(f) ? reverse(csi_rev.(e.curve_start_idx, length(e.p))) : e.curve_start_idx
+        xrefl(f) ? reverse(csi_rev.(e.curve_start_idx, length(e.p))) :
+        copy(e.curve_start_idx)
     )
 end
 
 convert(::Type{GeometryEntity{T}}, e::CurvilinearPolygon) where {T} =
     convert(CurvilinearPolygon{T}, e)
 convert(::Type{GeometryEntity{T}}, e::CurvilinearPolygon{T}) where {T} = e
+convert(::Type{CurvilinearPolygon{T}}, e::CurvilinearPolygon{T}) where {T} = e
 function convert(::Type{CurvilinearPolygon{T}}, e::CurvilinearPolygon{S}) where {T, S}
     return CurvilinearPolygon{T}(
         convert(Vector{Point{T}}, e.p),
-        e.curves,
-        e.curve_start_idx
+        convert(Vector{Paths.Segment{T}}, e.curves),
+        copy(e.curve_start_idx)
     )
 end
 
@@ -210,6 +212,7 @@ end
 convert(::Type{GeometryEntity{T}}, e::CurvilinearRegion) where {T} =
     convert(CurvilinearRegion{T}, e)
 convert(::Type{GeometryEntity{T}}, e::CurvilinearRegion{T}) where {T} = e
+convert(::Type{CurvilinearRegion{T}}, e::CurvilinearRegion{T}) where {T} = e
 function convert(::Type{CurvilinearRegion{T}}, e::CurvilinearRegion{S}) where {T, S}
     return CurvilinearRegion{T}(
         convert(CurvilinearPolygon{T}, e.exterior),

@@ -53,7 +53,7 @@ end
         simplify!(pa)
         attach!(pa, cref, range(0μm, stop=pathlength(pa), length=3))
         render!(c, pa)
-        @test_warn "Ignoring attachments" render!.(c, pa, GDSMeta())
+        @test_logs (:warn, r"Ignoring attachments") render!.(c, pa, GDSMeta())
         @test transformation(pa["sub", 2]) ≈ transformation(refs(pa)[2])
 
         @test isempty(c.elements)
@@ -131,7 +131,7 @@ end
         attach!(ro, c2ref, pathlength(ro))
         render!(c, ro)
         @test transformation(ro, c2ref) == ScaledIsometry(p1(ro), α1(ro))
-        @test_warn "Ignoring attachments" render!.(c, ro)
+        @test_logs (:warn, r"Ignoring attachments") render!.(c, ro)
         # === End Issue 13 ===
 
         # === Issue 51 ===

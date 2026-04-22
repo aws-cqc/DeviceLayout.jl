@@ -206,7 +206,7 @@ Transmon component with a rectangular island acting as a shunt capacitor across 
 
 # Parameters
 
-  - `name = "island"`: Name of component
+  - `name = "tr"`: Name of component
   - `jj_template = ExampleSimpleJunction()`: Template to generate JJ or SQUID,
     where `name` and `h_ground_island` will be overridden
   - `cap_width = 24μm`: The width of the rectangular island

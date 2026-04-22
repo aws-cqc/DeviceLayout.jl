@@ -524,6 +524,14 @@
         @test union2d(p1, cs => :test) == union2d([p1, p2])
         @test union2d(p1, [cs => :test]) == union2d([p1, p2])
     end
+
+    @testset "Polygon methods" begin
+        r1 = Rectangle(1, 1)
+        empty_poly = difference2d(r1, r1)
+        @test iszero(perimeter(empty_poly))
+        multi_poly = union2d(r1, r1 + Point(3, 0))
+        @test perimeter(multi_poly) == 8
+    end
 end
 
 @testitem "Polygon offsetting" setup = [CommonTestSetup] begin

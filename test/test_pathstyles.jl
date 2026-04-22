@@ -181,7 +181,7 @@ end
     pa = Path()
     straight!(pa, 10μm, Paths.Trace(1μm))
     straight!(pa, 10μm, Paths.Trace(27μm))
-    @test_warn "taper length" Paths.round_trace_transitions!(pa; radius=10μm)
+    @test_logs (:warn, r"taper length") Paths.round_trace_transitions!(pa; radius=10μm)
 
     # Rounding of TaperTrace
     pa = Path()

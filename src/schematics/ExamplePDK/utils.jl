@@ -78,7 +78,7 @@ function bridge_geometry(style::Paths.SimpleCPW)
 end
 
 """
-    add_bridges!(schematic, bridge=FEEDLINE_BRIDGE; spacing=200μm, margin=50μm)
+    add_bridges!(schematic, bridge=FEEDLINE_BRIDGE; spacing=500μm, margin=50μm)
 
 Example utility for adding bridges. Not optimized for microwave properties.
 
