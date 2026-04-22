@@ -1057,83 +1057,18 @@ function clip(
 end
 
 """
-    cliptree(op::Clipper.ClipType, s::AbstractPolygon{S}, c::AbstractPolygon{T};
-        kwargs...) where {S<:Coordinate, T<:Coordinate}
-    cliptree(op::Clipper.ClipType, s::AbstractVector{A}, c::AbstractVector{B};
-        kwargs...) where {S, T, A<:AbstractPolygon{S}, B<:AbstractPolygon{T}}
-    cliptree(op::Clipper.ClipType,
-        s::AbstractVector{Polygon{T}}, c::AbstractVector{Polygon{T}};
-        pfs::Clipper.PolyFillType=Clipper.PolyFillTypePositive,
-        pfc::Clipper.PolyFillType=Clipper.PolyFillTypePositive) where {T}
+    cliptree(op, s, c; kwargs...)
 
-Return a `Clipper.PolyNode` representing parent-child relationships between polygons and
-interior holes. The units and number type may need to be converted.
+!!! warning "Deprecated"
 
-Uses the [`Clipper`](http://www.angusj.com/delphi/clipper.php) library and the
-[`Clipper.jl`](https://github.com/Voxel8/Clipper.jl) wrapper to perform polygon clipping.
-
-## Positional arguments
-
-The first argument must be one of the following types to specify a clipping operation:
-
-  - `Clipper.ClipTypeDifference`
-  - `Clipper.ClipTypeIntersection`
-  - `Clipper.ClipTypeUnion`
-  - `Clipper.ClipTypeXor`
-
-Note that these are types; you should not follow them with `()`. The second and third
-arguments are `AbstractPolygon`s or vectors thereof.
-
-## Keyword arguments
-
-`pfs` and `pfc` specify polygon fill rules for the `s` and `c` arguments, respectively.
-These arguments may include:
-
-  - `Clipper.PolyFillTypeNegative`
-  - `Clipper.PolyFillTypePositive`
-  - `Clipper.PolyFillTypeEvenOdd`
-  - `Clipper.PolyFillTypeNonZero`
-
-See the [`Clipper` docs](http://www.angusj.com/delphi/clipper/documentation/Docs/Units/ClipperLib/Types/PolyFillType.htm)
-for further information.
+    `cliptree` is deprecated. Use `clip(op, s, c; kwargs...).tree` instead.
 """
-function cliptree(
-    op::Clipper.ClipType,
-    s::AbstractPolygon{S},
-    c::AbstractPolygon{T};
-    kwargs...
-) where {S <: Coordinate, T <: Coordinate}
-    dimension(S) != dimension(T) && throw(Unitful.DimensionError(oneunit(S), oneunit(T)))
-    R = promote_type(S, T)
-    return cliptree(op, Polygon{R}[s], Polygon{R}[c]; kwargs...)::Vector{Polygon{R}}
-end
-
-function cliptree(
-    op::Clipper.ClipType,
-    s::AbstractVector{A},
-    c::AbstractVector{B};
-    kwargs...
-) where {S, T, A <: AbstractPolygon{S}, B <: AbstractPolygon{T}}
-    dimension(S) != dimension(T) && throw(Unitful.DimensionError(oneunit(S), oneunit(T)))
-    R = promote_type(S, T)
-    return cliptree(
-        op,
-        convert(Vector{Polygon{R}}, s),
-        convert(Vector{Polygon{R}}, c);
-        kwargs...
-    )::Vector{Polygon{R}}
-end
-
-function cliptree(
-    op::Clipper.ClipType,
-    s::AbstractVector{Polygon{T}},
-    c::AbstractVector{Polygon{T}};
-    pfs::Clipper.PolyFillType=Clipper.PolyFillTypePositive,
-    pfc::Clipper.PolyFillType=Clipper.PolyFillTypePositive
-) where {T}
-    sc, cc = clipperize(s), clipperize(c)
-    cpoly = _clip(op, sc, cc; pfs, pfc)
-    return declipperize(cpoly, T).tree
+function cliptree(op, s, c; kwargs...)
+    Base.depwarn(
+        "`cliptree` is deprecated, use `clip(op, s, c; kwargs...).tree` instead",
+        :cliptree
+    )
+    return clip(op, s, c; kwargs...).tree
 end
 
 """
