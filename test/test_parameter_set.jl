@@ -11,13 +11,13 @@
         @test ps.data["components"] isa Dict
         @test ps.path == ""
 
-        # From Dict — required namespaces are added if missing
+        # From Dict - required namespaces are added if missing
         ps = ParameterSet(Dict{String, Any}("custom" => 42))
         @test haskey(ps.data, "global")
         @test haskey(ps.data, "components")
         @test ps.data["custom"] == 42
 
-        # From Dict — existing namespaces are preserved
+        # From Dict - existing namespaces are preserved
         ps = ParameterSet()
         ps.global.version = 1
         ps.components.qubit = ("cap_width" => 300)
@@ -34,7 +34,7 @@
 
         # If the caller's dict already has both required namespaces, no copy
         # is needed and we may keep using the same storage (either behavior is
-        # fine — just check no new keys get sneaked in).
+        # fine - just check no new keys get sneaked in).
         user_dict2 = Dict{String, Any}(
             "global" => Dict{String, Any}(),
             "components" => Dict{String, Any}(),
@@ -83,7 +83,7 @@
         comp_ps = resolve(ps, "components")
         @test comp_ps isa ParameterSet
 
-        # Empty address is a no-op — returns the root ParameterSet
+        # Empty address is a no-op - returns the root ParameterSet
         @test resolve(ps, "") === ps
 
         # Empty segments from leading/trailing/repeated dots are skipped
@@ -133,7 +133,7 @@
         ps = ParameterSet()
         ps.components.qubit.cap_width = 300
 
-        # Missing key on a scoped view — the error path should include the scope
+        # Missing key on a scoped view - the error path should include the scope
         sub = ps.components.qubit
         @test contains(string(sub.missing_param), "components.qubit.missing_param")
 
@@ -141,13 +141,9 @@
         @test contains(string(sub.a.b.c), "components.qubit.a.b.c")
 
         # Thrown ParameterKeyError also carries the qualified path
-        err = try
-            iterate(sub.missing_param)
-        catch e
-            e
-        end
-        @test err isa ParameterKeyError
-        @test err.path == "components.qubit.missing_param"
+        @test_throws ParameterKeyError("missing_param", "components.qubit.missing_param") iterate(
+            sub.missing_param
+        )
     end
 
     @testset "Dot-access mutation" begin
@@ -174,7 +170,7 @@
     @testset "setproperty! returns the original RHS" begin
         # Julia convention: `a.b = x` evaluates to `x`. Even when we wrap a
         # `Pair` RHS into a nested Dict for storage, the expression's value
-        # must be the user's original Pair — otherwise chained assignment and
+        # must be the user's original Pair - otherwise chained assignment and
         # any code that captures the RHS behaves surprisingly.
         ps = ParameterSet()
 
@@ -205,7 +201,7 @@
 
     @testset "Auto-vivification collides with existing leaf" begin
         # Normal dot-access can't reach _materialize! on a path that already holds
-        # a leaf — getproperty short-circuits at the leaf and returns its value.
+        # a leaf - getproperty short-circuits at the leaf and returns its value.
         # The collision path IS reachable when a MissingNamespace reference is
         # held across a mutation that overwrites its target with a leaf, then the
         # held reference is used for an auto-vivifying write.
@@ -213,28 +209,17 @@
         mn = ps.components.new_section   # MissingNamespace (target doesn't exist)
         ps.components.new_section = 500  # target now holds a leaf value
 
-        err = try
-            mn.foo = 99                  # auto-viv against a now-leaf target
-            nothing
-        catch e
-            e
-        end
-        @test err isa ArgumentError
-        @test contains(err.msg, "components.new_section")
-        @test contains(err.msg, "leaf value")
+        # ArgumentError message carries the qualified path and the "leaf value"
+        # phrase; match on both via a regex so the check runs once.
+        @test_throws r"components\.new_section.+leaf value" (mn.foo = 99)
+        @test_throws ArgumentError (mn.foo = 99)
 
         # Same collision one level deeper: leaf at an intermediate path segment
         ps2 = ParameterSet()
         mn2 = ps2.a.b                    # MissingNamespace chain
         ps2.a.b = 42                     # b becomes a leaf
-        err2 = try
-            mn2.c = 1
-            nothing
-        catch e
-            e
-        end
-        @test err2 isa ArgumentError
-        @test contains(err2.msg, "a.b")
+        @test_throws ArgumentError (mn2.c = 1)
+        @test_throws "a.b" (mn2.c = 1)
     end
 
     @testset "propertynames" begin
@@ -292,7 +277,7 @@
         keys_listed = split(m.captures[1], ", ")
         @test keys_listed == sort(keys_listed)
 
-        # text/plain — indented tree (top namespaces indented)
+        # text/plain - indented tree (top namespaces indented)
         io = IOBuffer()
         show(io, MIME("text/plain"), ps)
         s = String(take!(io))
@@ -301,7 +286,7 @@
         @test contains(s, "    qubit")
         @test contains(s, "      cap_width = 300")
 
-        # text/markdown — nested list
+        # text/markdown - nested list
         io = IOBuffer()
         show(io, MIME("text/markdown"), ps)
         s = String(take!(io))
@@ -309,7 +294,7 @@
         @test contains(s, "- **components**")
         @test contains(s, "    - cap_width = `300`")
 
-        # text/html — nested <ul>
+        # text/html - nested <ul>
         io = IOBuffer()
         show(io, MIME("text/html"), ps)
         s = String(take!(io))
@@ -432,28 +417,33 @@ end
         island2 = create_component(ExampleRectangleIsland, ps2.components.island)
         @test parameters(island2).cap_width == 50
 
-        # Missing path — address form should throw ParameterKeyError with the
+        # Missing path - address form should throw ParameterKeyError with the
         # qualified path, not a generic MethodError.
         using DeviceLayout.SchematicDrivenLayout: ParameterKeyError
         ps3 = ParameterSet()
-        err = try
-            create_component(ExampleRectangleIsland, ps3, "components.nonexistent")
-            nothing
-        catch e
-            e
-        end
-        @test err isa ParameterKeyError
-        @test err.path == "components.nonexistent"
+        @test_throws ParameterKeyError("nonexistent", "components.nonexistent") create_component(
+            ExampleRectangleIsland,
+            ps3,
+            "components.nonexistent"
+        )
 
         # Same for chained-dot form
-        err2 = try
-            create_component(ExampleRectangleIsland, ps3.components.nonexistent)
-            nothing
-        catch e
-            e
-        end
-        @test err2 isa ParameterKeyError
-        @test err2.path == "components.nonexistent"
+        @test_throws ParameterKeyError("nonexistent", "components.nonexistent") create_component(
+            ExampleRectangleIsland,
+            ps3.components.nonexistent
+        )
+
+        # Root PS (empty prefix) is not a valid scoped view: the bare leaf
+        # names have no meaningful qualified path, so tracking would diverge
+        # from the address-string form. Surface this with ArgumentError rather
+        # than silently tracking unqualified keys in `ps.accessed`.
+        ps4 = ParameterSet()
+        @test_throws "scoped view" create_component(ExampleRectangleIsland, ps4)
+        @test_throws ArgumentError create_component(ExampleRectangleIsland, ps4)
+
+        # Same check via the address form with an empty address (resolves to
+        # the root PS and then hits the scoped form's guard).
+        @test_throws ArgumentError create_component(ExampleRectangleIsland, ps4, "")
     end
 
     @testset "set_parameters with value => :name pairs" begin
@@ -492,7 +482,7 @@ end
         @test parameters(island6).cap_width == parameters(island).cap_width
 
         # Reading a value from the ParameterSet for forwarding records it in
-        # `accessed` with the fully qualified path — so `set_parameters` with a
+        # `accessed` with the fully qualified path - so `set_parameters` with a
         # `value => :name` pair sourced from `ps` contributes to the audit trail.
         ps_audit = ParameterSet()
         ps_audit.components.transmon.junction_gap = 15μm
@@ -509,14 +499,10 @@ end
         # store the MissingNamespace as the component's parameter value.
         using DeviceLayout.SchematicDrivenLayout: ParameterKeyError
         ps_missing = ParameterSet()
-        err = try
-            set_parameters(island, ps_missing.components.transmon.junction_gap => :junction_gap)
-            nothing
-        catch e
-            e
-        end
-        @test err isa ParameterKeyError
-        @test err.path == "components.transmon.junction_gap"
+        @test_throws ParameterKeyError("junction_gap", "components.transmon.junction_gap") set_parameters(
+            island,
+            ps_missing.components.transmon.junction_gap => :junction_gap
+        )
     end
 end
 
@@ -565,7 +551,7 @@ end
 
     @testset "Bare unit strings are preserved as strings" begin
         # Strings that `Unitful.uparse` recognizes as bare units (not Quantities)
-        # must NOT be coerced — `process_node: "s"` should stay the string "s",
+        # must NOT be coerced - `process_node: "s"` should stay the string "s",
         # not become the seconds unit.
         yaml_str = """
         global:
@@ -657,5 +643,119 @@ end
         @test ps2.components.transmon.island.cap_length == 520μm
         @test ps2.components.transmon.island.cap_width == 24μm
         @test ps2.components.transmon.junction.w_jj == 1μm
+    end
+end
+
+@testitem "Composite ParameterSet flow" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+    import .SchematicDrivenLayout: ParameterSet, parameter_set
+    using DeviceLayout.SchematicDrivenLayout.ExamplePDK.Transmons: ExampleRectangleIsland
+    using DeviceLayout.SchematicDrivenLayout.ExamplePDK.SimpleJunctions:
+        ExampleSimpleJunction
+    using Unitful: μm
+
+    @compdef struct PSFlowTestTransmon <: CompositeComponent
+        name = "ps_flow_transmon"
+        junction_gap = 12μm
+    end
+
+    function SchematicDrivenLayout._build_subcomponents(tr::PSFlowTestTransmon)
+        ps = parameter_set(tr._graph)
+        @assert ps !== nothing "regression for MR issue #1: composite _graph missing PS"
+        island = create_component(
+            ExampleRectangleIsland,
+            ps,
+            "components.ps_flow_transmon.island"
+        )
+        island = set_parameters(island, tr.junction_gap => :junction_gap)
+        junction = create_component(
+            ExampleSimpleJunction,
+            ps,
+            "components.ps_flow_transmon.junction"
+        )
+        junction = set_parameters(junction, tr.junction_gap => :h_ground_island)
+        return (island, junction)
+    end
+
+    function SchematicDrivenLayout._graph!(
+        g::SchematicGraph,
+        cc::PSFlowTestTransmon,
+        subcomps::NamedTuple
+    )
+        n = add_node!(g, subcomps.island)
+        fuse!(g, n => :junction, subcomps.junction => :island)
+        return g
+    end
+    SchematicDrivenLayout.map_hooks(::Type{PSFlowTestTransmon}) =
+        Dict{Pair{Int, Symbol}, Symbol}()
+
+    @testset "PS propagates into composite _graph" begin
+        ps = ParameterSet()
+        ps.components.ps_flow_transmon.junction_gap = 15μm
+        ps.components.ps_flow_transmon.island.cap_width = 42μm
+        ps.components.ps_flow_transmon.island.cap_length = 600μm
+        ps.components.ps_flow_transmon.junction.w_jj = 2μm
+        ps.components.ps_flow_transmon.junction.h_jj = 2μm
+
+        tr = create_component(PSFlowTestTransmon, ps, "components.ps_flow_transmon")
+        # PS is threaded into the composite's private graph - the core fix.
+        @test parameter_set(tr._graph) === ps
+        # Composite's own leaf consumed by create_component.
+        @test tr.junction_gap == 15μm
+
+        # Triggering graph(tr) runs _build_subcomponents, which reads the PS.
+        g_inner = graph(tr)
+        @test g_inner === tr._graph
+        comps = components(tr)
+        @test length(comps) == 2
+
+        island = comps[1]
+        junction = comps[2]
+        @test island isa ExampleRectangleIsland
+        @test junction isa ExampleSimpleJunction
+        # Leaf parameters from the PS were applied to the subcomponents.
+        @test parameters(island).cap_width == 42μm
+        @test parameters(island).cap_length == 600μm
+        @test parameters(junction).w_jj == 2μm
+        # Shared parameter forwarded via `set_parameters` from the composite.
+        @test parameters(island).junction_gap == 15μm
+        @test parameters(junction).h_ground_island == 15μm
+
+        # Access tracking records qualified paths (both the composite's own
+        # leaf and the subcomponent leaves).
+        @test "components.ps_flow_transmon.junction_gap" in ps.accessed
+        @test "components.ps_flow_transmon.island.cap_width" in ps.accessed
+        @test "components.ps_flow_transmon.junction.w_jj" in ps.accessed
+    end
+
+    @testset "Top-level plan runs end-to-end" begin
+        ps = ParameterSet()
+        ps.components.ps_flow_transmon.junction_gap = 10μm
+        ps.components.ps_flow_transmon.island.cap_width = 30μm
+        ps.components.ps_flow_transmon.island.cap_length = 500μm
+        ps.components.ps_flow_transmon.junction.w_jj = 1μm
+
+        g = SchematicGraph("chip", ps)
+        tr = create_component(PSFlowTestTransmon, ps, "components.ps_flow_transmon")
+        add_node!(g, tr)
+        # The real regression - `plan(g)` would previously throw inside
+        # `_build_subcomponents` because `parameter_set(tr._graph)` was nothing.
+        floorplan = plan(g; log_dir=nothing)
+        @test floorplan !== nothing
+    end
+
+    @testset "Chained-dot composite form is rejected" begin
+        ps = ParameterSet()
+        ps.components.ps_flow_transmon.junction_gap = 11μm
+        # Scoped view has no reference to the root PS - the helpful error
+        # points back to the address-string form.
+        @test_throws "address form" create_component(
+            PSFlowTestTransmon,
+            ps.components.ps_flow_transmon
+        )
+        @test_throws ArgumentError create_component(
+            PSFlowTestTransmon,
+            ps.components.ps_flow_transmon
+        )
     end
 end

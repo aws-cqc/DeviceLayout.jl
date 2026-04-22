@@ -85,35 +85,52 @@ passed as keyword arguments. Consumed leaves are recorded in the shared `accesse
 set as qualified paths (e.g. `"components.transmon.junction.w_jj"`), matching the
 behavior of the address-string form.
 
+`sub` must be a scoped view (non-empty prefix); passing a root `ParameterSet`
+raises an `ArgumentError` because bare leaf names at the root have no meaningful
+qualified path and the use case is ambiguous - use the address-string form.
+
 # Example
 
 ```julia
 junction = create_component(ExampleSimpleJunction, ps.components.transmon.junction)
 ```
 """
-function create_component(::Type{T}, sub::ParameterSet) where {T <: AbstractComponent}
+function create_component(
+    ::Type{T},
+    sub::ParameterSet;
+    kwargs...
+) where {T <: AbstractComponent}
+    prefix = getfield(sub, :prefix)
+    isempty(prefix) && throw(
+        ArgumentError(
+            "create_component(T, ::ParameterSet) requires a scoped view " *
+            "(e.g. `ps.components.qubit`). For a root ParameterSet, use " *
+            "`create_component(T, ps, address)` with an explicit address."
+        )
+    )
     kw = leaf_params(sub)
     # Track accessed parameter leaves with the scoped ParameterSet's qualified prefix
     accessed = getfield(sub, :accessed)
-    prefix = getfield(sub, :prefix)
     for k in keys(kw)
         if k in parameter_names(T)
-            name = String(k)
-            push!(accessed, isempty(prefix) ? name : prefix * "." * name)
+            push!(accessed, prefix * "." * String(k))
         end
     end
-    return create_component(T; pairs(kw)...)
+    # `kwargs` lets callers inject fields like `_graph=...` - e.g. the composite
+    # address-form needs to thread the root PS into the composite's private graph.
+    return create_component(T; kwargs..., pairs(kw)...)
 end
 
 # Reached when `create_component(T, ps, address)` or `create_component(T, ps.x.y)`
 # targets a path that does not exist. Surface the qualified path in a
 # ParameterKeyError instead of letting the caller see a generic MethodError.
-function create_component(
-    ::Type{<:AbstractComponent},
-    sub::MissingNamespace
-)
+function create_component(::Type{<:AbstractComponent}, sub::MissingNamespace)
     throw(ParameterKeyError(getfield(sub, :key), _namespace_path(sub)))
 end
+
+# Composite-specific `create_component` specializations live in
+# `composite_components.jl` (included after this file) because they dispatch
+# on `AbstractCompositeComponent`.
 
 """
     (c::AbstractComponent)(

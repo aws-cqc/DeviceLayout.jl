@@ -208,12 +208,7 @@ function Base.getproperty(ps::ParameterSet, s::Symbol)
     if val isa Dict
         # Scoped view over an interior subtree; `qualified` is non-empty so the
         # constructor skips namespace-ensuring (see ParameterSet inner ctor).
-        return ParameterSet(
-            getfield(ps, :path),
-            val,
-            getfield(ps, :accessed),
-            qualified
-        )
+        return ParameterSet(getfield(ps, :path), val, getfield(ps, :accessed), qualified)
     end
     # Track leaf access with qualified path
     push!(getfield(ps, :accessed), qualified)

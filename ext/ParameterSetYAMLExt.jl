@@ -12,7 +12,7 @@ Recursively walk a parsed YAML dict. String values that parse into a
 `Unitful.Quantity` (e.g. `"150μm"`) are converted in place.
 
 Bare unit names like `"s"`, `"m"`, `"cm"` parse into `Unitful.Units`, not
-`Quantity` — those are left as strings so that ordinary text values (e.g.
+`Quantity` - those are left as strings so that ordinary text values (e.g.
 `process_node: "s"`) are not silently coerced into the seconds unit.
 """
 function _parse_units!(data::Dict{String, Any})
