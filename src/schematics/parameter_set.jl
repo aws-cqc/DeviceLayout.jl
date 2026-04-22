@@ -183,7 +183,6 @@ Base.show(io::IO, d::MissingNamespace) = print(
 )
 
 # Throw on any attempt to use MissingNamespace as a value
-Base.convert(::Type{T}, d::MissingNamespace) where {T <: Number} = _missing_error(d)
 Base.iterate(d::MissingNamespace) = _missing_error(d)
 Base.length(d::MissingNamespace) = _missing_error(d)
 
