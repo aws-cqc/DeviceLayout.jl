@@ -62,6 +62,14 @@
         # Resolve to namespace
         comp_ps = resolve(ps, "components")
         @test comp_ps isa ParameterSet
+
+        # Empty address is a no-op — returns the root ParameterSet
+        @test resolve(ps, "") === ps
+
+        # Empty segments from leading/trailing/repeated dots are skipped
+        @test resolve(ps, ".components.qubit").data === ps.components.qubit.data
+        @test resolve(ps, "components.qubit.").data === ps.components.qubit.data
+        @test resolve(ps, "components..qubit").data === ps.components.qubit.data
     end
 
     @testset "leaf_params" begin
@@ -141,6 +149,40 @@
         ps2 = ParameterSet()
         ps2.components.transmon.island.cap_length = 520
         @test ps2.components.transmon.island.cap_length == 520
+    end
+
+    @testset "Auto-vivification collides with existing leaf" begin
+        # Normal dot-access can't reach _materialize! on a path that already holds
+        # a leaf — getproperty short-circuits at the leaf and returns its value.
+        # The collision path IS reachable when a MissingNamespace reference is
+        # held across a mutation that overwrites its target with a leaf, then the
+        # held reference is used for an auto-vivifying write.
+        ps = ParameterSet()
+        mn = ps.components.new_section   # MissingNamespace (target doesn't exist)
+        ps.components.new_section = 500  # target now holds a leaf value
+
+        err = try
+            mn.foo = 99                  # auto-viv against a now-leaf target
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test contains(err.msg, "components.new_section")
+        @test contains(err.msg, "leaf value")
+
+        # Same collision one level deeper: leaf at an intermediate path segment
+        ps2 = ParameterSet()
+        mn2 = ps2.a.b                    # MissingNamespace chain
+        ps2.a.b = 42                     # b becomes a leaf
+        err2 = try
+            mn2.c = 1
+            nothing
+        catch e
+            e
+        end
+        @test err2 isa ArgumentError
+        @test contains(err2.msg, "a.b")
     end
 
     @testset "propertynames" begin
@@ -322,6 +364,29 @@ end
         ps2.components.island.cap_width = 50
         island2 = create_component(ExampleRectangleIsland, ps2.components.island)
         @test parameters(island2).cap_width == 50
+
+        # Missing path — address form should throw ParameterKeyError with the
+        # qualified path, not a generic MethodError.
+        using DeviceLayout.SchematicDrivenLayout: ParameterKeyError
+        ps3 = ParameterSet()
+        err = try
+            create_component(ExampleRectangleIsland, ps3, "components.nonexistent")
+            nothing
+        catch e
+            e
+        end
+        @test err isa ParameterKeyError
+        @test err.path == "components.nonexistent"
+
+        # Same for chained-dot form
+        err2 = try
+            create_component(ExampleRectangleIsland, ps3.components.nonexistent)
+            nothing
+        catch e
+            e
+        end
+        @test err2 isa ParameterKeyError
+        @test err2.path == "components.nonexistent"
     end
 
     @testset "set_parameters with value => :name pairs" begin
@@ -429,6 +494,33 @@ end
         @test ps.components.qubit.cap_width == 300μm
         @test ps.components.qubit.cap_gap == 20μm
         @test ps.components.qubit.finger_count == 4
+    end
+
+    @testset "Bare unit strings are preserved as strings" begin
+        # Strings that `Unitful.uparse` recognizes as bare units (not Quantities)
+        # must NOT be coerced — `process_node: "s"` should stay the string "s",
+        # not become the seconds unit.
+        yaml_str = """
+        global:
+          process_node: "s"
+          lithography: "m"
+          label: "cm"
+          comment: "not a unit at all"
+        components:
+          cap:
+            finger_length: 150μm
+            notes: "μm"
+        """
+        io = IOBuffer(yaml_str)
+        ps = ParameterSet(io)
+
+        @test ps.global.process_node == "s"
+        @test ps.global.lithography == "m"
+        @test ps.global.label == "cm"
+        @test ps.global.comment == "not a unit at all"
+        @test ps.components.cap.notes == "μm"
+        # But a genuine quantity with magnitude + unit is still converted
+        @test ps.components.cap.finger_length == 150μm
     end
 
     @testset "IO round-trip with Unitful" begin

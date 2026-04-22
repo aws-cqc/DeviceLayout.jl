@@ -8,8 +8,12 @@ import Unitful
 """
     _parse_units!(data::Dict{String, Any})
 
-Recursively walk a parsed YAML dict. String values parseable by `Unitful.uparse`
-(e.g. `"150μm"`) are converted to `Unitful.Quantity` values.
+Recursively walk a parsed YAML dict. String values that parse into a
+`Unitful.Quantity` (e.g. `"150μm"`) are converted in place.
+
+Bare unit names like `"s"`, `"m"`, `"cm"` parse into `Unitful.Units`, not
+`Quantity` — those are left as strings so that ordinary text values (e.g.
+`process_node: "s"`) are not silently coerced into the seconds unit.
 """
 function _parse_units!(data::Dict{String, Any})
     for (k, v) in data
@@ -17,7 +21,8 @@ function _parse_units!(data::Dict{String, Any})
             _parse_units!(v)
         elseif v isa AbstractString
             try
-                data[k] = Unitful.uparse(v)
+                parsed = Unitful.uparse(v)
+                parsed isa Unitful.Quantity && (data[k] = parsed)
             catch
                 # not a valid unit expression, keep as-is
             end

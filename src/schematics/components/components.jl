@@ -67,15 +67,7 @@ function create_component(
     ps::ParameterSet,
     address::String
 ) where {T <: AbstractComponent}
-    sub = resolve(ps, address)
-    kw = leaf_params(sub)
-    # Track accessed parameter paths
-    for k in keys(kw)
-        if k in parameter_names(T)
-            push!(ps.accessed, address * "." * String(k))
-        end
-    end
-    return create_component(T; pairs(kw)...)
+    return create_component(T, resolve(ps, address))
 end
 
 """
@@ -107,6 +99,16 @@ function create_component(::Type{T}, sub::ParameterSet) where {T <: AbstractComp
         end
     end
     return create_component(T; pairs(kw)...)
+end
+
+# Reached when `create_component(T, ps, address)` or `create_component(T, ps.x.y)`
+# targets a path that does not exist. Surface the qualified path in a
+# ParameterKeyError instead of letting the caller see a generic MethodError.
+function create_component(
+    ::Type{<:AbstractComponent},
+    sub::MissingNamespace
+)
+    throw(ParameterKeyError(getfield(sub, :key), _namespace_path(sub)))
 end
 
 """

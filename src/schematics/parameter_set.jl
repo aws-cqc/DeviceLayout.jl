@@ -33,31 +33,22 @@ struct ParameterSet
     accessed::Set{String}
     prefix::String
 
-    # Public inner constructor: guarantees required top-level namespaces exist.
-    # All outer constructors route through here so callers can rely on the invariant.
+    # A non-empty `prefix` marks a scoped view over an interior subtree of a
+    # larger ParameterSet (e.g. `ps.components.qubit`); those subtrees must not
+    # be polluted with the top-level "global"/"components" keys. A root
+    # ParameterSet has `prefix == ""` and gets the required namespaces ensured
+    # so every caller can rely on them existing.
     function ParameterSet(
         path::String,
         data::Dict{String, Any},
         accessed::Set{String},
         prefix::String=""
     )
-        for ns in REQUIRED_NAMESPACES
-            haskey(data, ns) || (data[ns] = Dict{String, Any}())
+        if isempty(prefix)
+            for ns in REQUIRED_NAMESPACES
+                haskey(data, ns) || (data[ns] = Dict{String, Any}())
+            end
         end
-        return new(path, data, accessed, prefix)
-    end
-
-    # Internal inner constructor for scoped views (e.g. `ps.components.qubit`).
-    # The `Val{:scoped}` tag marks that `data` is an interior subtree which must
-    # NOT be polluted with "global"/"components" keys. Only `getproperty` should
-    # call this form.
-    function ParameterSet(
-        path::String,
-        data::Dict{String, Any},
-        accessed::Set{String},
-        prefix::String,
-        ::Val{:scoped}
-    )
         return new(path, data, accessed, prefix)
     end
 end
@@ -110,16 +101,29 @@ function _missing_error(d::MissingNamespace)
     throw(ParameterKeyError(d.key, _namespace_path(d)))
 end
 
+"""
+    _materialize!(d::MissingNamespace) -> Dict{String, Any}
+
+Walk `d`'s `parent` chain back to a real `Dict{String, Any}`, creating an empty
+`Dict{String, Any}` at every missing segment along the way, and return the dict
+at `d.key`. Internal helper for `setproperty!(::MissingNamespace, ...)`.
+
+Throws `ArgumentError` if the path collides with an existing leaf (i.e. `d.key`
+is already present in its parent dict and holds a non-`Dict` value).
+"""
 function _materialize!(d::MissingNamespace)
-    parent_dict = if d.parent isa Dict{String, Any}
-        d.parent
-    else
-        _materialize!(d.parent)
+    parent_dict = d.parent isa Dict{String, Any} ? d.parent : _materialize!(d.parent)
+    if haskey(parent_dict, d.key)
+        val = parent_dict[d.key]
+        val isa Dict{String, Any} || throw(
+            ArgumentError(
+                "Cannot auto-vivify namespace at \"$(_namespace_path(d))\": " *
+                "key already holds a leaf value of type $(typeof(val))"
+            )
+        )
+        return val
     end
-    if !haskey(parent_dict, d.key)
-        parent_dict[d.key] = Dict{String, Any}()
-    end
-    return parent_dict[d.key]
+    return parent_dict[d.key] = Dict{String, Any}()
 end
 
 function Base.getproperty(d::MissingNamespace, s::Symbol)
@@ -127,8 +131,34 @@ function Base.getproperty(d::MissingNamespace, s::Symbol)
     return MissingNamespace(d, String(s), getfield(d, :accessed), getfield(d, :prefix))
 end
 
+"""
+    setproperty!(d::MissingNamespace, s::Symbol, value)
+
+Auto-vivifying write into a missing path. This is what makes `ParameterSet`'s
+dot-write syntax work when intermediate namespaces don't exist yet:
+
+```julia
+ps.components.new_qubit.cap_width = 300  # "new_qubit" need not exist
+```
+
+Julia lowers that assignment to `setproperty!(mn, :cap_width, 300)` where `mn`
+is the `MissingNamespace` returned by `ps.components.new_qubit`. Before the
+write can land, every missing segment along the chain must be created as an
+empty `Dict{String, Any}` in the underlying `ParameterSet.data` — the actual
+walking-and-creating is done by `_materialize!`. This method then places
+`value` under `s` in the materialized dict.
+
+If `value isa Pair`, it is wrapped as `Dict(String(first) => second)` so that
+syntax like `ps.namespace = (:key => val)` produces a nested namespace rather
+than storing a raw `Pair`.
+
+Throws if `s` names an internal struct field (`:parent`, `:key`, `:accessed`,
+`:prefix`) or if the auto-vivification path collides with an existing leaf
+value (via `_materialize!`).
+"""
 function Base.setproperty!(d::MissingNamespace, s::Symbol, value)
-    s in (:parent, :key, :accessed, :prefix) && return setfield!(d, s, value)
+    s in (:parent, :key, :accessed, :prefix) &&
+        error("MissingNamespace.$s is an internal field and cannot be assigned")
     materialized = _materialize!(d)
     if value isa Pair
         value = Dict{String, Any}(String(value.first) => value.second)
@@ -152,7 +182,6 @@ Base.show(io::IO, d::MissingNamespace) = print(
 Base.convert(::Type{T}, d::MissingNamespace) where {T <: Number} = _missing_error(d)
 Base.iterate(d::MissingNamespace) = _missing_error(d)
 Base.length(d::MissingNamespace) = _missing_error(d)
-Base.ismissing(::MissingNamespace) = true
 
 ParameterSet(path::String, data::Dict{String, Any}) =
     ParameterSet(path, data, Set{String}())
@@ -173,14 +202,13 @@ function Base.getproperty(ps::ParameterSet, s::Symbol)
 
     val = d[key]
     if val isa Dict
-        # Scoped view: skip namespace-ensuring so the subtree isn't polluted
-        # with "global"/"components" keys. Extend prefix with the stepped-into key.
+        # Scoped view over an interior subtree; `qualified` is non-empty so the
+        # constructor skips namespace-ensuring (see ParameterSet inner ctor).
         return ParameterSet(
             getfield(ps, :path),
             val,
             getfield(ps, :accessed),
-            qualified,
-            Val(:scoped)
+            qualified
         )
     end
     # Track leaf access with qualified path
@@ -189,7 +217,7 @@ function Base.getproperty(ps::ParameterSet, s::Symbol)
 end
 
 function Base.setproperty!(ps::ParameterSet, s::Symbol, value)
-    s in (:path, :data, :accessed) && return setfield!(ps, s, value)
+    s in (:path, :data, :accessed, :prefix) && return setfield!(ps, s, value)
     d = getfield(ps, :data)
     if value isa Pair
         value = Dict{String, Any}(String(value.first) => value.second)
@@ -297,7 +325,9 @@ resolve(ps, "components.qubit")            # => ParameterSet scoped to qubit
 """
 function resolve(ps::ParameterSet, address::String)
     current = ps
-    for seg in split(address, '.')
+    # keepempty=false makes the empty address a no-op (returns `ps`) and skips
+    # empty segments from leading/trailing/repeated dots in malformed addresses.
+    for seg in split(address, '.'; keepempty=false)
         current = getproperty(current, Symbol(seg))
     end
     return current
@@ -328,7 +358,7 @@ function leaf_params(d::Dict)
     return NamedTuple(pairs_list)
 end
 
-leaf_params(ps::ParameterSet) = leaf_params(getfield(ps, :data))
+leaf_params(ps::ParameterSet) = leaf_params(getproperty(ps, :data))
 
 """
     save_parameter_set(path::String, ps::ParameterSet)
