@@ -66,6 +66,21 @@
 
         # Using a missing key as a value throws
         @test_throws ParameterKeyError iterate(ps.nonexistent)
+        @test_throws ParameterKeyError length(ps.nonexistent)
+    end
+
+    @testset "showerror(ParameterKeyError)" begin
+        # Empty path: omit the `at path "…"` suffix
+        err = ParameterKeyError("foo", "")
+        s = sprint(showerror, err)
+        @test contains(s, "ParameterKeyError: ParameterSet has no key :foo")
+        @test !contains(s, "at path")
+
+        # Non-empty path: suffix includes the qualified path
+        err2 = ParameterKeyError("foo", "a.b.foo")
+        s2 = sprint(showerror, err2)
+        @test contains(s2, "ParameterKeyError: ParameterSet has no key :foo")
+        @test contains(s2, "at path \"a.b.foo\"")
     end
 
     @testset "resolve" begin
@@ -144,6 +159,14 @@
         @test_throws ParameterKeyError("missing_param", "components.qubit.missing_param") iterate(
             sub.missing_param
         )
+
+        # 3-arg `show(io, MIME"text/plain", ::MissingNamespace)` renders the same
+        # qualified-path error string as the 2-arg form (e.g. REPL display).
+        io = IOBuffer()
+        show(io, MIME("text/plain"), sub.missing_param)
+        s = String(take!(io))
+        @test contains(s, "ParameterKeyError")
+        @test contains(s, "components.qubit.missing_param")
     end
 
     @testset "Dot-access mutation" begin
@@ -301,6 +324,23 @@
         @test contains(s, "<b>ParameterSet</b>")
         @test contains(s, "<b>qubit</b>")
         @test contains(s, "cap_width = <code>300</code>")
+
+        # When the ParameterSet carries a source path, each show MIME prints it
+        # in the header (the `!isempty(path)` branch).
+        ps_with_path = ParameterSet("design.yaml", Dict{String, Any}())
+        ps_with_path.components.qubit.cap_width = 300
+
+        io = IOBuffer()
+        show(io, MIME("text/plain"), ps_with_path)
+        @test contains(String(take!(io)), "ParameterSet (design.yaml)")
+
+        io = IOBuffer()
+        show(io, MIME("text/markdown"), ps_with_path)
+        @test contains(String(take!(io)), "**ParameterSet** (design.yaml)")
+
+        io = IOBuffer()
+        show(io, MIME("text/html"), ps_with_path)
+        @test contains(String(take!(io)), "<b>ParameterSet</b> (design.yaml)")
     end
 end
 
@@ -667,7 +707,7 @@ end
             ps,
             "components.ps_flow_transmon.island"
         )
-        island = set_parameters(island, tr.junction_gap => :junction_gap)
+        island = set_parameters(island, junction_gap=tr.junction_gap)
         junction = create_component(
             ExampleSimpleJunction,
             ps,
