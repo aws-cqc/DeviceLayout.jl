@@ -422,42 +422,37 @@ end
 
 ######## Actually doing the path construction
 struct AutoChannelRouting{T <: Coordinate} <: AbstractChannelRouting
-    channels::Vector{RouteChannel{T}}
+    router::ChannelRouter{T}
     transition_rule::RouteRule
     transition_margin::T
-    router::ChannelRouter{T}
 end
 
-function AutoChannelRouting(ar::ChannelRouter{T}, transition_rule, margin) where {T}
-    return AutoChannelRouting{T}(ar.channels, transition_rule, convert(T, margin), ar)
+function AutoChannelRouting(channels::Vector{RouteChannel{T}}, transition_rule, margin) where {T}
+    return AutoChannelRouting{T}(ChannelRouter(channels), transition_rule, convert(T, margin))
 end
 entry_rules(r::AutoChannelRouting) = Iterators.repeated(r.transition_rule)
 exit_rule(r::AutoChannelRouting) = r.transition_rule
 
 function track_path_segments(rule::AutoChannelRouting, pa::Path, _)
+    net_idx = findfirst(
+        pin -> pin.p ≈ p0(pa) && isapprox_angle(in_direction(pin), α0(pa)),
+        rule.router.pins[first.(rule.router.net_pins)]
+    )
     return [
-        track_path_segment(rule.router, channel, pa; margin=rule.transition_margin) for
-        channel in rule.channels[channels_taken(rule.router, pa)]
+        track_path_segment(rule.router, channel, net_idx; margin=rule.transition_margin) for
+        channel in channels_taken(rule.router, net_idx)
     ]
 end
 
 function track_path_segment(
     ar::ChannelRouter{T},
-    ch::RouteChannel,
-    pa::Path;
+    channel_idx::Int,
+    net_idx::Int;
     margin=zero(T)
 ) where {T}
+    ch = ar.channels[channel_idx]
     # Get the track wire segment from the router
     # Assume there is exactly one wire segment belonging to this path in the channel
-    # Channel node might have been converted to store in router, so just check start point/direction
-    channel_idx = findfirst(
-        chn -> p0(chn.node.seg) ≈ p0(ch.path) && α0(chn.node.seg) == α0(ch.path),
-        ar.channels
-    )
-    net_idx = findfirst(
-        pin -> pin.p ≈ p0(pa) && isapprox_angle(in_direction(pin), α0(pa)),
-        ar.pins[first.(ar.net_pins)]
-    )
     wireseg_idx = findfirst(ws -> running_channel(ws) == channel_idx, net_wire(ar, net_idx))
     wireseg = net_wire(ar, net_idx)[wireseg_idx]
     track_idx = segment_track(ar, wireseg)
@@ -483,10 +478,6 @@ function track_path_segment(
     )
 end
 
-function channels_taken(ar::ChannelRouter, pa::Path)
-    net_idx = findfirst(
-        pin -> pin.p ≈ p0(pa) && isapprox_angle(in_direction(pin), α0(pa)),
-        ar.pins[first.(ar.net_pins)]
-    )
+function channels_taken(ar::ChannelRouter, net_idx::Int)
     return [running_channel(wireseg) for wireseg in net_wire(ar, net_idx)]
 end
