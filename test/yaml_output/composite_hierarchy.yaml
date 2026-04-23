@@ -1,0 +1,23 @@
+components:
+  default_parameters:
+    ExtTestComposite: &ExtTestComposite_defaults
+      leaf_gap: 10 nm
+      leaf_width: 100 nm
+      spacing: 500 nm
+    ExtTestLeaf: &ExtTestLeaf_defaults
+      gap: 10 nm
+      width: 100 nm
+
+  example_composite_component:
+    type: ExtTestComposite
+    <<: *ExtTestComposite_defaults
+    leaf_width: 300 nm
+    subcomponents:
+      leaf_a:
+        type: ExtTestLeaf
+        <<: *ExtTestLeaf_defaults
+        width: 300 nm
+      leaf_b:
+        type: ExtTestLeaf
+        <<: *ExtTestLeaf_defaults
+        width: 300 nm

@@ -1,0 +1,11 @@
+components:
+  default_parameters:
+    ExtTestLeaf: &ExtTestLeaf_defaults
+      gap: 10 nm
+      name: leaf
+      width: 100 nm
+
+  leaf:
+    type: ExtTestLeaf
+    <<: *ExtTestLeaf_defaults
+    width: 200 nm

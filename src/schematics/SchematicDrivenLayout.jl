@@ -110,6 +110,7 @@ export @component,
     replace_component!,
     route!,
     set_parameters
+export extract_parameters, parameters_to_yaml
 export ProcessTechnology, SimulationTarget, ArtworkTarget, SolidModelTarget
 export base_variant, flipchip!, map_metadata!, @composite_variant, @variant
 
@@ -136,6 +137,8 @@ include("routes.jl")
 include("components/variants.jl")
 include("solidmodels.jl")
 include("pdktools.jl")
+
+include("parameter_extraction.jl")
 
 include("ExamplePDK/ExamplePDK.jl")
 
