@@ -285,8 +285,6 @@ function transform(e::Ellipse, f::Transformation)
     return Ellipse(center, (sqrt(vals[2]), sqrt(vals[1])) .* oneunit(a), θ)
 end
 
-DeviceLayout.footprint(e::Ellipse) = e
-
 """
     struct ClippedPolygon{T} <: AbstractPolygon{T}
         tree::Clipper.PolyNode{Point{T}}
