@@ -239,13 +239,11 @@ function print_segments(ar::ChannelRouter, net)
             is_pin(ar, s1) ? "Pin $(graphidx_to_pin(ar, s1))" : "Channel $s1",
             is_pin(ar, s2) ? "Pin $(graphidx_to_pin(ar, s2))" : "Channel $s2"
         ]
-        println(
-            """
-    Segment $i:
-        Runs along Channel $(running_channel(ws)), Track $(segment_track(ar, ws))
-        From $(channel_names[1]) to $(channel_names[2])
-    """
-        )
+        println("""
+        Segment $i:
+            Runs along Channel $(running_channel(ws)), Track $(segment_track(ar, ws))
+            From $(channel_names[1]) to $(channel_names[2])
+        """)
     end
 end
 
@@ -287,12 +285,14 @@ function autoroute!(
     if verbose
         n_routed = count(!isempty, ar.net_wires[collect(net_indices)])
         n_total = length(net_indices)
-        max_tracks = maximum(num_tracks(ar, ch) for ch in 1:num_channels(ar))
-        @info "Autorouting complete" nets_routed=n_routed nets_total=n_total max_tracks_per_channel=max_tracks
+        max_tracks = maximum(num_tracks(ar, ch) for ch = 1:num_channels(ar))
+        @info "Autorouting complete" nets_routed = n_routed nets_total = n_total max_tracks_per_channel =
+            max_tracks
         for idx in net_indices
             for (seg_i, ws) in enumerate(net_wire(ar, idx))
                 if isnothing(segment_track(ar, ws))
-                    @warn "Net $idx segment $seg_i: no track assigned" channel=running_channel(ws)
+                    @warn "Net $idx segment $seg_i: no track assigned" channel =
+                        running_channel(ws)
                 end
             end
         end
@@ -329,12 +329,24 @@ Returns a `BitVector` of length `num_nets(ar)` where `true` means the route
 produced valid geometry.  When a route fails, the corresponding `@error` from
 `route!()` is still emitted to the logging system.
 """
-function validate_routes(ar::ChannelRouter{T}, sty; atol=DeviceLayout.onenanometer(T)) where {T}
+function validate_routes(
+    ar::ChannelRouter{T},
+    sty;
+    atol=DeviceLayout.onenanometer(T)
+) where {T}
     success = trues(num_nets(ar))
     for (idx, rt) in enumerate(ar.net_routes)
         pa = Path(rt.p0, α0=rt.α0)
-        ok = route!(pa, rt.p1, rt.α1, rt.rule, sty;
-                     waypoints=rt.waypoints, waydirs=rt.waydirs, atol=atol)
+        ok = route!(
+            pa,
+            rt.p1,
+            rt.α1,
+            rt.rule,
+            sty;
+            waypoints=rt.waypoints,
+            waydirs=rt.waydirs,
+            atol=atol
+        )
         success[idx] = something(ok, false) # route! currently returns nothing on failure
     end
     return success
@@ -430,8 +442,16 @@ end
 function AutoChannelRouting(router::ChannelRouter{T}, transition_rule, margin) where {T}
     return AutoChannelRouting{T}(router, transition_rule, convert(T, margin))
 end
-function AutoChannelRouting(channels::Vector{RouteChannel{T}}, transition_rule, margin) where {T}
-    return AutoChannelRouting{T}(ChannelRouter(channels), transition_rule, convert(T, margin))
+function AutoChannelRouting(
+    channels::Vector{RouteChannel{T}},
+    transition_rule,
+    margin
+) where {T}
+    return AutoChannelRouting{T}(
+        ChannelRouter(channels),
+        transition_rule,
+        convert(T, margin)
+    )
 end
 entry_rules(r::AutoChannelRouting) = Iterators.repeated(r.transition_rule)
 exit_rule(r::AutoChannelRouting) = r.transition_rule
@@ -441,8 +461,12 @@ function track_path_segments(rule::AutoChannelRouting, pa::Path, _)
         pin -> pin.p ≈ p0(pa) && isapprox_angle(in_direction(pin), α0(pa)),
         rule.router.pins[first.(rule.router.net_pins)]
     )
-    isempty(matching_idx) && error("Could not find start pin corresponding to path $(pa.name) starting at $(p0(pa)).")
-    length(matching_idx) > 1 && error("Multiple nets $(matching_idx) including $(pa.name) start at $(p0(pa)). AutoChannelRouting requires distinct starting pins.")
+    isempty(matching_idx) && error(
+        "Could not find start pin corresponding to path $(pa.name) starting at $(p0(pa))."
+    )
+    length(matching_idx) > 1 && error(
+        "Multiple nets $(matching_idx) including $(pa.name) start at $(p0(pa)). AutoChannelRouting requires distinct starting pins."
+    )
     net_idx = only(matching_idx)
     return [
         track_path_segment(rule.router, channel, net_idx; margin=rule.transition_margin) for

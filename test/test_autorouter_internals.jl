@@ -19,8 +19,8 @@
     tpin(x, y) = PointHook(Point(Float64(x), Float64(y)), 90°)
 
     """
-        Build a ChannelRouter and run channel assignment only (no track assignment).
-        """
+    Build a ChannelRouter and run channel assignment only (no track assignment).
+    """
     function _route_channels(channels, hooks, nets)
         ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
         Paths.assign_channels!(ar)
