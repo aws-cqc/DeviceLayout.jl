@@ -242,10 +242,8 @@ end
 function prev_next_tendency(ar, ws; use_wire_direction=true)
     channel_idx = running_channel(ws)
     start_channel, stop_channel = bounding_channels(ws)
-    # Distances along bounding and running channels
+    # Distances along bounding channels
     s_along_start = pathlength_at_intersection(ar, start_channel, channel_idx)
-    s1 = pathlength_at_intersection(ar, channel_idx, start_channel)
-    s2 = pathlength_at_intersection(ar, channel_idx, stop_channel)
     s_along_stop = pathlength_at_intersection(ar, stop_channel, channel_idx)
     # Directions of bounding and running channels (Float64 radians from interface)
     start_dir = direction_at_intersection(ar, start_channel, channel_idx)
