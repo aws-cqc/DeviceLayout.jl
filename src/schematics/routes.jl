@@ -298,7 +298,7 @@ function _update_with_plan!(rule::Paths.AutoChannelRouting{T}, route_node, sch) 
         # Populate the router's graph and intersection dict in-place
         # (ChannelRouter is immutable, but its mutable fields can be mutated)
         ar_g = rule.router.channel_graph
-        for _ in 1:(Paths.nv(g) - Paths.nv(ar_g))
+        for _ = 1:(Paths.nv(g) - Paths.nv(ar_g))
             Paths.add_vertex!(ar_g)
         end
         for e in edges(g)

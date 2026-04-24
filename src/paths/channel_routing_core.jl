@@ -62,20 +62,20 @@ Subtypes must implement the following interface functions so that the core
 channel-routing algorithms can operate without knowledge of the underlying
 geometry representation:
 
-- `channel_graph(prob)::SimpleGraph{Int}`
-- `num_channels(prob)::Int`
-- `num_nets(prob)::Int`
-- `num_pins(prob)::Int`
-- `net_pins(prob, net)::Tuple{Int,Int}`
-- `net_wire(prob, net)::NetWire`
-- `channel_segments(prob, ch)::Vector{TrackWireSegment}`
-- `channel_tracks(prob, ch)::Vector{Track}`
-- `num_tracks(prob, ch)::Int`
-- `pathlength_at_intersection(prob, ch1, ch2)::T`
-- `direction_at_intersection(prob, ch1, ch2)::Float64` (radians)
-- `channel_width(prob, ch, s)::T`
-- `is_pin(prob, idx)::Bool`
-- `segment_offset(prob, ws, s...; use_wire_direction)::T`
+  - `channel_graph(prob)::SimpleGraph{Int}`
+  - `num_channels(prob)::Int`
+  - `num_nets(prob)::Int`
+  - `num_pins(prob)::Int`
+  - `net_pins(prob, net)::Tuple{Int,Int}`
+  - `net_wire(prob, net)::NetWire`
+  - `channel_segments(prob, ch)::Vector{TrackWireSegment}`
+  - `channel_tracks(prob, ch)::Vector{Track}`
+  - `num_tracks(prob, ch)::Int`
+  - `pathlength_at_intersection(prob, ch1, ch2)::T`
+  - `direction_at_intersection(prob, ch1, ch2)::Float64` (radians)
+  - `channel_width(prob, ch, s)::T`
+  - `is_pin(prob, idx)::Bool`
+  - `segment_offset(prob, ws, s...; use_wire_direction)::T`
 """
 abstract type AbstractChannelProblem{T} end
 
@@ -113,12 +113,7 @@ adjoining_channel(ar::AbstractChannelProblem, pin) =
     neighbors(channel_graph(ar), pin_to_graphidx(ar, pin))[1]
 
 # Offset coordinate or function for the section of track with given width
-function track_section_offset(
-    n_tracks,
-    section_width::Number,
-    track_idx;
-    reversed=false
-)
+function track_section_offset(n_tracks, section_width::Number, track_idx; reversed=false)
     # (spacing) * number of tracks away from middle track
     sgn = reversed ? -1 : 1
     spacing = section_width / (n_tracks + 1)
@@ -838,7 +833,8 @@ function routing_summary(io::IO, ar::AbstractChannelProblem)
         channels_used = [running_channel(ws) for ws in wire]
         tracks = [segment_track(ar, ws) for ws in wire]
         has_unassigned = any(isnothing, tracks)
-        println(io,
+        println(
+            io,
             "Net $idx: pins $(pins[1])→$(pins[2]), $(length(wire)) segments, " *
             "channels $channels_used, tracks $tracks" *
             (has_unassigned ? " [UNASSIGNED TRACKS]" : "")
