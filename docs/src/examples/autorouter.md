@@ -130,15 +130,15 @@ save("autoroute_bspline.png", c); nothing # hide
 <img src="../autoroute_bspline.png"/>
 ```
 
-## 40-net fan-out
+## 100-net fan-out
 
-40 nets fan out through a single wide channel from an inner row of pins to an outer row with twice the spacing.
+100 nets fan out through a single wide channel from an inner row of pins to an outer row with twice the spacing.
 
 ```@example autorouter
-c, ar = ChannelAutorouter.example_fanout40()
-save("autoroute_fanout40.png", c); nothing # hide
+c, ar = ChannelAutorouter.example_fanout100()
+save("autoroute_fanout100.svg", c); nothing # hide
 ```
 
 ```@raw html
-<img src="../autoroute_fanout40.png"/>
+<img src="../autoroute_fanout40.svg"/>
 ```
