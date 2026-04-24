@@ -38,7 +38,8 @@ RouteComponent(
     sty::Paths.Style,
     meta::Meta
 ) where {T} = RouteComponent{T}(name, r, gw, [sty], meta)
-hooks(rc::RouteComponent) = (p0=PointHook(rc.r.p0, rc.r.α0), p1=PointHook(rc.r.p1, rc.r.α1 + 180°))
+hooks(rc::RouteComponent) =
+    (p0=PointHook(rc.r.p0, rc.r.α0), p1=PointHook(rc.r.p1, rc.r.α1 + 180°))
 
 function redecorate!(path::Path, sty::Paths.Style) end
 function redecorate!(path::Path, sty::Paths.DecoratedStyle)
@@ -290,7 +291,7 @@ function _update_with_plan!(rule::Paths.AutoChannelRouting{T}, route_node, sch) 
         # Populate the router's graph and intersection dict in-place
         # (ChannelRouter is immutable, but its mutable fields can be mutated)
         ar_g = rule.router.channel_graph
-        for _ in 1:(Paths.nv(g) - Paths.nv(ar_g))
+        for _ = 1:(Paths.nv(g) - Paths.nv(ar_g))
             Paths.add_vertex!(ar_g)
         end
         for e in edges(g)
