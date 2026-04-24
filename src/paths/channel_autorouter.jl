@@ -427,6 +427,9 @@ struct AutoChannelRouting{T <: Coordinate} <: AbstractChannelRouting
     transition_margin::T
 end
 
+function AutoChannelRouting(router::ChannelRouter{T}, transition_rule, margin) where {T}
+    return AutoChannelRouting{T}(router, transition_rule, convert(T, margin))
+end
 function AutoChannelRouting(channels::Vector{RouteChannel{T}}, transition_rule, margin) where {T}
     return AutoChannelRouting{T}(ChannelRouter(channels), transition_rule, convert(T, margin))
 end
@@ -434,10 +437,13 @@ entry_rules(r::AutoChannelRouting) = Iterators.repeated(r.transition_rule)
 exit_rule(r::AutoChannelRouting) = r.transition_rule
 
 function track_path_segments(rule::AutoChannelRouting, pa::Path, _)
-    net_idx = findfirst(
+    matching_idx = findall(
         pin -> pin.p ≈ p0(pa) && isapprox_angle(in_direction(pin), α0(pa)),
         rule.router.pins[first.(rule.router.net_pins)]
     )
+    isempty(matching_idx) && error("Could not find start pin corresponding to path $(pa.name) starting at $(p0(pa)).")
+    length(matching_idx) > 1 && error("Multiple nets $(matching_idx) including $(pa.name) start at $(p0(pa)). AutoChannelRouting requires distinct starting pins.")
+    net_idx = only(matching_idx)
     return [
         track_path_segment(rule.router, channel, net_idx; margin=rule.transition_margin) for
         channel in channels_taken(rule.router, net_idx)

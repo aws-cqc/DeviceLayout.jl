@@ -442,7 +442,7 @@ end
 # ── Example 10: 40-net fan-out ───────────────────────────────────────────────
 # 40 nets fan out through a single wide channel from inner to outer pin rows.
 
-function example_fanout40()
+function example_fanout100()
     lx_outer = ly_outer = 10e6nm
     lx_inner = ly_inner = 5e6nm
 
@@ -450,7 +450,7 @@ function example_fanout40()
         Path(Point(-lx_outer / 2, -(ly_inner / 2 + (ly_outer - ly_inner) / 4)))
     straight!(fanout_space_bottom, lx_outer, Paths.Trace(0.8 * (ly_outer - ly_inner) / 4))
 
-    n_nets = 40
+    n_nets = 100
     x0s = range(-lx_outer / 2, stop=lx_outer / 2, length=n_nets + 2)[2:(end - 1)]
     x1s = range(-lx_inner / 2, stop=lx_inner / 2, length=n_nets + 2)[2:(end - 1)]
     p0s = [PointHook(x, -ly_outer / 2, -90°) for x in x0s]
@@ -462,7 +462,7 @@ function example_fanout40()
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     paths = Path.(routes, Ref(Paths.Trace(WW)))
     @assert isempty(inter_path_intersections(paths)) "No crossings"
-    @assert length(ar.channel_tracks[1]) <= 20 "Left and right halves share tracks"
+    @assert length(ar.channel_tracks[1]) <= n_nets/2 "Left and right halves share tracks"
     return c, ar
 end
 
@@ -520,7 +520,7 @@ const ALL_EXAMPLES = [
     "angled" => example_angled,
     "dense" => example_dense,
     "bspline" => example_bspline,
-    "fanout40" => example_fanout40,
+    "fanout100" => example_fanout100,
     "crossing_schematic" => example_crossing_schematic,
 ]
 
