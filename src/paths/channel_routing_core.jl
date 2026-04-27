@@ -14,7 +14,7 @@ import Graphs:
     add_edge!,
     add_vertex!,
     rem_edge!,
-    adjacency_matrix,
+    has_edge,
     edges,
     inneighbors,
     neighbors,
@@ -562,7 +562,7 @@ function assign_tracks_matching!(ar, channel)
             end
         end
         # Find max cardinality valid matching, removing edges as necessary
-        matching = best_matching!(merging_graph, vcg)[1] # Just the dict, not the indicator
+        matching = best_matching!(merging_graph, vcg, L, R)
     end
     # Assign merged groups to tracks according to VCG
     tracks = channel_tracks(ar, channel)
@@ -584,7 +584,7 @@ function assign_tracks_matching!(ar, channel)
     end
 end
 
-function best_matching!(merging_graph, vcg)
+function best_matching!(merging_graph, vcg, L, R)
     # Collect set of edges to remove
     to_remove = Set{Tuple{Int, Int}}()
     # Create a temporary copy to help find problematic edges
@@ -664,10 +664,19 @@ function best_matching!(merging_graph, vcg)
     for edge in to_remove
         rem_edge!(merging_graph, edge...)
     end
-    # Any matching is feasible now that we've removed marked edges
-    return BipartiteMatching.findmaxcardinalitybipartitematching(
-        BitMatrix(adjacency_matrix(merging_graph))
-    )
+    # Any matching is feasible now that we've removed marked edges.
+    # Rows are R so the returned row→col dict is keyed by R, matching how the
+    # caller looks up `matching[v]` when v crosses from R into L next iteration.
+    R_vec = collect(R)
+    L_vec = collect(L)
+    sort!(R_vec) # For determinism
+    sort!(L_vec)
+    bip = falses(length(R_vec), length(L_vec))
+    for (i, r) in pairs(R_vec), (j, l) in pairs(L_vec)
+        bip[i, j] = has_edge(merging_graph, r, l)
+    end
+    row_to_col, _ = BipartiteMatching.findmaxcardinalitybipartitematching(BitMatrix(bip))
+    return Dict{Int, Int}(R_vec[i] => L_vec[j] for (i, j) in row_to_col)
 end
 
 function dag_shortest_paths(dag, v_sorted, s)
