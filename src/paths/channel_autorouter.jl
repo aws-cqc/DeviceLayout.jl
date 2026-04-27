@@ -43,6 +43,16 @@ end
         pin_hooks::Vector{<:Hook},
         channels::Vector{<:RouteChannel}
     )
+
+Construct a `ChannelRouter` from `nets`, `pin_hooks`, and `channels`.
+
+`nets` is a list of `(i, j)` pairs of indices into `pin_hooks`; each pair specifies
+a wire to be routed from pin `i` to pin `j`. The pin `Hook`s supply the entry/exit
+positions and directions; each pin's outward ray (opposite its `in_direction`) must
+strike one of `channels` for graph construction to succeed.
+
+Channel intersections are computed eagerly during construction. Pass the result to
+[`autoroute!`](@ref) to actually assign channels and tracks.
 """
 function ChannelRouter(nets, pin_hooks::Vector{<:Hook}, channels::Vector{<:RouteChannel})
     T = promote_type(coordinatetype(pin_hooks), coordinatetype(channels))
@@ -66,6 +76,15 @@ function ChannelRouter(nets, pin_hooks::Vector{<:Hook}, channels::Vector{<:Route
     )
 end
 
+"""
+    ChannelRouter(channels::Vector{RouteChannel{T}}) where {T}
+
+Construct an empty `ChannelRouter` containing `channels` but no pins or nets.
+
+Nets and pins are added later — typically by constructing an [`AutoChannelRouting`](@ref)
+rule around this router and calling `route!` on a schematic graph, which discovers pins
+from the schematic's hooks at `plan` time.
+"""
 function ChannelRouter(channels::Vector{RouteChannel{T}}) where {T}
     channel_segments = [TrackWireSegment[] for i in eachindex(channels)]
     channel_tracks = [Track[] for i in eachindex(channels)]
@@ -433,6 +452,24 @@ function track_path(ar::ChannelRouter{T}, channel_idx, track_idx) where {T}
 end
 
 ######## Actually doing the path construction
+"""
+    struct AutoChannelRouting{T <: Coordinate} <: AbstractChannelRouting
+    AutoChannelRouting(router::ChannelRouter, transition_rule::RouteRule, margin)
+    AutoChannelRouting(channels::Vector{<:RouteChannel}, transition_rule::RouteRule, margin)
+
+A `RouteRule` that delegates routing decisions to a shared [`ChannelRouter`](@ref).
+
+At the schematic level, every `route!` call that should share channel and track
+assignments must use the **same** `AutoChannelRouting` instance, so that the
+underlying `router` sees all nets before channel and track assignment run during
+`plan`. The `channels`/`transition_rule`/`margin` form constructs a fresh empty
+`ChannelRouter` internally and is convenient when nets are populated from the schematic.
+
+`transition_rule` routes the short legs between a pin and its first channel, and
+between adjacent channels. It is typically [`Paths.StraightAnd90`](@ref),
+[`Paths.StraightAnd45`](@ref), or [`Paths.BSplineRouting`](@ref). `margin`
+reserves arclength at each end of a channel segment for the transition bends.
+"""
 struct AutoChannelRouting{T <: Coordinate} <: AbstractChannelRouting
     router::ChannelRouter{T}
     transition_rule::RouteRule

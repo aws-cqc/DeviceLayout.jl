@@ -15,6 +15,7 @@ How DeviceLayout handles geometric objects and their metadata.
 - [Texts](texts.md): Text elements as geometric entities
 - [Paths](paths.md): Transmission lines and other path-based geometry
 - [Routes](routes.md): Defining Paths implicitly based on routing rules
+- [Channel Autorouter](channel_autorouter.md): Multi-net routing through a channel network
 - [Rendering and File Export](render.md): How geometry becomes output data
 - [Solid Models](solidmodels.md): 3D geometry and meshing
 

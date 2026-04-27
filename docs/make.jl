@@ -60,6 +60,7 @@ makedocs(
             "Texts" => "concepts/texts.md",
             "Paths" => "concepts/paths.md",
             "Routes" => "concepts/routes.md",
+            "Channel Autorouter" => "concepts/channel_autorouter.md",
             "Rendering and Export" => "concepts/render.md",
             "Solid Models (3D Geometry)" => "concepts/solidmodels.md",
             "Schematic-Driven Design" => "concepts/schematic_driven_design.md",
