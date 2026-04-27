@@ -893,7 +893,9 @@
         # Component with geometry in two layers
         cs_fp = CoordinateSystem("fp_test", nm)
         render!(cs_fp, centered(Rectangle(10μm, 10μm)), BASE_NEGATIVE)
-        render!(cs_fp, centered(Rectangle(8μm, 8μm)), BASE_POSITIVE)
+        sub_cs = CoordinateSystem("sub_cs", nm)
+        render!(sub_cs, centered(Rectangle(8μm, 8μm)), BASE_POSITIVE)
+        addref!(cs_fp, sub_cs)
         comp = BasicComponent(cs_fp)
 
         # footprint_halo replicates footprint halo across all layers
