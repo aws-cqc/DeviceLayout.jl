@@ -66,6 +66,7 @@ makedocs(
             "Texts" => "concepts/texts.md",
             "Paths" => "concepts/paths.md",
             "Routes" => "concepts/routes.md",
+            "Channel Autorouter" => "concepts/channel_autorouter.md",
             "Rendering and Export" => "concepts/render.md",
             "Solid Models (3D Geometry)" => "concepts/solidmodels.md",
             "Solid Models (Experimental)" => "concepts/solidmodels_experimental.md",
