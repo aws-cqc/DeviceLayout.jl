@@ -114,6 +114,8 @@
     Paths.CompoundRouteRule
     Paths.SingleChannelRouting
     Paths.RouteChannel
+    Paths.ChannelRouter
+    Paths.AutoChannelRouting
 ```
 
 ### Route drawing
