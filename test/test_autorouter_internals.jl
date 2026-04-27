@@ -223,4 +223,24 @@
         new_tracks_net1 = [Paths.segment_track(ar, ws) for ws in Paths.net_wire(ar, 1)]
         @test all(!isnothing, new_tracks_net1)
     end
+
+    # ── best_matching! bipartite shape ───────────────────────────────────────
+    @testset "best_matching! bipartite shape" begin
+        import Graphs: SimpleGraph, SimpleDiGraph, add_edge!
+
+        # 4 vertices, L={1,2}, R={3,4}, edges (1,3), (1,4), (2,3).
+        # True max bipartite matching has 2 R→L pairs (e.g. 3→2, 4→1).
+        g = SimpleGraph(4)
+        add_edge!(g, 1, 3)
+        add_edge!(g, 1, 4)
+        add_edge!(g, 2, 3)
+        # Empty VCG preserves all merging edges (no ancestor constraints).
+        vcg = SimpleDiGraph(4)
+
+        m = Paths.best_matching!(g, vcg, Set([1, 2]), Set([3, 4]))
+        @test length(m) == 2
+        @test all(k in (3, 4) for k in keys(m))
+        @test all(v in (1, 2) for v in values(m))
+        @test length(unique(values(m))) == 2  # no duplicate L targets
+    end
 end
