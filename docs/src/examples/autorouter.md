@@ -1,6 +1,6 @@
-# Channel Autorouter
+# [Channel Autorouter](@id channel-autorouter-examples)
 
-The channel autorouter connects pairs of pins by routing wires through a user-defined network of channels. Routing proceeds in two steps: **channel assignment** (choosing which channels each net's wire passes through) and **track assignment** (assigning non-overlapping tracks within each channel).
+The channel autorouter connects pairs of pins by routing wires through a user-defined network of channels. Routing proceeds in two steps: **channel assignment** (choosing which channels each net's wire passes through) and **track assignment** (assigning non-overlapping tracks within each channel). See [Concepts: Channel Autorouter](./../concepts/channel_autorouter.md) for a conceptual overview.
 
 The full code for these examples can be found [in `examples/ChannelAutorouter/ChannelAutorouter.jl` in the DeviceLayout.jl repository](https://github.com/aws-cqc/DeviceLayout.jl/blob/main/examples/ChannelAutorouter/ChannelAutorouter.jl).
 
