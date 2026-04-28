@@ -216,6 +216,7 @@ function discretization_grid(
     bnds::Tuple{Float64, Float64}=(0.0, 1.0);
     t_scale=1.0
 )
+    bnds[1] == bnds[2] && return [bnds[1]]
     dt = 0.01 * bnds[2]
     ts = zeros(100)
     ts[1] = bnds[1]
@@ -245,7 +246,7 @@ function discretization_grid(
         t = ts[i]
     end
     # Make sure last two points aren't unnecessarily close together
-    if ts[i - 1] > (ts[i] + ts[i - 2]) / 2
+    if i > 2 && ts[i - 1] > (ts[i] + ts[i - 2]) / 2
         ts[i - 1] = (ts[i] + ts[i - 2]) / 2
     end
     return ts[1:i]
