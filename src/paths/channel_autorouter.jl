@@ -113,15 +113,9 @@ net_pins(ar::ChannelRouter, net) = ar.net_pins[net]
 net_wire(ar::ChannelRouter, net) = ar.net_wires[net]
 pin_coordinates(ar::ChannelRouter, pin) = ar.pins[pin].p
 pin_direction(ar::ChannelRouter, pin) = ar.pins[pin].in_direction
-channel_coordinates(ar::ChannelRouter, channel, s) = ar.channels[channel].node.seg(s)
-function channel_direction(ar::ChannelRouter, channel, s)
-    is_pin(ar, channel) && return pin_direction(ar, graphidx_to_pin(ar, channel))
-    return direction(ar.channels[channel].node.seg, s)
-end
-function channel_width(ar::ChannelRouter{T}, channel, s) where {T}
-    # Intersecting channel is zero where a wire segment hits a pin
+function channel_width(ar::ChannelRouter{T}, channel, s...) where {T}
     is_pin(ar, channel) && return zero(T)
-    return width(ar.channels[channel].node.sty, s)
+    return Paths.width(ar.channels[channel].node.sty, s...)
 end
 channel_segments(ar::ChannelRouter, channel) = ar.channel_segments[channel]
 channel_tracks(ar::ChannelRouter, channel) = ar.channel_tracks[channel]
@@ -166,7 +160,7 @@ function segment_offset(
     reversed = use_wire_direction && against_channel(ar, ws)
     return track_section_offset(
         length(ar.channel_tracks[channel_idx]),
-        Paths.width(ar.channels[channel_idx].node.sty, s...),
+        channel_width(ar, channel_idx, s...),
         track_idx;
         reversed
     )
@@ -264,17 +258,6 @@ function print_segments(ar::ChannelRouter, net)
             From $(channel_names[1]) to $(channel_names[2])
         """)
     end
-end
-
-"""
-    segment_direction(ar::ChannelRouter, ws::TrackWireSegment)
-
-The angle with the x-axis made by segment `ws` directed along its wire toward its end pin.
-"""
-function segment_direction(ar::ChannelRouter, ws::TrackWireSegment, s)
-    off = segment_offset(ar, ws)
-    seg = Paths.offset(ar.channels[running_channel(ws)].node.seg, off)
-    return direction(seg, s)
 end
 
 """
@@ -388,11 +371,11 @@ function visualize_router_state(ar::ChannelRouter{T}; wire_width=0.1 * oneunit(T
     c = DeviceLayout.Cell{T}("track_viz")
 
     paths = Path.(ar.net_routes, Ref(Paths.Trace(wire_width)))
-    DeviceLayout.render!.(c, paths, GDSMeta(5))
+    DeviceLayout.render!.(c, paths, GDSMeta(7))
     channels = channel_paths(ar)
     DeviceLayout.render!.(c, channels, GDSMeta(3))
     tracks = track_paths(ar)
-    DeviceLayout.render!.(c, tracks, GDSMeta(2))
+    DeviceLayout.render!.(c, tracks, GDSMeta(1))
     trlab = track_labels(ar, tracks)
     DeviceLayout.text!.(c, trlab, GDSMeta(4))
     for pa in paths
@@ -443,10 +426,10 @@ end
 function track_path(ar::ChannelRouter{T}, channel_idx, track_idx) where {T}
     n_tracks = length(channel_tracks(ar, channel_idx))
     seg = track_path_segment(n_tracks, ar.channels[channel_idx].node, track_idx)
-    w = Paths.width(ar.channels[channel_idx].node.sty, zero(T))
+    w = channel_width(ar, channel_idx, zero(T)) # Just illustrative, assume constant width
     pa = Path(
         [Paths.Node(seg, Paths.Trace(0.9 * w / (n_tracks + 1)))];
-        name="$channel_idx:$track_idx"
+        name="$channel_idx.$track_idx"
     )
     return pa
 end

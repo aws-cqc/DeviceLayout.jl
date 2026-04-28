@@ -73,7 +73,7 @@ geometry representation:
   - `num_tracks(prob, ch)::Int`
   - `pathlength_at_intersection(prob, ch1, ch2)::T`
   - `direction_at_intersection(prob, ch1, ch2)::Float64` (radians)
-  - `channel_width(prob, ch, s)::T`
+  - `channel_width(prob, ch, s...)::T`
   - `is_pin(prob, idx)::Bool`
   - `segment_offset(prob, ws, s...; use_wire_direction)::T`
 """
