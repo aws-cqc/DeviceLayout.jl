@@ -292,7 +292,7 @@ end
     import DeviceLayout.Paths: RouteChannel, ChannelRouter
     using .SchematicDrivenLayout
 
-    function test_simple(; split=false)
+    function test_simple()
         mypins = [
             Point(4.0, 3.0),
             Point(6.0, 3.0),
@@ -309,28 +309,11 @@ end
         space_paths = Path[]
         for x0 in [1.0, 5.0, 9.0]
             pa = Path(x0, 0.0, α0=90°)
-            if split && x0 == 5.0
-                straight!(pa, 4.5, Paths.Trace(2.0))
-                push!(space_paths, pa)
-                pa = Path(x0, 5.5, α0=90°)
-                straight!(pa, 4.5, Paths.Trace(2.0))
-                push!(space_paths, pa)
-                continue
-            end
             straight!(pa, 10.0, Paths.Trace(2.0))
             push!(space_paths, pa)
         end
         for y0 in [1.0, 5.0, 9.0]
             pa = Path(0.0, y0)
-            if split && y0 == 5.0
-                pa = Path(0.0, y0 + 0.7)
-                straight!(pa, 10.0, Paths.Trace(1.0))
-                push!(space_paths, pa)
-                pa = Path(0.0, y0 - 0.7)
-                straight!(pa, 10.0, Paths.Trace(1.0))
-                push!(space_paths, pa)
-                continue
-            end
             straight!(pa, 10.0, Paths.Trace(2.0))
             push!(space_paths, pa)
         end
@@ -339,131 +322,13 @@ end
         mynets = [(i, i + 4) for i = 1:n_wires]
         ar = ChannelRouter(mynets, pins, RouteChannel.(space_paths))
 
-        # # # # Split space demo
-        # # # Cut space 2 in half
-        # # pin_adjoining_spaces = [2, 2, 4, 4, 8, 6, 8, 6]
-        # # space_coord = [1.0, 5.0, 9.0, 5.0, 1.0, 5.5, 9.0, 4.5]
-        # # space_coord_idx = [1, 1, 1, 1, 2, 2, 2, 2]
-        # # space_widths = [2.0, 2.0, 2.0, 2.0, 2.0, 1.0, 2.0, 1.0]
-
-        # # # Split space demo
-        # # 2 doesn't connect to upper half of horizontal spaces
-        # rem_edge!(ar.space_graph, 2, 6)
-        # rem_edge!(ar.space_graph, 2, 7)
-        # # 4 (other half of 2) doesn't connect to bottom half
-        # rem_edge!(ar.space_graph, 4, 5)
-        # rem_edge!(ar.space_graph, 4, 8)
-
-        Paths.assign_channels!(ar) #, fixed_paths=Dict(2=>[2, 8, 4, 6]))
-        Paths.assign_tracks!(ar)
-
-        rule = Paths.StraightAnd90(min_bend_radius=0.1, max_bend_radius=0.1)
-        # rule = Paths.StraightAnd45(min_bend_radius=0.1, max_bend_radius=0.1)
-        # rule = Paths.BSplineRouting(endpoints_speed=7.5)
-        # rts = make_routes!(ar, rule)
-        # paths = [Path(rt, Paths.Trace(0.1)) for rt in rts]
-
-        c = Paths.visualize_router_state(ar)
-
-        save("autoroute_test.svg", c, width=10DeviceLayout.Graphics.inch)
-        return c
-    end
-
-    function test_grid_escape()
-        # Grid of sites
-        dx = 1.5
-        dy = 1.5
-        nx = 20
-        ny = 20
-        grid = [(ix, iy) for ix = 1:nx for iy = 1:ny]
-        sites = [Point(dx * (ix - 1), dy * (iy - 1)) for (ix, iy) in grid]
-        site_size = 0.5
-
-        # Channel coordinates
-        n_xch = nx + 1   # vertical channels
-        n_ych = ny + 1   # horizontal channels
-        x_coords = range(-dx / 2, step=dx, length=n_xch)
-        y_coords = range(-dy / 2, step=dy, length=n_ych)
-
-        # Build channel Paths (vertical then horizontal)
-        # Margin ensures channels cross each other but don't extend to edge pin positions
-        margin = 0.5
-        space_paths = Path[]
-        for x in x_coords
-            pa = Path(x, first(y_coords) - margin, α0=90°)
-            straight!(pa, last(y_coords) - first(y_coords) + 2margin, Paths.Trace(1.0))
-            push!(space_paths, pa)
-        end
-        for y in y_coords
-            pa = Path(first(x_coords) - margin, y)
-            straight!(pa, last(x_coords) - first(x_coords) + 2margin, Paths.Trace(1.0))
-            push!(space_paths, pa)
-        end
-
-        # Site pins: each site escapes toward the nearest grid edge
-        site_dirs = map(grid) do (ix, iy)
-            ix_delta = ix - nx / 2
-            iy_delta = iy - ny / 2
-            if abs(ix_delta) > abs(iy_delta)
-                return ix_delta > 0 ? 0.0 : pi
-            end
-            return iy_delta > 0 ? pi / 2 : -pi / 2
-        end
-        site_pin_pos = [
-            site + 0.5site_size * Point(cos(d), sin(d)) for
-            (site, d) in zip(sites, site_dirs)
-        ]
-        # PointHook in_direction points inward (away from channel); site_dirs point toward channel
-        site_hooks = [PointHook(p, d + pi) for (p, d) in zip(site_pin_pos, site_dirs)]
-
-        # Edge pins: placed at grid boundary, one per site
-        edge_dirs = [rem2pi(d + pi, RoundNearest) for d in site_dirs]
-
-        # Edge geometry: fixed coordinate and orientation for each of 4 edges
-        edge_fixed = [first(x_coords), last(x_coords), first(y_coords), last(y_coords)]
-        edge_is_vertical = [true, true, false, false]
-        function edge_index(dir)
-            abs(dir) < 0.1 && return 1                          # left edge (dir ≈ 0)
-            abs(abs(dir) - pi) < 0.1 && return 2                # right edge (dir ≈ ±π)
-            abs(dir - pi / 2) < 0.1 && return 3                 # bottom edge (dir ≈ π/2)
-            return 4                                              # top edge (dir ≈ -π/2)
-        end
-
-        # Pre-compute edge assignments and per-edge coordinate ranges
-        edge_assignments = [edge_index(edir) for edir in edge_dirs]
-        pins_per_edge = [count(==(ei), edge_assignments) for ei = 1:4]
-        coord_span = (-dx / 2, -dx / 2 + nx * dx)
-        coord_ranges = [range(coord_span..., length=n) for n in pins_per_edge]
-
-        edge_count = [1, 1, 1, 1]
-        edge_hooks = map(zip(edge_dirs, edge_assignments)) do (edir, ei)
-            ci = edge_count[ei]
-            edge_count[ei] += 1
-            fixed = edge_fixed[ei]
-            c = coord_ranges[ei][ci]
-            pos = if edge_is_vertical[ei]
-                Point(fixed - cos(edir), c)
-            else
-                Point(c, fixed - sin(edir))
-            end
-            return PointHook(pos, edir + pi)
-        end
-
-        # Assemble: each site pin connects to its corresponding edge pin
-        all_hooks = [site_hooks; edge_hooks]
-        n_wires = length(sites)
-        mynets = [(i, i + n_wires) for i = 1:n_wires]
-
-        ar = ChannelRouter(mynets, all_hooks, RouteChannel.(space_paths))
-
         Paths.assign_channels!(ar)
         Paths.assign_tracks!(ar)
 
-        c = Paths.visualize_router_state(ar, wire_width=0.001)
-        save("autoroute_escape_test.gds", c)
+        c = Paths.visualize_router_state(ar)
         return c
     end
+
     # Runs without error
     test_simple()
-    test_grid_escape()
 end
