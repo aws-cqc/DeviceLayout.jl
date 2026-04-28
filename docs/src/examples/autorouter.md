@@ -140,5 +140,5 @@ save("autoroute_fanout100.svg", c); nothing # hide
 ```
 
 ```@raw html
-<img src="../autoroute_fanout40.svg"/>
+<img src="../autoroute_fanout100.svg"/>
 ```
