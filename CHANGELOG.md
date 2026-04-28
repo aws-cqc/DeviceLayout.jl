@@ -4,12 +4,21 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 1.13.0 (2026-04-28)
 
-  - Normalized rotation angles to [0, 360) when writing GDS files
   - Added layerwise Booleans `union2d_layerwise`, `difference2d_layerwise`, `intersect2d_layerwise`, and `xor2d_layerwise`
+  - Added `clip_tiled` for tiled clipping of large polygon sets
   - Added `Polygons.area`
+  - Normalized rotation angles to [0, 360) when writing GDS files
+  - `Path` now uses the preferred coordinate type (`typeof(1.0UPREFERRED)`) when the coordinate type is not explicitly specified; use `Path{T}(...)` or (e.g.) `Path(nm, ...)` for explicit control
+  - `offset` now returns polygons with interior cuts instead of separate outer and hole contours when holes are present
+  - Deprecated `cliptree(op, s, c; kwargs...)` in favor of `clip(op, s, c; kwargs...).tree`
+  - Fixed bug where `default_parameters` would throw an error if `@compdef` parameter defaults referenced earlier parameters
   - Fixed overly-strict argument types for polygon clipping methods
+  - Fixed `selection_tolerance` not being forwarded when applying a transformation to a `Rounded` style
+  - Fixed `perimeter(::ClippedPolygon)` to sum over all outermost contours rather than just the first
+  - Fixed errors when rendering or clipping an empty `ClippedPolygon`
+  - Fixed degenerate cases in line-arc corner rounding that could produce `NaN` values or arcs too small for SolidModel rendering
 
 ## 1.12.0 (2026-04-13)
 
