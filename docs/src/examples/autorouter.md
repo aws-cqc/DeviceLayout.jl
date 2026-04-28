@@ -136,7 +136,7 @@ save("autoroute_bspline.png", c); nothing # hide
 
 ```@example autorouter
 c, ar = ChannelAutorouter.example_fanout100()
-save("autoroute_fanout100.svg", c); nothing # hide
+save("autoroute_fanout100.svg", c; width=8DeviceLayout.Unitful.inch); nothing # hide
 ```
 
 ```@raw html

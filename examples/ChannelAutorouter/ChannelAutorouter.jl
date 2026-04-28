@@ -458,9 +458,11 @@ function example_fanout100()
     mynets = [(i, i + n_nets) for i = 1:n_nets]
     ar = ChannelRouter(mynets, vcat(p0s, p1s), [RouteChannel(fanout_space_bottom)])
     routes = Paths.autoroute!(ar, Paths.StraightAnd90(10μm), 10μm)
-    c = Paths.visualize_router_state(ar, wire_width=1μm)
+    # c = Paths.visualize_router_state(ar, wire_width=1μm)
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
-    paths = Path.(routes, Ref(Paths.Trace(WW)))
+    paths = Path.(routes, Ref(Paths.Trace(10μm)))
+    c = Cell("fanout100")
+    render!.(c, paths, GDSMeta())
     @assert isempty(inter_path_intersections(paths)) "No crossings"
     @assert length(ar.channel_tracks[1]) <= n_nets/2 "Left and right halves share tracks"
     return c, ar
