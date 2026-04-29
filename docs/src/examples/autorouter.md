@@ -119,7 +119,7 @@ save("autoroute_dense.png", c); nothing # hide
 
 ## B-spline channels
 
-Curved channels using B-spline geometry with `BSplineRouting` transitions. Same fan-in/fan-out topology as above but with non-straight channels.
+Curved channels using B-spline geometry with `BSplineRouting` transitions. Same fan-in/fan-out topology as above but with non-straight channels and a tapered channel.
 
 ```@example autorouter
 c, ar = ChannelAutorouter.example_bspline()

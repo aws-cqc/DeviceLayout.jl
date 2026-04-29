@@ -377,7 +377,7 @@ function visualize_router_state(ar::ChannelRouter{T}; wire_width=0.1 * oneunit(T
     tracks = track_paths(ar)
     DeviceLayout.render!.(c, tracks, GDSMeta(1))
     trlab = track_labels(ar, tracks)
-    DeviceLayout.text!.(c, trlab, GDSMeta(4))
+    DeviceLayout.text!.(c, trlab, GDSMeta(0))
     for pa in paths
         for node in pa[1:(end - 1)]
             DeviceLayout.render!(
