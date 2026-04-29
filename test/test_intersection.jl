@@ -81,4 +81,15 @@
     @test pathlength_nearest(turn, Point(1, -0.9)) ≈ 3π / 2
     @test pathlength_nearest(turn, Point(0.9, -2)) ≈ 0
     @test pathlength_nearest(turn, Point(-1, 1)) ≈ 3π / 4
+
+    @testset "mixed coordinate contexts (issue #212)" begin
+        pa1 = Path(μm)  # μm-context
+        Paths.turn!(pa1, -360°, 100μm, Paths.CPW(10μm, 6μm))
+        pa2 = Path(Point(0, 100)μm, α0=-90°)  # nm-context (preferred)
+        Paths.straight!(pa2, 400μm, Paths.CPW(10μm, 6μm))
+        Paths.turn!(pa2, 270°, 200μm)
+        Paths.straight!(pa2, 400μm)
+        # Should not throw MethodError on mixed coordinate contexts
+        @test Intersect.intersections(pa1, pa2) isa Vector
+    end
 end
