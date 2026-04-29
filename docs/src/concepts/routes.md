@@ -150,6 +150,8 @@ nothing; # hide
 <img src="../compound_channel.svg" style="width:6in;"/>
 ```
 
+For multi-net routing through a network of channels, where the router decides which channels each wire passes through and which track it occupies, see [Concepts: Channel Autorouter](./channel_autorouter.md).
+
 ## Routing in Schematics
 
 We can add `Route`s between components in a schematic using [`route!(g::SchematicGraph, ...)`](@ref route!(::SchematicDrivenLayout.SchematicGraph, ::Paths.RouteRule, ::Pair{SchematicDrivenLayout.ComponentNode, Symbol}, ::Pair{SchematicDrivenLayout.ComponentNode, Symbol}, ::Any, ::Any)), creating flexible connections that are only resolved after floorplanning has determined the positions of the components to be connected. (For more about the schematic workflow, see [Concepts: Schematic-Driven Design](./schematic_driven_design.md))

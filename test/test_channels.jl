@@ -287,3 +287,48 @@
     ## Schematic-level routing
     test_schematic_single_channel()
 end
+
+@testitem "Channel Autorouter" setup = [CommonTestSetup] begin
+    import DeviceLayout.Paths: RouteChannel, ChannelRouter
+    using .SchematicDrivenLayout
+
+    function test_simple()
+        mypins = [
+            Point(4.0, 3.0),
+            Point(6.0, 3.0),
+            Point(4.0, 7.0),
+            Point(6.0, 7.0),
+            Point(3.0, 4.0),
+            Point(3.0, 6.0),
+            Point(7.0, 4.0),
+            Point(7.0, 6.0)
+        ]
+        dirs = [0, pi, 0, pi, pi / 2, -pi / 2, pi / 2, -pi / 2] .+ pi
+        pins = PointHook.(mypins, dirs)
+
+        space_paths = Path[]
+        for x0 in [1.0, 5.0, 9.0]
+            pa = Path(x0, 0.0, α0=90°)
+            straight!(pa, 10.0, Paths.Trace(2.0))
+            push!(space_paths, pa)
+        end
+        for y0 in [1.0, 5.0, 9.0]
+            pa = Path(0.0, y0)
+            straight!(pa, 10.0, Paths.Trace(2.0))
+            push!(space_paths, pa)
+        end
+
+        n_wires = 4
+        mynets = [(i, i + 4) for i = 1:n_wires]
+        ar = ChannelRouter(mynets, pins, RouteChannel.(space_paths))
+
+        Paths.assign_channels!(ar)
+        Paths.assign_tracks!(ar)
+
+        c = Paths.visualize_router_state(ar)
+        return c
+    end
+
+    # Runs without error
+    test_simple()
+end

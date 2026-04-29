@@ -48,8 +48,8 @@ function segment_channel_section(
         channel_section = split(
             ch.node,
             [
-                wireseg_start + margin + prev_width / 2,
-                wireseg_stop - margin - next_width / 2
+                max(zero(T), wireseg_start + margin + prev_width / 2),
+                min(pathlength(ch.node.seg), wireseg_stop - margin - next_width / 2)
             ]
         )[2]
     elseif d < zero(d) # segment is counter to channel direction
@@ -57,8 +57,8 @@ function segment_channel_section(
             split(
                 ch.node,
                 [
-                    wireseg_stop + margin + next_width / 2,
-                    wireseg_start - margin - prev_width / 2
+                    max(zero(T), wireseg_stop + margin + next_width / 2)
+                    min(pathlength(ch.node.seg), wireseg_start - margin - prev_width / 2)
                 ]
             )[2]
         )
@@ -72,27 +72,6 @@ function track_path_segment(n_tracks, channel_section, track_idx; reversed=false
         channel_section.seg,
         track_section_offset(n_tracks, width(channel_section.sty), track_idx; reversed)
     )
-end
-
-# Offset coordinate or function for the section of track with given width
-function track_section_offset(
-    n_tracks,
-    section_width::Coordinate,
-    track_idx;
-    reversed=false
-)
-    # (spacing) * number of tracks away from middle track
-    sgn = reversed ? -1 : 1
-    spacing = section_width / (n_tracks + 1)
-    return sgn * spacing * ((1 + n_tracks) / 2 - track_idx)
-end
-
-function track_section_offset(n_tracks, section_width::Function, track_idx; reversed=false)
-    # (spacing) * number of tracks away from middle track
-    return t ->
-        (reversed ? -1 : 1) *
-        (section_width(t) / (n_tracks + 1)) *
-        ((1 + n_tracks) / 2 - track_idx)
 end
 
 reverse(n::Node) = Paths.Node(reverse(n.seg), reverse(n.sty, pathlength(n.seg)))
@@ -177,7 +156,7 @@ function _route!(
                 sty;
                 waypoints
             )
-            push!(p, Node(resolve_offset(track_path_seg), sty), reconcile=false) # p0, α0 reconciled by construction
+            push!(p, Node(resolve_offset(track_path_seg), sty), reconcile=false)
             p[end - 1].next = p[end]
             p[end].prev = p[end - 1]
             # Note `auto_curvature` BSpline uses curvature from end of previous segment

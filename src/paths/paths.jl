@@ -709,8 +709,11 @@ end
 Generic fallback, approximating a [`Paths.Segment`](@ref) using many
 [`Polygons.LineSegment`](@ref) objects. Returns a vector of `LineSegment`s.
 """
-function line_segments(seg::Paths.Segment)
-    return Polygons.segmentize(seg.(discretization(seg)), false)
+function line_segments(seg::Paths.Segment{T}) where {T}
+    return Polygons.segmentize(
+        DeviceLayout.discretize_curve(seg, DeviceLayout.onenanometer(T)),
+        false
+    )
 end
 
 """
@@ -761,7 +764,9 @@ include("segments/bspline_optimization.jl")
 
 include("routes.jl")
 
+include("channel_routing_core.jl")
 include("channels.jl")
+include("channel_autorouter.jl")
 
 function change_handedness!(seg::Union{Turn, Corner})
     return seg.α = -seg.α
