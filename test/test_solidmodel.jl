@@ -1434,7 +1434,7 @@
                 Cdouble(p[1]),
                 Cdouble(p[2]),
                 Cdouble(p[3]),
-                Cdouble(0.0)
+                Cdouble(Inf)
             )
         end
 

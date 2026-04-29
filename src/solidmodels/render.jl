@@ -1384,7 +1384,7 @@ with parameters `(h, α)`, calculates size as `h * max(mesh_scale, (d/h)^α)` wh
   - `x::Cdouble`: X coordinate
   - `y::Cdouble`: Y coordinate
   - `z::Cdouble`: Z coordinate
-  - `lc::Cdouble`: Characteristic length (unused)
+  - `lc::Cdouble`: Characteristic length from Gmsh (curvature, fields, etc.); result is bounded by this
 
 # Returns
 
@@ -1408,7 +1408,7 @@ function gmsh_meshsize(
         _, d::Float64 = nn(tree, SVector{3}(x, y, z))
         l = min(l, h * max(mesh_scale(), (d / h)^α))::Float64
     end
-    return l
+    return min(l, lc)
 end
 
 # Utility intended for very last step in rendering, to get rid of overlapping geometry
