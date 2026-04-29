@@ -168,7 +168,7 @@ For now, one intersection style is implemented, but the heavy-lifting to add mor
 done already. Here's an example (consult the [Intersection API reference](@ref api-path-intersection) for further information):
 
 ```@example 1
-pa1 = Path(μm)
+pa1 = Path()
 turn!(pa1, -360°, 100μm, Paths.CPW(10μm, 6μm))
 pa2 = Path(Point(0, 100)μm, α0=-90°)
 straight!(pa2, 400μm, Paths.CPW(10μm, 6μm))
