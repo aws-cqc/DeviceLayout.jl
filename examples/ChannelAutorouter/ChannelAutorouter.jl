@@ -18,8 +18,8 @@ import .Paths:
 Horizontal channel at height `y`, from `x0` to `x1`.
 """
 function hchannel(x0, x1, y; width=2.0)
-    pa = Path(Float64(x0), Float64(y))
-    straight!(pa, Float64(x1 - x0), Paths.Trace(Float64(width)))
+    pa = Path(x0, y)
+    straight!(pa, x1 - x0, Paths.Trace(width))
     return pa
 end
 
@@ -27,8 +27,8 @@ end
 Vertical channel at `x`, from `y0` to `y1`.
 """
 function vchannel(x, y0, y1; width=2.0)
-    pa = Path(Float64(x), Float64(y0), α0=90°)
-    straight!(pa, Float64(y1 - y0), Paths.Trace(Float64(width)))
+    pa = Path(x, y0, α0=90°)
+    straight!(pa, y1 - y0, Paths.Trace(width))
     return pa
 end
 
@@ -36,8 +36,8 @@ end
 Diagonal channel from `(x0,y0)` at angle `α` for length `len`.
 """
 function dchannel(x0, y0, α, len; width=2.0)
-    pa = Path(Float64(x0), Float64(y0), α0=α)
-    straight!(pa, Float64(len), Paths.Trace(Float64(width)))
+    pa = Path(x0, y0, α0=α)
+    straight!(pa, len, Paths.Trace(width))
     return pa
 end
 
@@ -45,12 +45,12 @@ end
 B-spline channel from `(x0,y0)` to `(x1, y1)` at angle `α` at endpoints.
 """
 function bchannel(x0, y0, α, x1, y1; width=2.0)
-    pa = Path(Float64(x0), Float64(y0), α0=α)
+    pa = Path(x0, y0, α0=α)
     bspline!(
         pa,
         [Point(x1, y1)],
         α,
-        Paths.Trace(Float64(width)),
+        Paths.Trace(width),
         auto_speed=true,
         auto_curvature=true,
         endpoints_speed=1,
@@ -64,10 +64,10 @@ end
 # Right pin (route goes left):   rpin(x, y) → in_direction = 0°
 # Bottom pin (route goes up):    bpin(x, y) → in_direction = 270°
 # Top pin (route goes down):     tpin(x, y) → in_direction = 90°
-lpin(x, y) = PointHook(Point(Float64(x), Float64(y)), 180°)
-rpin(x, y) = PointHook(Point(Float64(x), Float64(y)), 0°)
-bpin(x, y) = PointHook(Point(Float64(x), Float64(y)), 270°)
-tpin(x, y) = PointHook(Point(Float64(x), Float64(y)), 90°)
+lpin(x, y) = PointHook(Point(float(x), float(y)), 180°)
+rpin(x, y) = PointHook(Point(float(x), float(y)), 0°)
+bpin(x, y) = PointHook(Point(float(x), float(y)), 270°)
+tpin(x, y) = PointHook(Point(float(x), float(y)), 90°)
 
 const R = Paths.StraightAnd90(0.1)
 const WW = 0.05
@@ -405,7 +405,7 @@ end
 function example_bspline()
     channels = [
         bchannel(0, -2, 30°, 1, 12),     # v_left
-        bchannel(-1, 2, -30°, 12, 9),    # h_mid
+        bchannel(-1, 2, -30°, 12, 9; width=s -> 2.0 + s/10),    # h_mid
         bchannel(10, -2, 30°, 11, 12)   # v_right
     ]
     # Left pins clustered at y=3,4,5,6 — all cross v_left

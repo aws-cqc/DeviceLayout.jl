@@ -3,20 +3,20 @@
     # ── Helpers (shared with autoroute_examples.jl) ──────────────────────────────
 
     hchannel(x0, x1, y; width=2.0) =
-        let pa = Path(Float64(x0), Float64(y))
-            straight!(pa, Float64(x1 - x0), Paths.Trace(Float64(width)))
+        let pa = Path(x0, y)
+            straight!(pa, x1 - x0, Paths.Trace(width))
             pa
         end
     vchannel(x, y0, y1; width=2.0) =
-        let pa = Path(Float64(x), Float64(y0), α0=90°)
-            straight!(pa, Float64(y1 - y0), Paths.Trace(Float64(width)))
+        let pa = Path(x, y0, α0=90°)
+            straight!(pa, y1 - y0, Paths.Trace(width))
             pa
         end
 
-    lpin(x, y) = PointHook(Point(Float64(x), Float64(y)), 180°)
-    rpin(x, y) = PointHook(Point(Float64(x), Float64(y)), 0°)
-    bpin(x, y) = PointHook(Point(Float64(x), Float64(y)), 270°)
-    tpin(x, y) = PointHook(Point(Float64(x), Float64(y)), 90°)
+    lpin(x, y) = PointHook(Point(float(x), float(y)), 180°)
+    rpin(x, y) = PointHook(Point(float(x), float(y)), 0°)
+    bpin(x, y) = PointHook(Point(float(x), float(y)), 270°)
+    tpin(x, y) = PointHook(Point(float(x), float(y)), 90°)
 
     """
     Build a ChannelRouter and run channel assignment only (no track assignment).
