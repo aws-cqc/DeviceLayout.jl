@@ -792,7 +792,7 @@ for func in ("union2d", "difference2d", "intersect2d", "xor2d")
 
     Return a `Dict` of `meta => [$(func)(obj => meta, tool => meta)]` for each unique element metadata `meta` in `obj` and `tool`.
 
-    Entities with metadata matching `only_layers` or `ignore_layers` are included or excluded based on [`layer_inclusion`](@ref).
+    Entities with metadata matching `only_layers` or `ignore_layers` are included or excluded based on [`layer_inclusion`](@ref DeviceLayout.layer_inclusion).
 
     Entities in references up to a depth of `depth` are included, where `depth=0` uses only top-level entities in `obj` and `tool`.
     Depth is unlimited by default.

@@ -183,7 +183,7 @@
     xor2d
     xor2d_layerwise
     clip
-    clip_tiled
+    Polygons.clip_tiled
     Polygons.StyleDict
 ```
 
