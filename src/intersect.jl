@@ -97,7 +97,11 @@ function intersect_segment_tree(tree1::SegmentTree{T}, tree2::SegmentTree{T}) wh
 end
 
 function intersections(paths::Path...)
-    tree = segment_tree(paths...)
+    # Promote all paths to common coordinate type (fixes mixed-context dispatch on segment_tree).
+    # Dimension mismatch (e.g., Length vs Angle) will throw via promote_type.
+    T_common = promote_type(map(DeviceLayout.coordinatetype, paths)...)
+    paths_promoted = map(p -> convert(Path{T_common}, p), paths)
+    tree = segment_tree(paths_promoted...)
     return intersect_segment_tree(tree, tree)
 end
 
