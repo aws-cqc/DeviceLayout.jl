@@ -1,0 +1,35 @@
+abstract: <p>A Julia package for computer-aided design of quantum integrated circuits</p>
+authors:
+- affiliation: Amazon Center for Quantum Computing
+  family-names: Peairs
+  given-names: Gregory
+  orcid: 0000-0001-9958-9975
+- affiliation: Amazon Center for Quantum Computing
+  family-names: Carson
+  given-names: Hugh
+  orcid: 0000-0003-1221-4850
+- affiliation: Amazon Center for Quantum Computing
+  family-names: Arrangoiz-Arriola
+  given-names: Patricio
+- affiliation: Amazon Center for Quantum Computing
+  family-names: Ghaffari
+  given-names: Layla
+- affiliation: Amazon Center for Quantum Computing
+  family-names: Lapointe
+  given-names: Simon
+- affiliation: Amazon Center for Quantum Computing
+  family-names: Keller
+  given-names: Andrew
+  orcid: 0000-0003-3030-1149
+cff-version: 1.2.0
+date-released: '2025-02-28'
+doi: 10.5281/zenodo.19849070
+identifiers:
+- type: swh
+  value: swh:1:dir:496179643596ecb4ccbe2140531bfc5665dc0cdd;origin=https://doi.org/10.5281/zenodo.19849069;visit=swh:1:snp:d0a433665de07a6d4591fa016bcefd5e5475592e;anchor=swh:1:rel:b50cc0e4ab53e4a5ffad5800fbd8c533b3dc5472;path=DeviceLayout.jl-1.13.0
+license:
+- mit
+message: If you use this software, please cite it using the metadata from this file.
+title: DeviceLayout.jl
+type: software
+version: 1.13.0

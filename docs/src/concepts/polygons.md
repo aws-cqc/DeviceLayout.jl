@@ -85,7 +85,7 @@ rounding at the transitions.
 
 #### Selecting line-arc corners
 
-[`line_arc_cornerindices`](@ref) identifies vertices where a straight edge meets a curve.
+[`Curvilinear.line_arc_cornerindices`](@ref) identifies vertices where a straight edge meets a curve.
 This is useful for components that need to round only arc-to-straight transitions while leaving other corners sharp:
 
 ```julia
