@@ -657,8 +657,9 @@ Keyword arguments include:
     with inferior unit support.
   - `modify`: date of last modification.
   - `acc`: date of last accession. It would be unusual to have this differ from `now()`.
-  - `options`: a [`GDSWriterOptions`](@ref) controlling validation of `Cell` names and warnings
-    for maximum layer/datatype numbers.
+  - `options`: a [`GDSWriterOptions`](@ref) controlling validation of `Cell` names, warnings
+    for maximum layer/datatype numbers, and whether to normalize output (overriding `modify`
+    and `acc` with a fixed timestamp and sorting records in a canonical order)
   - `spec_warnings`: if `false`, disables all warnings for max layer/datatype and invalid names
   - `verbose`: monitor the output of [`traverse!`](@ref) and [`order!`](@ref) to see if
     something funny is happening while saving.
