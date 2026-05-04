@@ -198,13 +198,13 @@ function SchematicDrivenLayout._build_subcomponents(tr::SimpleTransmon)
     ps = parameter_set(tr._graph)
 
     island = create_component(ExampleRectangleIsland, ps, "components.transmon.island")
-    # Forward shared parameter under from the parent component
+    # Forward shared parameter from under the parent component
     # No need to count its access here because it has been accessed
     # during the CC construction
     island = set_parameters(island, junction_gap = tr.junction_gap)
 
     junction = create_component(ExampleSimpleJunction, ps, "components.transmon.junction")
-    # Forward shared parameter from parameter set to the island component
+    # Forward shared parameter from parameter set to the junction component
     # Access to the parameter is logged, allowing PS verification
     junction = set_parameters(junction, ps.components.transmon.junction_gap => :h_ground_island)
 

@@ -54,15 +54,7 @@ struct SchematicGraph <: AbstractMetaGraph{Int}
     nodes::Vector{ComponentNode}
     parameter_set::Union{Nothing, ParameterSet}
 end
-SchematicGraph(name::String) = SchematicGraph(
-    name,
-    MetaGraph(),
-    Dict{String, Int}(),
-    Dict{Symbol, ComponentNode}(),
-    ComponentNode[],
-    nothing
-)
-SchematicGraph(name::String, ps::ParameterSet) = SchematicGraph(
+SchematicGraph(name::String, ps::Union{Nothing, ParameterSet}=nothing) = SchematicGraph(
     name,
     MetaGraph(),
     Dict{String, Int}(),
@@ -70,16 +62,6 @@ SchematicGraph(name::String, ps::ParameterSet) = SchematicGraph(
     ComponentNode[],
     ps
 )
-
-"""
-    SchematicGraph(g::SchematicGraph)
-
-Creates a new empty `SchematicGraph` with the same name
-and `ParameterSet` as `g`.
-"""
-SchematicGraph(g::SchematicGraph) =
-    isnothing(g.parameter_set) ? SchematicGraph(g.name) :
-    SchematicGraph(g.name, g.parameter_set)
 
 function Base.getproperty(g::SchematicGraph, s::Symbol)
     if s in (:name, :graph, :namecounter, :node_dict, :nodes, :parameter_set)

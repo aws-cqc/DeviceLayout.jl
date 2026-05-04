@@ -372,24 +372,19 @@ end
         @test g.parameter_set isa ParameterSet
     end
 
-    @testset "Copy constructor" begin
-        # Copy with ParameterSet preserves name and parameter_set
+    @testset "Constructor accepts Union{Nothing, ParameterSet}" begin
+        # Forwarding a ParameterSet preserves identity
         ps = ParameterSet()
         ps.components.qubit = ("cap_width" => 300)
         g = SchematicGraph("original", ps)
-        g_copy = SchematicGraph(g)
-        @test g_copy.name == "original"
-        @test g_copy.parameter_set === ps
-        @test g_copy.parameter_set.components.qubit.cap_width == 300
+        @test g.name == "original"
+        @test g.parameter_set === ps
+        @test g.parameter_set.components.qubit.cap_width == 300
 
-        # Copy without ParameterSet
-        g_no_ps = SchematicGraph("bare")
-        g_no_ps_copy = SchematicGraph(g_no_ps)
-        @test g_no_ps_copy.name == "bare"
-        @test g_no_ps_copy.parameter_set === nothing
-
-        # Copy creates a fresh graph (independent nodes/edges)
-        @test g_copy !== g
+        # Forwarding `nothing` behaves like the single-arg form
+        g_no_ps = SchematicGraph("bare", nothing)
+        @test g_no_ps.name == "bare"
+        @test g_no_ps.parameter_set === nothing
     end
 
     @testset "parameter_set function" begin

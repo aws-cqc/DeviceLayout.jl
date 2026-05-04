@@ -215,7 +215,9 @@ function Base.getproperty(ps::ParameterSet, s::Symbol)
 end
 
 function Base.setproperty!(ps::ParameterSet, s::Symbol, value)
-    s in (:path, :data, :accessed, :prefix) && return setfield!(ps, s, value)
+    s in (:path, :data, :accessed, :prefix) && error(
+        "`$(s)` is a reserved ParameterSet field and cannot be assigned via dot-access"
+    )
     d = getfield(ps, :data)
     # Julia convention: `a.b = x` evaluates to `x`, so return the original RHS
     # even when we wrap a `Pair` into a nested namespace Dict for storage.
@@ -368,12 +370,6 @@ Save a `ParameterSet` to a YAML file at `path` or write YAML to an `IO` stream.
 
 `Unitful.Quantity` values are serialized as `"<value><unit>"` (e.g. `"150μm"`)
 for lossless round-tripping.
-
-Requires `YAML.jl` to be loaded (`using YAML`).
-
-    ParameterSet(io::IO)
-
-Load a `ParameterSet` from a YAML IO stream.
 
 Requires `YAML.jl` to be loaded (`using YAML`).
 """

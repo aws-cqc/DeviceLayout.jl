@@ -51,6 +51,16 @@ function _serialize_units(data::Dict{String, Any})
     return out
 end
 
+"""
+    ParameterSet(io::IO, path::String="")
+    ParameterSet(path::String)
+
+Load a `ParameterSet` from a YAML source — either an `IO` stream or a file at
+`path`. String values that parse as `Unitful.Quantity` (e.g. `"150μm"`) are
+converted in place.
+
+Requires `YAML.jl` to be loaded (`using YAML`).
+"""
 function ParameterSet(io::IO, path::String="")
     data = YAML.load(io; dicttype=Dict{String, Any})
     _parse_units!(data)
