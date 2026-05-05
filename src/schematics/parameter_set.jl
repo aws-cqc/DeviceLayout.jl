@@ -26,6 +26,13 @@ Every `ParameterSet` contains two required top-level namespaces:
   - `data::Dict{String, Any}`: nested parameter dictionary
   - `accessed::Set{String}`: tracks which parameter paths were consumed (for auditing)
   - `prefix::String`: dot-separated namespace prefix for scoped views (empty at root)
+
+# Construction
+
+  - `ParameterSet()` / `ParameterSet(data::Dict{String,Any})`: empty or from a nested `Dict`.
+  - `ParameterSet(path::String)` / `ParameterSet(io::IO)`: load from a YAML file or
+    stream. String values that parse as `Unitful.Quantity` (e.g. `"150μm"`) are
+    converted in place. Requires `YAML.jl` to be loaded (`using YAML`).
 """
 struct ParameterSet
     path::String

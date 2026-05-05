@@ -188,6 +188,14 @@
         ps2 = ParameterSet()
         ps2.components.transmon.island.cap_length = 520
         @test ps2.components.transmon.island.cap_length == 520
+
+        # Assigning to reserved struct-field names surfaces a clear error
+        # (rather than bottoming out in `setfield!` on an immutable struct).
+        ps3 = ParameterSet()
+        @test_throws "reserved" (ps3.path = "x")
+        @test_throws "reserved" (ps3.data = Dict{String, Any}())
+        @test_throws "reserved" (ps3.accessed = Set{String}())
+        @test_throws "reserved" (ps3.prefix = "")
     end
 
     @testset "setproperty! returns the original RHS" begin
@@ -373,18 +381,21 @@ end
     end
 
     @testset "Constructor accepts Union{Nothing, ParameterSet}" begin
-        # Forwarding a ParameterSet preserves identity
+        # Call sites that forward a `Union{Nothing, ParameterSet}` rely on
+        # dispatch working for both branches without an `isnothing` guard.
+        @test hasmethod(SchematicGraph, Tuple{String, Nothing})
+        @test hasmethod(SchematicGraph, Tuple{String, ParameterSet})
+
+        # Explicit-`nothing` construction matches the default-arg construction.
+        @test SchematicGraph("bare", nothing).parameter_set === nothing
+        @test SchematicGraph("bare").parameter_set === nothing
+
+        # Forwarding a ParameterSet preserves identity (not a copy).
         ps = ParameterSet()
         ps.components.qubit = ("cap_width" => 300)
         g = SchematicGraph("original", ps)
-        @test g.name == "original"
         @test g.parameter_set === ps
-        @test g.parameter_set.components.qubit.cap_width == 300
-
-        # Forwarding `nothing` behaves like the single-arg form
-        g_no_ps = SchematicGraph("bare", nothing)
-        @test g_no_ps.name == "bare"
-        @test g_no_ps.parameter_set === nothing
+        @test g.name == "original"
     end
 
     @testset "parameter_set function" begin

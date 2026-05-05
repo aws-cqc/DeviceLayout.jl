@@ -4,6 +4,17 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+  - Added `ParameterSet`, a nested dictionary wrapper with dot-access for reading and
+    writing design parameters, plus `resolve` and `leaf_params` helpers
+  - Added a `ParameterSetYAMLExt` weak-dep extension loaded via `using YAML` that
+    enables `ParameterSet(path::String)` / `ParameterSet(io::IO)` construction and
+    `save_parameter_set` with Unitful round-tripping
+  - Added `SchematicGraph(name, ps)` to carry a `ParameterSet` on the graph, plumbed
+    through `_build_subcomponents` via `parameter_set(graph)` and
+    `create_component(T, ps, address)`
+
 ## 1.13.0 (2026-04-28)
 
   - Added layerwise Booleans `union2d_layerwise`, `difference2d_layerwise`, `intersect2d_layerwise`, and `xor2d_layerwise`
