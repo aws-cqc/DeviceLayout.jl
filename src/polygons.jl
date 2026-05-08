@@ -106,6 +106,10 @@ coffset() = (DeviceLayout._coffset[])::Clipper.ClipperOffset
 
 Polygon defined by list of coordinates. The first point should not be repeated
 at the end (although this is true for the GDS format).
+
+Polygons should be oriented counterclockwise, since clockwise polygons are treated
+as holes in clipping operations like [`union2d`](@ref), although the GDS format does not
+treat different orientations differently.
 """
 struct Polygon{T} <: AbstractPolygon{T}
     p::Vector{Point{T}}
