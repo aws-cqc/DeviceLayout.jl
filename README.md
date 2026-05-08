@@ -7,7 +7,7 @@
 [![codecov](https://codecov.io/gh/aws-cqc/DeviceLayout.jl/graph/badge.svg?token=D3EQ7I4LP0)](https://codecov.io/gh/aws-cqc/DeviceLayout.jl)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19849070.svg)](https://doi.org/10.5281/zenodo.19849070)
 
-DeviceLayout.jl is a [Julia](http://julialang.org) package for computer-aided design (CAD) of quantum integrated circuits, developed at the AWS Center for Quantum Computing. The package supports 
+DeviceLayout.jl is a [Julia](http://julialang.org) package for computer-aided design (CAD) of quantum integrated circuits, developed at the Amazon Center for Quantum Computing. The package supports 
 
 - **2D layout generation** for fabrication (GDSII export)
 - **3D model generation** for electromagnetic simulation
@@ -34,10 +34,10 @@ DeviceLayout.jl requires Julia v1.10 or later. You can follow [these instruction
 From Julia, install DeviceLayout.jl using the built-in package manager, [Pkg.jl](https://pkgdocs.julialang.org/v1/getting-started/):
 
 ```bash
-julia> ] # Pressing ] in the Julia REPL activates the Pkg REPL mode
-pkg> activate . # Activates an environment in the current directory
+julia> ]              # Pressing ] in the Julia REPL activates the Pkg REPL mode
+pkg> activate .       # Activates an environment in the current directory
 pkg> add DeviceLayout # Adds DeviceLayout.jl to the environment
-pkg> add FileIO # You'll want FileIO too, to save output files
+pkg> add FileIO       # You'll want FileIO too, to save output files
 ```
 
 We recommend [using an environment for each project](https://julialang.github.io/Pkg.jl/v1/environments/) rather than installing packages in the default environment. This ensures reproducibility and avoids version conflicts.

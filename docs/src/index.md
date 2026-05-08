@@ -1,6 +1,6 @@
 # DeviceLayout.jl
 
-DeviceLayout.jl is a [Julia](http://julialang.org) package for computer-aided design (CAD) of quantum integrated circuits, developed at the AWS Center for Quantum Computing. The package supports 
+DeviceLayout.jl is a [Julia](http://julialang.org) package for computer-aided design (CAD) of quantum integrated circuits, developed at the Amazon Center for Quantum Computing. The package supports 
 
 - **2D layout generation** for fabrication (GDSII export)
 - **3D model generation** for electromagnetic simulation
@@ -35,11 +35,11 @@ DeviceLayout.jl requires Julia v1.10 or later. You can follow [these instruction
 
 From Julia, install DeviceLayout.jl using the built-in package manager, [Pkg.jl](https://pkgdocs.julialang.org/v1/getting-started/):
 
-```julia
-julia> ] # Pressing ] in the Julia REPL activates the Pkg REPL mode
-pkg> activate . # Activates an environment in the current directory
+```bash
+julia> ]              # Pressing ] in the Julia REPL activates the Pkg REPL mode
+pkg> activate .       # Activates an environment in the current directory
 pkg> add DeviceLayout # Adds DeviceLayout.jl to the environment
-pkg> add FileIO # You'll want FileIO too, to save output files
+pkg> add FileIO       # You'll want FileIO too, to save output files
 ```
 
 !!! tip "Use Project Environments"
