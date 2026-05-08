@@ -41,8 +41,10 @@ gmsh_jll = "630162c2-fc9b-58b3-9910-8442a8a132e6"
 
 [weakdeps]
 GraphMakie = "1ecd5474-83a3-4783-bb4f-06765db800d2"
+YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 
 [extensions]
+ParameterSetYAMLExt = "YAML"
 SchematicGraphMakieExt = "GraphMakie"
 
 [compat]
@@ -78,6 +80,7 @@ StaticArrays = "1"
 TestItemRunner = "1.1.0"
 ThreadSafeDicts = "0.1"
 Unitful = "1.2"
+YAML = "0.4"
 gmsh_jll = "4.13"
 julia = "1.10"
 
@@ -85,6 +88,7 @@ julia = "1.10"
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
+YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 
 [targets]
-test = ["Aqua", "Test", "TestItemRunner"]
+test = ["Aqua", "Test", "TestItemRunner", "YAML"]

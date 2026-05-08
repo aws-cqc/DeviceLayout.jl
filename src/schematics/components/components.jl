@@ -52,6 +52,87 @@ function create_component(
 end
 
 """
+    create_component(::Type{T}, ps::ParameterSet, address::String) where {T <: AbstractComponent}
+
+Create an instance of type `T` using parameters from a `ParameterSet` at the given `address`.
+
+The address is resolved to a scoped `ParameterSet`, and the call is delegated to
+[`create_component(T, sub::ParameterSet)`](@ref). That overload splats the
+leaves at `sub` as keyword arguments into the keyword-only `create_component(T; kwargs...)`,
+which merges them recursively with `default_parameters(T)`. Nested namespaces
+below `address` are not merged - scope at the level whose leaves match `T`'s
+parameters.
+
+Consumed leaves (those matching `parameter_names(T)`) are recorded in `ps.accessed`
+as qualified paths rooted at the original PS.
+"""
+function create_component(
+    ::Type{T},
+    ps::ParameterSet,
+    address::String
+) where {T <: AbstractComponent}
+    return create_component(T, resolve(ps, address))
+end
+
+"""
+    create_component(::Type{T}, sub::ParameterSet) where {T <: AbstractComponent}
+
+Create an instance of type `T` from a scoped `ParameterSet`, typically obtained by
+chained-dot access like `ps.components.transmon.junction`.
+
+Leaf parameters (non-`Dict` values) at `sub` are extracted via `leaf_params` and
+passed as keyword arguments. Consumed leaves are recorded in the shared `accessed`
+set as qualified paths (e.g. `"components.transmon.junction.w_jj"`), matching the
+behavior of the address-string form.
+
+`sub` must be a scoped view (non-empty prefix); passing a root `ParameterSet`
+raises an `ArgumentError` because bare leaf names at the root have no meaningful
+qualified path and the use case is ambiguous - use the address-string form.
+
+# Example
+
+```julia
+junction = create_component(ExampleSimpleJunction, ps.components.transmon.junction)
+```
+"""
+function create_component(
+    ::Type{T},
+    sub::ParameterSet;
+    kwargs...
+) where {T <: AbstractComponent}
+    prefix = getfield(sub, :prefix)
+    isempty(prefix) && throw(
+        ArgumentError(
+            "create_component(T, ::ParameterSet) requires a scoped view " *
+            "(e.g. `ps.components.qubit`). For a root ParameterSet, use " *
+            "`create_component(T, ps, address)` with an explicit address."
+        )
+    )
+    kw = leaf_params(sub)
+    # Track accessed parameter leaves with the scoped ParameterSet's qualified prefix
+    accessed = getfield(sub, :accessed)
+    for k in keys(kw)
+        if k in parameter_names(T)
+            push!(accessed, prefix * "." * String(k))
+        end
+    end
+    # `kwargs` lets callers inject fields like `_graph=...` - e.g. the composite
+    # address-form needs to thread the root PS into the composite's private graph.
+    return create_component(T; kwargs..., pairs(kw)...)
+end
+
+# Reached when `create_component(T, ps, address)` or `create_component(T, ps.x.y)`
+# targets a path that does not exist. Surface the qualified path in a
+# ParameterKeyError instead of letting the caller see a generic MethodError.
+function create_component(::Type{<:AbstractComponent}, sub::MissingNamespace)
+    throw(ParameterKeyError(getfield(sub, :key), _namespace_path(sub)))
+end
+
+# Composite-specific `create_component` specializations live in
+# `composite_components.jl` (included after this file) because they dispatch
+# on `AbstractCompositeComponent`.
+
+"""
     (c::AbstractComponent)(
         name::String=name(c),
         params::NamedTuple=parameters(c);
@@ -100,6 +181,31 @@ function set_parameters(
     kwargs...
 )
     return create_component(typeof(c), name, params; kwargs...)
+end
+
+"""
+    set_parameters(c::AbstractComponent, pairs::Pair{<:Any, Symbol}...; kwargs...)
+
+Create an instance of type `typeof(c)` with selected parameters overridden using
+reversed `value => :name` pairs. Each pair's first element is the value to assign
+and its second element is the parameter name (a `Symbol`) on the component.
+This ordering makes it natural to forward a value from one source into a parameter
+with a different name, e.g. to route `ParameterSet` entries into subcomponent fields.
+
+```julia
+island = set_parameters(island, ps.components.transmon.junction_gap => :junction_gap)
+```
+
+Additional `kwargs` are forwarded to the main `set_parameters` method.
+"""
+function set_parameters(c::AbstractComponent, pairs::Pair{<:Any, Symbol}...; kwargs...)
+    # Surface missing ParameterSet lookups at the call site rather than silently
+    # storing a MissingNamespace in the component and erroring later.
+    for p in pairs
+        p.first isa MissingNamespace &&
+            throw(ParameterKeyError(getfield(p.first, :key), _namespace_path(p.first)))
+    end
+    return set_parameters(c; (p.second => p.first for p in pairs)..., kwargs...)
 end
 
 Base.show(io::IO, ::MIME"text/plain", c::T) where {T <: AbstractComponent} =

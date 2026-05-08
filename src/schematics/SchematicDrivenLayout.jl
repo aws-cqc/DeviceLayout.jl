@@ -104,12 +104,15 @@ export @component,
     origin,
     parameters,
     parameter_names,
+    parameter_set,
     plan,
     position_dependent_replace!,
     rem_node!,
     replace_component!,
     route!,
     set_parameters
+export ParameterSet,
+    MissingNamespace, ParameterKeyError, resolve, leaf_params, save_parameter_set
 export ProcessTechnology, SimulationTarget, ArtworkTarget, SolidModelTarget
 export base_variant, flipchip!, map_metadata!, @composite_variant, @variant
 
@@ -127,6 +130,7 @@ const Component = AbstractComponent{typeof(1.0UPREFERRED)}
 include("technologies.jl")
 include("utils.jl")
 include("targets.jl")
+include("parameter_set.jl")
 include("schematics.jl")
 include("components/components.jl")
 include("components/compdef.jl")

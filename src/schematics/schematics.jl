@@ -52,17 +52,19 @@ struct SchematicGraph <: AbstractMetaGraph{Int}
     namecounter::Dict{String, Int}
     node_dict::Dict{Symbol, ComponentNode}
     nodes::Vector{ComponentNode}
+    parameter_set::Union{Nothing, ParameterSet}
 end
-SchematicGraph(name::String) = SchematicGraph(
+SchematicGraph(name::String, ps::Union{Nothing, ParameterSet}=nothing) = SchematicGraph(
     name,
     MetaGraph(),
     Dict{String, Int}(),
     Dict{Symbol, ComponentNode}(),
-    ComponentNode[]
+    ComponentNode[],
+    ps
 )
 
 function Base.getproperty(g::SchematicGraph, s::Symbol)
-    if s in (:name, :graph, :namecounter, :node_dict, :nodes)
+    if s in (:name, :graph, :namecounter, :node_dict, :nodes, :parameter_set)
         return getfield(g, s)
     elseif s in keys(getfield(g, :node_dict))
         return getfield(g, :node_dict)[s]
@@ -77,6 +79,7 @@ MetaGraphs.weighttype(g::SchematicGraph) = MetaGraphs.weighttype(g.graph)
 nodes(g::SchematicGraph) = g.nodes
 components(g::SchematicGraph) = component.(nodes(g))
 name(g::SchematicGraph) = g.name
+parameter_set(g::SchematicGraph) = g.parameter_set
 
 """
     indexof(n::ComponentNode, g::SchematicGraph)

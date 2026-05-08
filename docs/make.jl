@@ -47,6 +47,7 @@ makedocs(
             "Building a Component" => "tutorials/building_a_component.md",
             "Schematic Basics" => "tutorials/schematic_basics.md",
             "Composite Components" => "tutorials/composite_components.md",
+            "Data-Driven Design with ParameterSet" => "tutorials/parameter_set.md",
             "Creating a PDK" => "tutorials/creating_a_pdk.md"
         ],
         "Concepts" => [
@@ -78,6 +79,7 @@ makedocs(
             "Geometry API Reference" => "reference/api.md",
             "Path API Reference" => "reference/path_api.md",
             "Schematic API Reference" => "reference/schematic_api.md",
+            "ParameterSet API Reference" => "reference/parameter_set_api.md",
             "Shape Reference" => "reference/shapes.md"
         ],
         "FAQ/Troubleshooting" => "how_to/faq.md"

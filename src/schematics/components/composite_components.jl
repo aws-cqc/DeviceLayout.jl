@@ -273,7 +273,7 @@ function DeviceLayout.flatten(g::SchematicGraph; depth=-1)
 end
 
 function _flatten(g::SchematicGraph, depth)
-    g2 = SchematicGraph(g.name)
+    g2 = SchematicGraph(g.name, g.parameter_set)
     for (k, v) in g.namecounter
         g2.namecounter[k] = v
     end
@@ -411,4 +411,51 @@ function _filter_parameters(subcomp, comp, prefix, except)
         return unprefixed_name => value
     end
     return filter(kv -> first(kv) in parameter_names(subcomp), Dict(unprefixed_params))
+end
+
+"""
+    create_component(::Type{T}, ps::ParameterSet, address::String) where {T <: AbstractCompositeComponent}
+
+Composite-component specialization that threads the root `ParameterSet` into the
+composite's private `_graph`, so that `parameter_set(cc._graph)` inside
+`_build_subcomponents` returns the same `ps` the caller holds.
+
+Without this specialization, `@compdef`'s default `_graph = SchematicGraph(uniquename(name))`
+has no PS attached and composite subcomponents can't find the parameter set during
+lazy graph construction.
+"""
+function create_component(
+    ::Type{T},
+    ps::ParameterSet,
+    address::String
+) where {T <: AbstractCompositeComponent}
+    sub = resolve(ps, address)
+    sub isa ParameterSet ||
+        throw(ParameterKeyError(getfield(sub, :key), _namespace_path(sub)))
+    # Build the private `_graph` with the ROOT `ps` attached so that, inside
+    # `_build_subcomponents`, `parameter_set(cc._graph) === ps`. The non-
+    # composite scoped form handles leaf extraction + access tracking; we
+    # bypass the composite-specific rejection method below via `invoke`.
+    nm = get(leaf_params(sub), :name, default_parameters(T).name)
+    _graph = SchematicGraph(uniquename(nm), ps)
+    return invoke(
+        create_component,
+        Tuple{Type{<:AbstractComponent}, ParameterSet},
+        T,
+        sub;
+        _graph=_graph
+    )
+end
+
+# Chained-dot form `create_component(T, ps.components.x)` on a composite has
+# no reference to the root PS, so it can't produce a PS-ready `_graph`.
+# Redirect the user to the address-string form with a clear error.
+function create_component(::Type{T}, ::ParameterSet) where {T <: AbstractCompositeComponent}
+    throw(
+        ArgumentError(
+            "create_component(T <: AbstractCompositeComponent, ::ParameterSet) " *
+            "requires the address form: `create_component(T, ps, address)`. " *
+            "Composite components need a reference to the root ParameterSet."
+        )
+    )
 end

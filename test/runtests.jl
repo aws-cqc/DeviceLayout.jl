@@ -52,4 +52,5 @@ using TestItemRunner
     end
 end
 
-@run_package_tests
+@run_package_tests filter =
+    ti -> (isempty(ARGS) || any(arg -> occursin(arg, ti.name), ARGS))
