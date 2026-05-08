@@ -54,6 +54,22 @@ This can happen for at least two reasons, both of which are related to the use o
     This occurs particularly often when rotating references by angles other than multiples of 90 degrees.
     One solution is to `flatten` cells before saving, since DeviceLayout's internal representation of `Cell`s uses 64-bit floating point precision.
 
+## Geometry-level layout
+
+##### Some polygons are disappearing or being ignored when I use `union2d`, `difference2d`, `intersect2d`, or `xor2d`.
+
+You might have polygons oriented clockwise. These operations use a "positive" fill rule applied to both inputs
+and to the output. This means they look at the sum of contour orientations
+(+1 for counterclockwise and -1 for clockwise) or "winding number" for each region in each of the first and second arguments, then combine the
+regions with positive winding number using their clipping operation (union, difference, etc), returning resulting regions with positive winding number.
+This means that clockwise polygons that are not inside counterclockwise polygons are "holes in nothing",
+and will be ignored in either argument.
+
+This can happen when using clipping operations on polygons loaded from files created by other programs with different conventions,
+like KLayout, which normalizes all polygon orientations to be clockwise on saving.
+
+You can check polygon orientation with `DeviceLayout.orientation(poly::Polygon)`, which will be `-1` for a polygon that would be considered a hole in clipping operations.
+
 ## Schematic-Driven Design
 
 ##### Is there a way to not render a node in the SchematicGraph?
