@@ -207,8 +207,8 @@ If you don't have any other leads, you can fall back on this generic debugging c
   - At any point, inspect the log for unexpected messages about nonexistent or empty physical groups
   - Make sure that 2D geometry is being drawn as expected by running `render!(::SolidModel, ...; skip_postrender=true)` and inspecting results
   - Make sure you are not removing any extrusions or the boundaries that generated them via operations with `:remove_object => true` or `:remove_tool => true`
-  - Add `skip_unused_layers=true` as a keyword argument to `render!(::SolidModel, ...)` (recommended in general)
-  - Add `auto_union=true` as a keyword argument to `render!(::SolidModel, ...)` (recommended if not too expensive)
+  - Add `skip_unused_layers=true` as a keyword argument to `render!(::SolidModel, ...)` or your `SolidModelTarget` constructor (recommended in general)
+  - Add `auto_union=true` as a keyword argument to `render!(::SolidModel, ...)` or your `SolidModelTarget` constructor (recommended if not too expensive)
   - Delete any `:remove_object => true` or `:remove_tool => true` arguments except where you actually intend to remove geometry (rely on `retained_physical_groups` to clean up the group namespace after rendering)
   - Bisect `postrender_ops` to find the operation that lands you in a bad state:
     - Render with empty `postrender_ops`
