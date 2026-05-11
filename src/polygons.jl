@@ -211,6 +211,7 @@ function to_polygons(
     e::Ellipse;
     atol=DeviceLayout.onenanometer(eltype(e.center)),
     Δθ=nothing,
+    rtol=nothing,
     kwargs...
 )
     if !isnothing(Δθ) # Use Δθ-based discretization
@@ -221,7 +222,8 @@ function to_polygons(
             Base.Fix1(ellipse_curvature, e),
             atol,
             (0.0, 2π);
-            t_scale=e.radii[1]
+            t_scale=e.radii[1],
+            rtol=rtol
         )[1:(end - 1)])
     end
     return Polygon([e.center + _ellipse_p(θ, e.angle, e.radii[1], e.radii[2]) for θ in θs])
