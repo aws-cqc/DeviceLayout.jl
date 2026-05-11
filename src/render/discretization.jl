@@ -181,32 +181,60 @@ function make_grid(f, initial_grid, max_recursions, max_change, rand_factor)
 end
 
 """
-    discretize_curve(f, ddf, tolerance)
+    discretize_curve(f, ddf, tolerance; rtol=nothing, t_scale=1.0)
 
 Given a curve `f` and its second derivative `ddf`, discretize a curve into piecewise linear segments with an approximate absolute tolerance.
+
+If `rtol` is provided, the effective tolerance at each step is `max(tolerance, rtol / curvature)`, i.e. `rtol * radius_of_curvature`. This allows coarser discretization on gentle curves while preserving accuracy on tight ones.
+
+`t_scale` converts parameter-space steps to arclength for the kernel's chord-height formula. When `ddf` has curvature units (1/length), pass `t_scale = pathlength(curve)`.
 """
-function discretize_curve(f, ddf, tolerance)
-    ts = discretization_grid(ddf, tolerance)
+function discretize_curve(f, ddf, tolerance; rtol=nothing, t_scale=1.0)
+    ts = discretization_grid(ddf, tolerance; rtol=rtol, t_scale=t_scale)
     return f.(ts)
 end
 
-function discretize_curve(s::Paths.Segment, tolerance)
-    return s.(discretization_grid(s, tolerance) * pathlength(s))
+function discretize_curve(s::Paths.Segment, tolerance; rtol=nothing)
+    return s.(discretization_grid(s, tolerance; rtol=rtol) * pathlength(s))
 end
 
-function discretize_curve(s::Paths.BSpline, tolerance)
-    return s.r.(discretization_grid(s, tolerance))
+function discretize_curve(s::Paths.BSpline, tolerance; rtol=nothing)
+    return s.r.(discretization_grid(s, tolerance; rtol=rtol))
 end
 
-function discretization_grid(s::Paths.Segment, tolerance)
+function discretization_grid(s::Paths.Segment, tolerance; rtol=nothing)
     l = pathlength(s)
-    return discretization_grid(t -> Paths.signed_curvature(s, t * l), tolerance; t_scale=l)
+    return discretization_grid(
+        t -> Paths.signed_curvature(s, t * l),
+        tolerance;
+        t_scale=l,
+        rtol=rtol
+    )
 end
 
-function discretization_grid(s::Paths.BSpline, tolerance)
-    # Assume ds/dt ≈ 1 to avoid converting between arclength and t
-    h(t) = Paths.Interpolations.hessian(s.r, t)[1]
-    return discretization_grid(h, tolerance)
+# True curvature κ(t) = |r'×r''|/|r'|³ for a 2D BSpline interpolation r.
+# Returns a scalar with units 1/length, matching the marching kernel's
+# `cc` contract.
+function _bspline_curvature(r, t)
+    g = Paths.Interpolations.gradient(r, t)[1]
+    h = Paths.Interpolations.hessian(r, t)[1]
+    return abs(g.x * h.y - g.y * h.x) / (g.x^2 + g.y^2)^(3 // 2)
+end
+
+function discretization_grid(s::Paths.BSpline, tolerance; rtol=nothing)
+    # Use true curvature κ = |r'×r''|/|r'|³ (units: 1/length) as the kernel's
+    # `cc`, so the kernel's rtol/cc formula is dimensionally correct.
+    # `t_scale = pathlength(s)` because true curvature is parameterization-free;
+    # the kernel converts `t`-steps to length-steps via `t_scale`. Under the
+    # standard ds/dt ≈ L approximation (BSplines are not arclength-
+    # parameterized) this algebraically matches Hessian-based step size.
+    l = pathlength(s)
+    return discretization_grid(
+        t -> _bspline_curvature(s.r, t),
+        tolerance;
+        t_scale=l,
+        rtol=rtol
+    )
 end
 
 # Discretize using marching algorithm based on Hessian or curvature
@@ -214,7 +242,8 @@ function discretization_grid(
     ddf,
     tolerance,
     bnds::Tuple{Float64, Float64}=(0.0, 1.0);
-    t_scale=1.0
+    t_scale=1.0,
+    rtol=nothing
 )
     dt = 0.01 * bnds[2]
     ts = zeros(100)
@@ -226,9 +255,12 @@ function discretization_grid(
         i = i + 1
         i > length(ts) && resize!(ts, 2 * length(ts))
         t = ts[i - 1]
+        # Effective tolerance: use rtol * radius_of_curvature when it exceeds atol.
+        # cc has units (curvature, e.g., rad/μm) so compare with zero(cc), not `0`.
+        eff_tol = (!isnothing(rtol) && !iszero(cc)) ? max(tolerance, rtol / cc) : tolerance
         # Set dt based on distance from chord assuming constant curvature
-        if cc >= 100 * 8 * tolerance / (bnds[2]^2 * t_scale^2) # Update dt if curvature is not near zero
-            dt = uconvert(NoUnits, sqrt(8 * tolerance / cc) / t_scale)
+        if cc >= 100 * 8 * eff_tol / (bnds[2]^2 * t_scale^2) # Update dt if curvature is not near zero
+            dt = uconvert(NoUnits, sqrt(8 * eff_tol / cc) / t_scale)
         end
         if t + dt >= bnds[2]
             dt = bnds[2] - t
@@ -236,8 +268,11 @@ function discretization_grid(
         # Check that curvature didn't increase too much (decrease is fine)
         # Rare but may happen near inflection points
         cc_next = norm(ddf(t + dt))
-        if (t_scale * dt)^2 * (cc_next - cc) / 24 > tolerance
-            dt = uconvert(NoUnits, sqrt(8 * tolerance / cc_next) / t_scale)
+        eff_tol_next =
+            (!isnothing(rtol) && !iszero(cc_next)) ? max(tolerance, rtol / cc_next) :
+            tolerance
+        if (t_scale * dt)^2 * (cc_next - cc) / 24 > eff_tol_next
+            dt = uconvert(NoUnits, sqrt(8 * eff_tol_next / cc_next) / t_scale)
             cc_next = norm(ddf(t + dt))
         end
         cc = cc_next
