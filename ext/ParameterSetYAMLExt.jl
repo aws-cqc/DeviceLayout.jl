@@ -14,6 +14,9 @@ Recursively walk a parsed YAML dict. String values that parse into a
 Bare unit names like `"s"`, `"m"`, `"cm"` parse into `Unitful.Units`, not
 `Quantity` - those are left as strings so that ordinary text values (e.g.
 `process_node: "s"`) are not silently coerced into the seconds unit.
+
+Length-dimensioned quantities are re-attached to `DeviceLayout.PreferredUnits.UPREFERRED`
+so they share a single promotion context with the rest of the package.
 """
 function _parse_units!(data::Dict{String, Any})
     for (k, v) in data
@@ -22,13 +25,29 @@ function _parse_units!(data::Dict{String, Any})
         elseif v isa AbstractString
             try
                 parsed = Unitful.uparse(v)
-                parsed isa Unitful.Quantity && (data[k] = parsed)
+                if parsed isa Unitful.Quantity
+                    data[k] = _recontext_length(parsed)
+                end
             catch
                 # not a valid unit expression, keep as-is
             end
         end
     end
     return data
+end
+
+const _LENGTH_DIM = Unitful.dimension(Unitful.m)
+
+function _recontext_length(v::Unitful.Quantity)
+    # `Unitful.uparse` returns `FreeUnits` quantities whose promotion target is `m`, which mismatches the
+    # package's `ContextUnits` (target `nm` or `μm`) and breaks mixed arithmetic such as
+    # `layer_z` in `technologies.jl`.
+    Unitful.dimension(v) == _LENGTH_DIM || return v
+    target = DeviceLayout.PreferredUnits.UPREFERRED
+    # PreferNoUnits sets UPREFERRED = NoUnits - skip re-contexting in that case.
+    Unitful.dimension(target) == _LENGTH_DIM || return v
+    ctx = Unitful.ContextUnits(Unitful.unit(v), target)
+    return Unitful.ustrip(v) * ctx
 end
 
 """
