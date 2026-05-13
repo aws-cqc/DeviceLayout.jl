@@ -9,14 +9,16 @@ import Unitful
     _parse_units!(data::Dict{String, Any})
 
 Recursively walk a parsed YAML dict. String values that parse into a
-`Unitful.Quantity` (e.g. `"150μm"`) are converted in place.
+`Unitful.Quantity` (e.g. `"150μm"`) are converted in place via
+[`DeviceLayout.uparse`](@ref), so length-dimensioned values share the
+package's promotion context (`ContextUnits`) instead of carrying bare
+`FreeUnits` (which would later trip the mixed-context promotion bug
+fixed in https://github.com/JuliaPhysics/Unitful.jl/pull/845 — surfaced
+in DeviceLayout via `layer_z` arithmetic).
 
 Bare unit names like `"s"`, `"m"`, `"cm"` parse into `Unitful.Units`, not
 `Quantity` - those are left as strings so that ordinary text values (e.g.
 `process_node: "s"`) are not silently coerced into the seconds unit.
-
-Length-dimensioned quantities are re-attached to `DeviceLayout.PreferredUnits.UPREFERRED`
-so they share a single promotion context with the rest of the package.
 """
 function _parse_units!(data::Dict{String, Any})
     for (k, v) in data
@@ -24,30 +26,14 @@ function _parse_units!(data::Dict{String, Any})
             _parse_units!(v)
         elseif v isa AbstractString
             try
-                parsed = Unitful.uparse(v)
-                if parsed isa Unitful.Quantity
-                    data[k] = _recontext_length(parsed)
-                end
+                parsed = DeviceLayout.uparse(v)
+                parsed isa Unitful.Quantity && (data[k] = parsed)
             catch
                 # not a valid unit expression, keep as-is
             end
         end
     end
     return data
-end
-
-const _LENGTH_DIM = Unitful.dimension(Unitful.m)
-
-function _recontext_length(v::Unitful.Quantity)
-    # `Unitful.uparse` returns `FreeUnits` quantities whose promotion target is `m`, which mismatches the
-    # package's `ContextUnits` (target `nm` or `μm`) and breaks mixed arithmetic such as
-    # `layer_z` in `technologies.jl`.
-    Unitful.dimension(v) == _LENGTH_DIM || return v
-    target = DeviceLayout.PreferredUnits.UPREFERRED
-    # PreferNoUnits sets UPREFERRED = NoUnits - skip re-contexting in that case.
-    Unitful.dimension(target) == _LENGTH_DIM || return v
-    ctx = Unitful.ContextUnits(Unitful.unit(v), target)
-    return Unitful.ustrip(v) * ctx
 end
 
 """

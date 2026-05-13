@@ -90,6 +90,32 @@ Mixed unit operations with these imports will be converted based on the unit
 preference set by [`DeviceLayout.set_unit_preference!`](@ref) (default `nm`).
 """ PreferredUnits
 
+"""
+    uparse(str)
+
+Parse `str` as a `Unitful.Quantity`, resolving length symbols (`fm`, `pm`, `nm`,
+`μm`, `mm`, `cm`, `dm`, `m`) against [`PreferredUnits`](@ref) so the parsed value
+carries the package's promotion context (`Unitful.ContextUnits`) instead of bare
+`Unitful.FreeUnits`. Non-length symbols (e.g. `s`, `Hz`, `fH`) fall back to
+`Unitful` and behave exactly as `Unitful.uparse`.
+
+Use this in place of `Unitful.uparse` when ingesting unit strings from external
+sources (YAML, JSON, user input) — bare `FreeUnits` lengths cause the mixed-context
+promotion bug in https://github.com/JuliaPhysics/Unitful.jl/pull/845 when later
+combined with package-internal `ContextUnits` values (e.g. inside `layer_z`).
+"""
+function uparse(str::AbstractString)
+    # Try PreferredUnits first; fall back to Unitful for any non-length symbol
+    # that PreferredUnits does not redefine. This avoids `Unitful.uparse`'s
+    # "found in multiple registered unit modules" warning for shared length
+    # symbols (μm, nm, ...) that exist in both modules with different values.
+    try
+        return Unitful.uparse(str; unit_context=PreferredUnits)
+    catch
+        return Unitful.uparse(str)
+    end
+end
+
 onemicron(v::T) where {T <: Unitful.Length} =
     one(T) * Unitful.ContextUnits(Unitful.μm, Unitful.unit(Unitful.upreferred(v)))
 onemicron(T::Type{<:Unitful.Length}) =
