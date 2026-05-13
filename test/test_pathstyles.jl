@@ -69,7 +69,7 @@
     straight!(pa, 10μm, Paths.Trace(2μm))
     cs = CoordinateSystem("test", nm)
     place!(cs, Rectangle(10μm, 10μm), GDSMeta())
-    attach!(pa, sref(cs), 5μm)
+    attach!(pa, sref(cs), 5μm, location=1)
     psty_complex = PeriodicStyle(pa)
     # Note: PeriodicStyle doesn't work with generic taper; same as CompoundStyle issue #13
     # But constructor based on a path handles generic tapers
@@ -85,6 +85,10 @@
     # Note: Attachment will be duplicated if it's at the exact end and start of a segment!
     @test length(c.elements) == 101 # 10 * (1 + 2 + 2 + 2 + 0 + 1 + 1 + 1) + 1
     @test split(pa2[1], 100μm)[2].sty.l0 == 100μm
+    # Reverse
+    rev_path = Path(reverse(reverse.(pa2.nodes)); metadata=GDSMeta(1))
+    @test isempty(to_polygons(xor2d(pa2 => GDSMeta(), rev_path => GDSMeta())))
+    @test isempty(to_polygons(xor2d(pa2 => GDSMeta(1), rev_path => GDSMeta(1))))
 
     cs = CoordinateSystem("test")
     place!(cs, pa2)

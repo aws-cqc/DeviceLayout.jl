@@ -58,6 +58,15 @@ A copy of `sty`, with shallow copies of attached references.
 Base.copy(sty::DecoratedStyle{T}) where {T} =
     DecoratedStyle{T}(deepcopy(sty.s), copy(sty.ts), copy(sty.dirs), copy(sty.refs))
 
+function reverse(s::DecoratedStyle{T}, l) where {T}
+    return DecoratedStyle{T}(
+        reverse(s.s, l),
+        l .- s.ts,
+        -1 .* s.dirs,
+        RotationPi().(s.refs)
+    )
+end
+
 """
     attach!(p::Path, c::GeometryReference, t::Coordinate;
         i::Integer=length(p), location::Integer=0)
@@ -254,6 +263,9 @@ summary(s::OverlayStyle) = string(summary(s.s), " with ", length(s.overlay), " o
 
 Base.copy(sty::OverlayStyle) =
     OverlayStyle(deepcopy(sty.s), copy(sty.overlay), copy(sty.overlay_metadata))
+
+reverse(s::OverlayStyle, l) =
+    OverlayStyle(reverse(s.s, l), reverse.(s.overlay, l), s.overlay_metadata)
 
 function _refs(segment::Paths.Segment{T}, s::OverlayStyle) where {T}
     cs = DeviceLayout.CoordinateSystem{T}(uniquename("overlay"))

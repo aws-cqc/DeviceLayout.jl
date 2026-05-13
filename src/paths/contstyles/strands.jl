@@ -35,6 +35,8 @@ spacing(s::GeneralStrands, t) = s.spacing(t)
 num(s::GeneralStrands, t...) = s.num
 translate(s::GeneralStrands, t) =
     GeneralStrands(x -> s.offset(x + t), x -> s.width(x + t), x -> s.spacing(x + t), s.num)
+reverse(s::GeneralStrands, l) =
+    GeneralStrands(x -> s.offset(l - x), x -> s.width(l - x), x -> s.spacing(l - x), num)
 
 """
     struct SimpleStrands{T<:Coordinate} <: Strands{false}

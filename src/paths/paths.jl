@@ -367,6 +367,45 @@ function pathlength_nearest(seg::Paths.Segment{T}, pt::Point) where {T}
     return Optim.minimizer(optimize(errfunc, 0.0, 1.0))[1] * pathlength(seg)
 end
 
+### StyledHook definition for Paths
+"""
+    StyledHook{T, H<:Hook{T}, S<:Paths.Style} <: Hook{T}
+        h::H
+        style::S
+
+A `Hook` augmented with a path-style object. Used by graph-level `terminate!`
+(and other style-aware operations) to read the cross-section that terminates at
+the hook without consulting the owning component's internals. Wraps any
+underlying `Hook` so `style` composes orthogonally with handedness.
+"""
+struct StyledHook{T, H <: Hook{T}, S <: Paths.Style} <: Hook{T}
+    h::H
+    style::S
+end
+StyledHook(h::Hook, ::Nothing) = StyledHook(h, Paths.NoRenderContinuous())
+
+function DeviceLayout.transformation(h1::StyledHook, h2::StyledHook)
+    return transformation(getfield(h1, :h), getfield(h2, :h))
+end
+DeviceLayout.transformation(h1::StyledHook, h2::Hook) = transformation(getfield(h1, :h), h2)
+DeviceLayout.transformation(h1::Hook, h2::StyledHook) = transformation(h1, getfield(h2, :h))
+
+function Base.getproperty(h::StyledHook, s::Symbol)
+    (s === :h || s === :style) && return getfield(h, s)
+    return getproperty(getfield(h, :h), s)
+end
+
+function Base.propertynames(h::StyledHook)
+    return (:h, :style, propertynames(getfield(h, :h))...)
+end
+
+DeviceLayout.in_direction(h::StyledHook) = in_direction(getfield(h, :h))
+
+DeviceLayout.transform(x::StyledHook, f::Transformation) =
+    StyledHook(transform(getfield(x, :h), f), getfield(x, :style))
+
+DeviceLayout.hook_style(h::StyledHook) = getfield(h, :style)
+
 """
     mutable struct Path{T<:Coordinate} <: AbstractComponent{T}
 
@@ -457,26 +496,32 @@ A `Path` starting at h, pointing along its outward direction.
 path_out(h::Hook) = Path(h.p, α0=out_direction(h))
 
 """
-    p0_hook(pa::Path, right_handed=true) = HandedPointHook(p0(pa), α0(pa), right_handed)
+    p0_hook(pa::Path, right_handed=true) = StyledHook(HandedPointHook(p0(pa), α0(pa), right_handed), style)
 
-A `HandedPointHook` looking into the start of path `pa`.
+A `StyledHook` wrapping a `HandedPointHook` looking into the start of path `pa` with a `style`.
+
+The style is `nothing` for an empty path and otherwise `nextstyle` of the reversed initial node.
 """
-p0_hook(pa::Path, right_handed=true) = HandedPointHook(p0(pa), α0(pa), right_handed)
+p0_hook(pa::Path, right_handed=true) = StyledHook(
+    HandedPointHook(p0(pa), α0(pa), right_handed),
+    isempty(pa.nodes) ? nothing : nextstyle(without_attachments(reverse(pa[1]).sty))
+)
 
 """
-    p1_hook(pa::Path, right_handed=true) = HandedPointHook(p1(pa), α1(pa) + π, right_handed)
+    p1_hook(pa::Path, right_handed=true) = StyledHook(HandedPointHook(p1(pa), α1(pa) + π, right_handed), nextstyle(pa))
 
-A `HandedPointHook` looking into the end of path `pa`.
+A `StyledHook` wrapping a `HandedPointHook` looking into the end of path `pa` with `nextstyle(pa)`.
 """
-p1_hook(pa::Path, right_handed=true) = HandedPointHook(p1(pa), α1(pa) + π, right_handed)
+p1_hook(pa::Path, right_handed=true) =
+    StyledHook(HandedPointHook(p1(pa), α1(pa) + π, right_handed), nextstyle(pa))
 
 """
     hooks(pa::Path)
 
-  - `:p0`: A `HandedPointHook` looking into the start of path `pa`.
-  - `:p1`: A `HandedPointHook` looking into the end of path `pa`.
-  - `:p0_lh`: A left-handed `HandedPointHook` looking into the start of path `pa`.
-  - `:p1_lh`: A left-handed `HandedPointHook` looking into the end of path `pa`.
+  - `:p0`: A right-handed `StyledHook` looking into the start of path `pa` with `nextstyle` of the reversed path.
+  - `:p1`: A right-handed `StyledHook` looking into the end of path `pa` with `nextstyle(pa)`.
+  - `:p0_lh`: A left-handed `StyledHook` looking into the start of path `pa` with `nextstyle` of the reversed path.
+  - `:p1_lh`: A left-handed `StyledHook` looking into the end of path `pa` with `nextstyle(pa)`.
 """
 DeviceLayout.hooks(pa::Path) =
     (p0=p0_hook(pa), p1=p1_hook(pa), p0_lh=p0_hook(pa, false), p1_lh=p1_hook(pa, false))

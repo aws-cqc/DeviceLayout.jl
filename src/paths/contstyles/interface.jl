@@ -18,7 +18,7 @@ function width end
 """
     translate(s::ContinuousStyle, x)
 
-Creates a style `s′` such that all properties `f(s′, t) == f(s, t+x)`. Basically, advance
+Create a style `s′` such that all properties `f(s′, t) == f(s, t+x)`. Basically, advance
 the style forward by path length `x`.
 """
 function translate end
@@ -37,3 +37,11 @@ function pin(s::ContinuousStyle{false}; start=nothing, stop=nothing)
     end
     return s
 end
+
+"""
+    reverse(s::Style, l)
+
+Create a style `s′` such that all properties `f(s′, x) == f(s, l - x)`. Basically, reverse
+the style assuming it is applied to a segment of pathlength `l`.
+"""
+reverse(s::Style, l) = s

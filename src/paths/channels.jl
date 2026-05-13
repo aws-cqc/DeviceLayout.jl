@@ -119,12 +119,10 @@ reverse(s::Turn) = Turn(-s.α, s.r, p1(s), α1(s) + 180°)
 reverse(s::Straight) = Straight(s.l, p1(s), s.α0 + 180°)
 # Reversing a GeneralTrace requires knowing its length, so we'll require that as an argument even if unused
 reverse(s::TaperTrace{T}, l) where {T} = TaperTrace{T}(s.width_end, s.width_start, s.length)
-reverse(s::SimpleTrace, l) = s
 reverse(s::GeneralTrace, l) = GeneralTrace(t -> width(s, l - t))
 # Define methods for CPW even though they're not allowed for channels
 reverse(s::TaperCPW{T}, l) where {T} =
     TaperCPW{T}(s.trace_end, s.gap_end, s.trace_start, s.gap_start, s.length)
-reverse(s::SimpleCPW, l) = s
 reverse(s::GeneralCPW, l) = GeneralCPW(t -> trace(s, l - t), t -> gap(s, l - t))
 # For compound segments, reverse the individual sections and reverse their order
 # Keep the same tag so if a compound segment/style pair matched before they will still match
@@ -145,6 +143,13 @@ function reverse(s::CompoundStyle{T}, l) where {T}
         reverse(reverse.(s.styles, lengths)),
         [zero(T); cumsum(reverse(lengths))],
         s.tag
+    )
+end
+function reverse(s::PeriodicStyle{T}, l) where {T}
+    return PeriodicStyle{T}(
+        reverse(reverse.(s.styles, s.lengths)),
+        reverse(s.lengths),
+        sum(s.lengths) - ((s.l0 + l) % sum(s.lengths))
     )
 end
 

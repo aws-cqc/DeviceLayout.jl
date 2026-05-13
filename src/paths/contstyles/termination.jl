@@ -332,3 +332,27 @@ end
 function nextstyle(::Union{TraceTermination, CPWOpenTermination, CPWShortTermination})
     return NoRenderContinuous()
 end
+
+function reverse(sty::CPWOpenTermination{T}, l) where {T}
+    return CPWOpenTermination{T}(
+        sty.trace,
+        sty.gap,
+        sty.open_gap,
+        sty.rounding,
+        !sty.initial
+    )
+end
+
+function reverse(sty::CPWShortTermination{T}, l) where {T}
+    return CPWShortTermination{T}(
+        sty.trace,
+        sty.gap,
+        sty.open_gap,
+        sty.rounding,
+        !sty.initial
+    )
+end
+
+function reverse(sty::TraceTermination{T}, l) where {T}
+    return TraceTermination{T}(sty.width, sty.rounding, !sty.initial)
+end
