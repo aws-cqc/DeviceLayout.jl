@@ -54,6 +54,22 @@ This can happen for at least two reasons, both of which are related to the use o
     This occurs particularly often when rotating references by angles other than multiples of 90 degrees.
     One solution is to `flatten` cells before saving, since DeviceLayout's internal representation of `Cell`s uses 64-bit floating point precision.
 
+## Geometry-level layout
+
+##### Some polygons are disappearing or being ignored when I use `union2d`, `difference2d`, `intersect2d`, or `xor2d`.
+
+You might have polygons oriented clockwise. These operations use a "positive" fill rule applied to both inputs
+and to the output. This means they look at the sum of contour orientations
+(+1 for counterclockwise and -1 for clockwise) or "winding number" for each region in each of the first and second arguments, then combine the
+regions with positive winding number using their clipping operation (union, difference, etc), returning resulting regions with positive winding number.
+This means that clockwise polygons that are not inside counterclockwise polygons are "holes in nothing",
+and will be ignored in either argument.
+
+This can happen when using clipping operations on polygons loaded from files created by other programs with different conventions,
+like KLayout, which normalizes all polygon orientations to be clockwise on saving.
+
+You can check polygon orientation with `DeviceLayout.orientation(poly::Polygon)`, which will be `-1` for a polygon that would be considered a hole in clipping operations.
+
 ## Schematic-Driven Design
 
 ##### Is there a way to not render a node in the SchematicGraph?
@@ -165,3 +181,77 @@ First, make sure the new code is being loaded. You can use [Revise](https://timh
 Most component types, including those defined using `@compdef`, contain a `_geometry` field
 that allows them to store their geometry so that it is only generated once.
 It is not marked as dirty or automatically regenerated when geometry methods change. Currently, to regenerate the geometry, you have to empty the geometry or instantiate a new component. (For composite components, there are also similar fields for their graph, schematic, and hooks.)
+
+## SolidModels
+
+##### SolidModel rendering is failing. How do I debug it?
+
+If you see a message like `“ERROR: Unknown OpenCASCADE entity of dimension 2 with tag 2”`
+inside `render!`, you may have removed an entity in a way that threw off a later operation.
+This can happen if you use a Boolean operation on an extrusion or the boundary it was extruded from and remove it with `:remove_object => true` or `:remove_tool => true`.
+Avoid using those keyword arguments unless you actually need to remove the geometry from the model.
+To clean up the physical group namespace after rendering, use `retained_physical_groups` instead.
+
+If you don't have any other leads, you can fall back on this generic debugging checklist:
+
+  - Update to the latest DeviceLayout version
+  - Search [open and closed DeviceLayout issues](https://github.com/aws-cqc/DeviceLayout.jl/issues?q=is%3Aissue%20SolidModel) for similar errors
+  - At any point, inspect rendering or meshing results in the Gmsh GUI by running `SolidModels.gmsh.fltk.run()`, using GUI controls for fine-grained entity and physical group labeling and visibility
+  - At any point, inspect the contents of the model by listing physical groups, their entity counts, and their bounds: 
+
+```julia
+for (name, pg) in pairs(SolidModels.dimgroupdict(sm, 2)) # 2d groups only
+    println("$name: $(length(SolidModels.dimtags(pg))) entities \
+            in bounds (x1, y1, z1, x2, y2, z2) = $(SolidModels.bounds3d(pg))")
+end
+```
+
+  - At any point, inspect the log for unexpected messages about nonexistent or empty physical groups
+  - Make sure that 2D geometry is being drawn as expected by running `render!(::SolidModel, ...; skip_postrender=true)` and inspecting results
+  - Make sure you are not removing any extrusions or the boundaries that generated them via operations with `:remove_object => true` or `:remove_tool => true`
+  - Add `skip_unused_layers=true` as a keyword argument to `render!(::SolidModel, ...)` or your `SolidModelTarget` constructor (recommended in general)
+  - Add `auto_union=true` as a keyword argument to `render!(::SolidModel, ...)` or your `SolidModelTarget` constructor (recommended if not too expensive)
+  - Delete any `:remove_object => true` or `:remove_tool => true` arguments except where you actually intend to remove geometry (rely on `retained_physical_groups` to clean up the group namespace after rendering)
+  - Bisect `postrender_ops` to find the operation that lands you in a bad state:
+    - Render with empty `postrender_ops`
+    - If that works, try rendering with the first half of `postrender_ops`
+    - Iteratively remove or restore half of the remaining suspect operations until you find the
+    operation that leads to an error
+  - Try removing, moving, or modifying the problematic operation or the involved entities
+  - Step through postrendering operations manually by rendering with `skip_postrender=true` and calling the operations generated by your `SolidModelTarget` one at a time (this uses internal methods, not a stable API):
+
+```julia
+import DeviceLayout.SchematicDrivenLayout: extrusion_ops, intersection_ops
+render!(sm, sch, target; skip_postrender=true)
+postrender_ops =
+    vcat(extrusion_ops(target, sch), target.postrenderer, intersection_ops(target, sch))
+for (destination, op, args, kwargs...) in postrender_ops # or iterate manually
+    println("Executing `sm[$destination] = $(op)(sm, $(args)...; $(kwargs)...)`")
+    sm[destination] = op(sm, args...; kwargs...)
+    # additional inspection/debug messages with result...
+end
+```
+
+  - Try to create a minimal reproducing example, either bottom up or by deleting entities and operations
+  - [File an issue](https://github.com/aws-cqc/DeviceLayout.jl/issues) on GitHub with your example
+
+##### SolidModel meshing is failing. What do I do?
+
+Some meshing errors are symptoms of rendering problems; see the section above.
+
+If you see a message like `PLC Error: A segment and a facet intersect at point` when meshing,
+this may be due to duplicated or adjoining entities that `render!`'s internal final `fragment`
+operation failed to handle correctly. Try updating to DeviceLayout 1.11+; known cases have been fixed.
+If this doesn't work, or if you're stuck on an earlier version, try removing entities with
+coincident or overlapping boundaries.
+
+Some failures occur when element growth rates are too fast; a smaller
+[`SolidModels.mesh_grading_default`](@ref) may be more robust.
+
+##### My curves are meshed with way too many points. How do I avoid this?
+
+This typically means that a curved entity was converted to a `Polygon` at some point
+before rendering to the SolidModel. Avoid using polygon clipping operations like `union2d` or
+`difference2d` on `Rounded` polygons. Instead, clip first, then apply `Rounded`, or else
+wait to do Boolean postrendering operations like `union_geom!` or `difference_geom!` in the SolidModel,
+where the geometry kernel will preserve curves.

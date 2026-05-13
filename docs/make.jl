@@ -35,7 +35,7 @@ makedocs(
     ),
     sitename="DeviceLayout.jl",
     authors="""
-  AWS Center for Quantum Computing
+  Amazon Center for Quantum Computing
   """,
     pages=[
         "Home" => "index.md",

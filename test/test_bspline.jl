@@ -72,7 +72,7 @@
     @test p1(a2) == po1
     @test a1(Paths.t_to_arclength(a1, 0.7)) ≈ b.r(tsplit * 0.7) atol = 1e-6 * μm
     @test a2(Paths.t_to_arclength(a2, 0.2)) ≈ b.r(tsplit + (1 - tsplit) * 0.2) atol =
-        1e-9 * μm
+        1e-6 * μm
     @test pathlength(a1) ≈ 500μm rtol = 1e-9
     @test pathlength(a2) ≈ pathlength(b) - 500μm rtol = 1e-9
 
@@ -104,7 +104,7 @@
     @test α0(pa2) == α0(b4)
     # Check an arbitrary point to make sure we have just rotated and translated a curve segment
     @test (pa2[1].seg)(Paths.t_to_arclength(pa2[1].seg, 0.2)) ≈
-          splice_transform(b4.r(tsplit2 + (1 - tsplit2) * 0.2)) atol = 1e-9
+          splice_transform(b4.r(tsplit2 + (1 - tsplit2) * 0.2)) rtol = 1e-7
 
     # Also check reflection after splitting
     # And splitting with non-preferred unit

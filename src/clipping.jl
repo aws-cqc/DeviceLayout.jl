@@ -10,7 +10,7 @@
 
 Return the `ClippedPolygon` resulting from a polygon clipping operation.
 
-Uses the [`Clipper`](http://www.angusj.com/delphi/clipper.php) library and the
+Uses the [`Clipper1`](http://www.angusj.com/clipper2/Docs/Overview.htm) library and the
 [`Clipper.jl`](https://github.com/Voxel8/Clipper.jl) wrapper to perform polygon clipping.
 
 ## Positional arguments
@@ -42,7 +42,9 @@ These arguments may include:
   - `Clipper.PolyFillTypeEvenOdd`
   - `Clipper.PolyFillTypeNonZero`
 
-See the [`Clipper` docs](http://www.angusj.com/delphi/clipper/documentation/Docs/Units/ClipperLib/Types/PolyFillType.htm)
+These determine how Clipper treats overlapping polygons based on the sum of their contour orientations (+1 for counterclockwise,
+-1 for clockwise).
+See the [`Clipper` docs](https://www.angusj.com/clipper2/Docs/Units/Clipper/Types/FillRule.htm)
 for further information.
 
 See also [union2d](@ref), [difference2d](@ref), [intersect2d](@ref), and [xor2d](@ref).
@@ -130,9 +132,13 @@ of either, in which case only the elements in those layers will used.
 This is not implemented as a method of `union` because you can have a set union of arrays of
 polygons, which is a distinct operation.
 
-The Clipper polyfill rule is PolyFillTypePositive, meaning as long as a
-region lies within more non-hole (by orientation) than hole polygons, it lies
-in the union.
+Clockwise polygons are holes, while counterclockwise polygons are non-holes.
+The Clipper polyfill rule is `PolyFillTypePositive`, which is applied to both inputs and then to
+the output. That is, all regions with positive winding number (regions that are
+part of more non-hole than hole polygons) within each input are then combined to create the output.
+A "hole in nothing" in one input is ignored, not subtracted from the other input.
+
+See also [`clip`](@ref), [`difference2d`](@ref), [`intersect2d`](@ref), [`xor2d`](@ref).
 """
 function union2d(p1, p2)
     return clip(
@@ -167,6 +173,13 @@ Each of `p1` and `p2` can also be a `GeometryStructure` or `GeometryReference`, 
 Each can also be a pair `geom => layer`, where `geom` is a
 `GeometryStructure` or `GeometryReference`, while `layer` is a `DeviceLayout.Meta`, a layer name `Symbol`, and/or a collection
 of either, in which case only the elements in those layers will be used.
+
+Clockwise polygons are holes, while counterclockwise polygons are non-holes.
+The Clipper polyfill rule is `PolyFillTypePositive`, which is applied to both inputs and then to
+the output. That is, all regions with positive winding number (regions that are
+part of more non-hole than hole polygons) within each input are then combined to create the output.
+
+See also [`clip`](@ref), [`union2d`](@ref), [`intersect2d`](@ref), [`xor2d`](@ref).
 """
 function difference2d(plus, minus)
     return clip(
@@ -192,6 +205,13 @@ Each of `p1` and `p2` can also be a `GeometryStructure` or `GeometryReference`, 
 Each can also be a pair `geom => layer`, where `geom` is a
 `GeometryStructure` or `GeometryReference`, while `layer` is a `DeviceLayout.Meta`, a layer name `Symbol`, and/or a collection
 of either, in which case only the elements in those layers will be used.
+
+Clockwise polygons are holes, while counterclockwise polygons are non-holes.
+The Clipper polyfill rule is `PolyFillTypePositive`, which is applied to both inputs and then to
+the output. That is, all regions with positive winding number (regions that are
+part of more non-hole than hole polygons) within each input are then combined to create the output.
+
+See also [`clip`](@ref), [`union2d`](@ref), [`difference2d`](@ref), [`xor2d`](@ref).
 """
 function intersect2d(plus, minus)
     return clip(
@@ -220,6 +240,13 @@ Each of `p1` and `p2` can also be a `GeometryStructure` or `GeometryReference`, 
 Each can also be a pair `geom => layer`, where `geom` is a
 `GeometryStructure` or `GeometryReference`, while `layer` is a `DeviceLayout.Meta`, a layer name `Symbol`, and/or a collection
 of either, in which case only the elements in those layers will be used.
+
+Clockwise polygons are holes, while counterclockwise polygons are non-holes.
+The Clipper polyfill rule is `PolyFillTypePositive`, which is applied to both inputs and then to
+the output. That is, all regions with positive winding number (regions that are
+part of more non-hole than hole polygons) within each input are then combined to create the output.
+
+See also [`clip`](@ref), [`union2d`](@ref), [`difference2d`](@ref), [`intersect2d`](@ref).
 """
 function xor2d(p1, p2)
     return clip(
