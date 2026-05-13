@@ -24,7 +24,7 @@
         tags = Int32[1]
         result = connected_components(3, tags)
         @test length(result) == 1
-        @test result[1] == (Int32(3), Int32(1))
+        @test result[1] == [(Int32(3), Int32(1))]
     end
 
     @testset "two disconnected volumes" begin

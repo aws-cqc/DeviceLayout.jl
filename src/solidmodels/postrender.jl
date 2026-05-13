@@ -1048,7 +1048,7 @@ connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2) =
 function connected_components(dim::Integer, tags::Vector{Int32})
     n = length(tags)
     isempty(tags) && return Vector{Tuple{Int32, Int32}}[]
-    n == 1 && return [(Int32(dim), only(tags))]
+    n == 1 && return [[(Int32(dim), only(tags))]]
 
     # Build adjacency: map boundary entities to parent entity indices
     boundary_to_parents = Dict{Int32, Vector{Int}}()
@@ -1097,6 +1097,113 @@ function connected_components(dim::Integer, tags::Vector{Int32})
     end
 
     return collect(values(components))
+end
+
+"""
+    check_port_connectivity(sm::SolidModel, port_names, metal_groups; dim=2)
+        -> Dict{String, Symbol}
+
+Classify each port in `port_names` by its connectivity to the metal regions defined by
+`metal_groups`. Returns a `Dict` mapping each port name (as `String`) to one of:
+
+  - `:short` — at least two of the port's boundary entities touch metal, and every
+    metal-touching boundary lands on the same connected metal component. You can
+    trace a path from one terminal of the port to another through entities in
+    `metal_groups`, which would make a short circuit at DC.
+  - `:open` — the port's metal-touching boundaries land on two or more disconnected
+    metal components. There is no path through entities in `metal_groups` from one
+    terminal of the port to the other, which would make an open circuit at DC.
+  - `:floating` — fewer than two of the port's boundary entities touch metal. The
+    port has at most one terminal connected to metal; if used as a Palace lumped
+    port, this is generally a configuration error.
+  - `:missing` — the named port group does not exist in `sm` or is empty.
+
+Wave ports (2D exterior surface ports) are not handled specially; the `dim=2` path can still
+classify them algorithmically but the results are generally not electrically meaningful.
+
+# Arguments
+
+  - `sm::SolidModel`: a rendered solid model. Gmsh must be synchronized (the function
+    calls `SolidModels._synchronize!` defensively).
+  - `port_names::AbstractVector{<:Union{AbstractString, Symbol}}`: names of port
+    physical groups.
+  - `metal_groups::AbstractVector{<:Union{AbstractString, Symbol}}`: names of metal
+    physical groups. All listed groups are fed into a single "metal" connectivity
+    question.
+
+# Keyword arguments
+
+  - `dim=2`: dimension of port and metal groups. `3` is appropriate for volumetric lumped
+    ports in a 3D model; `2` would be used for surfaces.
+
+# Algorithm
+
+ 1. Compute connected components of the metal groups once via
+    [`connected_components`](@ref).
+ 2. Build a reverse map `entity tag → component index`.
+ 3. For each port, find its boundary entities (via `gmsh.model.getBoundary`) at
+    dimension `dim - 1`, then look up adjacent entities at dimension `dim`
+    (via `gmsh.model.getAdjacencies`). Count both the number of port boundary
+    entities that touch metal and the number of distinct metal components reached.
+    A port with fewer than two metal-touching boundaries is `:floating`; otherwise
+    it is `:short` (one component) or `:open` (multiple).
+
+See also [`connected_components`](@ref).
+"""
+function check_port_connectivity(sm::SolidModel, port_names, metal_groups; dim::Integer=2)
+    SolidModels._synchronize!(sm)
+
+    # Build connected-components tag → component-index map.
+    tag_to_comp = Dict{Int32, Int}()
+    if !isempty(metal_groups)
+        comps = connected_components(sm, metal_groups, dim)
+        for (ci, comp_dimtags) in enumerate(comps)
+            for (_, tag) in comp_dimtags
+                tag_to_comp[tag] = ci
+            end
+        end
+    end
+
+    results = Dict{String, Symbol}()
+    for pn in port_names
+        pn_s = string(pn)
+        if !SolidModels.hasgroup(sm, pn_s, dim)
+            results[pn_s] = :missing
+            continue
+        end
+        port_tags = SolidModels.entitytags(sm[pn_s, dim])
+        if isempty(port_tags)
+            results[pn_s] = :missing
+            continue
+        end
+        # Boundary faces of the port volume(s).
+        port_dimtags = Tuple{Int32, Int32}[(Int32(dim), t) for t in port_tags]
+        # getBoundary(dimtags, combined, oriented, recursive)
+        boundary = gmsh.model.getBoundary(port_dimtags, false, false, false)
+        touched = Set{Int}()
+        n_touching_boundaries = 0
+        for (bd, bt) in boundary
+            # `bt` may be signed (Gmsh convention); use absolute value as the tag.
+            upward, _ = gmsh.model.getAdjacencies(bd, abs(bt))
+            comps_here = Set{Int}()
+            for neighbor in upward
+                # Skip the port's own volumes.
+                (neighbor in port_tags) && continue
+                ci = get(tag_to_comp, neighbor, 0)
+                ci == 0 && continue
+                push!(comps_here, ci)
+            end
+            if !isempty(comps_here)
+                n_touching_boundaries += 1
+                union!(touched, comps_here)
+            end
+        end
+        # A Palace lumped port needs two terminals on metal; a single metal-touching
+        # boundary is treated as :floating regardless of how many components it reaches.
+        results[pn_s] =
+            n_touching_boundaries < 2 ? :floating : length(touched) == 1 ? :short : :open
+    end
+    return results
 end
 
 """
