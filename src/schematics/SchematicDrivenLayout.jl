@@ -120,6 +120,7 @@ export ParameterSet,
     MissingNamespace, ParameterKeyError, resolve, leaf_params, save_parameter_set
 export ProcessTechnology, SimulationTarget, ArtworkTarget, SolidModelTarget
 export base_variant, flipchip!, map_metadata!, @composite_variant, @variant
+export port_directions
 
 """
     const Component = AbstractComponent{typeof(1.0UPREFERRED)}

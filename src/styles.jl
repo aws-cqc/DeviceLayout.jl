@@ -350,3 +350,42 @@ struct ToTolerance{T <: Coordinate} <: GeometryEntityStyle
 end
 to_polygons(ent::GeometryEntity, sty::ToTolerance; kwargs...) =
     to_polygons(ent; merge((; kwargs...), (; atol=sty.atol))...)
+
+"""
+    struct WithDirection <: GeometryEntityStyle
+        direction::typeof(1.0°)
+    end
+    WithDirection(direction=0°)
+
+Style that annotates a `GeometryEntity` with a direction angle (CCW from the +X axis
+in the entity's local frame) for use in simulation configuration. For example, a
+lumped-port rectangle can carry its electrical orientation so that Palace's
+`LumpedPort`/`WavePort` `Direction` field can be populated after rendering.
+
+Rendering is unaffected: `to_polygons` passes through to the underlying entity, and
+`to_primitives` is stripped by the generic fallback at `src/solidmodels/render.jl`.
+The direction transforms with the entity under rotation or reflection via
+`transform(sty::WithDirection, f::Transformation) = WithDirection(rotated_direction(sty.direction, f))`,
+so after `plan!`/`build!`/`index_layer!` the carried angle reflects the global
+orientation.
+
+The stored angle is NOT automatically normalized to `[0°, 360°)`. Use
+[`port_directions`](@ref) to extract Palace-compatible strings (which normalize and
+map to `"+X"`/`"-X"`/`"+Y"`/`"-Y"` or `"[dx, dy, 0]"`).
+
+See also: [`port_directions`](@ref), [`MeshSized`](@ref), [`OptionalStyle`](@ref).
+"""
+struct WithDirection <: GeometryEntityStyle
+    direction::typeof(1.0°)
+    # Constrain the inner constructor to a Number so WithDirection(::GeometryEntity)
+    # routes via the generic `(T::Type{<:GeometryEntityStyle})(x::GeometryEntity, args...)`
+    # fallback instead of colliding with this constructor (silences Aqua).
+    WithDirection(direction::Number) = new(uconvert(°, direction))
+end
+# Default constructor — no-arg form is unambiguous.
+WithDirection() = WithDirection(0°)
+
+to_polygons(ent::GeometryEntity, ::WithDirection; kwargs...) = to_polygons(ent; kwargs...)
+
+transform(sty::WithDirection, f::Transformation) =
+    WithDirection(rotated_direction(sty.direction, f))
