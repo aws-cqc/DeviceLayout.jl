@@ -492,7 +492,7 @@ end
         @test_throws ArgumentError create_component(ExampleRectangleIsland, ps4, "")
     end
 
-    @testset "set_parameters with value => :name pairs" begin
+    @testset "set_parameters with ParameterSet-sourced kwargs" begin
         using DeviceLayout.SchematicDrivenLayout: parameters, set_parameters
         using DeviceLayout.SchematicDrivenLayout.ExamplePDK.Transmons:
             ExampleRectangleIsland
@@ -502,52 +502,47 @@ end
         ps.components.transmon.junction_gap = 15μm
 
         island = ExampleRectangleIsland()
-        # Reversed pair: value => :param_name
-        island2 =
-            set_parameters(island, ps.components.transmon.junction_gap => :junction_gap)
+        # Forwarding a PS leaf into the same-named parameter
+        island2 = set_parameters(island; junction_gap=ps.components.transmon.junction_gap)
         @test parameters(island2).junction_gap == 15μm
 
         # Forwarding a value under a different parameter name
-        island3 = set_parameters(island, ps.components.transmon.junction_gap => :cap_gap)
+        island3 = set_parameters(island; cap_gap=ps.components.transmon.junction_gap)
         @test parameters(island3).cap_gap == 15μm
         # Untouched parameters keep their previous values
         @test parameters(island3).cap_width == parameters(island).cap_width
 
-        # Multiple pairs
-        island4 = set_parameters(island, 40μm => :cap_width, 600μm => :cap_length)
+        # Multiple kwargs
+        island4 = set_parameters(island; cap_width=40μm, cap_length=600μm)
         @test parameters(island4).cap_width == 40μm
         @test parameters(island4).cap_length == 600μm
 
-        # Pairs combine with trailing kwargs (distinct keys)
-        island5 = set_parameters(island, 40μm => :cap_width; cap_length=600μm)
-        @test parameters(island5).cap_width == 40μm
-        @test parameters(island5).cap_length == 600μm
-
-        # Zero pairs is a no-op copy
+        # Zero kwargs is a no-op copy
         island6 = set_parameters(island)
         @test parameters(island6).cap_width == parameters(island).cap_width
 
         # Reading a value from the ParameterSet for forwarding records it in
-        # `accessed` with the fully qualified path - so `set_parameters` with a
-        # `value => :name` pair sourced from `ps` contributes to the audit trail.
+        # `accessed` with the fully qualified path.
         ps_audit = ParameterSet()
         ps_audit.components.transmon.junction_gap = 15μm
         @test isempty(ps_audit.accessed)
 
-        _ = set_parameters(
-            island,
-            ps_audit.components.transmon.junction_gap => :junction_gap
-        )
+        _ = set_parameters(island; junction_gap=ps_audit.components.transmon.junction_gap)
         @test "components.transmon.junction_gap" in ps_audit.accessed
 
-        # Forwarding a MissingNamespace (lookup in the ParameterSet failed) must
+        # Passing a MissingNamespace (PS lookup failed) as a kwarg value must
         # throw ParameterKeyError at the set_parameters call site, not silently
         # store the MissingNamespace as the component's parameter value.
         using DeviceLayout.SchematicDrivenLayout: ParameterKeyError
         ps_missing = ParameterSet()
         @test_throws ParameterKeyError("junction_gap", "components.transmon.junction_gap") set_parameters(
-            island,
-            ps_missing.components.transmon.junction_gap => :junction_gap
+            island;
+            junction_gap=ps_missing.components.transmon.junction_gap
+        )
+        # Same guard fires when calling `create_component` directly.
+        @test_throws ParameterKeyError("junction_gap", "components.transmon.junction_gap") create_component(
+            ExampleRectangleIsland;
+            junction_gap=ps_missing.components.transmon.junction_gap
         )
     end
 end
@@ -758,7 +753,7 @@ end
             ps,
             "components.ps_flow_transmon.junction"
         )
-        junction = set_parameters(junction, tr.junction_gap => :h_ground_island)
+        junction = set_parameters(junction; h_ground_island=tr.junction_gap)
         return (island, junction)
     end
 
@@ -842,5 +837,230 @@ end
             PSFlowTestTransmon,
             ps.components.ps_flow_transmon
         )
+    end
+end
+
+@testitem "set_parameters with template + ParameterSet" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+    import .SchematicDrivenLayout:
+        ParameterSet, ParameterKeyError, parameter_set, parameters, set_parameters
+    using DeviceLayout.SchematicDrivenLayout.ExamplePDK.Transmons: ExampleRectangleIsland
+    using DeviceLayout.SchematicDrivenLayout.ExamplePDK.SimpleJunctions:
+        ExampleSimpleJunction
+    using Unitful: μm
+
+    # Composite that declares subcomponent templates via the new NamedTuple convention.
+    # `_build_subcomponents` overlays PS on top of each template (templates-aliasing)
+    # and then applies composite-level overrides via the pair form.
+    @compdef struct Phase2Transmon <: CompositeComponent
+        name = "phase2_transmon"
+        junction_gap = 12μm
+        templates = (
+            island=ExampleRectangleIsland(name="island", cap_width=30μm),
+            junction=ExampleSimpleJunction(name="junction")
+        )
+    end
+
+    function SchematicDrivenLayout._build_subcomponents(tr::Phase2Transmon)
+        ps = parameter_set(tr._graph)
+        island = set_parameters(tr.templates.island, ps, "components.$(name(tr)).island")
+        island = set_parameters(island; junction_gap=tr.junction_gap)
+        junction =
+            set_parameters(tr.templates.junction, ps, "components.$(name(tr)).junction")
+        junction = set_parameters(junction; h_ground_island=tr.junction_gap)
+        return (island, junction)
+    end
+
+    function SchematicDrivenLayout._graph!(
+        g::SchematicGraph,
+        cc::Phase2Transmon,
+        subcomps::NamedTuple
+    )
+        n = add_node!(g, subcomps.island)
+        fuse!(g, n => :junction, subcomps.junction => :island)
+        return g
+    end
+    SchematicDrivenLayout.map_hooks(::Type{Phase2Transmon}) =
+        Dict{Pair{Int, Symbol}, Symbol}()
+
+    @testset "Happy path — address form" begin
+        ps = ParameterSet()
+        ps.components.phase2_transmon.junction_gap = 15μm
+        ps.components.phase2_transmon.island.cap_length = 600μm
+        ps.components.phase2_transmon.junction.w_jj = 2μm
+
+        tr = create_component(Phase2Transmon, ps, "components.phase2_transmon")
+        island = components(tr)[1]
+        junction = components(tr)[2]
+        @test parameters(island).cap_length == 600μm
+        # Template default for cap_width (30μm) is preserved — PS didn't set it
+        @test parameters(island).cap_width == 30μm
+        @test parameters(junction).w_jj == 2μm
+    end
+
+    @testset "Happy path — scoped form" begin
+        ps = ParameterSet()
+        ps.components.phase2_transmon.island.cap_length = 600μm
+
+        template_island = ExampleRectangleIsland(name="island", cap_width=30μm)
+        island = set_parameters(template_island, ps.components.phase2_transmon.island)
+        @test parameters(island).cap_length == 600μm
+        @test parameters(island).cap_width == 30μm
+    end
+
+    @testset "Precedence: template → PS override" begin
+        ps = ParameterSet()
+        ps.components.phase2_transmon.island.cap_length = 600μm
+
+        template_island = ExampleRectangleIsland(name="island", cap_width=30μm)
+        island = set_parameters(template_island, ps, "components.phase2_transmon.island")
+        # cap_width came from the template (PS didn't set it)
+        @test parameters(island).cap_width == 30μm
+        # cap_length came from PS
+        @test parameters(island).cap_length == 600μm
+    end
+
+    @testset "Precedence: composite override wins over PS" begin
+        ps = ParameterSet()
+        ps.components.phase2_transmon.junction_gap = 15μm
+        # PS tries to set island's junction_gap to 99μm, but the composite then
+        # forwards its own `tr.junction_gap` (15μm) on top via the pair form.
+        ps.components.phase2_transmon.island.junction_gap = 99μm
+        # junction namespace must exist for `set_parameters(..., ps, ".junction")`
+        # to resolve; content is irrelevant here.
+        ps.components.phase2_transmon.junction.w_jj = 1μm
+
+        tr = create_component(Phase2Transmon, ps, "components.phase2_transmon")
+        island = components(tr)[1]
+        # Composite's forwarded value (15μm) wins over PS's 99μm — documented
+        # precedence: template → PS → composite.
+        @test parameters(island).junction_gap == 15μm
+    end
+
+    @testset "Typo detection — address form" begin
+        ps = ParameterSet()
+        ps.components.phase2_transmon.island.cap_length = 600μm
+        ps.components.phase2_transmon.island.fictional_param = 5μm
+
+        template_island = ExampleRectangleIsland(name="island")
+        err = try
+            set_parameters(template_island, ps, "components.phase2_transmon.island")
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("fictional_param", err.msg)
+        @test occursin("ExampleRectangleIsland", err.msg)
+    end
+
+    @testset "Typo detection — scoped form" begin
+        ps = ParameterSet()
+        ps.components.phase2_transmon.island.cap_length = 600μm
+        ps.components.phase2_transmon.island.fictional_param = 5μm
+
+        template_island = ExampleRectangleIsland(name="island")
+        err = try
+            set_parameters(template_island, ps.components.phase2_transmon.island)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("fictional_param", err.msg)
+    end
+
+    @testset "Missing address throws ParameterKeyError" begin
+        ps = ParameterSet()
+        template_island = ExampleRectangleIsland(name="island")
+        @test_throws ParameterKeyError set_parameters(
+            template_island,
+            ps,
+            "components.does_not_exist"
+        )
+    end
+
+    @testset "Combined form: kwargs apply on top of PS overlay" begin
+        ps = ParameterSet()
+        ps.components.phase2_transmon.island.cap_length = 600μm
+        ps.components.phase2_transmon.island.junction_gap = 99μm
+
+        template_island = ExampleRectangleIsland(name="island", cap_width=30μm)
+        island = set_parameters(
+            template_island,
+            ps,
+            "components.phase2_transmon.island";
+            junction_gap=15μm
+        )
+        # Template default preserved
+        @test parameters(island).cap_width == 30μm
+        # PS overlay
+        @test parameters(island).cap_length == 600μm
+        # kwargs win over PS
+        @test parameters(island).junction_gap == 15μm
+    end
+
+    @testset "Combined form: ParameterSet as kwarg value is rejected" begin
+        ps = ParameterSet()
+        ps.components.phase2_transmon.island.cap_length = 600μm
+        ps.parent_component.junction_gap = 15μm
+
+        template_island = ExampleRectangleIsland(name="island")
+        # Forgot the leaf: passes a scoped ParameterSet rather than its `.junction_gap`
+        @test_throws ArgumentError set_parameters(
+            template_island,
+            ps,
+            "components.phase2_transmon.island";
+            junction_gap=ps.parent_component
+        )
+    end
+
+    @testset "Combined form: MissingNamespace as kwarg value is rejected" begin
+        ps = ParameterSet()
+        ps.components.phase2_transmon.island.cap_length = 600μm
+        # No `parent_component` namespace — `ps.parent_component.junction_gap`
+        # returns a MissingNamespace.
+
+        template_island = ExampleRectangleIsland(name="island")
+        @test_throws ParameterKeyError set_parameters(
+            template_island,
+            ps,
+            "components.phase2_transmon.island";
+            junction_gap=ps.parent_component.junction_gap
+        )
+    end
+
+    @testset "Root ParameterSet rejected by scoped form" begin
+        ps = ParameterSet()
+        template_island = ExampleRectangleIsland(name="island")
+        @test_throws ArgumentError set_parameters(template_island, ps)
+    end
+
+    @testset "Access tracking records PS leaves only" begin
+        ps = ParameterSet()
+        ps.components.phase2_transmon.island.cap_length = 600μm
+
+        template_island = ExampleRectangleIsland(name="island", cap_width=30μm)
+        @test isempty(ps.accessed)
+        _ = set_parameters(template_island, ps, "components.phase2_transmon.island")
+        # PS leaf is tracked with the qualified path
+        @test "components.phase2_transmon.island.cap_length" in ps.accessed
+        # Template-only defaults (cap_width, junction_gap, ...) are NOT tracked —
+        # they never flowed through the PS.
+        @test !("components.phase2_transmon.island.cap_width" in ps.accessed)
+        @test !("components.phase2_transmon.island.junction_gap" in ps.accessed)
+    end
+
+    @testset "plan(g) runs end-to-end on templates-aliasing composite" begin
+        ps = ParameterSet()
+        ps.components.phase2_transmon.junction_gap = 10μm
+        ps.components.phase2_transmon.island.cap_length = 500μm
+        ps.components.phase2_transmon.junction.w_jj = 1μm
+
+        g = SchematicGraph("chip_phase2", ps)
+        tr = create_component(Phase2Transmon, ps, "components.phase2_transmon")
+        add_node!(g, tr)
+        floorplan = plan(g; log_dir=nothing)
+        @test floorplan !== nothing
     end
 end

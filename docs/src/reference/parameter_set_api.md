@@ -16,5 +16,6 @@ DeviceLayout.SchematicDrivenLayout.save_parameter_set
 ```@docs
 SchematicDrivenLayout.create_component(::Type{T}, ::DeviceLayout.SchematicDrivenLayout.ParameterSet, ::String) where {T <: DeviceLayout.SchematicDrivenLayout.AbstractComponent}
 SchematicDrivenLayout.create_component(::Type{T}, ::DeviceLayout.SchematicDrivenLayout.ParameterSet) where {T <: DeviceLayout.SchematicDrivenLayout.AbstractComponent}
-SchematicDrivenLayout.set_parameters(::DeviceLayout.SchematicDrivenLayout.AbstractComponent, ::Pair{<:Any, Symbol}...)
+SchematicDrivenLayout.set_parameters(::DeviceLayout.SchematicDrivenLayout.AbstractComponent, ::DeviceLayout.SchematicDrivenLayout.ParameterSet, ::String)
+SchematicDrivenLayout.set_parameters(::DeviceLayout.SchematicDrivenLayout.AbstractComponent, ::DeviceLayout.SchematicDrivenLayout.ParameterSet)
 ```
