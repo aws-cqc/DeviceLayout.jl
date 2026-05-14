@@ -980,6 +980,27 @@ end
         )
     end
 
+    @testset "set_parameters(c, ::MissingNamespace) throws ParameterKeyError" begin
+        ps = ParameterSet()
+        ps.components.phase2_transmon.island.cap_length = 600μm
+        template_island = ExampleRectangleIsland(name="island")
+
+        # Direct call: a MissingNamespace as the second argument surfaces the
+        # qualified path in a ParameterKeyError rather than a generic MethodError.
+        mn = ps.components.does_not_exist
+        @test_throws ParameterKeyError("does_not_exist", "components.does_not_exist") set_parameters(
+            template_island,
+            mn
+        )
+
+        # Deeper missing chain: the qualified path tracks the full lookup.
+        mn_chain = ps.components.phase2_transmon.island.fictional.deeper
+        @test_throws ParameterKeyError(
+            "deeper",
+            "components.phase2_transmon.island.fictional.deeper"
+        ) set_parameters(template_island, mn_chain)
+    end
+
     @testset "Combined form: kwargs apply on top of PS overlay" begin
         ps = ParameterSet()
         ps.components.phase2_transmon.island.cap_length = 600μm
