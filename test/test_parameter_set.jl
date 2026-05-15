@@ -690,6 +690,45 @@ end
         @test ps2.components.transmon.island.cap_width == 24μm
         @test ps2.components.transmon.junction.w_jj == 1μm
     end
+
+    @testset "Parsed lengths share DeviceLayout's promotion context" begin
+        # `Unitful.uparse` returns FreeUnits quantities (promotion target `m`),
+        # which mismatch DeviceLayout's ContextUnits (target `nm` or `μm`).
+        # Mixing them through `+` (e.g. inside `layer_z`) used to fail with
+        # `MethodError: no method matching (::FreeUnits{(m,), 𝐋, nothing})()` -
+        # see https://github.com/JuliaPhysics/Unitful.jl/pull/845. Lengths
+        # parsed from YAML must therefore enter the system already wrapped in
+        # the package's preferred context via `DeviceLayout.uparse`.
+        yaml_str = """
+        components:
+          cap:
+            finger_length: 150μm
+            t_chip: 525μm
+            inv_length: 1/μm
+        """
+        ps = ParameterSet(IOBuffer(yaml_str))
+        v = ps.components.cap.finger_length
+
+        @test v isa Unitful.Quantity
+        @test Unitful.unit(v) isa Unitful.ContextUnits
+        # The parsed length must add cleanly to a value carrying the package's
+        # preferred context - this was the operation that previously threw.
+        @test (v + 1 * DeviceLayout.PreferredUnits.UPREFERRED) isa Unitful.Quantity
+
+        # Compound expressions involving length symbols must also resolve
+        # against PreferredUnits so the embedded length carries ContextUnits.
+        @test ps.components.cap.inv_length isa Unitful.Quantity
+
+        # Reproduce the original `level_z` failure path: mixing YAML-loaded
+        # chip thicknesses (parsed as μm) with package-internal nm-targeted
+        # ContextUnits inside the same arithmetic chain. Pre-fix this raised
+        # the FreeUnits MethodError on the second `+`/`-`.
+        t_chips = [v, v]
+        t_gap = ps.components.cap.t_chip
+        nm_value = 1 * DeviceLayout.nm
+        z = sum(t_chips) + t_gap - nm_value
+        @test (z + nm_value) isa Unitful.Quantity
+    end
 end
 
 @testitem "Composite ParameterSet flow" setup = [CommonTestSetup] begin

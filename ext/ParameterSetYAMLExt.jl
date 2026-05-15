@@ -9,7 +9,12 @@ import Unitful
     _parse_units!(data::Dict{String, Any})
 
 Recursively walk a parsed YAML dict. String values that parse into a
-`Unitful.Quantity` (e.g. `"150μm"`) are converted in place.
+`Unitful.Quantity` (e.g. `"150μm"`) are converted in place via
+[`DeviceLayout.uparse`](@ref), so length-dimensioned values share the
+package's promotion context (`ContextUnits`) instead of carrying bare
+`FreeUnits` (which would later trip the mixed-context promotion bug
+fixed in https://github.com/JuliaPhysics/Unitful.jl/pull/845 — surfaced
+in DeviceLayout via `layer_z` arithmetic).
 
 Bare unit names like `"s"`, `"m"`, `"cm"` parse into `Unitful.Units`, not
 `Quantity` - those are left as strings so that ordinary text values (e.g.
@@ -21,7 +26,7 @@ function _parse_units!(data::Dict{String, Any})
             _parse_units!(v)
         elseif v isa AbstractString
             try
-                parsed = Unitful.uparse(v)
+                parsed = DeviceLayout.uparse(v)
                 parsed isa Unitful.Quantity && (data[k] = parsed)
             catch
                 # not a valid unit expression, keep as-is
