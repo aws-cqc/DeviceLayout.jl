@@ -134,6 +134,11 @@ In more detail:
       + If the parameter is inherited by multiple subcomponents, use the same name as in the subcomponents
       + If the parameter is used for one specific subcomponent, add prefix for the subcomponent
       + Use [`SchematicDrivenLayout.filter_parameters`](@ref) to get a collection of either kind of shared parameters
+      + Alternatively, store per-subcomponent parameters in a [`ParameterSet`](@ref SchematicDrivenLayout.ParameterSet)
+        addressed by the subcomponent's path and overlay them onto a template via
+        [`set_parameters(c, ps, address)`](@ref SchematicDrivenLayout.set_parameters); this avoids declaring a
+        pass-through field on the composite for every forwarded value (see the
+        [templates-aliasing tutorial](../tutorials/parameter_set.md#Templates-Aliasing-for-Composite-Subcomponents))
 
   - If you have a large number of parameters to pass through to a subcomponent, or want to maintain
     flexibility over parameters that are not usually important, use a `templates` NamedTuple parameter
@@ -142,6 +147,13 @@ In more detail:
         (with the subcomponent name as the key) that provides defaults
       + Parameters you’d often want to override or reconcile with other parameters are set at
         the CompositeComponent parameter level
+      + As an alternative to `filter_parameters` for forwarding subcomponent parameters, overlay a
+        [`ParameterSet`](@ref SchematicDrivenLayout.ParameterSet) onto each template via
+        [`set_parameters(c, ps, address)`](@ref SchematicDrivenLayout.set_parameters). This keeps the
+        composite struct free of pass-through fields and externalizes per-subcomponent values to the
+        `ParameterSet`. See the
+        [Templates-Aliasing section of the ParameterSet tutorial](../tutorials/parameter_set.md#Templates-Aliasing-for-Composite-Subcomponents)
+        for the full pattern.
 
 Example of template usage in `_build_subcomponents`:
 
@@ -179,6 +191,43 @@ function SchematicDrivenLayout._build_subcomponents(cc::MyCompositeComponent)
     return (subcomp1, subcomp2)
 end
 ```
+
+Example with templates and `ParameterSet` (alternative to `filter_parameters`):
+
+```julia
+@compdef struct MyCompositeComponent <: CompositeComponent
+    templates = (;
+        subcomp1=MySubComponent(; name="subcomp1"),
+        subcomp2=MySubComponent(; name="subcomp2")
+    )
+    length = 2mm
+end
+
+@compdef struct MySubComponent <: Component
+    width = 1mm
+    length = 2mm
+end
+
+function SchematicDrivenLayout._build_subcomponents(cc::MyCompositeComponent)
+    ps = parameter_set(cc._graph)
+    # ParameterSet leaves at `components.<cc>.subcompN` overlay each template;
+    # trailing kwargs are composite-level overrides that win over the ParameterSet.
+    subcomp1 = set_parameters(
+        cc.templates.subcomp1, ps, "components.$(name(cc)).subcomp1"; length=cc.length,
+    )
+    subcomp2 = set_parameters(
+        cc.templates.subcomp2, ps, "components.$(name(cc)).subcomp2"; length=cc.length,
+    )
+    return (subcomp1, subcomp2)
+end
+```
+
+The two patterns differ in where per-subcomponent values live:
+
+  - `filter_parameters` keeps shared and prefixed pass-through values as fields on the composite struct, so the composite is the single source of truth for both shared and per-subcomponent overrides.
+  - Templates-aliasing externalizes per-subcomponent values to the `ParameterSet` (addressed by the subcomponent's path) and reserves the composite struct for parameters it actually needs to reconcile or override. The composite no longer carries a `subcomp1_width`-style field for every pass-through value.
+
+Precedence under templates-aliasing is `template defaults < ParameterSet overlay < trailing composite kwargs`, so composite invariants (the trailing `set_parameters(subcomp1; length=cc.length)` above) always win over `ParameterSet` contents.
 
 ### Other special cases
 
