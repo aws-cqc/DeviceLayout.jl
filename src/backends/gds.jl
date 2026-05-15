@@ -1342,8 +1342,8 @@ function aref(s, dbs, verbose, nounits)
     return (
         name=str,
         origin=o,
-        deltacol=ec / col,
-        deltarow=er / row,
+        deltacol=(ec - o) / col,
+        deltarow=(er - o) / row,
         col=col,
         row=row,
         xrefl=xrefl,
