@@ -888,6 +888,42 @@
         @test halo_path.metadata == BASE_NEGATIVE
     end
 
+    @testset "footprint_halo" begin
+        import .SchematicDrivenLayout: footprint_halo
+        # Component with geometry in two layers
+        cs_fp = CoordinateSystem("fp_test", nm)
+        render!(cs_fp, centered(Rectangle(10μm, 10μm)), BASE_NEGATIVE)
+        sub_cs = CoordinateSystem("sub_cs", nm)
+        render!(sub_cs, centered(Rectangle(8μm, 8μm)), BASE_POSITIVE)
+        addref!(cs_fp, sub_cs)
+        comp = BasicComponent(cs_fp)
+
+        # footprint_halo replicates footprint halo across all layers
+        fh = footprint_halo(comp, 2μm)
+        @test length(fh.elements) == 2
+        @test Set(fh.element_metadata) == Set([BASE_NEGATIVE, BASE_POSITIVE])
+
+        # only_layers filtering
+        fh_neg = footprint_halo(comp, 2μm; only_layers=[:base_negative])
+        @test length(fh_neg.elements) == 1
+        @test fh_neg.element_metadata[1] == BASE_NEGATIVE
+
+        # inner_delta produces annular halo
+        fh_annular = footprint_halo(comp, 4μm, 2μm)
+        @test length(fh_annular.elements) == 2  # one per layer
+
+        # memoized_halos prevents recomputation
+        memo = Dict{DeviceLayout.GeometryStructure, DeviceLayout.GeometryStructure}()
+        fh1 = footprint_halo(comp, 2μm; memoized_halos=memo)
+        fh2 = footprint_halo(comp, 999μm; memoized_halos=memo)
+        @test fh1 === fh2
+
+        # ExampleStarIsland uses footprint_halo via its halo override
+        isl = SchematicDrivenLayout.ExamplePDK.Transmons.ExampleStarIsland()
+        isl_halo = halo(isl, 10μm)
+        @test !isempty(isl_halo.elements)
+    end
+
     @testset "Autofill" begin
         g = SchematicGraph("autofill_test")
         cs_0 = CoordinateSystem("c0", nm)
