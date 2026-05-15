@@ -1051,6 +1051,36 @@ end
             rm(path, force=true)
         end
 
+        # Round-trip test: ArrayReference with nonzero origin (#222)
+        let c = Cell("main"), c2 = Cell("sub")
+            render!(c2, Rectangle(1μm, 2μm), GDSMeta(0))
+            c2ref = aref(
+                c2,
+                Point(5, -5)μm;
+                xrefl=true,
+                rot=90°,
+                nrow=3,
+                ncol=2,
+                drow=Point(0, 10)μm,
+                dcol=Point(10, 0)μm,
+                mag=2.0
+            )
+            push!(c.refs, c2ref)
+            path = joinpath(tdir, "test_aref_roundtrip.gds")
+            save(path, c)
+            c_rt = load(path)["main"]
+            c2ref_rt = c_rt.refs[1]
+            @test c2ref_rt.origin == c2ref.origin
+            @test c2ref_rt.deltacol == c2ref.deltacol
+            @test c2ref_rt.deltarow == c2ref.deltarow
+            @test c2ref_rt.col == c2ref.col
+            @test c2ref_rt.row == c2ref.row
+            @test c2ref_rt.xrefl == c2ref.xrefl
+            @test c2ref_rt.mag == c2ref.mag
+            @test c2ref_rt.rot == c2ref.rot
+            rm(path, force=true)
+        end
+
         # test we can recognize PROPATTR and PROPVALUE tags (though ignored)
         @test_logs (:info, r"PROPATTR: 0") match_mode = :any load(
             joinpath(@__DIR__, "propattr.gds");
