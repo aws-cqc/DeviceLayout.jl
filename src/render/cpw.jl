@@ -59,10 +59,13 @@ function to_polygons(
     f::Paths.Turn{T},
     s::Paths.SimpleCPW;
     atol=DeviceLayout.onenanometer(T),
+    rtol=nothing,
     kwargs...
 ) where {T}
     dir = sign(f.α)
-    # Use the same θ step for all curves, worst case is outer curve
+    if !isnothing(rtol)
+        atol = max(atol, rtol * (f.r + Paths.extent(s)))
+    end
     dθ_max = 2 * sqrt(2 * atol / (f.r + Paths.extent(s))) # r - r cos dθ/2 ≈ tolerance
     pts(sgn1::Int, sgn2::Int) = circular_arc(
         f.α0 - dir * 90°,
@@ -83,21 +86,26 @@ function to_polygons(
     f::Paths.BSpline{T},
     s::Paths.SimpleCPW;
     atol=DeviceLayout.onenanometer(T),
+    rtol=nothing,
     kwargs...
 ) where {T}
     # since s will ignore arguments passed in, we can use f.r directly. should be faster.
     g = cpw_points(f.r, s)
-    hess(t) = Paths.Interpolations.hessian(f.r, t)[1]
+    κ(t) = _bspline_curvature(f.r, t)
 
-    # Assume hess = ddf ~ ddg
-    # And d^2 s / dt^2 is small
     ppts = [
-        discretize_curve(r -> g(r, 1, -1), hess, atol)
-        @view discretize_curve(r -> g(r, 1, 1), hess, atol)[end:-1:1]
+        discretize_curve(r -> g(r, 1, -1), κ, atol; rtol=rtol, t_scale=pathlength(f))
+        @view discretize_curve(r -> g(r, 1, 1), κ, atol; rtol=rtol, t_scale=pathlength(f))[end:-1:1]
     ]
     mpts = [
-        discretize_curve(r -> g(r, -1, 1), hess, atol)
-        @view discretize_curve(r -> g(r, -1, -1), hess, atol)[end:-1:1]
+        discretize_curve(r -> g(r, -1, 1), κ, atol; rtol=rtol, t_scale=pathlength(f))
+        @view discretize_curve(
+            r -> g(r, -1, -1),
+            κ,
+            atol;
+            rtol=rtol,
+            t_scale=pathlength(f)
+        )[end:-1:1]
     ]
 
     return [Polygon(uniquepoints(ppts)), Polygon(uniquepoints(mpts))]
@@ -107,20 +115,27 @@ function to_polygons(
     f::Paths.BSpline{T},
     s::Paths.CPW;
     atol=DeviceLayout.onenanometer(T),
+    rtol=nothing,
     kwargs...
 ) where {T}
     g = cpw_points(f, s)
-    hess(t) = Paths.Interpolations.hessian(f.r, t)[1]
+    κ(t) = _bspline_curvature(f.r, t)
 
-    # Assume hess = ddf ~ ddg (trace/gap vary slowly and are small compared to radius of curvature)
-    # And d^2 s / dt^2 is small...
+    # trace/gap vary slowly vs. radius of curvature, so base-spline κ is an
+    # acceptable surrogate for the offset curve's curvature.
     ppts = [
-        discretize_curve(r -> g(r, 1, -1), hess, atol)
-        @view discretize_curve(r -> g(r, 1, 1), hess, atol)[end:-1:1]
+        discretize_curve(r -> g(r, 1, -1), κ, atol; rtol=rtol, t_scale=pathlength(f))
+        @view discretize_curve(r -> g(r, 1, 1), κ, atol; rtol=rtol, t_scale=pathlength(f))[end:-1:1]
     ]
     mpts = [
-        discretize_curve(r -> g(r, -1, 1), hess, atol)
-        @view discretize_curve(r -> g(r, -1, -1), hess, atol)[end:-1:1]
+        discretize_curve(r -> g(r, -1, 1), κ, atol; rtol=rtol, t_scale=pathlength(f))
+        @view discretize_curve(
+            r -> g(r, -1, -1),
+            κ,
+            atol;
+            rtol=rtol,
+            t_scale=pathlength(f)
+        )[end:-1:1]
     ]
 
     return [Polygon(uniquepoints(ppts)), Polygon(uniquepoints(mpts))]

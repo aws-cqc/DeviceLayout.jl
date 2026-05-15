@@ -139,8 +139,12 @@ _default_curve_atol(::Type{<:Length}) = 1nm
 function bspline_approximation(
     f::Paths.Segment{T};
     atol=_default_curve_atol(T),
-    maxits=10
+    maxits=10,
+    rtol=nothing
 ) where {T}
+    # rtol is accepted for API consistency with render-time callers (e.g. OffsetSegment).
+    # The internal _testvals sampling grid is construction-time, not render-time, and
+    # intentionally stays at the package default atol.
     # Sample points from f and use them to create the BSpline interpolation
     approx = _initial_guess(f)
     # Sample a dense set of points to test approximation against

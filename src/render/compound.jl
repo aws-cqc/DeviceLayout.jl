@@ -45,7 +45,7 @@ function to_polygons(seg::Paths.CompoundSegment{T}, sty::Paths.Style; kwargs...)
     l0 = zero(T)
     for se in seg.segments
         l = l0 + pathlength(se)
-        p = vcat(p, to_polygons(se, Paths.pin(sty; start=l0, stop=l)))
+        p = vcat(p, to_polygons(se, Paths.pin(sty; start=l0, stop=l); kwargs...))
         l0 = l
     end
     return p

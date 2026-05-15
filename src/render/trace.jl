@@ -17,10 +17,11 @@ function to_polygons(
     seg::Paths.OffsetSegment{T},
     s::Paths.Trace;
     atol=DeviceLayout.onenanometer(T),
+    rtol=nothing,
     kwargs...
 ) where {T}
-    bsp = Paths.bspline_approximation(seg; atol)
-    return to_polygons(bsp, s; atol, kwargs...)
+    bsp = Paths.bspline_approximation(seg; atol, rtol)
+    return to_polygons(bsp, s; atol, rtol, kwargs...)
 end
 
 function to_polygons(segment::Paths.Straight{T}, s::Paths.SimpleTrace; kwargs...) where {T}
@@ -45,10 +46,13 @@ function to_polygons(
     f::Paths.Turn{T},
     s::Paths.SimpleTrace;
     atol=DeviceLayout.onenanometer(T),
+    rtol=nothing,
     kwargs...
 ) where {T}
     dir = sign(f.α)
-    # Use the same θ step for all curves, worst case is outer curve
+    if !isnothing(rtol)
+        atol = max(atol, rtol * (f.r + Paths.extent(s)))
+    end
     dθ_max = 2 * sqrt(2 * atol / (f.r + Paths.extent(s))) # r - r cos dθ/2 ≈ tolerance
     pts(sgn::Int) = circular_arc(
         f.α0 - dir * 90°,
@@ -65,6 +69,7 @@ function to_polygons(
     b::Paths.BSpline{T},
     s::Paths.SimpleTrace;
     atol=DeviceLayout.onenanometer(T),
+    rtol=nothing,
     kwargs...
 ) where {T}
     f = b.r
@@ -75,12 +80,13 @@ function to_polygons(
         return f(t) + perp * (Paths.extent(s) / norm(perp))
     end
 
-    hess(t) = Paths.Interpolations.hessian(f, t)[1]
+    # Use base-spline true curvature as a surrogate for the offset curve's κ
+    # (same "hess ≈ ddf ~ ddg" approximation the old code made, just
+    # dimensionally correct). Forwards `rtol` to `discretize_curve`.
+    κ(t) = _bspline_curvature(f, t)
 
-    # Assume hess = ddf ~ ddg
-    # And d^2 s / dt^2 is small
-    ppts = discretize_curve(r -> g(r, 1), hess, atol)
-    mpts = discretize_curve(r -> g(r, -1), hess, atol)
+    ppts = discretize_curve(r -> g(r, 1), κ, atol; rtol=rtol, t_scale=pathlength(b))
+    mpts = discretize_curve(r -> g(r, -1), κ, atol; rtol=rtol, t_scale=pathlength(b))
 
     return Polygon(uniquepoints([ppts; @view mpts[end:-1:1]]))
 end
@@ -89,11 +95,13 @@ function to_polygons(
     b::Paths.BSpline{T},
     tr::Paths.Trace;
     atol=DeviceLayout.onenanometer(T),
+    rtol=nothing,
     kwargs...
 ) where {T}
     f = b.r
     arclength(t) = Paths.t_to_arclength(b, t)
-    hess(t) = Paths.Interpolations.hessian(f, t)[1]
+    # Same base-spline-κ surrogate as the SimpleTrace method above.
+    κ(t) = _bspline_curvature(f, t)
 
     g = (t, sgn) -> begin
         s = arclength(t)
@@ -102,9 +110,7 @@ function to_polygons(
         return f(t) + perp * (Paths.extent(tr, s) / norm(perp))
     end
 
-    # Assume hess = ddf ~ ddg
-    # And d^2 s / dt^2 is small
-    ppts = discretize_curve(r -> g(r, 1), hess, atol)
-    mpts = discretize_curve(r -> g(r, -1), hess, atol)
+    ppts = discretize_curve(r -> g(r, 1), κ, atol; rtol=rtol, t_scale=pathlength(b))
+    mpts = discretize_curve(r -> g(r, -1), κ, atol; rtol=rtol, t_scale=pathlength(b))
     return Polygon(uniquepoints([ppts; @view mpts[end:-1:1]]))
 end

@@ -100,6 +100,7 @@ CurvilinearPolygon(p::Polygon{T}) where {T} = CurvilinearPolygon{T}(points(p))
 function to_polygons(
     e::CurvilinearPolygon{T};
     atol=DeviceLayout.onenanometer(T),
+    rtol=nothing,
     kwargs...
 ) where {T}
     i = 1
@@ -111,7 +112,7 @@ function to_polygons(
 
         # Discretize segment using tolerance-based adaptive grid.
         wrapped_i = mod1(csi + 1, length(e.p))
-        pp = DeviceLayout.discretize_curve(c, atol)
+        pp = DeviceLayout.discretize_curve(c, atol; rtol=rtol)
 
         # Remove the calculated points corresponding to start and end.
         term_p = pop!(pp)
@@ -586,6 +587,7 @@ function to_polygons(
     ent::CurvilinearPolygon{S},
     sty::Polygons.Rounded{T};
     atol=Polygons._round_atol(S, T),
+    rtol=nothing,
     kwargs...
 ) where {S, T}
     rad_raw = Polygons.radius(sty)
@@ -720,7 +722,8 @@ function to_polygons(
                     t -> Paths.signed_curvature(c, t * l),
                     atol,
                     (Float64(t_start / l), Float64(t_end / l));
-                    t_scale=l
+                    t_scale=l,
+                    rtol=rtol
                 )
                 # Remove endpoints (already present as fillet tangent points)
                 inner = grid[(begin + 1):(end - 1)] .* l
