@@ -1047,11 +1047,7 @@ end
 connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; kwargs...) =
     connected_components(dim, entitytags(sm[group, dim]); kwargs...)
 
-function connected_components(
-    dim::Integer,
-    tags::Vector{Int32};
-    geometric_tol::Real=1e-6
-)
+function connected_components(dim::Integer, tags::Vector{Int32}; geometric_tol::Real=1e-6)
     n = length(tags)
     isempty(tags) && return Vector{Tuple{Int32, Int32}}[]
     n == 1 && return [[(Int32(dim), only(tags))]]
@@ -1099,9 +1095,10 @@ function connected_components(
     if dim == 2 && geometric_tol > 0
         tag_to_idx = Dict(t => i for (i, t) in enumerate(tags))
         bbox_cache = Dict{Int32, NTuple{6, Float64}}()
-        get_bbox(d, t) = get!(bbox_cache, t) do
-            return gmsh.model.getBoundingBox(d, t)
-        end
+        get_bbox(d, t) =
+            get!(bbox_cache, t) do
+                return gmsh.model.getBoundingBox(d, t)
+            end
         for (btag, ps) in boundary_to_parents
             length(ps) == 1 || continue
             owner_idx = ps[1]
@@ -1132,9 +1129,12 @@ end
 
 # Axis-aligned bbox containment test (a contains b). `bbox` is gmsh's (xmin, ymin, zmin, xmax, ymax, zmax).
 function _bbox_contains(a, b; pad::Real=0.0)
-    return (a[1] - pad <= b[1]) && (b[4] - pad <= a[4]) &&
-           (a[2] - pad <= b[2]) && (b[5] - pad <= a[5]) &&
-           (a[3] - pad <= b[3]) && (b[6] - pad <= a[6])
+    return (a[1] - pad <= b[1]) &&
+           (b[4] - pad <= a[4]) &&
+           (a[2] - pad <= b[2]) &&
+           (b[5] - pad <= a[5]) &&
+           (a[3] - pad <= b[3]) &&
+           (b[6] - pad <= a[6])
 end
 
 # Sample a 1D entity (curve) at `n_samples` parametric points and test whether each
@@ -1151,10 +1151,9 @@ function _curve_lies_on_face(curve_tag::Integer, face_tag::Integer; tol, n_sampl
     xyz = gmsh.model.getValue(1, curve_tag, params) # flat [x1,y1,z1,x2,y2,z2,...]
     tol2 = Float64(tol)^2
     for k = 1:n_samples
-        p = @view xyz[3k - 2:3k]
+        p = @view xyz[(3k - 2):(3k)]
         closest, uv = gmsh.model.getClosestPoint(2, face_tag, p)
-        d2 =
-            (closest[1] - p[1])^2 + (closest[2] - p[2])^2 + (closest[3] - p[3])^2
+        d2 = (closest[1] - p[1])^2 + (closest[2] - p[2])^2 + (closest[3] - p[3])^2
         d2 > tol2 && return false
         gmsh.model.isInside(2, face_tag, uv, true) > 0 || return false
     end

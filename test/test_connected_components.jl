@@ -65,7 +65,7 @@
         tags = Int32[1; 2; leg_faces]
 
         # Topology only: ground plane (tag 1) is disconnected from each leg face.
-        result_topo = connected_components(2, tags; geometric_tol=0.0)
+        result_topo = connected_components(2, tags; geometric_tol=0.0) # tol=0.0 turns off augmentation
         @test length(result_topo) == 2
 
         # Geometric augmentation: the foot edges lie in the ground plane's interior

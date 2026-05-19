@@ -31,12 +31,7 @@
         name_group!(sm, "metal_B", 3, [2])
         name_group!(sm, "port_1", 3, [3])
 
-        result = check_port_connectivity(
-            sm,
-            ["port_1"],
-            ["metal_A", "metal_B"];
-            dim=3
-        )
+        result = check_port_connectivity(sm, ["port_1"], ["metal_A", "metal_B"]; dim=3)
         @test result == Dict("port_1" => :open)
     end
 
@@ -88,12 +83,8 @@
 
         # Unioning L1+via+L2 as metal: port touches both L1 and L2, which are joined
         # into one component through the via, so this is :short.
-        result = check_port_connectivity(
-            sm,
-            ["port_1"],
-            ["metal_L1", "via", "metal_L2"];
-            dim=3
-        )
+        result =
+            check_port_connectivity(sm, ["port_1"], ["metal_L1", "via", "metal_L2"]; dim=3)
         @test result == Dict("port_1" => :short)
 
         # Asking only about metal_L1: only one boundary face touches metal → :floating.
