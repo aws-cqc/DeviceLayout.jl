@@ -19,24 +19,24 @@ end
 
 sm = SolidModel("demo"; overwrite=true)
 SolidModels.gmsh.option.set_number("General.Verbosity", 2)
-@time render!(sm, schematic, target)
+render!(sm, schematic, target) # ~30 min
 
 DeviceLayout.save("qpu17.xao", sm)
-# Verify port connectivity
+# Verify port connectivity (~2 min)
 conn = SolidModels.check_port_connectivity(sm, ["port_$i" for i=1:42], ["metal"]; dim=2)
 for i = 1:42
     port = "port_$i"
     component_node =  schematic.index_dict[:port][i]
     role = split(component_node.component.name, "_")[2]
-    @show conn[port]
     if role == "XY" || role == "RO"
-        @assert conn[port] == :open
+        @assert conn[port] == :open "$role port $i is $(conn[port]); should be :open"
     elseif role == "Z"
-        @assert conn[port] == :short
+        @assert conn[port] == :short "$role port $i is $(conn[port]); should be :short"
     else
         error("Invalid port role")
     end
 end
+println("All flux ports are `:short`, and all charge and readout ports are `:open`")
 
 SolidModels.mesh_order(1)
 SolidModels.gmsh.model.mesh.generate(3)
@@ -123,22 +123,3 @@ using JSON
 open(joinpath(@__DIR__, "config.json"), "w") do f
     return JSON.print(f, config)
 end
-
-sm = SolidModel("test2", overwrite=true)
-gmsh.model.occ.addRectangle(-10, -10, 0, 20, 20)
-gmsh.model.occ.addRectangle(0, 0, 1, 1, 1)
-gmsh.model.occ.addPoint(0, 0, 0)
-gmsh.model.occ.addPoint(0, 1, 0)
-gmsh.model.occ.addPoint(1, 1, 0)
-gmsh.model.occ.addPoint(1, 0, 0)
-l1 = gmsh.model.occ.addLine(9, 10)
-l2 = gmsh.model.occ.addLine(11, 12)
-gmsh.model.occ.fragment([(1, l1), (1, l2)], [(2, 1)])
-gmsh.model.occ.synchronize()
-gmsh.model.getAdjacencies(2,1) # Just the four outer edges
-ext = gmsh.model.occ.extrude([(1, 9), (1, 10)], 0.0, 0.0, 1.0)
-gmsh.model.occ.fragment(ext, [(2, 1)])
-gmsh.model.occ.synchronize()
-gmsh.model.getAdjacencies(2,1) # Still just the four outer edges
-
-(Int32[], Int32[17, 19, 20, 18])

@@ -1109,7 +1109,7 @@ function connected_components(
             for (j, ftag) in enumerate(tags)
                 j == owner_idx && continue
                 find(j) == find(owner_idx) && continue
-                _bbox_overlaps(get_bbox(dim, ftag), ebbox; pad=geometric_tol) || continue
+                _bbox_contains(get_bbox(dim, ftag), ebbox; pad=geometric_tol) || continue
                 _curve_lies_on_face(btag, ftag; tol=geometric_tol) || continue
                 unite(owner_idx, j)
             end
@@ -1130,29 +1130,33 @@ function connected_components(
     return collect(values(components))
 end
 
-# Axis-aligned bbox overlap test. `bbox` is gmsh's (xmin, ymin, zmin, xmax, ymax, zmax).
-function _bbox_overlaps(a, b; pad::Real=0.0)
-    return (a[1] - pad <= b[4]) && (b[1] - pad <= a[4]) &&
-           (a[2] - pad <= b[5]) && (b[2] - pad <= a[5]) &&
-           (a[3] - pad <= b[6]) && (b[3] - pad <= a[6])
+# Axis-aligned bbox containment test (a contains b). `bbox` is gmsh's (xmin, ymin, zmin, xmax, ymax, zmax).
+function _bbox_contains(a, b; pad::Real=0.0)
+    return (a[1] - pad <= b[1]) && (b[4] - pad <= a[4]) &&
+           (a[2] - pad <= b[2]) && (b[5] - pad <= a[5]) &&
+           (a[3] - pad <= b[3]) && (b[6] - pad <= a[6])
 end
 
 # Sample a 1D entity (curve) at `n_samples` parametric points and test whether each
-# sample lies on the 2D entity (face) within `tol`. Uses `gmsh.model.getClosestPoint`
-# which returns the point on the face nearest to the query — exactly zero distance
-# means the sample is geometrically embedded in the face.
-function _curve_lies_on_face(curve_tag::Integer, face_tag::Integer; tol, n_samples::Int=5)
+# sample lies on the 2D entity (face) within `tol`. Two filters: (1) `getClosestPoint`
+# distance ≤ tol confirms the sample is on the face's underlying surface (an infinite
+# plane for a planar face — does NOT respect trim curves / holes); (2) batched
+# `isInside` in parametric uv-space confirms the sample is on the *trimmed* portion
+# of the face. The parametric form of `isInside` skips an internal world→parametric
+# reprojection, which is the slow part on large CPW-style faces.
+function _curve_lies_on_face(curve_tag::Integer, face_tag::Integer; tol, n_samples::Int=2)
     tmin, tmax = gmsh.model.getParametrizationBounds(1, curve_tag)
     isempty(tmin) && return false
     params = collect(range(Float64(tmin[1]), Float64(tmax[1]); length=n_samples))
     xyz = gmsh.model.getValue(1, curve_tag, params) # flat [x1,y1,z1,x2,y2,z2,...]
     tol2 = Float64(tol)^2
     for k = 1:n_samples
-        px, py, pz = xyz[3k - 2], xyz[3k - 1], xyz[3k]
-        closest, _ = gmsh.model.getClosestPoint(2, face_tag, [px, py, pz])
+        p = @view xyz[3k - 2:3k]
+        closest, uv = gmsh.model.getClosestPoint(2, face_tag, p)
         d2 =
-            (closest[1] - px)^2 + (closest[2] - py)^2 + (closest[3] - pz)^2
+            (closest[1] - p[1])^2 + (closest[2] - p[2])^2 + (closest[3] - p[3])^2
         d2 > tol2 && return false
+        gmsh.model.isInside(2, face_tag, uv, true) > 0 || return false
     end
     return true
 end
