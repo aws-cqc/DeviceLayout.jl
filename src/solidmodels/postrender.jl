@@ -1011,24 +1011,26 @@ function remove_group!(group::PhysicalGroup; recursive=true, remove_entities=tru
 end
 
 """
-    connected_components(dim::Int, tags::Vector{Int32})
-    connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2)
-    connected_components(sm::SolidModel, groups, dim=2)
+    connected_components(dim::Int, tags::Vector{Int32}; geometric_tol=1e-6)
+    connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; geometric_tol=1e-6)
+    connected_components(sm::SolidModel, groups, dim=2; geometric_tol=1e-6)
 
 Find connected components among SolidModel entities at dimension `dim` with the given `tags` or physical group names.
 
 Two entities are connected if they share any boundary entity (dimension `dim - 1`).
 Uses union-find with path compression on the adjacency graph from `gmsh.model.getAdjacencies`.
 
+For `dim == 2`, also unites entities that share a "stray" 1D entity that lies in the
+interior of a 2D entity without being one of its topological boundary curves. This is
+necessary because OpenCascade's global fragment leaves curves that are coincident with
+a face's interior geometrically embedded but topologically detached, so `getAdjacencies`
+does not see the connection (a typical case is the foot edge of a staple air-bridge leg
+landing on a ground plane). A 1D entity is considered to lie on a 2D entity's interior
+if `getClosestPoint` returns a distance ≤ `geometric_tol` (in `STP_UNIT`) for every
+sampled parametric point on the curve. Set `geometric_tol = 0` to disable.
+
 Returns a `Vector{Vector{Tuple{Int32, Int32}}}` where each inner vector contains the entity dimtags
 of one connected component.
-
-# Algorithm
-
- 1. Query downward adjacencies (boundary entities) for each tag via getAdjacencies
- 2. Build a mapping from boundary tags to parent entity indices
- 3. Use union-find to merge entities sharing boundaries
- 4. Collect and return connected component groups
 
 # Notes
 
@@ -1037,15 +1039,19 @@ of one connected component.
   - For dim=3 (volumes): shares boundary surfaces (dim=2)
   - For dim=2 (surfaces): shares boundary curves (dim=1)
 """
-function connected_components(sm::SolidModel, groups, dim=2)
+function connected_components(sm::SolidModel, groups, dim=2; kwargs...)
     tags = reduce(vcat, [entitytags(sm[name, dim]) for name in groups], init=Int32[])
     unique!(tags)
-    return connected_components(dim, tags)
+    return connected_components(dim, tags; kwargs...)
 end
-connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2) =
-    connected_components(dim, entitytags(sm[group, dim]))
+connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; kwargs...) =
+    connected_components(dim, entitytags(sm[group, dim]); kwargs...)
 
-function connected_components(dim::Integer, tags::Vector{Int32})
+function connected_components(
+    dim::Integer,
+    tags::Vector{Int32};
+    geometric_tol::Real=1e-6
+)
     n = length(tags)
     isempty(tags) && return Vector{Tuple{Int32, Int32}}[]
     n == 1 && return [[(Int32(dim), only(tags))]]
@@ -1085,6 +1091,31 @@ function connected_components(dim::Integer, tags::Vector{Int32})
         end
     end
 
+    # Geometric augmentation: connect entities through stray (dim-1) entities that lie
+    # on the interior of another entity's geometry without being its topological boundary.
+    # Only the dim=2 / dim-1=1 case (curve in face) is handled — this catches the
+    # staple-bridge foot landing on an interior of a metal plane. For dim=3, "face inside
+    # volume interior" is not a typical Palace configuration so we skip it.
+    if dim == 2 && geometric_tol > 0
+        tag_to_idx = Dict(t => i for (i, t) in enumerate(tags))
+        bbox_cache = Dict{Int32, NTuple{6, Float64}}()
+        get_bbox(d, t) = get!(bbox_cache, t) do
+            return gmsh.model.getBoundingBox(d, t)
+        end
+        for (btag, ps) in boundary_to_parents
+            length(ps) == 1 || continue
+            owner_idx = ps[1]
+            ebbox = gmsh.model.getBoundingBox(dim - 1, btag)
+            for (j, ftag) in enumerate(tags)
+                j == owner_idx && continue
+                find(j) == find(owner_idx) && continue
+                _bbox_overlaps(get_bbox(dim, ftag), ebbox; pad=geometric_tol) || continue
+                _curve_lies_on_face(btag, ftag; tol=geometric_tol) || continue
+                unite(owner_idx, j)
+            end
+        end
+    end
+
     # Collect components
     components = Dict{Int, Vector{Tuple{Int32, Int32}}}()
     for (i, tag) in enumerate(tags)
@@ -1097,6 +1128,33 @@ function connected_components(dim::Integer, tags::Vector{Int32})
     end
 
     return collect(values(components))
+end
+
+# Axis-aligned bbox overlap test. `bbox` is gmsh's (xmin, ymin, zmin, xmax, ymax, zmax).
+function _bbox_overlaps(a, b; pad::Real=0.0)
+    return (a[1] - pad <= b[4]) && (b[1] - pad <= a[4]) &&
+           (a[2] - pad <= b[5]) && (b[2] - pad <= a[5]) &&
+           (a[3] - pad <= b[6]) && (b[3] - pad <= a[6])
+end
+
+# Sample a 1D entity (curve) at `n_samples` parametric points and test whether each
+# sample lies on the 2D entity (face) within `tol`. Uses `gmsh.model.getClosestPoint`
+# which returns the point on the face nearest to the query — exactly zero distance
+# means the sample is geometrically embedded in the face.
+function _curve_lies_on_face(curve_tag::Integer, face_tag::Integer; tol, n_samples::Int=5)
+    tmin, tmax = gmsh.model.getParametrizationBounds(1, curve_tag)
+    isempty(tmin) && return false
+    params = collect(range(Float64(tmin[1]), Float64(tmax[1]); length=n_samples))
+    xyz = gmsh.model.getValue(1, curve_tag, params) # flat [x1,y1,z1,x2,y2,z2,...]
+    tol2 = Float64(tol)^2
+    for k = 1:n_samples
+        px, py, pz = xyz[3k - 2], xyz[3k - 1], xyz[3k]
+        closest, _ = gmsh.model.getClosestPoint(2, face_tag, [px, py, pz])
+        d2 =
+            (closest[1] - px)^2 + (closest[2] - py)^2 + (closest[3] - pz)^2
+        d2 > tol2 && return false
+    end
+    return true
 end
 
 """

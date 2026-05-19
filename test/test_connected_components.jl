@@ -40,6 +40,40 @@
         @test sizes == [1, 1]
     end
 
+    @testset "stray edge embedded in face interior connects two faces" begin
+        # Two coplanar surfaces that share no topological boundary in gmsh's adjacency
+        # graph, but are bridged geometrically by 1D edges lying in the interior of
+        # one and on the boundary of the other. Mirrors the staple-airbridge foot
+        # edges landing on a ground plane: OCC's global fragment leaves these curves
+        # geometrically embedded but topologically detached, so getAdjacencies returns
+        # only the ground plane's outer rectangle. Geometry matches the minimal
+        # reproduction observed empirically — the second loose-rectangle is irrelevant
+        # but kept to match the exact tag layout the reproduction relies on.
+        fresh_model("stray_edge")
+        gmsh.model.occ.addRectangle(-10, -10, 0, 20, 20)
+        gmsh.model.occ.addRectangle(0, 0, 1, 1, 1)
+        gmsh.model.occ.addPoint(0, 0, 0)
+        gmsh.model.occ.addPoint(0, 1, 0)
+        gmsh.model.occ.addPoint(1, 1, 0)
+        gmsh.model.occ.addPoint(1, 0, 0)
+        l1 = gmsh.model.occ.addLine(9, 10)
+        l2 = gmsh.model.occ.addLine(11, 12)
+        ext = gmsh.model.occ.extrude([(1, 9), (1, 10)], 0.0, 0.0, 1.0)
+        gmsh.model.occ.fragment([(1, l1), (1, l2)], [(2, 1), (2, 2), (2, 3), (2, 4)])
+        gmsh.model.occ.synchronize()
+        leg_faces = Int32[dt[2] for dt in ext if dt[1] == 2]
+        tags = Int32[1; 2; leg_faces]
+
+        # Topology only: ground plane (tag 1) is disconnected from each leg face.
+        result_topo = connected_components(2, tags; geometric_tol=0.0)
+        @test length(result_topo) == 2
+
+        # Geometric augmentation: the foot edges lie in the ground plane's interior
+        # and are boundary edges of the leg faces → all united into 1 component.
+        result_geom = connected_components(2, tags; geometric_tol=1e-6)
+        @test length(result_geom) == 1
+    end
+
     @testset "shared-boundary volumes via fragment" begin
         fresh_model("shared")
         # Two overlapping boxes — fragment will create shared boundary surfaces

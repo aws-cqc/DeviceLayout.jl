@@ -31,7 +31,7 @@
         name_group!(sm, "metal_B", 3, [2])
         name_group!(sm, "port_1", 3, [3])
 
-        result = DeviceLayout.check_port_connectivity(
+        result = check_port_connectivity(
             sm,
             ["port_1"],
             ["metal_A", "metal_B"];
@@ -53,7 +53,7 @@
         name_group!(sm, "metal_A", 2, [1, 2, 3])
         name_group!(sm, "port_1", 2, [4])
 
-        result = DeviceLayout.check_port_connectivity(sm, ["port_1"], ["metal_A"]; dim=2)
+        result = check_port_connectivity(sm, ["port_1"], ["metal_A"]; dim=2)
         @test result == Dict("port_1" => :short)
     end
 
@@ -65,7 +65,7 @@
         name_group!(sm, "metal_A", 3, [1])
         name_group!(sm, "port_1", 3, [2])
 
-        result = DeviceLayout.check_port_connectivity(sm, ["port_1"], ["metal_A"]; dim=3)
+        result = check_port_connectivity(sm, ["port_1"], ["metal_A"]; dim=3)
         @test result == Dict("port_1" => :floating)
     end
 
@@ -88,7 +88,7 @@
 
         # Unioning L1+via+L2 as metal: port touches both L1 and L2, which are joined
         # into one component through the via, so this is :short.
-        result = DeviceLayout.check_port_connectivity(
+        result = check_port_connectivity(
             sm,
             ["port_1"],
             ["metal_L1", "via", "metal_L2"];
@@ -97,7 +97,7 @@
         @test result == Dict("port_1" => :short)
 
         # Asking only about metal_L1: only one boundary face touches metal → :floating.
-        result2 = DeviceLayout.check_port_connectivity(sm, ["port_1"], ["metal_L1"]; dim=3)
+        result2 = check_port_connectivity(sm, ["port_1"], ["metal_L1"]; dim=3)
         @test result2 == Dict("port_1" => :floating)
     end
 
@@ -127,7 +127,7 @@
         name_group!(sm, "port_short", 3, [6])
         name_group!(sm, "port_floating", 3, [7])
 
-        result = DeviceLayout.check_port_connectivity(
+        result = check_port_connectivity(
             sm,
             ["port_open", "port_short", "port_floating"],
             ["metal_A", "metal_B"];
@@ -153,7 +153,7 @@
         name_group!(sm, "p1", 3, [4])
 
         # Pass Symbols for port_names and metal_groups
-        result = DeviceLayout.check_port_connectivity(sm, [:p1], [:metal]; dim=3)
+        result = check_port_connectivity(sm, [:p1], [:metal]; dim=3)
         # Keys always returned as String
         @test haskey(result, "p1")
         @test result["p1"] === :short
@@ -166,7 +166,7 @@
         name_group!(sm, "metal", 3, [1])
         # "port_absent" was never registered
 
-        result = DeviceLayout.check_port_connectivity(sm, ["port_absent"], ["metal"]; dim=3)
+        result = check_port_connectivity(sm, ["port_absent"], ["metal"]; dim=3)
         @test result == Dict("port_absent" => :missing)
     end
 end

@@ -123,3 +123,22 @@ using JSON
 open(joinpath(@__DIR__, "config.json"), "w") do f
     return JSON.print(f, config)
 end
+
+sm = SolidModel("test2", overwrite=true)
+gmsh.model.occ.addRectangle(-10, -10, 0, 20, 20)
+gmsh.model.occ.addRectangle(0, 0, 1, 1, 1)
+gmsh.model.occ.addPoint(0, 0, 0)
+gmsh.model.occ.addPoint(0, 1, 0)
+gmsh.model.occ.addPoint(1, 1, 0)
+gmsh.model.occ.addPoint(1, 0, 0)
+l1 = gmsh.model.occ.addLine(9, 10)
+l2 = gmsh.model.occ.addLine(11, 12)
+gmsh.model.occ.fragment([(1, l1), (1, l2)], [(2, 1)])
+gmsh.model.occ.synchronize()
+gmsh.model.getAdjacencies(2,1) # Just the four outer edges
+ext = gmsh.model.occ.extrude([(1, 9), (1, 10)], 0.0, 0.0, 1.0)
+gmsh.model.occ.fragment(ext, [(2, 1)])
+gmsh.model.occ.synchronize()
+gmsh.model.getAdjacencies(2,1) # Still just the four outer edges
+
+(Int32[], Int32[17, 19, 20, 18])
