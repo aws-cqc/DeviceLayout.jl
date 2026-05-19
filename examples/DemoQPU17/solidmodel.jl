@@ -19,11 +19,11 @@ end
 
 sm = SolidModel("demo"; overwrite=true)
 SolidModels.gmsh.option.set_number("General.Verbosity", 2)
-render!(sm, schematic, target) # ~30 min
+@time render!(sm, schematic, target) # ~30 min
 
 DeviceLayout.save("qpu17.xao", sm)
 # Verify port connectivity (~2 min)
-conn = SolidModels.check_port_connectivity(sm, ["port_$i" for i=1:42], ["metal"]; dim=2)
+@time conn = SolidModels.check_port_connectivity(sm, ["port_$i" for i=1:42], ["metal"]; dim=2)
 for i = 1:42
     port = "port_$i"
     component_node =  schematic.index_dict[:port][i]
@@ -39,10 +39,10 @@ end
 println("All flux ports are `:short`, and all charge and readout ports are `:open`")
 
 SolidModels.mesh_order(1)
-SolidModels.gmsh.model.mesh.generate(3)
-# Make verbose and optimize if only to show element quality / warnings
 SolidModels.gmsh.option.set_number("General.Verbosity", 5)
-SolidModels.gmsh.model.mesh.optimize()
+@time SolidModels.gmsh.model.mesh.generate(1)
+@time SolidModels.gmsh.model.mesh.generate(2)
+@time SolidModels.gmsh.model.mesh.generate(3)
 meshfile = joinpath(@__DIR__, "qpu17_order$mesh_order.msh2")
 save(meshfile, sm)
 
