@@ -41,6 +41,12 @@
     c_atol_nothing = Cell("atol_nothing", nm)
     render!(c_atol_nothing, pa, GDSMeta(0); atol=1nm, rtol=nothing)
     @test c_atol.elements[1].p == c_atol_nothing.elements[1].p
+
+    # Also works for Ellipse
+    circ = Circle(1e3)
+    circpoly_atol = to_polygons(circ)
+    circpoly_rtol = to_polygons(circ; rtol=1e-4)
+    @test round(length(points(circpoly_atol)) / length(points(circpoly_rtol))) == 10
 end
 
 @testitem "rtol_preserves_tight_curve_accuracy" setup = [CommonTestSetup] begin
