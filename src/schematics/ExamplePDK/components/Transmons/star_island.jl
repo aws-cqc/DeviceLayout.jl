@@ -53,7 +53,6 @@ function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, isl::ExampleStar
         coupler_style,
         rounding
     ) = isl
-    ground_radius = island_outer_radius + island_ground_gap
     θ_outer = range(π / 2, step=2π / 5, length=5)
     θ_inner = θ_outer .+ π / 5
     ## Draw the inner star
@@ -88,6 +87,33 @@ function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, isl::ExampleStar
     end
 
     ## Draw the outer "circle"
+    outer, interface_pts = _outer_cutout(isl)
+
+    ## Draw the coupler lead rectangles
+    lead = Rectangle(coupler_style.trace, island_ground_gap + 5μm)
+    lead = Align.flushbottom(lead, outer, centered=true)
+    append!(positive_polys, [Rotation(θ - π / 2)(lead) for θ in θ_outer])
+
+    cutout = difference2d(outer, positive_polys)
+    roundsty = StyleDict() # Different styles for inner and outer contours
+    roundsty[1] = Rounded(
+        rounding; # Outer contour: Round coupler pads and outer circumference
+        p0=interface_pts, # Don't round these points so coupler interface is flat
+        inverse_selection=true
+    )
+    roundsty[1, 1] = Rounded(rounding) # Inner contour: round everything
+
+    rounded_cutout = roundsty(cutout)
+
+    return place!(cs, MeshSized(rounded_cutout, critical_dimension(isl)), METAL_NEGATIVE)
+end
+
+function _outer_cutout(isl::ExampleStarIsland)
+    (; island_outer_radius, island_ground_gap, star_tip_width, coupler_style) = isl
+    θ_outer = range(π / 2, step=2π / 5, length=5)
+    dθ_tip = asin(star_tip_width / (2 * island_outer_radius))
+
+    ground_radius = island_outer_radius + island_ground_gap
     dθ_coupler_trace = asin((coupler_style.trace / 2) / ground_radius)
     dθ_coupler_extent = asin((coupler_style.trace / 2 + coupler_style.gap) / ground_radius)
     pts_facing_star_tip = [ # Use points at fixed x so island-ground distance is exact
@@ -110,23 +136,7 @@ function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, isl::ExampleStar
     outer = Polygon(outer_pts)
     interface_pts = vcat([Rotation(θ).(pts_coupler_interface) for θ in θ_outer]...)
 
-    ## Draw the coupler lead rectangles
-    lead = Rectangle(coupler_style.trace, island_ground_gap + 5μm)
-    lead = Align.flushbottom(lead, outer, centered=true)
-    append!(positive_polys, [Rotation(θ - π / 2)(lead) for θ in θ_outer])
-
-    cutout = difference2d(outer, positive_polys)
-    roundsty = StyleDict() # Different styles for inner and outer contours
-    roundsty[1] = Rounded(
-        rounding; # Outer contour: Round coupler pads and outer circumference
-        p0=interface_pts, # Don't round these points so coupler interface is flat
-        inverse_selection=true
-    )
-    roundsty[1, 1] = Rounded(rounding) # Inner contour: round everything
-
-    rounded_cutout = roundsty(cutout)
-
-    return place!(cs, MeshSized(rounded_cutout, critical_dimension(isl)), METAL_NEGATIVE)
+    return outer, interface_pts
 end
 
 function critical_dimension(isl::ExampleStarIsland)
@@ -157,5 +167,6 @@ DeviceLayout.halo(isl::ExampleStarIsland, d, d_i=nothing; kw...) =
     SchematicDrivenLayout.footprint_halo(isl, d, d_i; kw...)
 
 function DeviceLayout.footprint(isl::ExampleStarIsland)
-    return Circle(isl.island_outer_radius + isl.island_ground_gap)
+    outer, _ = _outer_cutout(isl) # Outer contour pre-rounding
+    return outer
 end

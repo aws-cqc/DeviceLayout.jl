@@ -244,6 +244,25 @@ function map_metadata(geom::GeometryStructure, map_meta)
 end
 
 """
+    has_valid_footprint(geom::GeometryStructure{T}; atol=DeviceLayout.onenanometer(T)) where {T}
+
+Return `true` if `footprint(geom)` is a `GeometryEntity` covering all entities in `geom`, and `false` otherwise.
+
+Offsets footprint by `atol`, then subtracts it from `elements(flatten(geom))` with `difference2d`.
+The result is empty for a valid footprint.
+
+Intended for validating custom footprints for `GeometryStructure` subtypes.
+"""
+function has_valid_footprint(
+    geom::GeometryStructure{T};
+    atol=DeviceLayout.onenanometer(T)
+) where {T}
+    fp = footprint(geom)
+    return fp isa GeometryEntity &&
+           isempty(to_polygons(difference2d(elements(flatten(geom)), offset(fp, atol))))
+end
+
+"""
     flatten(c::GeometryStructure; depth::Integer=-1, name=uniquename("flatten_"*name(c)), metadata_filter=nothing)
 
 Return a new coordinate system with name `name` with recursively flattened references and arrays up to a hierarchical `depth`.

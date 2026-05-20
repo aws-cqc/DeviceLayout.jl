@@ -922,6 +922,7 @@
         isl = SchematicDrivenLayout.ExamplePDK.Transmons.ExampleStarIsland()
         isl_halo = halo(isl, 10μm)
         @test !isempty(isl_halo.elements)
+        @test DeviceLayout.has_valid_footprint(isl)
     end
 
     @testset "Autofill" begin

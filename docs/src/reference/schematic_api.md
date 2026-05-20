@@ -14,6 +14,7 @@
     SchematicDrivenLayout.matching_hook
     SchematicDrivenLayout.footprint_halo
     SchematicDrivenLayout.geometry
+    DeviceLayout.has_valid_footprint
     SchematicDrivenLayout.hooks
     SchematicDrivenLayout.default_parameters
     halo(::SchematicDrivenLayout.AbstractComponent, ::Any, ::Any)
