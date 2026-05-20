@@ -14,6 +14,7 @@ The format of this changelog is based on
   - Added `SchematicGraph(name, ps)` to carry a `ParameterSet` on the graph, plumbed
     through `_build_subcomponents` via `parameter_set(graph)` and
     `create_component(T, ps, address)`
+  - Added `SchematicDrivenLayout.footprint_halo` for implementing fast custom halos with less boilerplate
   - Fixed incorrect loading of GDS array references with nonzero origin
 
 ## 1.13.0 (2026-04-28)
