@@ -231,7 +231,7 @@ The `ParameterSet` is preserved when graphs are copied — for example, inside `
 The `create_component(T, ps, address)` pattern above hardcodes the subcomponent type at each call site. A composite can instead declare its subcomponents in a `templates::NamedTuple` field — the type and any designer-chosen defaults live on the composite, and `ParameterSet` values overlay on top of the template:
 
 ```julia
-@compdef struct SimpleTransmon <: CompositeComponent
+@compdef struct SimpleTransmonTemplated <: CompositeComponent
     name = "transmon"
     junction_gap = 12μm
     templates = (
@@ -244,7 +244,7 @@ end
 Use the three-argument form of `set_parameters` inside `_build_subcomponents` to apply the `ParameterSet` at the subcomponent's address on top of the template. Trailing keyword arguments are composite-level overrides that win over the `ParameterSet`:
 
 ```julia
-function SchematicDrivenLayout._build_subcomponents(tr::SimpleTransmon)
+function SchematicDrivenLayout._build_subcomponents(tr::SimpleTransmonTemplated)
     ps = parameter_set(tr._graph)
 
     island = set_parameters(

@@ -15,6 +15,14 @@ The format of this changelog is based on
     through `_build_subcomponents` via `parameter_set(graph)` and
     `create_component(T, ps, address)`
   - Fixed incorrect loading of GDS array references with nonzero origin
+  - Added `set_parameters(c, ps, address; kwargs...)` and the scoped form
+    `set_parameters(c, sub::ParameterSet)` for the templates-aliasing pattern:
+    overlay `ParameterSet` leaves on top of a template instance, with optional
+    composite-level kwargs winning over the overlay. Unknown leaves under the
+    address surface as `ArgumentError` at composite-build time
+  - `create_component(T; kwargs...)` now rejects `MissingNamespace` and
+    `ParameterSet` kwarg values with actionable errors at the call site,
+    rather than letting them flow into the constructor
 
 ## 1.13.0 (2026-04-28)
 

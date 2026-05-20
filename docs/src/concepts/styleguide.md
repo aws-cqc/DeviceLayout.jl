@@ -195,16 +195,16 @@ end
 Example with templates and `ParameterSet` (alternative to `filter_parameters`):
 
 ```julia
+@compdef struct MySubComponent <: Component
+    width = 1mm
+    length = 2mm
+end
+
 @compdef struct MyCompositeComponent <: CompositeComponent
     templates = (;
         subcomp1=MySubComponent(; name="subcomp1"),
         subcomp2=MySubComponent(; name="subcomp2")
     )
-    length = 2mm
-end
-
-@compdef struct MySubComponent <: Component
-    width = 1mm
     length = 2mm
 end
 
@@ -222,12 +222,12 @@ function SchematicDrivenLayout._build_subcomponents(cc::MyCompositeComponent)
 end
 ```
 
-The two patterns differ in where per-subcomponent values live:
+The two patterns differ in where per-subcomponent values live and how typos are surfaced:
 
-  - `filter_parameters` keeps shared and prefixed pass-through values as fields on the composite struct, so the composite is the single source of truth for both shared and per-subcomponent overrides.
-  - Templates-aliasing externalizes per-subcomponent values to the `ParameterSet` (addressed by the subcomponent's path) and reserves the composite struct for parameters it actually needs to reconcile or override. The composite no longer carries a `subcomp1_width`-style field for every pass-through value.
+  - `filter_parameters` keeps shared and prefixed pass-through values as fields on the composite struct, so the composite is the single source of truth for both shared and per-subcomponent overrides. Typos in pass-through field names fail at the composite-construction call site.
+  - Templates-aliasing externalizes per-subcomponent values to the `ParameterSet` (addressed by the subcomponent's path) and reserves the composite struct for parameters it actually needs to reconcile or override. The composite no longer carries a `subcomp1_width`-style field for every pass-through value. Typos in `ParameterSet` leaf names — under a subcomponent's namespace — surface as an `ArgumentError` at composite-build time, naming both the unknown leaf and the valid parameters of that subcomponent type.
 
-Precedence under templates-aliasing is `template defaults < ParameterSet overlay < trailing composite kwargs`, so composite invariants (the trailing `set_parameters(subcomp1; length=cc.length)` above) always win over `ParameterSet` contents.
+Precedence under templates-aliasing is `template defaults < ParameterSet overlay < trailing composite kwargs`, so composite invariants (the trailing `length=cc.length` kwarg) always win over `ParameterSet` contents.
 
 ### Other special cases
 

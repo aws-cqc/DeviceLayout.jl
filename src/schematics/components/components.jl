@@ -214,15 +214,20 @@ scope at the level whose leaves match `c`'s parameters. Any `kwargs` are then
 applied on top of the `ParameterSet` overlay, so precedence is:
 template defaults < `ParameterSet` overlay < `kwargs`.
 
-Throws `ParameterKeyError` if `address` doesn't resolve to a namespace, or if
-a `kwarg` value is a `MissingNamespace` (failed PS lookup).
-Throws `ArgumentError` listing unknown leaves if any leaf under `address` is not
-a parameter of `typeof(c)` — surfaces typos at aliasing time rather than as a
-`MethodError` inside the constructor. Also throws `ArgumentError` if a `kwarg`
-value is itself a `ParameterSet`: a subtree is never a valid component-field
-value and almost always indicates a missing leaf access.
+Throws `ParameterKeyError` if `address` doesn't resolve to anything (no such
+namespace), or if a `kwarg` value is a `MissingNamespace` (failed PS lookup).
+Throws `ArgumentError` if `address` resolves to a leaf scalar rather than a
+namespace, if any leaf under `address` is not a parameter of `typeof(c)`
+(surfaces typos at aliasing time rather than as a `MethodError` inside the
+constructor), or if a `kwarg` value is itself a `ParameterSet` (a subtree is
+never a valid component-field value and almost always indicates a missing
+leaf access).
 
-Consumed leaves are recorded in `ps.accessed` as fully qualified paths.
+Every PS leaf under `address` is recorded in `ps.accessed` as a fully qualified
+path — including leaves whose value happens to equal the template's default and
+leaves that are subsequently shadowed by a trailing `kwarg`. The audit semantics
+is "the loader read this PS leaf during build", not "this value reached the
+final component". A trailing `kwarg` that overrides a PS leaf does not unmark it.
 
 This is the "templates-aliasing" entry point: a composite declares subcomponent
 defaults in a `templates` field, then `_build_subcomponents` overlays `ParameterSet`
@@ -243,9 +248,32 @@ end
 ```
 """
 function set_parameters(c::AbstractComponent, ps::ParameterSet, address::String; kwargs...)
+    # An empty address would hand the root `ps` to the scoped form, which
+    # rejects roots with a message telling the caller to use the address-form
+    # — confusing when they just did. Reject empty addresses up front.
+    isempty(address) && throw(
+        ArgumentError(
+            "set_parameters(c, ps, address): `address` must be non-empty. " *
+            "Pass the dot-separated path to the namespace whose leaves " *
+            "match `c`'s parameters (e.g. \"components.transmon.island\")."
+        )
+    )
     sub = resolve(ps, address)
     sub isa MissingNamespace &&
         throw(ParameterKeyError(getfield(sub, :key), _namespace_path(sub)))
+    # `resolve` returns a leaf value when the address terminates at a scalar
+    # (e.g. "components.x.junction_gap"). That's never a valid argument to the
+    # scoped form below — surface it directly with an actionable message rather
+    # than letting dispatch fall through to a generic MethodError.
+    sub isa ParameterSet || throw(
+        ArgumentError(
+            "address \"$address\" resolves to a leaf value ($(typeof(sub))), " *
+            "not a ParameterSet namespace. `set_parameters(c, ps, address)` " *
+            "expects `address` to point at the namespace whose leaves match " *
+            "`c`'s parameters; pass a leaf as a kwarg instead, e.g. " *
+            "`set_parameters(c; <param>=resolve(ps, \"$address\"))`."
+        )
+    )
     overlaid = set_parameters(c, sub)
     isempty(kwargs) && return overlaid
     return set_parameters(overlaid; kwargs...)
@@ -262,6 +290,11 @@ address-string form instead.
 
 Throws `ArgumentError` if any leaf in `sub` is not a parameter of `typeof(c)`,
 surfacing typos in the `ParameterSet` source early.
+
+Every leaf in `sub` is pushed into `ps.accessed` with its qualified path, even
+when the leaf's value happens to equal the field's existing value on `c`. The
+recorded fact is "the loader read this PS leaf", not "the value differed from
+the template default".
 """
 function set_parameters(c::AbstractComponent, sub::ParameterSet)
     prefix = getfield(sub, :prefix)
@@ -291,9 +324,12 @@ function set_parameters(c::AbstractComponent, sub::ParameterSet)
     return set_parameters(c; pairs(kw)...)
 end
 
-# Reached when `set_parameters(c, ps, address)` targets a path that does not exist
-# and the intermediate navigation yields a `MissingNamespace`. Surface the qualified
-# path in a `ParameterKeyError` rather than a generic `MethodError`.
+# Reached when a caller passes a chained-dot lookup that fizzled, e.g.
+# `set_parameters(c, ps.foo.bar)` where `foo` (or any segment after) is not a
+# namespace in `ps`. The address-form `set_parameters(c, ps, address)` already
+# guards `MissingNamespace` before delegating, so this method exists as
+# defense-in-depth for the direct-invocation path. Surface the qualified path
+# in a `ParameterKeyError` rather than a generic `MethodError`.
 function set_parameters(::AbstractComponent, sub::MissingNamespace)
     return throw(ParameterKeyError(getfield(sub, :key), _namespace_path(sub)))
 end
