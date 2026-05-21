@@ -1011,9 +1011,9 @@ function remove_group!(group::PhysicalGroup; recursive=true, remove_entities=tru
 end
 
 """
-    connected_components(dim::Int, tags::Vector{Int32}; geometric_tol=1e-6)
-    connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; geometric_tol=1e-6)
-    connected_components(sm::SolidModel, groups, dim=2; geometric_tol=1e-6)
+    connected_components(dim::Int, tags::Vector{Int32}; staple_tol=1e-6)
+    connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; staple_tol=1e-6)
+    connected_components(sm::SolidModel, groups, dim=2; staple_tol=1e-6)
 
 Find connected components among SolidModel entities at dimension `dim` with the given `tags` or physical group names.
 
@@ -1022,12 +1022,10 @@ Uses union-find with path compression on the adjacency graph from `gmsh.model.ge
 
 For `dim == 2`, also unites entities that share a "stray" 1D entity that lies in the
 interior of a 2D entity without being one of its topological boundary curves. This is
-necessary because OpenCascade's global fragment leaves curves that are coincident with
-a face's interior geometrically embedded but topologically detached, so `getAdjacencies`
-does not see the connection (a typical case is the foot edge of a staple air-bridge leg
-landing on a ground plane). A 1D entity is considered to lie on a 2D entity's interior
-if `getClosestPoint` returns a distance ≤ `geometric_tol` (in `STP_UNIT`) for every
-sampled parametric point on the curve. Set `geometric_tol = 0` to disable.
+necessary even after embedding with `fragment` because OpenCascade's `getAdjacencies`
+does not see the connection (a typical case is the foot edge of a "staple" air-bridge leg
+landing on a ground plane). Checking stray 1D entities can be relatively slow if they exist, so
+it's better to add dummy 2D entities that attach to them. Set `staple_tol=0` to disable.
 
 Returns a `Vector{Vector{Tuple{Int32, Int32}}}` where each inner vector contains the entity dimtags
 of one connected component.
@@ -1047,7 +1045,7 @@ end
 connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; kwargs...) =
     connected_components(dim, entitytags(sm[group, dim]); kwargs...)
 
-function connected_components(dim::Integer, tags::Vector{Int32}; geometric_tol::Real=1e-6)
+function connected_components(dim::Integer, tags::Vector{Int32}; staple_tol=1e-6)
     n = length(tags)
     isempty(tags) && return Vector{Tuple{Int32, Int32}}[]
     n == 1 && return [[(Int32(dim), only(tags))]]
@@ -1092,8 +1090,7 @@ function connected_components(dim::Integer, tags::Vector{Int32}; geometric_tol::
     # Only the dim=2 / dim-1=1 case (curve in face) is handled — this catches the
     # staple-bridge foot landing on an interior of a metal plane. For dim=3, "face inside
     # volume interior" is not a typical Palace configuration so we skip it.
-    if dim == 2 && geometric_tol > 0
-        tag_to_idx = Dict(t => i for (i, t) in enumerate(tags))
+    if dim == 2 && staple_tol > 0
         bbox_cache = Dict{Int32, NTuple{6, Float64}}()
         get_bbox(d, t) =
             get!(bbox_cache, t) do
@@ -1106,8 +1103,8 @@ function connected_components(dim::Integer, tags::Vector{Int32}; geometric_tol::
             for (j, ftag) in enumerate(tags)
                 j == owner_idx && continue
                 find(j) == find(owner_idx) && continue
-                _bbox_contains(get_bbox(dim, ftag), ebbox; pad=geometric_tol) || continue
-                _curve_lies_on_face(btag, ftag; tol=geometric_tol) || continue
+                _bbox_contains(get_bbox(dim, ftag), ebbox; pad=staple_tol) || continue
+                _curve_lies_on_face(btag, ftag; tol=staple_tol) || continue
                 unite(owner_idx, j)
             end
         end

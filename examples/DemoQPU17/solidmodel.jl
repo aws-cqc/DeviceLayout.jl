@@ -5,6 +5,8 @@ schematic, artwork = DemoQPU17.qpu17_demo(savegds=true)
 using DeviceLayout,
     .SchematicDrivenLayout, .PreferredUnits, .SchematicDrivenLayout.ExamplePDK
 using .ExamplePDK.LayerVocabulary
+using FileIO
+
 place!(schematic.coordinate_system, bounds(schematic.coordinate_system), SIMULATED_AREA)
 target = ExamplePDK.SINGLECHIP_SOLIDMODEL_TARGET
 if length(target.rendering_options.retained_physical_groups) < 10
@@ -38,8 +40,9 @@ for i = 1:42
 end
 println("All flux ports are `:short`, and all charge and readout ports are `:open`")
 
-SolidModels.mesh_order(1)
-SolidModels.gmsh.option.set_number("General.Verbosity", 5)
+mesh_order = 1
+SolidModels.mesh_order(mesh_order)
+SolidModels.gmsh.option.set_number("General.Verbosity", 3)
 @time SolidModels.gmsh.model.mesh.generate(1)
 @time SolidModels.gmsh.model.mesh.generate(2)
 @time SolidModels.gmsh.model.mesh.generate(3)
