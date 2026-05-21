@@ -102,3 +102,12 @@ function pin(s::CompoundStyle; start=nothing, stop=nothing, tag=gensym())
     end
     return copy(s, tag)
 end
+
+function reverse(s::CompoundStyle{T}, l) where {T}
+    lengths = diff(s.grid)
+    return CompoundStyle{T}(
+        reverse(reverse.(s.styles, lengths)),
+        [zero(T); cumsum(reverse(lengths))],
+        s.tag
+    )
+end

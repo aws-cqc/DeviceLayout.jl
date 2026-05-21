@@ -21,6 +21,7 @@ width(s::TaperTrace, t) =
 width(s::TaperTrace) = t -> width(s, t)
 trace(s::TaperTrace, t) = width(s, t)
 trace(s::TaperTrace) = width(s)
+reverse(s::TaperTrace{T}, l) where {T} = TaperTrace{T}(s.width_end, s.width_start, s.length)
 
 function pin(s::TaperTrace{T}; start=nothing, stop=nothing) where {T}
     iszero(s.length) && error("cannot `pin`; length of $s not yet determined.")
@@ -126,6 +127,9 @@ function pin(sty::TaperCPW{T}; start=nothing, stop=nothing) where {T}
     )
 end
 
+reverse(s::TaperCPW{T}, l) where {T} =
+    TaperCPW{T}(s.trace_end, s.gap_end, s.trace_start, s.gap_start, s.length)
+
 nextstyle(sty::TaperCPW) = CPW(sty.trace_end, sty.gap_end)
 
 summary(s::TaperTrace) = string(
@@ -153,6 +157,7 @@ between an initial `CPW` or `Trace` and an end `CPW` or `Trace` of different dim
 """
 struct Taper <: ContinuousStyle{false} end
 copy(::Taper) = Taper()
+reverse(s::Taper, l) = s
 
 summary(::Taper) = string("Generic linear taper between neighboring segments in a path")
 

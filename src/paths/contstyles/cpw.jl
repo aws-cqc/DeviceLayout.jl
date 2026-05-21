@@ -21,6 +21,7 @@ trace(s::GeneralCPW) = s.trace
 gap(s::GeneralCPW, t) = s.gap(t)
 gap(s::GeneralCPW) = s.gap
 translate(s::GeneralCPW, t) = GeneralCPW(x -> s.trace(x + t), x -> s.gap(x + t))
+reverse(s::GeneralCPW, l) = GeneralCPW(t -> trace(s, l - t), t -> gap(s, l - t))
 
 """
     struct SimpleCPW{T <: Coordinate} <: CPW{false}
@@ -44,6 +45,7 @@ extent(s::SimpleCPW, t...) = s.trace / 2 + s.gap
 trace(s::SimpleCPW, t...) = s.trace
 gap(s::SimpleCPW, t...) = s.gap
 translate(s::SimpleCPW, t) = copy(s)
+reverse(s::SimpleCPW, l) = s
 
 """
     CPW(trace::Coordinate, gap::Coordinate)

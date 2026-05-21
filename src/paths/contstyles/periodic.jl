@@ -195,3 +195,11 @@ undecorated(sty::PeriodicStyle) =
 function translate(sty::PeriodicStyle, x)
     return PeriodicStyle(sty.styles, sty.lengths, sty.l0 + x)
 end
+
+function reverse(s::PeriodicStyle{T}, l) where {T}
+    return PeriodicStyle{T}(
+        reverse(reverse.(s.styles, s.lengths)),
+        reverse(s.lengths),
+        sum(s.lengths) - ((s.l0 + l) % sum(s.lengths))
+    )
+end

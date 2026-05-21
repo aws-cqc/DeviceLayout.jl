@@ -44,4 +44,5 @@ end
 Create a style `s′` such that all properties `f(s′, x) == f(s, l - x)`. Basically, reverse
 the style assuming it is applied to a segment of pathlength `l`.
 """
-reverse(s::Style, l) = s
+function reverse end
+# Reversing a GeneralTrace/CPW requires knowing its length, so we require that as an argument even if unused
