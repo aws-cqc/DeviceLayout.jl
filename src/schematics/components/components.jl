@@ -47,6 +47,25 @@ function create_component(
     base_parameters::NamedTuple=default_parameters(T);
     kwargs...
 ) where {T <: AbstractComponent}
+    # Surface ParameterSet-shaped values at the call site rather than silently
+    # storing them in the component and erroring later.
+    for (k, v) in kwargs
+        # Failed PS lookup (typo or stale address) — surface the qualified path.
+        v isa MissingNamespace &&
+            throw(ParameterKeyError(getfield(v, :key), _namespace_path(v)))
+        # A ParameterSet (root or scoped view) is never a valid component-field
+        # value; the user almost certainly forgot a leaf access. Templates-aliasing
+        # is the right entry point for overlaying a ParameterSet subtree.
+        v isa ParameterSet && throw(
+            ArgumentError(
+                "kwarg `$k` received a `ParameterSet`. Did you forget a leaf " *
+                "access (e.g. `ps.components.x.length` instead of `ps.components.x`)? " *
+                "To overlay an entire ParameterSet subtree onto a template, use " *
+                "`set_parameters(c, ps, address)` rather than passing the subtree " *
+                "as a kwarg."
+            )
+        )
+    end
     p = merge_recursive(base_parameters, (; name=name, pairs(kwargs)...))
     return (T)(; p...)
 end
@@ -184,28 +203,135 @@ function set_parameters(
 end
 
 """
-    set_parameters(c::AbstractComponent, pairs::Pair{<:Any, Symbol}...; kwargs...)
+    set_parameters(c::AbstractComponent, ps::ParameterSet, address::String; kwargs...)
 
-Create an instance of type `typeof(c)` with selected parameters overridden using
-reversed `value => :name` pairs. Each pair's first element is the value to assign
-and its second element is the parameter name (a `Symbol`) on the component.
-This ordering makes it natural to forward a value from one source into a parameter
-with a different name, e.g. to route `ParameterSet` entries into subcomponent fields.
+Apply `ParameterSet` leaves at `address` on top of the template instance `c`,
+optionally followed by composite-level keyword overrides.
+
+Starting from `c`'s parameters as the base, each leaf under `resolve(ps, address)`
+overrides the corresponding field. Nested namespaces below `address` are ignored —
+scope at the level whose leaves match `c`'s parameters. Any `kwargs` are then
+applied on top of the `ParameterSet` overlay, so precedence is:
+template defaults < `ParameterSet` overlay < `kwargs`.
+
+Throws `ParameterKeyError` if `address` doesn't resolve to anything (no such
+namespace), or if a `kwarg` value is a `MissingNamespace` (failed PS lookup).
+Throws `ArgumentError` if `address` resolves to a leaf scalar rather than a
+namespace, if any leaf under `address` is not a parameter of `typeof(c)`
+(surfaces typos at aliasing time rather than as a `MethodError` inside the
+constructor), or if a `kwarg` value is itself a `ParameterSet` (a subtree is
+never a valid component-field value and almost always indicates a missing
+leaf access).
+
+Every PS leaf under `address` is recorded in `ps.accessed` as a fully qualified
+path — including leaves whose value happens to equal the template's default and
+leaves that are subsequently shadowed by a trailing `kwarg`. The audit semantics
+is "the loader read this PS leaf during build", not "this value reached the
+final component". A trailing `kwarg` that overrides a PS leaf does not unmark it.
+
+This is the "templates-aliasing" entry point: a composite declares subcomponent
+defaults in a `templates` field, then `_build_subcomponents` overlays `ParameterSet`
+values on top of each template via this overload, optionally with trailing
+composite-level kwargs to enforce composite invariants.
 
 ```julia
-island = set_parameters(island, ps.components.transmon.junction_gap => :junction_gap)
+function _build_subcomponents(tr::MyTransmon)
+    ps = parameter_set(tr._graph)
+    island = set_parameters(
+        tr.templates.island,
+        ps,
+        "components.\$(name(tr)).island";
+        junction_gap=tr.junction_gap
+    )
+    return (island,)
+end
 ```
-
-Additional `kwargs` are forwarded to the main `set_parameters` method.
 """
-function set_parameters(c::AbstractComponent, pairs::Pair{<:Any, Symbol}...; kwargs...)
-    # Surface missing ParameterSet lookups at the call site rather than silently
-    # storing a MissingNamespace in the component and erroring later.
-    for p in pairs
-        p.first isa MissingNamespace &&
-            throw(ParameterKeyError(getfield(p.first, :key), _namespace_path(p.first)))
+function set_parameters(c::AbstractComponent, ps::ParameterSet, address::String; kwargs...)
+    # An empty address would hand the root `ps` to the scoped form, which
+    # rejects roots with a message telling the caller to use the address-form
+    # — confusing when they just did. Reject empty addresses up front.
+    isempty(address) && throw(
+        ArgumentError(
+            "set_parameters(c, ps, address): `address` must be non-empty. " *
+            "Pass the dot-separated path to the namespace whose leaves " *
+            "match `c`'s parameters (e.g. \"components.transmon.island\")."
+        )
+    )
+    sub = resolve(ps, address)
+    sub isa MissingNamespace &&
+        throw(ParameterKeyError(getfield(sub, :key), _namespace_path(sub)))
+    # `resolve` returns a leaf value when the address terminates at a scalar
+    # (e.g. "components.x.junction_gap"). That's never a valid argument to the
+    # scoped form below — surface it directly with an actionable message rather
+    # than letting dispatch fall through to a generic MethodError.
+    sub isa ParameterSet || throw(
+        ArgumentError(
+            "address \"$address\" resolves to a leaf value ($(typeof(sub))), " *
+            "not a ParameterSet namespace. `set_parameters(c, ps, address)` " *
+            "expects `address` to point at the namespace whose leaves match " *
+            "`c`'s parameters; pass a leaf as a kwarg instead, e.g. " *
+            "`set_parameters(c; <param>=resolve(ps, \"$address\"))`."
+        )
+    )
+    overlaid = set_parameters(c, sub)
+    isempty(kwargs) && return overlaid
+    return set_parameters(overlaid; kwargs...)
+end
+
+"""
+    set_parameters(c::AbstractComponent, sub::ParameterSet)
+
+Apply leaves from a scoped `ParameterSet` on top of `c`.
+
+`sub` must be a scoped view (non-empty prefix, typically reached via chained-dot
+access like `ps.components.transmon.island`). For a root `ParameterSet` use the
+address-string form instead.
+
+Throws `ArgumentError` if any leaf in `sub` is not a parameter of `typeof(c)`,
+surfacing typos in the `ParameterSet` source early.
+
+Every leaf in `sub` is pushed into `ps.accessed` with its qualified path, even
+when the leaf's value happens to equal the field's existing value on `c`. The
+recorded fact is "the loader read this PS leaf", not "the value differed from
+the template default".
+"""
+function set_parameters(c::AbstractComponent, sub::ParameterSet)
+    prefix = getfield(sub, :prefix)
+    isempty(prefix) && throw(
+        ArgumentError(
+            "set_parameters(c, ::ParameterSet) requires a scoped view " *
+            "(e.g. `ps.components.transmon.island`). For a root ParameterSet " *
+            "use `set_parameters(c, ps, address)` with an explicit address."
+        )
+    )
+    kw = leaf_params(sub)
+    names_c = parameter_names(typeof(c))
+    unknown = [String(k) for k in keys(kw) if !(k in names_c)]
+    if !isempty(unknown)
+        throw(
+            ArgumentError(
+                "ParameterSet at \"$prefix\" has unknown leaves for " *
+                "$(typeof(c)): $(join(unknown, ", ")). " *
+                "Valid parameters: $(join(names_c, ", "))."
+            )
+        )
     end
-    return set_parameters(c; (p.second => p.first for p in pairs)..., kwargs...)
+    accessed = getfield(sub, :accessed)
+    for k in keys(kw)
+        push!(accessed, prefix * "." * String(k))
+    end
+    return set_parameters(c; pairs(kw)...)
+end
+
+# Reached when a caller passes a chained-dot lookup that fizzled, e.g.
+# `set_parameters(c, ps.foo.bar)` where `foo` (or any segment after) is not a
+# namespace in `ps`. The address-form `set_parameters(c, ps, address)` already
+# guards `MissingNamespace` before delegating, so this method exists as
+# defense-in-depth for the direct-invocation path. Surface the qualified path
+# in a `ParameterKeyError` rather than a generic `MethodError`.
+function set_parameters(::AbstractComponent, sub::MissingNamespace)
+    return throw(ParameterKeyError(getfield(sub, :key), _namespace_path(sub)))
 end
 
 Base.show(io::IO, ::MIME"text/plain", c::T) where {T <: AbstractComponent} =

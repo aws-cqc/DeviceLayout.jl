@@ -191,7 +191,7 @@ ps.components.transmon.junction.w_jj = 1μm
 ps.components.transmon.junction.h_jj = 1μm
 ```
 
-Inside `_build_subcomponents`, use `parameter_set(g)` to access the graph's `ParameterSet`, then `create_component` to instantiate each subcomponent from its subtree. The shared `junction_gap` is read from the parameter set and forwarded to both subcomponents under their respective parameter names using the `value => :name` form of `set_parameters`:
+Inside `_build_subcomponents`, use `parameter_set(g)` to access the graph's `ParameterSet`, then `create_component` to instantiate each subcomponent from its subtree. The shared `junction_gap` is read from the parameter set and forwarded to both subcomponents under their respective parameter names using `set_parameters` kwargs:
 
 ```julia
 function SchematicDrivenLayout._build_subcomponents(tr::SimpleTransmon)
@@ -201,12 +201,13 @@ function SchematicDrivenLayout._build_subcomponents(tr::SimpleTransmon)
     # Forward shared parameter from under the parent component
     # No need to count its access here because it has been accessed
     # during the CC construction
-    island = set_parameters(island, junction_gap = tr.junction_gap)
+    island = set_parameters(island; junction_gap=tr.junction_gap)
 
     junction = create_component(ExampleSimpleJunction, ps, "components.transmon.junction")
     # Forward shared parameter from parameter set to the junction component
-    # Access to the parameter is logged, allowing PS verification
-    junction = set_parameters(junction, ps.components.transmon.junction_gap => :h_ground_island)
+    # under a different parameter name. A missing PS lookup would surface as
+    # ParameterKeyError at this call site.
+    junction = set_parameters(junction; h_ground_island=ps.components.transmon.junction_gap)
 
     return (island, junction)
 end
@@ -224,6 +225,51 @@ transmon_node = add_node!(g, transmon)
 ```
 
 The `ParameterSet` is preserved when graphs are copied — for example, inside `BasicCompositeComponent` or during `_flatten` operations. This means subcomponents at any depth can access the same parameter set.
+
+## Templates-Aliasing for Composite Subcomponents
+
+The `create_component(T, ps, address)` pattern above hardcodes the subcomponent type at each call site. A composite can instead declare its subcomponents in a `templates::NamedTuple` field — the type and any designer-chosen defaults live on the composite, and `ParameterSet` values overlay on top of the template:
+
+```julia
+@compdef struct SimpleTransmonTemplated <: CompositeComponent
+    name = "transmon"
+    junction_gap = 12μm
+    templates = (
+        island = ExampleRectangleIsland(name="island", cap_width=30μm),  # designer default
+        junction = ExampleSimpleJunction(name="junction"),
+    )
+end
+```
+
+Use the three-argument form of `set_parameters` inside `_build_subcomponents` to apply the `ParameterSet` at the subcomponent's address on top of the template. Trailing keyword arguments are composite-level overrides that win over the `ParameterSet`:
+
+```julia
+function SchematicDrivenLayout._build_subcomponents(tr::SimpleTransmonTemplated)
+    ps = parameter_set(tr._graph)
+
+    island = set_parameters(
+        tr.templates.island, ps, "components.$(name(tr)).island";
+        junction_gap=tr.junction_gap,
+    )
+
+    junction = set_parameters(
+        tr.templates.junction, ps, "components.$(name(tr)).junction";
+        h_ground_island=tr.junction_gap,
+    )
+
+    return (island, junction)
+end
+```
+
+Precedence is explicit and layered:
+
+1. **Template defaults** — whatever `tr.templates.island` was constructed with (e.g. `cap_width=30μm`).
+2. **`ParameterSet` overrides the template** — every leaf under `components.transmon.island` overwrites the matching template field.
+3. **Composite overrides the `ParameterSet`** — trailing kwargs to `set_parameters(c, ps, address; …)` always win, so composite invariants (e.g. "the island's `junction_gap` is whatever the composite decides") can never be silently undermined by `ParameterSet` contents.
+
+Typos surface early: if the `ParameterSet` carries a leaf at `components.transmon.island.fictional_param` and `ExampleRectangleIsland` has no such field, `set_parameters(tr.templates.island, ps, ...)` throws `ArgumentError` naming the unknown leaf — rather than silently ignoring it or erroring later inside the constructor.
+
+`set_parameters(c, ps, address)` also has a scoped-view sibling `set_parameters(c, ps.components.transmon.island)` for cases where the scoped `ParameterSet` is already in hand.
 
 ## Access Tracking
 
