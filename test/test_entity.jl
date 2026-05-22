@@ -161,15 +161,19 @@ end
     ## Construction
     @test WithDirection().direction == 0°
     # Numeric argument converts to degrees
-    @test WithDirection(pi/4).direction ≈ 45°
+    @test WithDirection(pi / 4).direction ≈ 45°
     ## Transformation
     sty = WithDirection(90°)
     @test transform(sty, Rotation(90°)).direction == 180°
     @test transform(sty, Rotation(270°)).direction % 360° == 0°
     @test isapprox_angle(transform(sty, XReflection()).direction, 270°)
     @test transform(WithDirection(), XReflection()).direction == 0°
-    @test transform(WithDirection(), ScaledIsometry(nothing, 90°, true, 1.0)).direction == 90°
-    @test isapprox_angle(transform(sty, ScaledIsometry(nothing, 90°, true, 1.0)).direction, 0°)
+    @test transform(WithDirection(), ScaledIsometry(nothing, 90°, true, 1.0)).direction ==
+          90°
+    @test isapprox_angle(
+        transform(sty, ScaledIsometry(nothing, 90°, true, 1.0)).direction,
+        0°
+    )
     @test transform(sty, Transformations.IdentityTransformation()).direction == 90°
     ## Rendering
     rect = Rectangle(2μm, 3μm)

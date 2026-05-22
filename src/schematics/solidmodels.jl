@@ -255,9 +255,10 @@ function port_directions(sch::Schematic, ly::Symbol)
             idx == 0 && continue
             dir = _extract_direction(el)
             dir === nothing && continue
-            haskey(dirs, idx) && error("Repeated index $idx. Before calling `port_directions`, \
-                layer $ly should be indexed by rendering with a target whose `indexed_layers` \
-                include $ly (or indexed directly with `index_layer!`)")
+            haskey(dirs, idx) &&
+                error("Repeated index $idx. Before calling `port_directions`, \
+layer $ly should be indexed by rendering with a target whose `indexed_layers` \
+include $ly (or indexed directly with `index_layer!`)")
             dirs[idx] = _direction_string(rotated_direction(dir, trans))
         end
     end
@@ -272,7 +273,9 @@ _extract_direction(::DeviceLayout.GeometryEntity) = nothing
 function _extract_direction(ent::DeviceLayout.StyledEntity)
     return _extract_direction(ent.ent)
 end
-function _extract_direction(ent::DeviceLayout.StyledEntity{T,U,WithDirection}) where {T, U <: GeometryEntity{T}}
+function _extract_direction(
+    ent::DeviceLayout.StyledEntity{T, U, WithDirection}
+) where {T, U <: GeometryEntity{T}}
     return ent.sty.direction
 end
 
