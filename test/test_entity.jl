@@ -216,7 +216,7 @@ end
     @test _direction_string(-0.0005°) == "+X"
     @test _direction_string(359.9995°) == "+X"
 
-    @testset "port_directions" setup = [CommonTestSetup] begin
+    @testset "port_directions" begin
         using DeviceLayout.SchematicDrivenLayout
         # Place three rectangles directly on the schematic's top-level coordsys.
         # Two of them carry WithDirection; one is bare.
