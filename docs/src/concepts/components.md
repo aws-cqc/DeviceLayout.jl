@@ -60,7 +60,7 @@ order to function correctly with the keyword outer constructor.
 
 Because `AbstractComponent{T}` is a subtype of `GeometryStructure{T}`, components support the [Structure API](@ref api-geometrystructure) as well as general geometry methods like `bounds`. Most of those methods are not implemented by the component but are instead forwarded to the `CoordinateSystem` containing the component's geometry (that is, `bounds(mycomponent) = bounds(geometry(mycomponent))`). One exception is `name`: A component's name is not necessarily unique, but the name of `geometry(component)` is set using `uniquename(name(component))`.
 
-An `AbstractComponent` may override some `GeometryStructure` methods like `footprint` and `halo` when customization or efficient computation is required (see [Concepts: Autofill](@ref concept-autofill)).
+An `AbstractComponent` may override some `GeometryStructure` methods like `footprint` and `halo` when customization or efficient computation is required (see [Concepts: Autofill](@ref concept-autofill)). A valid footprint is a single entity covering the entire geometry; this can be checked with [`DeviceLayout.has_valid_footprint`](@ref).
 
 The methods [`check_rotation`](@ref) and [`allowed_rotation_angles`](@ref) can be implemented to enforce a requirement for the orientation of the component in the global coordinate system (checked by `check!(schematic)` by default). Other schematic design rules can be implemented with a similar pattern: a "trait" method that says that the rule applies, and a second method used to evaluate the rule.
 
