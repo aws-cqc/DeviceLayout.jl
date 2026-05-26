@@ -42,7 +42,7 @@ RouteComponent(
 function hooks(rc::RouteComponent{T}) where {T}
     p0 = StyledHook(
         PointHook(rc.r.p0, rc.r.α0),
-        Paths.nextstyle(reverse(rc.sty[1], zero(T)))
+        Paths.nextstyle(reverse(rc.sty[1], pathlength(rc._path)))
     )
     p1 = StyledHook(PointHook(rc.r.p1, rc.r.α1 + 180°), Paths.nextstyle(rc.sty[end]))
     return (; p0, p1)

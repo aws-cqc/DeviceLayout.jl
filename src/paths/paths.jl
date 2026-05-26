@@ -504,7 +504,8 @@ The style is `nothing` for an empty path and otherwise `nextstyle` of the revers
 """
 p0_hook(pa::Path, right_handed=true) = StyledHook(
     HandedPointHook(p0(pa), α0(pa), right_handed),
-    isempty(pa.nodes) ? nothing : nextstyle(without_attachments(reverse(pa[1]).sty))
+    isempty(pa.nodes) ? nothing :
+    nextstyle(without_attachments(reverse(pa[1].sty, pathlength(pa[1].seg))))
 )
 
 """
