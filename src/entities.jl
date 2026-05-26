@@ -180,7 +180,7 @@ Keyword arguments can be used to control how certain entity types are converted 
     (these mainly come from path segment/style pairs where boundaries are derived from arbitrary functions)
   - `atol` is the absolute tolerance used for discretizing other curves (default `1.0nm`)
   - `Δθ` can be provided to render circles and ellipses with an angular step rather than `atol`
-  - `rtol` can be provided to render tolerance-controlled curves with tolerance `max(atol, rtol*local_curvature_radius)`
+  - `rtol` can be provided to render tolerance-controlled (non-`adapted_grid`) curves with tolerance `max(atol, rtol*local_curvature_radius)`
   - Additional rendering options can be provided for user-defined conditional rendering with [`OptionalStyle`](@ref)
 """
 function to_polygons end
