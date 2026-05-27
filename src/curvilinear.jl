@@ -262,6 +262,19 @@ pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.SimpleCPW; kwargs...) where {T} 
     pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
 pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.CPW; kwargs...) where {T} =
     pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
+# Disambiguate OffsetSegment with NoRender and DecoratedStyle
+pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderContinuous; kwargs...) where {T} =
+    Polygon{T}[]
+pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderDiscrete; kwargs...) where {T} =
+    Polygon{T}[]
+pathtopolys(::Paths.OffsetSegment{T}, ::Paths.SimpleNoRender; kwargs...) where {T} =
+    Polygon{T}[]
+pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRender; kwargs...) where {T} =
+    Polygon{T}[]
+function pathtopolys(f::Paths.OffsetSegment{T}, sty::Paths.AbstractDecoratedStyle; kwargs...) where {T}
+    @warn "Ignoring attachments on path segment $f with style $sty when converting to polygons. Did you write `render!.(cell, path, ...)` instead of `render!(cell, path, ...)`?"
+    return pathtopolys(f, Paths.undecorated(sty); kwargs...)
+end
 
 # NoRender and friends — effectively the same as above but without the warning
 pathtopolys(seg::Paths.Segment{T}, s::Paths.NoRenderContinuous; kwargs...) where {T} =

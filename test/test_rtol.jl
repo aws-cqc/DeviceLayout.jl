@@ -20,6 +20,10 @@
     vcount_atol = sum(length(points(e)) for e in c_atol.elements)
     vcount_rtol = sum(length(points(e)) for e in c_rtol.elements)
     # chord midpoints on outer curve
+    # TODO: Int(vcount/2) assumes equal point counts on outer/inner arcs.
+    # After unifying through pathtopolys, curvature-based discretization produces
+    # different counts per arc (outer arc is longer → more points). Use div or
+    # find the actual arc boundary instead.
     r_outer = 1.005mm
     midpoints_atol =
         (
