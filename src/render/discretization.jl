@@ -212,6 +212,31 @@ function discretization_grid(s::Paths.Segment, tolerance; rtol=nothing)
     )
 end
 
+# ConstantOffset segments are parameterized by the base curve's arclength, but
+# the actual arclength per unit parameter is |1 - offset * κ_base(t)|. The generic
+# Segment method uses pathlength(s) as t_scale, which equals the *base* curve's
+# length, not the offset curve's actual arclength. This underestimates t_scale for
+# outer offsets and overestimates for inner offsets, causing the chord-height tolerance
+# to be violated.
+# TODO: For varying base curvature, a single t_scale is an approximation. A fully
+# correct approach would incorporate local curve speed into the marching kernel.
+function discretization_grid(s::Paths.ConstantOffset, tolerance; rtol=nothing)
+    l = pathlength(s)
+    # Use the maximum curve speed at the endpoints as t_scale. This is conservative:
+    # it may produce slightly more points than necessary, but never exceeds tolerance.
+    # (Exact for constant-curvature base curves like Turn.)
+    κ_base_start = Paths.signed_curvature(s.seg, zero(l))
+    κ_base_end = Paths.signed_curvature(s.seg, l)
+    max_speed = max(abs(1 - s.offset * κ_base_start), abs(1 - s.offset * κ_base_end))
+    actual_l = l * max_speed
+    return discretization_grid(
+        t -> Paths.signed_curvature(s, t * l),
+        tolerance;
+        t_scale=actual_l,
+        rtol=rtol
+    )
+end
+
 # True curvature κ(t) = |r'×r''|/|r'|³ for a 2D BSpline interpolation r.
 # Returns a scalar with units 1/length, matching the marching kernel's
 # `cc` contract.
