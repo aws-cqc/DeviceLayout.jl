@@ -108,12 +108,12 @@ function single_transmon(;
         csport = CoordinateSystem(uniquename("port"), nm)
         render!(
             csport,
-            only_simulated(centered(Rectangle(cpw_width, cpw_width))),
+            only_simulated(WithDirection(centered(Rectangle(cpw_width, cpw_width)))),
             LayerVocabulary.PORT
         )
         # Attach with port center `cpw_width` from the end (instead of `cpw_width/2`) to avoid corner effects
         attach!(p_readout, sref(csport), cpw_width, i=1) # @ start
-        attach!(p_readout, sref(csport), readout_length / 2 - cpw_width, i=2) # @ end
+        attach!(p_readout, sref(csport, rot=180°), readout_length / 2 - cpw_width, i=2) # @ end
     end
 
     #### Build schematic graph
@@ -192,11 +192,11 @@ function single_transmon(;
         flatten!(c)
         save(joinpath(@__DIR__, "single_transmon.gds"), c)
     end
-    return sm
+    return floorplan, sm
 end
 
 """
-    configfile(sm::SolidModel; palace_build=nothing, solver_order=2, amr=0, wave_ports=false)
+    configfile(sch::Schematic, sm::SolidModel; palace_build=nothing, solver_order=2, amr=0, wave_ports=false)
 
 Given a `SolidModel`, assemble a dictionary defining a configuration file for use within
 Palace.
@@ -209,6 +209,7 @@ Palace.
   - `amr = 0`: Maximum number of adaptive mesh refinement (AMR) iterations.
 """
 function configfile(
+    sch::Schematic,
     sm::SolidModel;
     palace_build=nothing,
     solver_order=2,
@@ -216,6 +217,8 @@ function configfile(
     wave_ports=false
 )
     attributes = SolidModels.attributes(sm)
+    port_dirs = ExamplePDK.port_directions(sch, layer(LayerVocabulary.PORT))
+    lumped_dirs = ExamplePDK.port_directions(sch, layer(LayerVocabulary.LUMPED_ELEMENT))
 
     config = Dict(
         "Problem" => Dict(
@@ -275,13 +278,13 @@ function configfile(
                             "Index" => 1,
                             "Attributes" => [attributes["port_1"]],
                             "R" => 50,
-                            "Direction" => "+X"
+                            "Direction" => port_dirs[1]
                         ),
                         Dict(
                             "Index" => 2,
                             "Attributes" => [attributes["port_2"]],
                             "R" => 50,
-                            "Direction" => "+X"
+                            "Direction" => port_dirs[2]
                         )
                     )
                 )...,
@@ -290,7 +293,7 @@ function configfile(
                     "Attributes" => [attributes["lumped_element"]],
                     "L" => 14.860e-9,
                     "C" => 5.5e-15,
-                    "Direction" => "+Y"
+                    "Direction" => lumped_dirs[1]
                 )
             ]
         ),
@@ -388,14 +391,14 @@ function compute_eigenfrequencies(
     total_length=5000μm
 )
     # Construct the SolidModel
-    @time "SolidModel + Meshing" sm = single_transmon(
+    @time "SolidModel + Meshing" floorplan, sm = single_transmon(
         save_mesh=true;
         cap_length=cap_length,
         total_length=total_length,
         mesh_order=mesh_order
     )
     # Assemble the configuration
-    @time "Configuration" config = configfile(sm; palace_build, solver_order=solver_order)
+    @time "Configuration" config = configfile(floorplan, sm; palace_build, solver_order=solver_order)
     # Call Palace
     @time "Palace" freqs = palace_job(config; palace_build, np)
     return freqs

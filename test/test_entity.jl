@@ -178,46 +178,50 @@ end
     ## Rendering
     rect = Rectangle(2μm, 3μm)
     @test to_polygons(sty(rect)) == to_polygons(rect)
-    ## Direction extraction
-    opt = optional_entity(rect, :foo; default=true)
-    msz = meshsized_entity(opt, 0.5μm)
-    wd_outer = WithDirection(90°)(msz)
-    wd_inner = WithDirection(45°)(rect)
-    msz2 = meshsized_entity(wd_inner, 0.5μm)
-    opt2 = optional_entity(msz2, :foo; default=true)
-    @test SchematicDrivenLayout._extract_direction(wd_outer) == 90°
-    @test SchematicDrivenLayout._extract_direction(wd_inner) == 45°
-    @test SchematicDrivenLayout._extract_direction(opt2) == 45°
-    @test SchematicDrivenLayout._extract_direction(opt) === nothing
-    @test SchematicDrivenLayout._extract_direction(rect) === nothing
-    # If multiple WithDirection layers exist, outer wins (expected behavior, not a contract)
-    double = WithDirection(0°)(WithDirection(90°)(rect))
-    @test SchematicDrivenLayout._extract_direction(double) == 0°
-    ## _direction_string
-    using DeviceLayout.SchematicDrivenLayout: _direction_string
-    @test _direction_string(0°) == "+X"
-    @test _direction_string(90°) == "+Y"
-    @test _direction_string(180°) == "-X"
-    @test _direction_string(270°) == "-Y"
-
-    # Normalization: 360° → +X, -90° → -Y, 450° → +Y
-    @test _direction_string(360°) == "+X"
-    @test _direction_string(-90°) == "-Y"
-    @test _direction_string(450°) == "+Y"
-
-    # Off-axis: "[dx, dy, 0.0]" format
-    s45 = _direction_string(45°)
-    @test startswith(s45, "[")
-    @test occursin("0.707107", s45)
-    @test endswith(s45, ", 0.0]")
-
-    # Within atol tolerance → still +X
-    @test _direction_string(0.0005°) == "+X"
-    @test _direction_string(-0.0005°) == "+X"
-    @test _direction_string(359.9995°) == "+X"
 
     @testset "port_directions" begin
+        # Not currently API functionality but worth testing alongside WithDirection
         using DeviceLayout.SchematicDrivenLayout
+        import .SchematicDrivenLayout.ExamplePDK:
+            port_directions, _extract_direction, _direction_config
+        ## Direction extraction
+        rect = Rectangle(2μm, 3μm)
+        @test to_polygons(sty(rect)) == to_polygons(rect)
+        opt = optional_entity(rect, :foo; default=true)
+        msz = meshsized_entity(opt, 0.5μm)
+        wd_outer = WithDirection(90°)(msz)
+        wd_inner = WithDirection(45°)(rect)
+        msz2 = meshsized_entity(wd_inner, 0.5μm)
+        opt2 = optional_entity(msz2, :foo; default=true)
+        # Extract direction
+        @test _extract_direction(wd_outer) == 90°
+        @test _extract_direction(wd_inner) == 45°
+        @test _extract_direction(opt2) == 45°
+        @test _extract_direction(opt) === nothing
+        @test _extract_direction(rect) === nothing
+        # If multiple WithDirection layers exist, outer wins (expected behavior, not a contract)
+        double = WithDirection(0°)(WithDirection(90°)(rect))
+        @test _extract_direction(double) == 0°
+        ## _direction_config
+        @test _direction_config(0°) == "+X"
+        @test _direction_config(90°) == "+Y"
+        @test _direction_config(180°) == "-X"
+        @test _direction_config(270°) == "-Y"
+
+        # Normalization: 360° → +X, -90° → -Y, 450° → +Y
+        @test _direction_config(360°) == "+X"
+        @test _direction_config(-90°) == "-Y"
+        @test _direction_config(450°) == "+Y"
+
+        # Off-axis: [dx, dy, 0.0] format
+        s45 = _direction_config(45°)
+        @test s45 ≈ [cos(45°), sin(45°), 0.0]
+
+        ## Port directions
+        # Within atol tolerance → still +X
+        @test _direction_config(0.0005°) == "+X"
+        @test _direction_config(-0.0005°) == "+X"
+        @test _direction_config(359.9995°) == "+X"
         # Place three rectangles directly on the schematic's top-level coordsys.
         # Two of them carry WithDirection; one is bare.
         g = SchematicGraph("test-g")

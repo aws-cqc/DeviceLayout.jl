@@ -368,13 +368,8 @@ The direction transforms with the entity under rotation or reflection via
 so after `plan!`/`build!`/`index_layer!` the carried angle describes the global
 orientation.
 
-The stored angle is not automatically normalized to `[0°, 360°)`. Use
-[`port_directions`](@ref) to extract Palace-compatible strings (which normalize and
-map to `"+X"`/`"-X"`/`"+Y"`/`"-Y"` or `"[dx, dy, 0]"`).
-
 If an angle is given without units, it is assumed to be in radians.
-
-See also: [`port_directions`](@ref), [`MeshSized`](@ref), [`OptionalStyle`](@ref).
+The stored angle is **not** automatically normalized to `[0°, 360°)`.
 """
 struct WithDirection <: GeometryEntityStyle
     direction::typeof(1.0°)
