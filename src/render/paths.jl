@@ -20,7 +20,27 @@ end
 to_polygons(seg::Paths.Segment{T}, s::Paths.Style; kwargs...) where {T} =
     to_polygons(seg, pathlength(seg), s; kwargs...)
 
-to_polygons(n::Paths.Node; kwargs...) = to_polygons(n.seg, n.sty; kwargs...)
+function to_polygons(n::Paths.Node; kwargs...)
+    result = pathtopolys(n; kwargs...)
+    return _pathtopolys_to_polygons(result; kwargs...)
+end
+
+# Convert pathtopolys output to Polygon(s) for GDS rendering.
+# pathtopolys returns Polygon (linear), CurvilinearPolygon (curved),
+# or vectors of either (CPW styles produce two polygons).
+# Uses runtime dispatch rather than type signatures because CurvilinearPolygon
+# is defined after this file in the include order.
+_pathtopolys_to_polygons(p::Polygon; kwargs...) = p
+_pathtopolys_to_polygons(p::Vector{<:Polygon}; kwargs...) = p
+_pathtopolys_to_polygons(entity::GeometryEntity; kwargs...) = to_polygons(entity; kwargs...)
+function _pathtopolys_to_polygons(v::Vector; kwargs...)
+    polys = Polygon[]
+    for item in v
+        r = _pathtopolys_to_polygons(item; kwargs...)
+        r isa Polygon ? push!(polys, r) : append!(polys, r)
+    end
+    return polys
+end
 
 # NoRender and friends
 to_polygons(seg::Paths.Segment{T}, s::Paths.NoRenderContinuous; kwargs...) where {T} =
