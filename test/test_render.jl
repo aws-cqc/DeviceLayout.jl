@@ -201,6 +201,7 @@ end
             p(20.5μm, -0.5μm),
             p(20.5μm, 0.5μm)
         ]
+        @test reverse(Paths.SimpleTraceCorner(), 0) == Paths.SimpleTraceCorner()
     end
 
     @testset "Straight, GeneralTrace" begin
@@ -501,6 +502,8 @@ end
         # verify extent
         @test height(bounds(c)) ≈ 2 * Paths.extent(pa[1].sty)
         @test contains(summary(pa[1].sty), "2 strands")
+        @test reverse(pa[1].sty, 10μm) == pa[1].sty
+        @test Paths.translate(pa[1].sty, 10μm) == pa[1].sty
     end
 
     @testset "Turn, Strands" begin
@@ -722,6 +725,8 @@ end
         node = simplify(p2, 2:3)
         @test node.sty.styles[1] isa Paths.TaperTrace
         @test p2[2].sty isa Paths.Taper # unchanged
+        @test reverse(Paths.Taper(), 0) == Paths.Taper()
+        @test contains(summary(Paths.Taper()), "linear taper")
     end
 
     @testset "Terminations" begin
