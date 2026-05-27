@@ -240,6 +240,29 @@ function pathtopolys(f::Paths.Segment{T}, s::Paths.Style; kwargs...) where {T}
     return to_polygons(f, s; kwargs...)
 end
 
+# OffsetSegments have a parameterization mismatch between corner_points (which uses
+# the offset segment's tangent direction) and Paths.offset (which nests offsets on the
+# base segment's coordinate system). Resolve by converting to a BSpline approximation
+# first, which traces the offset curve, then construct CurvilinearPolygons from that.
+function _offset_to_bspline(
+    f::Paths.OffsetSegment{T};
+    atol=DeviceLayout.onenanometer(T),
+    rtol=nothing,
+    kwargs...
+) where {T}
+    return Paths.bspline_approximation(f; atol, rtol)
+end
+pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.Style; kwargs...) where {T} =
+    pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
+pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.SimpleTrace; kwargs...) where {T} =
+    pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
+pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.Trace; kwargs...) where {T} =
+    pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
+pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.SimpleCPW; kwargs...) where {T} =
+    pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
+pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.CPW; kwargs...) where {T} =
+    pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
+
 # NoRender and friends — effectively the same as above but without the warning
 pathtopolys(seg::Paths.Segment{T}, s::Paths.NoRenderContinuous; kwargs...) where {T} =
     Polygon{T}[]
