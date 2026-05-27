@@ -472,6 +472,33 @@ const LinearStyle =
 islinear(::LinearSegment{T}, ::LinearStyle) where {T} = Val(true)
 islinear(::Paths.Segment{T}, ::Paths.Style) where {T} = Val(false)
 
+# DecoratedStyles: strip the decoration and delegate to the underlying style.
+# Attachments are handled by render!(Cell, Path), not here.
+function pathtopolys(
+    seg::Paths.Segment{T},
+    sty::Paths.AbstractDecoratedStyle;
+    kwargs...
+) where {T}
+    @warn "Ignoring attachments on path segment $seg with style $sty when converting to polygons. Did you write `render!.(cell, path, ...)` instead of `render!(cell, path, ...)`?"
+    return pathtopolys(seg, Paths.undecorated(sty); kwargs...)
+end
+
+# Linear segments with linear styles produce exact polygons without curves.
+# This handles the case where pathtopolys is called at the segment level
+# (e.g. from CompoundSegment+CompoundStyle recursion) bypassing the Node-level
+# islinear gate.
+# TODO: Could return CurvilinearPolygon(corner_points(...)) with empty curve list instead,
+# keeping everything in the CurvilinearPolygon representation. Currently falls back to
+# to_polygons because discretize_curve doesn't handle zero-curvature segments efficiently.
+pathtopolys(seg::LinearSegment{T}, sty::Paths.SimpleTrace; kwargs...) where {T} =
+    to_polygons(seg, sty; kwargs...)
+pathtopolys(seg::LinearSegment{T}, sty::Paths.SimpleCPW; kwargs...) where {T} =
+    to_polygons(seg, sty; kwargs...)
+pathtopolys(seg::LinearSegment{T}, sty::Paths.TaperTrace; kwargs...) where {T} =
+    to_polygons(seg, sty; kwargs...)
+pathtopolys(seg::LinearSegment{T}, sty::Paths.TaperCPW; kwargs...) where {T} =
+    to_polygons(seg, sty; kwargs...)
+
 # Dispatch node->primitive based on kernel and requirements for representing node exactly
 function pathtopolys(node::Paths.Node; kwargs...)
     return pathtopolys(node, islinear(node.seg, node.sty); kwargs...)
