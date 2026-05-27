@@ -4,6 +4,7 @@
     pdkpath = joinpath(tdir, "MyPDK")
     using Pkg
     Pkg.develop(path=pdkpath)
+    Pkg.precompile()  # force pkgimage matching current CacheFlags (e.g. check_bounds=1)
     using MyPDK
     pdktoml = Pkg.TOML.parsefile(joinpath(pkgdir(MyPDK), "Project.toml"))
     @test VersionNumber(pdktoml["compat"]["DeviceLayout"]).major == 1
