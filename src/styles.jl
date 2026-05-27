@@ -362,16 +362,17 @@ in the entity's local frame) for use in simulation configuration. For example, a
 lumped-port rectangle can carry its electrical orientation so that Palace's
 `LumpedPort`/`WavePort` `Direction` field can be populated after rendering.
 
-Rendering is unaffected: `to_polygons` passes through to the underlying entity, and
-`to_primitives` is stripped by the generic fallback at `src/solidmodels/render.jl`.
+Rendering is unaffected: `to_polygons` and `to_primitives` pass through to the underlying entity.
 The direction transforms with the entity under rotation or reflection via
 `transform(sty::WithDirection, f::Transformation) = WithDirection(rotated_direction(sty.direction, f))`,
-so after `plan!`/`build!`/`index_layer!` the carried angle reflects the global
+so after `plan!`/`build!`/`index_layer!` the carried angle describes the global
 orientation.
 
-The stored angle is NOT automatically normalized to `[0°, 360°)`. Use
+The stored angle is not automatically normalized to `[0°, 360°)`. Use
 [`port_directions`](@ref) to extract Palace-compatible strings (which normalize and
 map to `"+X"`/`"-X"`/`"+Y"`/`"-Y"` or `"[dx, dy, 0]"`).
+
+If an angle is given without units, it is assumed to be in radians.
 
 See also: [`port_directions`](@ref), [`MeshSized`](@ref), [`OptionalStyle`](@ref).
 """

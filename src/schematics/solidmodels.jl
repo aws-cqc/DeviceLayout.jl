@@ -266,7 +266,7 @@ include $ly (or indexed directly with `index_layer!`)")
 end
 
 # Walk through any nesting of StyledEntity wrappers and return the `direction`
-# angle of the innermost `WithDirection` style encountered, or `nothing` if no
+# angle of the outermost `WithDirection` style encountered, or `nothing` if no
 # `WithDirection` is present. Handles nesting like
 # WithDirection(MeshSized(only_simulated(rect))) and the reverse.
 _extract_direction(::DeviceLayout.GeometryEntity) = nothing
