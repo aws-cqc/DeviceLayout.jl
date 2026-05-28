@@ -269,9 +269,12 @@ pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderDiscrete; kwargs...) where
     Polygon{T}[]
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.SimpleNoRender; kwargs...) where {T} =
     Polygon{T}[]
-pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRender; kwargs...) where {T} =
-    Polygon{T}[]
-function pathtopolys(f::Paths.OffsetSegment{T}, sty::Paths.AbstractDecoratedStyle; kwargs...) where {T}
+pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRender; kwargs...) where {T} = Polygon{T}[]
+function pathtopolys(
+    f::Paths.OffsetSegment{T},
+    sty::Paths.AbstractDecoratedStyle;
+    kwargs...
+) where {T}
     @warn "Ignoring attachments on path segment $f with style $sty when converting to polygons. Did you write `render!.(cell, path, ...)` instead of `render!(cell, path, ...)`?"
     return pathtopolys(f, Paths.undecorated(sty); kwargs...)
 end
@@ -464,6 +467,55 @@ function pathtopolys(seg::Paths.Segment{T}, sty::Paths.CPW; kwargs...) where {T}
             ],
             [1, -3]
         )
+    ]
+end
+
+# Strands generate 2*num polygons (plus and minus side for each strand).
+# Each strand is a trace-like shape at a computed offset from center.
+function pathtopolys(seg::Paths.Segment{T}, sty::Paths.Strands; kwargs...) where {T}
+    polys = Union{CurvilinearPolygon{T}, Polygon{T}}[]
+    for i = 0:(Paths.num(sty) - 1)
+        # Offset to center of strand i, plus half-width for edges
+        strand_inner(t) =
+            Paths.offset(sty, t) + i * (Paths.width(sty, t) + Paths.spacing(sty, t))
+        strand_outer(t) = strand_inner(t) + Paths.width(sty, t)
+        # Plus side (left of path)
+        p_pts = _strand_corners(seg, strand_inner, strand_outer)
+        push!(
+            polys,
+            CurvilinearPolygon(
+                p_pts,
+                [Paths.offset(seg, strand_inner), Paths.offset(seg, strand_outer)],
+                [1, -3]
+            )
+        )
+        # Minus side (right of path)
+        m_pts = _strand_corners(seg, t -> -strand_outer(t), t -> -strand_inner(t))
+        push!(
+            polys,
+            CurvilinearPolygon(
+                m_pts,
+                [
+                    Paths.offset(seg, t -> -strand_outer(t)),
+                    Paths.offset(seg, t -> -strand_inner(t))
+                ],
+                [1, -3]
+            )
+        )
+    end
+    return polys
+end
+
+function _strand_corners(seg::Paths.Segment{T}, inner_offset, outer_offset) where {T}
+    l = pathlength(seg)
+    dir0 = Paths.α0(seg)
+    dir1 = Paths.α1(seg)
+    a, b = Paths.p0(seg), Paths.p1(seg)
+    return [
+        a + inner_offset(zero(T)) * Point(-sin(dir0), cos(dir0)),
+        b + inner_offset(l) * Point(-sin(dir1), cos(dir1)),
+        b + outer_offset(l) * Point(-sin(dir1), cos(dir1)),
+        a + outer_offset(zero(T)) * Point(-sin(dir0), cos(dir0))
     ]
 end
 
