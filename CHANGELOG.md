@@ -4,29 +4,30 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 1.14.0 (2026-05-28)
 
   - Added `ParameterSet`, a nested dictionary wrapper with dot-access for reading and
     writing design parameters, plus `resolve` and `leaf_params` helpers
-  - Added a `ParameterSetYAMLExt` weak-dep extension loaded via `using YAML` that
+    - Added a `ParameterSetYAMLExt` weak-dep extension loaded via `using YAML` that
     enables `ParameterSet(path::String)` / `ParameterSet(io::IO)` construction and
     `save_parameter_set` with Unitful round-tripping
-  - Added `SchematicGraph(name, ps)` to carry a `ParameterSet` on the graph, plumbed
+    - Added `SchematicGraph(name, ps)` to carry a `ParameterSet` on the graph, plumbed
     through `_build_subcomponents` via `parameter_set(graph)` and
     `create_component(T, ps, address)`
-  - Added `SchematicDrivenLayout.footprint_halo` for implementing fast custom halos with less boilerplate
-  - Fixed incorrect loading of GDS array references with nonzero origin
-  - Added `set_parameters(c, ps, address; kwargs...)` and the scoped form
+    - Added `set_parameters(c, ps, address; kwargs...)` and the scoped form
     `set_parameters(c, sub::ParameterSet)` for the templates-aliasing pattern:
     overlay `ParameterSet` leaves on top of a template instance, with optional
     composite-level kwargs winning over the overlay. Unknown leaves under the
     address surface as `ArgumentError` at composite-build time
-  - `create_component(T; kwargs...)` now rejects `MissingNamespace` and
-    `ParameterSet` kwarg values with actionable errors at the call site,
-    rather than letting them flow into the constructor
+  - Added `SchematicDrivenLayout.footprint_halo` for implementing fast custom halos with less boilerplate
   - Added optional `rtol` keyword argument for `render!`/`to_polygons` to allow larger features to be rendered with relaxed tolerance; if provided, curves are discretized with tolerance `max(atol, rtol * local_curvature_radius)`
+  - Added `StyledHook <: Hook`, which wraps a hook with a `Paths.Style`; `Path` and `RouteComponent` hooks are now `SyledHooks`
+  - Added graph-level `terminate!`, which fuses an open or short path termination to a specified node and hook, with cross-section for termination provided by the hook (if a `StyledHook`) or by the user
+  - Docs: Added SolidModel section to FAQ/Troubleshooting addressing common issues and suggesting a debugging checklist
+  - Fixed `Path` intersections on mixed coordinate contexts
   - Fixed issue where rendering keyword arguments could be dropped for compound segments with non-compound styles
   - Fixed overly-strict `Ellipse` and `Circle` constructors to allow different center and radius coordinate types
+  - Fixed incorrect loading of GDS array references with nonzero origin
 
 ## 1.13.0 (2026-04-28)
 
