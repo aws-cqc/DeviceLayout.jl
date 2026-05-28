@@ -38,7 +38,15 @@ RouteComponent(
     sty::Paths.Style,
     meta::Meta
 ) where {T} = RouteComponent{T}(name, r, gw, [sty], meta)
-hooks(rc::RouteComponent) = (p0=PointHook(rc.r.p0, rc.r.α0), p1=PointHook(rc.r.p1, rc.r.α1))
+
+function hooks(rc::RouteComponent{T}) where {T}
+    p0 = StyledHook(
+        PointHook(rc.r.p0, rc.r.α0),
+        Paths.nextstyle(reverse(rc.sty[1], pathlength(rc._path)))
+    )
+    p1 = StyledHook(PointHook(rc.r.p1, rc.r.α1 + 180°), Paths.nextstyle(rc.sty[end]))
+    return (; p0, p1)
+end
 
 function redecorate!(path::Path, sty::Paths.Style) end
 function redecorate!(path::Path, sty::Paths.DecoratedStyle)

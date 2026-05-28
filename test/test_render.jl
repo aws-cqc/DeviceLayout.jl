@@ -201,6 +201,7 @@ end
             p(20.5μm, -0.5μm),
             p(20.5μm, 0.5μm)
         ]
+        @test reverse(Paths.SimpleTraceCorner(), 0) == Paths.SimpleTraceCorner()
     end
 
     @testset "Straight, GeneralTrace" begin
@@ -501,6 +502,8 @@ end
         # verify extent
         @test height(bounds(c)) ≈ 2 * Paths.extent(pa[1].sty)
         @test contains(summary(pa[1].sty), "2 strands")
+        @test reverse(pa[1].sty, 10μm) == pa[1].sty
+        @test Paths.translate(pa[1].sty, 10μm) == pa[1].sty
     end
 
     @testset "Turn, Strands" begin
@@ -722,6 +725,8 @@ end
         node = simplify(p2, 2:3)
         @test node.sty.styles[1] isa Paths.TaperTrace
         @test p2[2].sty isa Paths.Taper # unchanged
+        @test reverse(Paths.Taper(), 0) == Paths.Taper()
+        @test contains(summary(Paths.Taper()), "linear taper")
     end
 
     @testset "Terminations" begin
@@ -845,6 +850,7 @@ end
         @test p0(pa) == Point(-6, 0)μm
         @test α1(pa) ≈ 90°
         @test p1(pa) ≈ Point(100, 106)μm
+        @test reverse(pa[1]).sty == pa[end].sty
         c = Cell("test", nm)
         render!(c, pa, GDSMeta())
         @test bounds(c).ll.y < -11μm # Drawn as though straight, extends at slight angle
@@ -857,6 +863,7 @@ end
         @test p0(pa) == Point(0, 0)μm
         @test α1(pa) ≈ 90°
         @test p1(pa) ≈ Point(100, 100)μm
+        @test reverse(pa[1]).sty == pa[end].sty
         c = Cell("test", nm)
         render!(c, pa, GDSMeta())
 
@@ -869,6 +876,7 @@ end
         @test p0(pa) == Point(0, 0)μm
         @test α1(pa) ≈ 90°
         @test p1(pa) ≈ Point(100, 100)μm
+        @test reverse(pa[1]).sty == pa[end].sty
         c = Cell("test", nm)
         render!(c, pa, GDSMeta())
     end
@@ -901,6 +909,19 @@ end
         render!(c, ScaledIsometry(Point(10μm, 10μm), 45°, true)(path), GDSMeta())
         @test length(c.elements) == 6 # 6 CPW segments in base path
         @test length(c.refs) == 7 # 4 overlays, 3 attachments
+
+        # Reverse
+        rev_path = Path(reverse(reverse.(path.nodes)); metadata=GDSMeta())
+        @test all(is_sliver.(to_polygons(xor2d(path => GDSMeta(), rev_path => GDSMeta()))))
+        @test all(
+            is_sliver.(to_polygons(xor2d(path => GDSMeta(2), rev_path => GDSMeta(2))))
+        )
+        @test all(
+            is_sliver.(to_polygons(xor2d(path => GDSMeta(3), rev_path => GDSMeta(3))))
+        )
+        @test all(
+            is_sliver.(to_polygons(xor2d(path => GDSMeta(4), rev_path => GDSMeta(4))))
+        )
 
         # Halos
         hp = halo(path, 2μm; only_layers=[GDSMeta(1), GDSMeta(3)])

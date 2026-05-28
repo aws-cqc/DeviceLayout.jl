@@ -329,6 +329,109 @@ function fuse!(
 end
 
 """
+    terminate!(g::SchematicGraph, node::ComponentNode, hook_name::Symbol;
+               style=nothing, kwargs...)
+    terminate!(g::SchematicGraph, p::Pair{<:ComponentNode, Symbol}; kwargs...)
+
+Attach a termination component to `node`'s `hook_name` hook in the schematic
+graph `g`. The termination is realized as a short `Paths.Path` ending in a
+rendered termination cap (open gap, short, rounded, ...) — see
+[`Paths.terminate!`](@ref).
+
+# Style resolution
+
+ 1. If the hook is a [`StyledHook`](@ref), use its carried style.
+ 2. Otherwise, the user MUST supply `style=...` explicitly.
+
+A bare `PointHook` or `HandedPointHook` without an explicit `style=` kwarg
+errors with an actionable message.
+
+# Keyword arguments
+
+All kwargs are forwarded to [`Paths.terminate!`](@ref):
+
+  - `rounding` — corner rounding radius (default `zero(T)`)
+  - `initial::Bool` — direction flag (unused here; `terminate!` always caps the
+    end of the termination stub we build, so `initial=false` is what you want)
+  - `overlay_index` — apply to an overlay style
+  - `gap` — termination gap (default `terminationlength(pa, false; overlay_index)`); nonzero = open, `0` = short
+  - `margin` — extra backtracking length
+
+# Returns
+
+The newly added termination `ComponentNode`.
+
+# Examples
+
+```julia
+# terminate the `:xy` hook of a transmon (assumed to carry a CPW StyledHook)
+terminate!(g, qubit, :xy; rounding=5μm)
+
+# short instead of open
+terminate!(g, qubit, :xy; gap=0μm)
+
+# bare hook: pass style explicitly
+terminate!(g, some_node, :p1; style=Paths.CPW(10μm, 6μm))
+```
+
+See also: [`StyledHook`](@ref), [`hook_style`](@ref), [`Paths.terminate!`](@ref).
+"""
+function DeviceLayout.terminate!(
+    g::SchematicGraph,
+    node::ComponentNode,
+    hook_name::Symbol;
+    style=nothing,
+    kwargs...
+)
+    # Fusion to RouteComponent hooks is not allowed (route nodes are planned last), so RC termination fails
+    component(node) isa RouteComponent &&
+        throw(ArgumentError("RouteComponents cannot be terminated"))
+    h = hooks(component(node), hook_name)
+    sty = _resolve_termination_style(h, style, node, hook_name)
+    termpath = _build_termination_path(h, sty; kwargs...)
+    return fuse!(g, node => hook_name, termpath => :p0)
+end
+
+DeviceLayout.terminate!(g::SchematicGraph, p::Pair{<:ComponentNode, Symbol}; kwargs...) =
+    terminate!(g, first(p), last(p); kwargs...)
+
+function _resolve_termination_style(h::Hook, user_style, node, hook_name)
+    !isnothing(user_style) && return user_style
+    hs = hook_style(h)
+    !isnothing(hs) && return hs
+    return error(
+        "terminate!(g, $(repr(node.id)), $(repr(hook_name))): hook carries no style " *
+        "(it is a bare $(typeof(h).name.name), not a StyledHook). " *
+        "Pass style=<Paths.Style> explicitly, or wrap the hook as " *
+        "StyledHook(h, style) in the component's hooks() method."
+    )
+end
+
+"""
+    _build_termination_path(h::Hook, sty; rounding, margin, kwargs...) -> Path
+
+Build a minimal termination `Path` that attaches at `h` and ends in a
+[`Paths.terminate!`](@ref) cap in the given style `sty`. The initial straight
+segment length equals `backtracking = rounding + margin` so that
+`Paths.terminate!`'s `splice!` backtrack consumes exactly this stub rather
+than eating into the fused parent component.
+"""
+function _build_termination_path(h::Hook, sty; rounding=nothing, margin=nothing, kwargs...)
+    T = eltype(h.p)
+    z = zero(T)
+    rnd = isnothing(rounding) ? z : rounding
+    mrg = isnothing(margin) ? z : margin
+    backtracking = rnd + mrg
+    pa = Path(h.p; α0=out_direction(h), name=uniquename("term"))
+    # Invariant: initial straight must be at least `backtracking` long so that
+    # Paths.terminate! eats into this stub and not into the parent component via
+    # the fused hook.
+    straight!(pa, backtracking, sty)
+    terminate!(pa; rounding=rnd, margin=mrg, kwargs...)
+    return pa
+end
+
+"""
     add_graph!(g0::SchematicGraph, g1::SchematicGraph; id_prefix=name(g1) * ".", kwargs...)
 
 Add the graph `g1` to `g0`, creating new nodes by prefixing IDs with `id_prefix`.

@@ -18,6 +18,7 @@ width(s::GeneralTrace) = s.width
 trace(s::GeneralTrace, t) = s.width(t)
 trace(s::GeneralTrace) = s.width
 translate(s::GeneralTrace, t) = GeneralTrace(x -> s.width(x + t))
+reverse(s::GeneralTrace, l) = GeneralTrace(t -> width(s, l - t))
 
 """
     struct SimpleTrace{T <: Coordinate} <: Trace{false}
@@ -34,6 +35,7 @@ extent(s::SimpleTrace, t...) = 0.5 * s.width
 width(s::SimpleTrace, t...) = s.width
 trace(s::SimpleTrace, t...) = s.width
 translate(s::SimpleTrace, t) = copy(s)
+reverse(s::SimpleTrace, l) = s
 
 """
     Trace(width)

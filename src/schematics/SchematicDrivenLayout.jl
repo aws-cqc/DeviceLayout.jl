@@ -31,8 +31,10 @@ import DeviceLayout:
     Hook,
     Meta,
     PointHook,
+    StyledHook,
     Transformation,
     UPREFERRED
+import DeviceLayout: hook_style
 import DeviceLayout:
     attach!,
     autofill!,
@@ -51,10 +53,13 @@ import DeviceLayout:
     map_metadata!,
     name,
     origin,
+    out_direction,
     parameters,
     refs,
     render!,
     sref,
+    straight!,
+    terminate!,
     transform,
     transformation,
     _geometry!

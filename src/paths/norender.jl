@@ -49,3 +49,5 @@ translate(s::SimpleNoRender, t) = copy(s)
 translate(s::NoRenderContinuous, t) = copy(s)
 
 pin(s::NoRender; start=nothing, stop=nothing) = s
+
+reverse(s::Union{NoRender, NoRenderDiscrete, NoRenderContinuous, SimpleNoRender}, l) = s

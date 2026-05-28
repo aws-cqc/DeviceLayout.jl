@@ -462,12 +462,13 @@ export CoordinateSystems,
     traverse!
 
 include("hooks.jl")
-export HandedPointHook, Hook, PointHook, compass, in_direction, out_direction
+export HandedPointHook, Hook, PointHook, compass, hook_style, in_direction, out_direction
 
 include("paths/paths.jl")
 import .Paths:
     Path,
     Route,
+    StyledHook,
     α0,
     α1,
     reconcile!,
@@ -513,6 +514,7 @@ import .Paths:
 export Paths,
     Path,
     Route,
+    StyledHook,
     α0,
     α1,
     reconcile!,
