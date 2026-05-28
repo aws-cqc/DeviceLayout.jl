@@ -145,11 +145,11 @@ copy(p::Polygon) = Polygon(copy(p.p))
         angle::typeof(1.0°)
         Ellipse{T}(c, r, a) where {T} = new{T}(c, r[1] < r[2] ? (r[2], r[1]) : r, a)
     end
-    Ellipse(center::Point{T}, radii, angle) where {T} = Ellipse{T}(center, radii, angle)
-    Ellipse(center::Point{T}; r::T) where {T} = Ellipse{T}(center, (r, r), 0.0°)
+    Ellipse(center::Point; r::Coordinate) = Ellipse(center, (r, r), 0.0°)
+    Ellipse(center::Point, radii, angle)
 
 Represent an ellipse with a centroid, radii and major axis angle. The major axis radius is
-stored first within radii, and the axis angle is defined from the x-axis.
+stored first within `radii`, and the axis angle is defined CCW from the positive x-axis.
 """
 struct Ellipse{T} <: GeometryEntity{T}
     center::Point{T}
@@ -163,14 +163,15 @@ function Ellipse(center::Point{T}, radii, angle) where {T}
     V = float(promote_type(T, typeof(radii[1]), typeof(radii[2])))
     return Ellipse{V}(center, radii, angle)
 end
-Ellipse(center::Point{T}; r::S) where {T, S <: Coordinate} = Ellipse(center, (r, r), 0.0°)
+Ellipse(center::Point; r::Coordinate) = Ellipse(center, (r, r), 0.0°)
 
 copy(e::Ellipse) = Ellipse(e.center, e.radii, e.angle)
 
 """
-    Circle(center::Point{T}, r::T)
+    Circle(center::Point, r::Coordinate)
+    Circle(r::Coordinate)
 
-Construct an Ellipse with major and minor radii equal to `r` at `center`.
+Construct an Ellipse with major and minor radii equal to `r` at `center` (or origin if not provided).
 """
 Circle(center::Point{T}, r::T) where {T} = Ellipse(center, (r, r), 0.0°)
 Circle(r::T) where {T <: Coordinate} = Circle(zero(Point{T}), r)
