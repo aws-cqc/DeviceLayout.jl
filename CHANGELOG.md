@@ -26,6 +26,7 @@ The format of this changelog is based on
     rather than letting them flow into the constructor
   - Added optional `rtol` keyword argument for `render!`/`to_polygons` to allow larger features to be rendered with relaxed tolerance; if provided, curves are discretized with tolerance `max(atol, rtol * local_curvature_radius)`
   - Fixed issue where rendering keyword arguments could be dropped for compound segments with non-compound styles
+  - Fixed overly-strict `Ellipse` and `Circle` constructors to allow different center and radius coordinate types
 
 ## 1.13.0 (2026-04-28)
 
