@@ -239,9 +239,9 @@ For every entity on layer `ly` in `sch.coordinate_system` that has been indexed
 (i.e., `layerindex(metadata) != 0`) AND carries a [`WithDirection`](@ref) style in
 its wrapper chain, return a dictionary mapping `layerindex(metadata) -> direction config value` suitable for Palace's `LumpedPort`/`WavePort` `Direction` field.
 
-Direction strings are `"+X"`, `"-X"`, `"+Y"`, `"-Y"` for axis-aligned orientations
-(within `atol=1e-3` degrees of the nearest axis), or `[dx, dy, 0.0]` for arbitrary
-orientations.
+Direction config value is a string `"+X"`, `"-X"`, `"+Y"`, or `"-Y"` for axis-aligned orientations
+(within `atol=1e-3` degrees of the nearest axis), or a unit vector `[dx, dy, 0.0]::Vector{Float64}`
+for arbitrary orientations.
 
 Must be called AFTER indexing has run. Typical usage is after `render!(sm, sch, target)` or `Cell(sch, target)` for a target whose `indexed_layers(target)`
 includes `ly`. If no entities on `ly` are indexed or none carry `WithDirection`,

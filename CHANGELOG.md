@@ -32,6 +32,10 @@ coordinate system) with no `SolidModel` and no geometry kernel.
     through `_build_subcomponents` via `parameter_set(graph)` and
     `create_component(T, ps, address)`
     - Added `set_parameters(c, ps, address; kwargs...)` and the scoped form
+  - Added `SchematicDrivenLayout.footprint_halo` for implementing fast custom halos with less boilerplate
+  - Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
+  - Fixed incorrect loading of GDS array references with nonzero origin
+  - Added `set_parameters(c, ps, address; kwargs...)` and the scoped form
     `set_parameters(c, sub::ParameterSet)` for the templates-aliasing pattern:
     overlay `ParameterSet` leaves on top of a template instance, with optional
     composite-level kwargs winning over the overlay. Unknown leaves under the
