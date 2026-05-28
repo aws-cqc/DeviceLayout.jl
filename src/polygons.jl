@@ -157,12 +157,12 @@ struct Ellipse{T} <: GeometryEntity{T}
     angle::typeof(1.0°)
     Ellipse{T}(c, r, a) where {T} = new{T}(c, r[1] < r[2] ? (r[2], r[1]) : r, a)
 end
-Ellipse(center::Point{T}, radii, angle) where {T} = Ellipse{T}(center, radii, angle)
-Ellipse(center::Point{T}; r::T) where {T} = Ellipse{T}(center, (r, r), 0.0°)
-function Ellipse(center::Point{S}; r::T) where {S, T}
-    V = float(promote_type(S, T))
-    return Ellipse(convert(Point{V}, center); r=convert(V, r))
+Ellipse(center::Point{T}, radii::NTuple{2,T}, angle) where {T} = Ellipse{T}(center, radii, angle)
+function Ellipse(center::Point{T}, radii, angle) where {T}
+    V = float(promote_type(T, typeof(radii[1]), typeof(radii[2])))
+    return Ellipse{V}(center, radii, angle)
 end
+Ellipse(center::Point{T}; r::S) where {T, S <: Coordinate} = Ellipse(center, (r, r), 0.0°)
 
 copy(e::Ellipse) = Ellipse(e.center, e.radii, e.angle)
 
