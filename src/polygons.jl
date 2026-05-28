@@ -159,6 +159,11 @@ struct Ellipse{T} <: GeometryEntity{T}
 end
 Ellipse(center::Point{T}, radii, angle) where {T} = Ellipse{T}(center, radii, angle)
 Ellipse(center::Point{T}; r::T) where {T} = Ellipse{T}(center, (r, r), 0.0°)
+function Ellipse(center::Point{S}; r::T) where {S, T}
+    V = float(promote_type(S, T))
+    return Ellipse(convert(Point{V}, center); r=convert(V, r))
+end
+
 copy(e::Ellipse) = Ellipse(e.center, e.radii, e.angle)
 
 """
@@ -168,6 +173,10 @@ Construct an Ellipse with major and minor radii equal to `r` at `center`.
 """
 Circle(center::Point{T}, r::T) where {T} = Ellipse(center, (r, r), 0.0°)
 Circle(r::T) where {T <: Coordinate} = Circle(zero(Point{T}), r)
+function Circle(center::Point{S}, r::T) where {S, T}
+    V = float(promote_type(S, T))
+    return Circle(convert(Point{V}, center), convert(V, r))
+end
 
 center(e::Ellipse) = e.center
 r1(e::Ellipse) = e.radii[1]

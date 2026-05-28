@@ -634,6 +634,14 @@ end
 
     # circle is deprecated
     @test_logs (:warn, r"deprecated") circle(10.0)
+
+    # Issue #228
+    @test Circle(Point(1µm, 1µm), 1.0µm) isa Ellipse  # was MethodError
+    @test Circle(Point(1.0µm, 1µm), 1µm) isa Ellipse
+    @test Circle(Point(1µm, 1µm), 1nm) isa Ellipse
+    @test Circle(Point(1µm, 1µm), 1.0nm) isa Ellipse
+    @test Ellipse(Point(1µm, 1µm); r=1.0µm) isa Ellipse
+    @test Ellipse(Point(1µm, 1µm); r=1nm) isa Ellipse
 end
 
 @testitem "circular_arc equal angles" setup = [CommonTestSetup] begin
