@@ -21,7 +21,7 @@ Geometric Boolean operations on polygons are called "clipping" operations. For 2
 
 !!! info
 
-    Boolean operations in 3D with `SolidModel` are handled by the Open CASCADE Technology kernel, which works directly with rich geometry types rendered from our native `CoordinateSystem`. If you need boolean operations involving curved geometry whose results can't be achieved by clipping-then-rounding, then your 2D geometry should defer the boolean operation until `SolidModel` postrendering so that the result will still be represented with curves.
+    Boolean operations in 3D with `SolidModel` are handled by the Open CASCADE Technology kernel, which works directly with rich geometry types rendered from our native `CoordinateSystem`. If you need boolean operations involving curved geometry whose results can't be achieved by clipping-then-rounding, you have two options: keep curves in 2D using the curve-preserving Boolean variants (see [Recovering curves through clipping](@ref) below), or defer the boolean operation until `SolidModel` postrendering so that the result will still be represented with curves.
 
 For many use cases, `union2d`, `difference2d`, `intersect2d`, and `xor2d` behave as expected and are easiest to use.
 More general operations may be accomplished using the `clip` function.
@@ -44,6 +44,34 @@ A [`CurvilinearRegion`](@ref) pairs a `CurvilinearPolygon` exterior with zero or
 `CurvilinearPolygon` holes.
 
 See [API Reference: Curvilinear geometry](@ref api-curvilinear).
+
+### Recovering curves through clipping
+
+Boolean operations (`union2d`, `difference2d`, etc.) discretize curved geometry to polygons
+before passing them to the Clipper library. Normally, the original curves (arcs, splines)
+are lost in this process. The [`recover_curves`](@ref) function and its convenience
+wrappers (`difference2d_curved`, `union2d_curved`, `intersect2d_curved`, `xor2d_curved`)
+track each input curve's discretized integer-grid footprint and substitute the original
+curve back into the result wherever that footprint survived the boolean operation intact.
+
+The curve-preserving variants return a `Vector{CurvilinearRegion}` rather than a single
+`ClippedPolygon`. Each region in the vector corresponds to one outer contour in the clipped
+result (the disjoint pieces each become a separate region). For example:
+
+```julia
+# Standard clipping discretizes curves to polygons:
+result = difference2d(a, b)  # ClippedPolygon
+
+# Curve-preserving variant recovers arcs where possible:
+regions = difference2d_curved(a, b)  # Vector{CurvilinearRegion}, arcs preserved
+```
+
+**Current limitations:** A curve is recovered only if its entire discretized run survives
+the boolean operation with exact integer equality. If the operation cuts through a curve
+(e.g., a straight edge crossing an arc's interior), that curve falls back to a polyline.
+Additionally, curves can only be recovered on CurvilinearRegion/CurvilinearPolygon,
+Path nodes, and `Rounded`-styled `Polygon`/`Rectangle` entities. `Rounded` applied to
+other entities, styled Curvilinear entities, and nested styles do not yet support curve recovery.
 
 ## Styles
 

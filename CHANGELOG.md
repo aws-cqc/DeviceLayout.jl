@@ -45,6 +45,7 @@ coordinate system) with no `SolidModel` and no geometry kernel.
     numbers in `ExampleStarTransmon`/`ExampleStarIsland` geometry were extracted to
     parameters. `ExamplePDK` makes no API-stability guarantee, so these are not treated
     as breaking changes to DeviceLayout.jl.
+  - Added `recover_curves` and the curve-preserving Boolean variants `union2d_curved`, `difference2d_curved`, `intersect2d_curved`, and `xor2d_curved`, which recover original curves (arcs, splines) from a clipped result wherever their discretized footprint survived the operation intact, returning a `Vector{CurvilinearRegion}`
 
 ## 1.14.0 (2026-05-28)
 

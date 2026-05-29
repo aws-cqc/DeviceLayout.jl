@@ -11,6 +11,8 @@ import DeviceLayout:
     AbstractPolygon,
     GeometryEntity,
     GeometryEntityStyle,
+    GeometryStructure,
+    GeometryReference,
     Paths,
     Reflection,
     Rotation,
@@ -20,6 +22,7 @@ import DeviceLayout:
     Translation
 import DeviceLayout:
     _compound_pin_render,
+    flat_elements,
     to_polygons,
     points,
     rotation,
@@ -44,6 +47,7 @@ export CurvilinearPolygon,
     round_to_curvilinearpolygon,
     rounded_corner_segment,
     rounded_corner_segment_line_arc
+export recover_curves, difference2d_curved, intersect2d_curved, union2d_curved, xor2d_curved
 
 """
     struct CurvilinearPolygon{T} <: GeometryEntity{T}
@@ -102,6 +106,16 @@ struct CurvilinearPolygon{T} <: GeometryEntity{T}
         for (curve_idx, start_idx) in enumerate(csi)
             csi[curve_idx] = start_idx - count(dup_idx .< start_idx)
         end
+        # Consumers (`to_polygons`, `_collect_provenance!`) walk curves with a running
+        # cursor and slice `p[i:csi]`, which requires `csi` ascending. Producers such as
+        # `_reverse` and reflective `transform` can emit unsorted indices when a curve
+        # wraps around to the last vertex, so sort curves and indices jointly here to
+        # restore the invariant for every producer.
+        if length(csi) > 1
+            perm = sortperm(csi)
+            c = c[perm]
+            csi = csi[perm]
+        end
         return new{T}(p, c, csi)
     end
 end
@@ -147,6 +161,15 @@ function to_polygons(
     append!(p, e.p[i:end])
 
     return Polygon{T}(p)
+end
+
+function _reverse(e::CurvilinearPolygon)
+    csi_rev = (i, N) -> mod1(i + 1, N) - N - 1
+    return CurvilinearPolygon(
+        reverse(e.p),
+        reverse(e.curves),
+        reverse(csi_rev.(e.curve_start_idx, length(e.p)))
+    )
 end
 
 function transform(e::CurvilinearPolygon, f::Transformation)
@@ -1108,13 +1131,7 @@ function round_to_curvilinearpolygon(
         end
     end
 
-    # Sort curves by start index so to_polygons can iterate in vertex order
-    if length(new_curve_start_idx) > 1
-        perm = sortperm(new_curve_start_idx)
-        new_curves = new_curves[perm]
-        new_curve_start_idx = new_curve_start_idx[perm]
-    end
-
+   # Constructor will sort curves by start index
     return CurvilinearPolygon(new_points, new_curves, new_curve_start_idx)
 end
 
@@ -1322,5 +1339,7 @@ function rounded_corner_segment_line_arc(
 
     return (; fillet, T_line, T_arc=T_arc_pt)
 end
+
+include("curve_recovery.jl")
 
 end # module

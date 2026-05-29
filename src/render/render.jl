@@ -212,3 +212,91 @@ Additional keyword arguments are passed to [`to_polygons`](@ref) for each entity
 certain entity types to control how they are converted to polygons.
 """
 render!(c::Cell, s::GeometryStructure; kwargs...) = _render!(c, s; kwargs...)
+
+####### Rendering pathway through Curvilinear
+function round_to_curvilinearpolygon(
+    pol::GeometryEntity{T},
+    radius::S;
+    corner_indices=eachindex(points(pol)),
+    line_arc_corner_indices=nothing,
+    min_angle=1e-3,
+    relative::Bool=(T <: Length) && (S <: Real),
+    min_side_len=relative ? zero(T) : radius
+) where {T, S <: Coordinate}
+    # If radius is dimensional, non-relative rounding.
+    V = float(T)
+    # Tie break for Real, Real introduces a type instability for non-dimensional.
+    relative = ((T <: Length) && (S <: Real)) || (relative && T <: Real && S <: Real)
+
+    poly = points(pol)
+    len = length(poly)
+    new_points = Point{V}[]
+    new_curves = Paths.Turn{V}[]
+    new_curve_start_idx = Int[]
+
+    for i in eachindex(poly)
+        if !(i in corner_indices)
+            push!(new_points, poly[i])
+        else
+            p0 = poly[mod1(i - 1, len)] # handles the cyclic boundary condition
+            p1 = poly[i]
+            p2 = poly[mod1(i + 1, len)]
+            radius_dim = relative ? radius * min(norm(p0 - p1), norm(p1 - p2)) : radius
+            seg_or_p1 = rounded_corner_segment(
+                p0,
+                p1,
+                p2,
+                radius_dim,
+                min_side_len=min_side_len,
+                min_angle=min_angle
+            )
+            if seg_or_p1 isa Paths.Turn
+                push!(new_points, Paths.p0(seg_or_p1))
+                push!(new_curves, seg_or_p1)
+                push!(new_curve_start_idx, length(new_points))
+                push!(new_points, Paths.p1(seg_or_p1))
+            else
+                push!(new_points, seg_or_p1)
+            end
+        end
+    end
+
+    return CurvilinearPolygon(new_points, new_curves, new_curve_start_idx)
+end
+
+function rounded_corner_segment(
+    p0::Point{T},
+    p1::Point{T},
+    p2::Point{T},
+    radius::S;
+    min_side_len=radius,
+    min_angle=1e-3
+) where {T, S <: Coordinate}
+    V = float(T)
+    rad = convert(V, radius)
+
+    v1 = (p1 - p0) / norm(p1 - p0)
+    v2 = (p2 - p1) / norm(p2 - p1)
+    α1 = atan(v1.y, v1.x) # between -π and π
+    α2 = atan(v2.y, v2.x)
+
+    if min_side_len > norm(p1 - p0) || min_side_len > norm(p2 - p1) # checks that the side lengths against min_side_len
+        return p1
+    elseif isapprox(rem2pi(α1 - α2, RoundNearest), 0, atol=min_angle) # checks if the points are collinear, within tolerance
+        return p1
+    end
+
+    dir = orientation(p0, p1, p2) # checks the direction of the corner
+    dα = α2 - α1 # always between +/- 2π
+    if sign(dα) != dir # Make sure turn is in the correct direction
+        dα = dα + dir * 2π # Still between +/- 2π
+    end
+
+    # p0_seg is the start of the arc, determined by the intersection
+    # of lines parallel to v1, v2
+    k =
+        inv([v1.x -v2.x; v1.y -v2.y]) *
+        [p2.x - p0.x + dir * rad * (v1.y - v2.y), p2.y - p0.y + dir * rad * (v2.x - v1.x)]
+    p0_seg = p0 + k[1] * v1
+    return Paths.Turn(uconvert(°, dα), rad, p0_seg, uconvert(°, α1))
+end
