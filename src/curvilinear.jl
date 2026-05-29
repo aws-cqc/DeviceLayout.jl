@@ -11,14 +11,27 @@ import DeviceLayout:
     AbstractPolygon,
     GeometryEntity,
     GeometryEntityStyle,
+    GeometryStructure,
+    GeometryReference,
     Paths,
     Reflection,
     Rotation,
     ScaledIsometry,
+    StyledEntity,
     Transformation,
     Translation
 import DeviceLayout:
-    to_polygons, points, rotation, origin, mag, xrefl, transform, perimeter, isapprox_angle
+    flat_elements,
+    to_polygons,
+    points,
+    rotation,
+    round_to_curvilinearpolygon,
+    origin,
+    mag,
+    xrefl,
+    transform,
+    perimeter,
+    isapprox_angle
 using DeviceLayout.Paths
 import DeviceLayout.Polygons: cornerindices
 
@@ -27,6 +40,7 @@ using ..Polygons
 using ..Paths
 
 export CurvilinearPolygon, CurvilinearRegion, pathtopolys, line_arc_cornerindices
+export recover_curves, difference2d_curved, intersect2d_curved, union2d_curved, xor2d_curved
 
 """
     struct CurvilinearPolygon{T} <: GeometryEntity{T}
@@ -959,5 +973,7 @@ function rounded_corner_line_arc(
     end
     return (; points=fillet_pts, T_arc=T_arc)
 end
+
+include("curve_recovery.jl")
 
 end # module

@@ -1,0 +1,518 @@
+@testitem "Provenance — preserved vertices survive Clipper" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point, Polygon, union2d
+    snap(p) = DeviceLayout.Polygons.clipperize(p)
+
+    R = 10.0
+    N = 64
+    circ = [Point(R * cos(t), R * sin(t)) for t in range(0, 2π, length=N + 1)[1:(end - 1)]]
+    poly = Polygon(circ)
+    in_int = snap.(circ)
+
+    sq = Polygon([
+        Point(1000.0, 1000.0),
+        Point(1001.0, 1000.0),
+        Point(1001.0, 1001.0),
+        Point(1000.0, 1001.0)
+    ])
+    res = union2d(poly, sq)
+
+    function allcontours(node, acc)
+        for c in node.children
+            push!(acc, c.contour)
+            allcontours(c, acc)
+        end
+        return acc
+    end
+    cons = allcontours(res.tree, Vector{Point{Float64}}[])
+    circ_con = argmax(length, cons)
+    out_set = Set(snap.(circ_con))
+
+    @test all(p -> p in out_set, in_int)
+    @test length(circ_con) == N
+end
+
+@testitem "Provenance — discretize_with_provenance captures arc runs" setup =
+    [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, Paths, Polygon
+    using DeviceLayout.Curvilinear: discretize_with_provenance
+    # Create a square with one curved edge: (0,0) -> (10,0) -> Turn -> (0,10)
+    # Turn from (10,0) with α0=90° (pointing up), radius 10, sweeping 90° ends at (0,10)
+    pts = Point{Float64}[(0, 0), (10, 0), (0, 10)]
+    turn = Paths.Turn(90.0°, 10.0; p0=Point(10.0, 0.0), α0=90.0°)
+    cpoly = CurvilinearPolygon(pts, [turn], [2])
+    polys, runs = discretize_with_provenance([cpoly], Float64)
+    @test polys isa Vector{<:Polygon}
+    @test length(runs) == 1
+    @test runs[1].curve === turn
+    @test runs[1].run[1] == DeviceLayout.Polygons.clipperize(Point(10.0, 0.0))
+    @test length(runs[1].run) ≥ 3
+end
+
+@testitem "Provenance — match_run cyclic + bidirectional" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point
+    M = DeviceLayout.Curvilinear   # match_run is internal (not exported)
+    ip(x) = Point{Int64}(x, 0)
+    contour = ip.([1, 2, 3, 4, 5, 6])
+    @test M.match_run(contour, ip.([2, 3, 4])) == (start=2, reversed=false)
+    @test M.match_run(contour, ip.([5, 6, 1])) == (start=5, reversed=false)  # cyclic wrap
+    @test M.match_run(contour, ip.([4, 3, 2])) == (start=2, reversed=true)   # reversed
+    @test M.match_run(contour, ip.([2, 4, 3])) === nothing                   # no contiguous match
+end
+
+@testitem "Provenance — substitute_curves recovers one arc" setup = [CommonTestSetup] begin
+    using DeviceLayout:
+        Point, CurvilinearPolygon, CurvilinearRegion, Paths, union2d, Polygon
+    using DeviceLayout.Curvilinear: discretize_with_provenance, substitute_curves
+    # A CurvilinearPolygon whose exterior has a single recoverable arc.
+    pts = Point{Float64}[(0, 0), (10, 0), (0, 10)]
+    turn = Paths.Turn(90.0°, 10.0; p0=Point(10.0, 0.0), α0=90.0°)
+    region = CurvilinearRegion(CurvilinearPolygon(pts, [turn], [2]))
+
+    polys, runs = discretize_with_provenance([region], Float64)
+    sq = Polygon([
+        Point(1e4, 1e4),
+        Point(1e4 + 1, 1e4),
+        Point(1e4 + 1, 1e4 + 1),
+        Point(1e4, 1e4 + 1)
+    ])
+    clipped = union2d(polys, [sq])              # ClippedPolygon, arc untouched
+    report = Tuple[]
+    out = substitute_curves(clipped, runs; report=report)
+    @test out isa Vector{<:CurvilinearRegion}
+    @test sum(length(r.exterior.curves) for r in out) == 1
+    @test count(t -> t[1] == :recovered, report) == 1
+    @test count(t -> t[1] == :clipped, report) == 0
+end
+
+@testitem "Provenance — substitute_curves recovers two arcs in order" setup =
+    [CommonTestSetup] begin
+    using DeviceLayout:
+        Point, CurvilinearPolygon, CurvilinearRegion, Paths, union2d, Polygon
+    using DeviceLayout.Curvilinear: discretize_with_provenance, substitute_curves
+    # A CurvilinearPolygon with two recoverable arcs (two rounded corners) on its exterior.
+    # Exercises the multi-curve ordering path: matched runs must be sorted by start index
+    # so to_polygons' monotonic cursor doesn't drop/misorder vertices.
+    t1 = Paths.Turn(90.0°, 2.0; p0=Point(10.0, 0.0), α0=0.0°)   # (10,0) heading +x → (12,2)
+    t2 = Paths.Turn(90.0°, 2.0; p0=Point(12.0, 10.0), α0=90.0°) # (12,10) heading +y → (10,12)
+    pts = Point{Float64}[(0, 0), (10, 0), (12, 2), (12, 10), (10, 12), (0, 12)]
+    region = CurvilinearRegion(CurvilinearPolygon(pts, [t1, t2], [2, 4]))
+
+    polys, runs = discretize_with_provenance([region], Float64)
+    sq = Polygon([
+        Point(1e4, 1e4),
+        Point(1e4 + 1, 1e4),
+        Point(1e4 + 1, 1e4 + 1),
+        Point(1e4, 1e4 + 1)
+    ])
+    clipped = union2d(polys, [sq])
+    report = Tuple[]
+    out = substitute_curves(clipped, runs; report=report)
+    # Clipper may order the disjoint square's region first, so select the curved
+    # region by curve count rather than assuming an index.
+    curved = out[findfirst(r -> !isempty(r.exterior.curves), out)]
+    @test length(curved.exterior.curves) == 2
+    # curve_start_idx must be ascending after sorting.
+    @test issorted(curved.exterior.curve_start_idx)
+    # to_polygons must not error or drop everything when walking the two curves.
+    @test length(DeviceLayout.to_polygons(curved.exterior).p) > 0
+    @test count(t -> t[1] == :recovered, report) == 2
+    @test count(t -> t[1] == :clipped, report) == 0
+end
+
+@testitem "Provenance — recover_curves end to end" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
+    using DeviceLayout: recover_curves, union2d, union2d_curved, difference2d_curved
+    pts = Point{Float64}[(0, 0), (10, 0), (0, 10)]
+    turn = Paths.Turn(90.0°, 10.0; p0=Point(10.0, 0.0), α0=90.0°)
+    region = CurvilinearRegion(CurvilinearPolygon(pts, [turn], [2]))
+    sq = Polygon([
+        Point(1e4, 1e4),
+        Point(1e4 + 1, 1e4),
+        Point(1e4 + 1, 1e4 + 1),
+        Point(1e4, 1e4 + 1)
+    ])
+
+    a = recover_curves(union2d, region, sq)
+    b = union2d_curved(region, sq)
+    @test a isa Vector{<:CurvilinearRegion}
+    @test b isa Vector{<:CurvilinearRegion}
+    @test sum(length(r.exterior.curves) for r in a) == 1
+    @test sum(length(r.exterior.curves) for r in b) == 1
+    # report kwarg flows through
+    report = Tuple[]
+    recover_curves(union2d, region, sq; report=report)
+    @test count(t -> t[1] == :recovered, report) == 1
+end
+
+@testitem "Provenance — interface methods" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
+    using DeviceLayout: recover_curves, union2d, union2d_curved, difference2d_curved
+    pts = Point{Float64}[(0, 0), (10, 0), (0, 10)]
+    turn = Paths.Turn(90.0°, 10.0; p0=Point(10.0, 0.0), α0=90.0°)
+    region = CurvilinearRegion(CurvilinearPolygon(pts, [turn], [2]))
+    sq = Polygon([
+        Point(1e4, 1e4),
+        Point(1e4 + 1, 1e4),
+        Point(1e4 + 1, 1e4 + 1),
+        Point(1e4, 1e4 + 1)
+    ])
+    cs1 = CoordinateSystem{Float64}("test1")
+    cs2 = CoordinateSystem{Float64}("test2")
+    place!(cs1, region, :curved)
+    place!(cs1, sq, :square)
+    place!(cs2, sq, :square)
+    out = union2d_curved(region, sq)
+    a = union2d_curved(cs1)
+    b = union2d_curved(region, cs2)
+    c = union2d_curved(cs1 => :curved, cs1 => :square)
+    d = union2d_curved([sq, cs1 => :curved])
+    @test isempty(to_polygons(xor2d(out, a)))
+    @test isempty(to_polygons(xor2d(a, b)))
+    @test isempty(to_polygons(xor2d(b, c)))
+    @test isempty(to_polygons(xor2d(c, d)))
+end
+
+@testitem "Provenance — Path round trips" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
+    using DeviceLayout: recover_curves, union2d, union2d_curved, difference2d_curved
+    # Trace
+    pa = Path()
+    turn!(pa, 90°, 50μm, Paths.Trace(5μm))
+    turn!(pa, 90°, 50μm, Paths.Trace(5μm))
+    out = union2d_curved(pa)
+    @test length(out) == 1 # Unioned into a single CurvilinearRegion
+    curved = out[1]
+    @test length(curved.exterior.curves) == 4 # original 4 curves
+    @test length(curved.exterior.p) == 6 # original 6 points
+    @test isempty(to_polygons(xor2d(curved, pathtopolys(pa))))
+
+    # CPW
+    pa = Path()
+    turn!(pa, 90°, 50μm, Paths.CPW(5μm, 5μm))
+    turn!(pa, 90°, 50μm, Paths.CPW(5μm, 5μm))
+    out = union2d_curved(pa)
+    @test length(out) == 2
+    curved = out[1]
+    @test length(curved.exterior.curves) == 4 # original 4 curves
+    @test length(curved.exterior.p) == 6 # original 6 points
+    @test isempty(to_polygons(xor2d(out, pathtopolys(pa))))
+
+    # Generic curves
+    pa = Path()
+    turn!(pa, 90°, 50μm, Paths.TaperTrace(5μm, 10μm))
+    out = union2d_curved(pa)
+    @test length(out) == 1 # Unioned into a single CurvilinearRegion
+    curved = out[1]
+    @test length(curved.exterior.curves) == 2 # Recognizes offset turn
+    @test isempty(to_polygons(xor2d(curved, pathtopolys(pa))))
+    # BSpline offset
+    pa = Path()
+    bspline!(pa, [Point(0μm, 1mm)], 180°, Paths.Trace(10μm))
+    out = union2d_curved(pa)
+    @test length(out) == 1 # Unioned into a single CurvilinearRegion
+    curved = out[1]
+    @test length(curved.exterior.curves) == 2
+    @test isempty(to_polygons(xor2d(curved, pathtopolys(pa))))
+end
+
+@testitem "Provenance — Rounded polygon round trips" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
+    using DeviceLayout: recover_curves, union2d, union2d_curved, difference2d_curved
+    r = centered(Rectangle(10.0μm, 10.0μm))
+    rr = Rounded(r, 1μm)
+    out = intersect2d_curved(r, rr)
+    curved = out[1]
+    @test length(curved.exterior.curves) == 4
+    @test length(curved.exterior.p) == 8
+    @test isempty(to_polygons(xor2d(curved, Curvilinear._as_entities(rr))))
+    r2 = centered(Rectangle(100μm, 2μm))
+    out = union2d_curved(rr, r2)
+    curved = out[1]
+    @test length(curved.exterior.curves) == 4
+    @test length(curved.exterior.p) == 16
+    @test isempty(to_polygons(xor2d(curved, [r2, Curvilinear._as_entities(rr)])))
+    out = difference2d_curved(rr, r2)
+    @test length(out) == 2
+    @test length(out[1].exterior.curves) == 2
+    @test length(out[2].exterior.curves) == 2
+    @test isempty(to_polygons(xor2d(out, difference2d(Curvilinear._as_entities(rr), r2))))
+end
+
+# ── Acceptance fixtures ─────────────────────────────────────────────────────
+
+@testitem "Provenance — single untouched arc, varied radius" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
+    using DeviceLayout: recover_curves, union2d, to_polygons
+    # An arc-bearing region unioned with a DISJOINT square recovers its arc intact
+    # across a range of radii (the integer-grid run survives byte-identical).
+    for R in (1.0, 100.0, 1.0μm, 100.0μm, 1.0mm)
+        z = zero(R)
+        T = typeof(R)
+        um = DeviceLayout.onemicron(T)
+        turn = Paths.Turn(90.0°, R; p0=Point(R, z), α0=90.0°)  # (R,0) heading +y → (0,R)
+        region = CurvilinearRegion(
+            CurvilinearPolygon(Point{T}[(z, z), (R, z), (z, R)], [turn], [2])
+        )
+        sq = Polygon([
+            Point(1e4, 1e4)um,
+            Point(1e4 + 1, 1e4)um,
+            Point(1e4 + 1, 1e4 + 1)um,
+            Point(1e4, 1e4 + 1)um
+        ])
+        report = Tuple[]
+        out = recover_curves(union2d, region, sq; report=report)
+        @test count(t -> t[1] == :recovered, report) == 1
+        @test count(t -> t[1] == :clipped, report) == 0
+        curved = out[findfirst(r -> !isempty(r.exterior.curves), out)]
+        @test length(curved.exterior.curves) == 1
+        @test length(curved.exterior.p) == 3
+        @test length(to_polygons(curved.exterior).p) > 0
+        @test isempty(to_polygons(xor2d(region, curved)))
+    end
+end
+
+@testitem "Provenance — seam-rotation (union with self)" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
+    using DeviceLayout: recover_curves, union2d
+    # A rectangle with ONE rounded corner unioned with a copy of itself. Clipper
+    # rotates the start vertex of the output contour so the seam lands on a kink.
+    # The cyclic match_run handles it.
+    t = Paths.Turn(90.0°, 2.0; p0=Point(18.0, 0.0), α0=0.0°)  # (18,0) heading +x → (20,2)
+    region = CurvilinearRegion(
+        CurvilinearPolygon(
+            Point{Float64}[(0, 0), (18, 0), (20, 2), (20, 10), (0, 10)],
+            [t],
+            [2]
+        )
+    )
+    report = Tuple[]
+    out = recover_curves(union2d, region, region; report=report)
+    # The arc survives the union-with-self and is recovered onto the merged contour.
+    @test count(t -> t[1] == :recovered, report) ≥ 1
+    @test count(t -> t[1] == :clipped, report) == 0
+    curved = out[findfirst(r -> !isempty(r.exterior.curves), out)]
+    @test length(curved.exterior.curves) == 1
+    @test length(curved.exterior.p) == 5
+    @test curved.exterior.curves[1] isa Paths.Turn
+    @test isempty(to_polygons(xor2d(region, out)))
+end
+
+@testitem "Provenance — reversed winding (arc on a hole)" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
+    using DeviceLayout.Curvilinear: recover_curves, difference2d, discretize_with_provenance
+    # Differencing a curved region out of a solid square puts the arc on the
+    # resulting HOLE boundary, whose winding is reversed relative to the input
+    # exterior. The reversed branch of match_run must fire to recover it.
+    plus = Polygon([Point(0.0, 0), Point(30, 0), Point(30, 30), Point(0, 30)])
+    tm = Paths.Turn(90.0°, 2.0; p0=Point(18.0, 10.0), α0=0.0°)  # (18,10) → (20,12)
+    minus = CurvilinearRegion(
+        CurvilinearPolygon(
+            Point{Float64}[(10, 10), (18, 10), (20, 12), (20, 20), (10, 20)],
+            [tm],
+            [2]
+        )
+    )
+    report = Tuple[]
+    out = recover_curves(difference2d, plus, minus; report=report)
+    @test count(t -> t[1] == :recovered, report) == 1
+    @test count(t -> t[1] == :clipped, report) == 0
+    # The recovered curve lands on a hole, not the exterior.
+    @test sum(length(r.exterior.curves) for r in out) == 0
+    @test sum(sum(length(h.curves) for h in r.holes; init=0) for r in out) == 1
+
+    # Confirm the reversed branch of match_run actually fired on the hole contour.
+    R = Float64
+    polys_plus, _ = discretize_with_provenance([plus], R)
+    polys_minus, runs_m = discretize_with_provenance([minus], R)
+    clipped = difference2d(polys_plus, polys_minus)
+    # Output is geometrically identical
+    @test isempty(to_polygons(xor2d(clipped, out)))
+    saw_reversed = Ref(false)
+    walk(node) =
+        for c in node.children
+            snapped = DeviceLayout.Polygons.clipperize.(collect(c.contour))
+            for pr in runs_m
+                hit = Curvilinear.match_run(snapped, pr.run)
+                (hit !== nothing && hit.reversed) && (saw_reversed[] = true)
+            end
+            walk(c)
+        end
+    walk(clipped.tree)
+    @test saw_reversed[]
+end
+
+@testitem "Provenance — arcs on exterior and a hole" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
+    using DeviceLayout: recover_curves, difference2d
+    # A region with an arc on its exterior, differenced by a curved region that
+    # becomes a hole carrying its own arc. Both arcs must be recovered, one on
+    # the exterior contour and one on the hole contour.
+    # NOTE: union2d with a disjoint square cannot be used here — discretizing a
+    # CurvilinearRegion yields exterior+hole as separate polygons, and union2d
+    # fills the hole back in. difference2d preserves both contours.
+    te = Paths.Turn(90.0°, 2.0; p0=Point(28.0, 0.0), α0=0.0°)  # exterior arc (28,0) → (30,2)
+    plus = CurvilinearRegion(
+        CurvilinearPolygon(
+            Point{Float64}[(0, 0), (28, 0), (30, 2), (30, 30), (0, 30)],
+            [te],
+            [2]
+        )
+    )
+    th = Paths.Turn(90.0°, 2.0; p0=Point(18.0, 10.0), α0=0.0°)  # hole arc (18,10) → (20,12)
+    minus = CurvilinearRegion(
+        CurvilinearPolygon(
+            Point{Float64}[(10, 10), (18, 10), (20, 12), (20, 20), (10, 20)],
+            [th],
+            [2]
+        )
+    )
+    report = Tuple[]
+    out = recover_curves(difference2d, plus, minus; report=report)
+    @test count(t -> t[1] == :recovered, report) == 2
+    @test count(t -> t[1] == :clipped, report) == 0
+    n_ext = sum(length(r.exterior.curves) for r in out)
+    n_hole = sum(sum(length(h.curves) for h in r.holes; init=0) for r in out)
+    @test n_ext == 1   # one arc on an exterior contour
+    @test n_hole == 1  # one arc on a hole contour
+    @test isempty(to_polygons(xor2d(difference2d(plus, minus), out)))
+end
+
+@testitem "Provenance — annulus / collision probe" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
+    using DeviceLayout.Curvilinear: recover_curves, union2d, discretize_with_provenance
+    # Two arcs of DIFFERENT radii in one geometry. Each must map to its own curve.
+    # Different radii produce different integer runs, so no cross-match collision
+    # is possible — we assert the runs differ to make that intent explicit.
+    t1 = Paths.Turn(90.0°, 2.0; p0=Point(10.0, 0.0), α0=0.0°)   # r=2: (10,0) → (12,2)
+    t2 = Paths.Turn(90.0°, 5.0; p0=Point(12.0, 10.0), α0=90.0°) # r=5: (12,10) → (7,15)
+    pts = Point{Float64}[(0, 0), (10, 0), (12, 2), (12, 10), (7, 15), (0, 15)]
+    region = CurvilinearRegion(CurvilinearPolygon(pts, [t1, t2], [2, 4]))
+    sq = Polygon([
+        Point(1e4, 1e4),
+        Point(1e4 + 1, 1e4),
+        Point(1e4 + 1, 1e4 + 1),
+        Point(1e4, 1e4 + 1)
+    ])
+    report = Tuple[]
+    out = recover_curves(union2d, region, sq; report=report)
+    @test count(t -> t[1] == :recovered, report) == 2
+    @test count(t -> t[1] == :clipped, report) == 0
+    curved = out[findfirst(r -> !isempty(r.exterior.curves), out)]
+    @test length(curved.exterior.curves) == 2
+    radii = sort([c.r for c in curved.exterior.curves])
+    @test radii == [2.0, 5.0]   # each arc recovered as its own distinct curve
+    @test isempty(to_polygons(xor2d(region, curved)))
+
+    # The two provenance runs differ → no cross-match collision is possible.
+    _, runs = discretize_with_provenance([region], Float64)
+    @test runs[1].run != runs[2].run
+end
+
+@testitem "Provenance — straight edge cuts an arc (clipped, not recovered)" setup =
+    [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
+    using DeviceLayout: recover_curves, difference2d
+    # A straight rectangle that crosses the arc interior. Clipper inserts a new
+    # intersection vertex on the arc, breaking its run. Recovery is all-or-nothing,
+    # so the cut arc is reported :clipped (NOT recovered) and falls back to polyline.
+    t = Paths.Turn(90.0°, 2.0; p0=Point(18.0, 10.0), α0=0.0°)  # (18,10) → (20,12)
+    region = CurvilinearRegion(
+        CurvilinearPolygon(
+            Point{Float64}[(10, 10), (18, 10), (20, 12), (20, 20), (10, 20)],
+            [t],
+            [2]
+        )
+    )
+    cutter = Polygon([
+        Point(18.5, 10.5),
+        Point(25.0, 10.5),
+        Point(25.0, 13.0),
+        Point(18.5, 13.0)
+    ])
+    report = Tuple[]
+    out = recover_curves(difference2d, region, cutter; report=report)
+    @test count(t -> t[1] == :recovered, report) == 0
+    @test count(t -> t[1] == :clipped, report) == 1
+    @test sum(length(r.exterior.curves) for r in out) == 0  # polyline fallback
+end
+
+@testitem "Provenance — full circle across the seam" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
+    using DeviceLayout: recover_curves, union2d, to_polygons
+    # A closed-loop circle built from two half-circle Turns (a single 360° Turn is
+    # degenerate — start and end vertices coincide), unioned with a disjoint square.
+    # Both half-arcs must be recovered onto the single closed contour.
+    R = 10.0
+    t1 = Paths.Turn(180.0°, R; p0=Point(R, 0.0), α0=90.0°)    # top half: (R,0) → (-R,0)
+    t2 = Paths.Turn(180.0°, R; p0=Point(-R, 0.0), α0=-90.0°)  # bottom half: (-R,0) → (R,0)
+    region = CurvilinearRegion(
+        CurvilinearPolygon(Point{Float64}[(R, 0), (-R, 0)], [t1, t2], [1, 2])
+    )
+    sq = Polygon([
+        Point(1e4, 1e4),
+        Point(1e4 + 1, 1e4),
+        Point(1e4 + 1, 1e4 + 1),
+        Point(1e4, 1e4 + 1)
+    ])
+    report = Tuple[]
+    out = recover_curves(union2d, region, sq; report=report)
+    @test count(t -> t[1] == :recovered, report) == 2
+    @test count(t -> t[1] == :clipped, report) == 0
+    curved = out[findfirst(r -> !isempty(r.exterior.curves), out)]
+    @test length(curved.exterior.p) == 2
+    @test length(curved.exterior.curves) == 2
+    @test length(to_polygons(curved.exterior).p) > 0
+    @test isempty(to_polygons(xor2d(region, curved)))
+end
+
+@testitem "Provenance — BSpline segment (type-agnostic)" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
+    using DeviceLayout: recover_curves, union2d
+    # A BSpline-bearing region unioned with a disjoint square. The recovery
+    # mechanism is curve-type-agnostic: it must recover the BSpline, not just arcs.
+    bpts = Point{Float64}[(10, 0), (13, 3), (16, 2), (18, 6)]
+    bs = Paths.BSpline(bpts, Point(1.0, 1.0), Point(1.0, 1.0))
+    pts = Point{Float64}[(0, 0), bs.p0, bs.p1, (0, 10)]
+    region = CurvilinearRegion(CurvilinearPolygon(pts, [bs], [2]))
+    sq = Polygon([
+        Point(1e4, 1e4),
+        Point(1e4 + 1, 1e4),
+        Point(1e4 + 1, 1e4 + 1),
+        Point(1e4, 1e4 + 1)
+    ])
+    report = Tuple[]
+    out = recover_curves(union2d, region, sq; report=report)
+    @test count(t -> t[1] == :recovered, report) == 1
+    @test count(t -> t[1] == :clipped, report) == 0
+    curved = out[findfirst(r -> !isempty(r.exterior.curves), out)]
+    @test length(curved.exterior.curves) == 1
+    @test curved.exterior.curves[1] isa Paths.BSpline
+    @test isempty(to_polygons(xor2d(region, curved)))
+end
+
+@testitem "Provenance — clipped curve not spuriously recovered" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
+    using DeviceLayout: recover_curves, difference2d
+    # Safety property: a destroyed arc must NEVER emit a (wrong) curve. Uses the same
+    # cut-arc geometry as the "straight edge cuts an arc" case and asserts zero
+    # recovery, a :clipped report, and a polyline (zero-curve) exterior.
+    t = Paths.Turn(90.0°, 2.0; p0=Point(18.0, 10.0), α0=0.0°)
+    region = CurvilinearRegion(
+        CurvilinearPolygon(
+            Point{Float64}[(10, 10), (18, 10), (20, 12), (20, 20), (10, 20)],
+            [t],
+            [2]
+        )
+    )
+    cutter = Polygon([
+        Point(18.5, 10.5),
+        Point(25.0, 10.5),
+        Point(25.0, 13.0),
+        Point(18.5, 13.0)
+    ])
+    report = Tuple[]
+    out = recover_curves(difference2d, region, cutter; report=report)
+    @test count(t -> t[1] == :recovered, report) == 0
+    @test any(t -> t[1] == :clipped, report)
+    @test all(isempty(r.exterior.curves) for r in out)
+end
