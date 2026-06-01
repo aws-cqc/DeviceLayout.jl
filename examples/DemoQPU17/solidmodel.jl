@@ -21,12 +21,9 @@ SolidModels.gmsh.option.set_number("General.Verbosity", 2)
 
 DeviceLayout.save("qpu17.xao", sm)
 # Verify port connectivity (~2 min)
-# < 1s without staple detection
-# But still >2 min with mesh control on bridges (only staples are from intersection XSTY), why?
-# The bridges shouldn't need any isInside checks in that case because the bounding box checks fail
-# So maybe those are expensive? Need to investigate, may still be room for improvement
-# Otherwise might just leave QPU17 without the mesh control polygons
-@time conn = SolidModels.check_port_connectivity(sm, ["port_$i" for i=1:42], ["metal"]; dim=2)
+# < 1s without staple detection, ~30 seconds with
+@time conn = SolidModels.check_port_connectivity(sm,
+    ["port_$i" for i=1:42], ["metal"]; dim=2, detect_non_boundary_contacts=true)
 for i = 1:42
     port = "port_$i"
     component_node =  schematic.index_dict[:port][i]

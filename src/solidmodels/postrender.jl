@@ -1045,7 +1045,11 @@ end
 connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; kwargs...) =
     connected_components(dim, entitytags(sm[group, dim]); kwargs...)
 
-function connected_components(dim::Integer, tags::Vector{Int32}; detect_non_boundary_contacts=false)
+function connected_components(
+    dim::Integer,
+    tags::Vector{Int32};
+    detect_non_boundary_contacts=false
+)
     n = length(tags)
     isempty(tags) && return Vector{Tuple{Int32, Int32}}[]
     n == 1 && return [[(Int32(dim), only(tags))]]
@@ -1114,11 +1118,8 @@ function connected_components(dim::Integer, tags::Vector{Int32}; detect_non_boun
                 j, ftag = elem.val
                 j == owner_idx && continue
                 find(j) == find(owner_idx) && continue
-                _bbox_contains(
-                    [elem.mbr.low..., elem.mbr.high...],
-                    ebbox,
-                    pad=0.0
-                ) || continue
+                _bbox_contains([elem.mbr.low..., elem.mbr.high...], ebbox, pad=0.0) ||
+                    continue
                 _curve_lies_on_face(btag, ftag; tol=0.0) || continue
                 unite(owner_idx, j)
             end
@@ -1208,6 +1209,9 @@ classify them algorithmically but the results are generally not electrically mea
 
   - `dim=2`: dimension of port and metal groups. `3` is appropriate for volumetric lumped
     ports in a 3D model; `2` would be used for surfaces.
+  - `detect_non_boundary_contacts=false`: If `true` and `dim == 2`, then `connected_components`
+    finds non-conformal contacts (1D edges in the interior of 2D surfaces, like the foot edge
+    of a "staple" air-bridge leg landing on a ground plane) and treats them as connections
 
 # Algorithm
 
@@ -1223,13 +1227,19 @@ classify them algorithmically but the results are generally not electrically mea
 
 See also [`connected_components`](@ref).
 """
-function check_port_connectivity(sm::SolidModel, port_names, metal_groups; dim::Integer=2)
+function check_port_connectivity(
+    sm::SolidModel,
+    port_names,
+    metal_groups;
+    dim::Integer=2,
+    detect_non_boundary_contacts=false
+)
     SolidModels._synchronize!(sm)
 
     # Build connected-components tag → component-index map.
     tag_to_comp = Dict{Int32, Int}()
     if !isempty(metal_groups)
-        comps = connected_components(sm, metal_groups, dim)
+        comps = connected_components(sm, metal_groups, dim; detect_non_boundary_contacts)
         for (ci, comp_dimtags) in enumerate(comps)
             for (_, tag) in comp_dimtags
                 tag_to_comp[tag] = ci

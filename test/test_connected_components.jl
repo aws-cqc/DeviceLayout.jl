@@ -59,10 +59,8 @@
         l1 = gmsh.model.occ.addLine(9, 10)
         l2 = gmsh.model.occ.addLine(11, 12)
         ext = gmsh.model.occ.extrude([(1, 9), (1, 10)], 0.0, 0.0, 1.0)
-        frag, _ = gmsh.model.occ.fragment(
-            [(1, l1), (1, l2)],
-            [(2, 1), (2, 2), (2, 3), (2, 4)]
-        )
+        frag, _ =
+            gmsh.model.occ.fragment([(1, l1), (1, l2)], [(2, 1), (2, 2), (2, 3), (2, 4)])
         gmsh.model.occ.synchronize()
         tags = Int32[dt[2] for dt in frag if dt[1] == 2]
 
@@ -94,7 +92,13 @@
             ],
             solidmodel=true
         )
-        @test length(connected_components(sm, ["bridge_metal", "gnd"], detect_non_boundary_contacts=true)) == 1
+        @test length(
+            connected_components(
+                sm,
+                ["bridge_metal", "gnd"],
+                detect_non_boundary_contacts=true
+            )
+        ) == 1
         # Does not work without stapling
         @test length(connected_components(sm, ["bridge_metal", "gnd"])) == 2
     end
