@@ -1011,21 +1011,21 @@ function remove_group!(group::PhysicalGroup; recursive=true, remove_entities=tru
 end
 
 """
-    connected_components(dim::Int, tags::Vector{Int32}; staple_tol=1e-6)
-    connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; staple_tol=1e-6)
-    connected_components(sm::SolidModel, groups, dim=2; staple_tol=1e-6)
+    connected_components(dim::Int, tags::Vector{Int32}; detect_non_boundary_contacts=false)
+    connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; detect_non_boundary_contacts=false)
+    connected_components(sm::SolidModel, groups, dim=2; detect_non_boundary_contacts=false)
 
 Find connected components among SolidModel entities at dimension `dim` with the given `tags` or physical group names.
 
 Two entities are connected if they share any boundary entity (dimension `dim - 1`).
 Uses union-find with path compression on the adjacency graph from `gmsh.model.getAdjacencies`.
 
-For `dim == 2`, also unites entities that share a "stray" 1D entity that lies in the
-interior of a 2D entity without being one of its topological boundary curves. This is
+For `dim == 2`, set `detect_non_boundary_contacts=true` to unite entities that share a "stray"
+1D entity that lies in the interior of a 2D entity without being one of its topological boundary curves. This is
 necessary even after embedding with `fragment` because OpenCascade's `getAdjacencies`
 does not see the connection (a typical case is the foot edge of a "staple" air-bridge leg
 landing on a ground plane). Checking stray 1D entities can be relatively slow if they exist, so
-it's better to add dummy 2D entities that attach to them. Set `staple_tol=0` to disable.
+it may be preferable to add dummy 2D entities that attach to them.
 
 Returns a `Vector{Vector{Tuple{Int32, Int32}}}` where each inner vector contains the entity dimtags
 of one connected component.
@@ -1045,7 +1045,7 @@ end
 connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; kwargs...) =
     connected_components(dim, entitytags(sm[group, dim]); kwargs...)
 
-function connected_components(dim::Integer, tags::Vector{Int32}; staple_tol=1e-6)
+function connected_components(dim::Integer, tags::Vector{Int32}; detect_non_boundary_contacts=false)
     n = length(tags)
     isempty(tags) && return Vector{Tuple{Int32, Int32}}[]
     n == 1 && return [[(Int32(dim), only(tags))]]
@@ -1090,7 +1090,7 @@ function connected_components(dim::Integer, tags::Vector{Int32}; staple_tol=1e-6
     # Only the dim=2 / dim-1=1 case (curve in face) is handled — this catches the
     # staple-bridge foot landing on an interior of a metal plane. For dim=3, "face inside
     # volume interior" is not a typical Palace configuration so we skip it.
-    if dim == 2 && staple_tol > 0
+    if dim == 2 && detect_non_boundary_contacts
         bbox_tree = RTree{Float64, 3}(Tuple{Int, Int32})
         function convertel(enumtag)
             bbox = gmsh.model.get_bounding_box(dim, enumtag[2])
@@ -1116,10 +1116,10 @@ function connected_components(dim::Integer, tags::Vector{Int32}; staple_tol=1e-6
                 find(j) == find(owner_idx) && continue
                 _bbox_contains(
                     [elem.mbr.low..., elem.mbr.high...],
-                    ebbox;
-                    pad=staple_tol
+                    ebbox,
+                    pad=0.0
                 ) || continue
-                _curve_lies_on_face(btag, ftag; tol=staple_tol) || continue
+                _curve_lies_on_face(btag, ftag; tol=0.0) || continue
                 unite(owner_idx, j)
             end
         end

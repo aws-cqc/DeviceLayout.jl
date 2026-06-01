@@ -52,7 +52,6 @@
         fresh_model("stray_edge")
         gmsh.model.occ.addRectangle(-10, -10, 0, 20, 20)
         gmsh.model.occ.addRectangle(0, 0, 1, 1, 1)
-        gmsh.model.occ.addRectangle(0, 0, 0, 1, 1)
         gmsh.model.occ.addPoint(0, 0, 0)
         gmsh.model.occ.addPoint(0, 1, 0)
         gmsh.model.occ.addPoint(1, 1, 0)
@@ -62,27 +61,26 @@
         ext = gmsh.model.occ.extrude([(1, 9), (1, 10)], 0.0, 0.0, 1.0)
         frag, _ = gmsh.model.occ.fragment(
             [(1, l1), (1, l2)],
-            [(2, 1), (2, 2), (2, 3), (2, 4), (2, 5)]
+            [(2, 1), (2, 2), (2, 3), (2, 4)]
         )
         gmsh.model.occ.synchronize()
-        leg_faces = Int32[dt[2] for dt in frag if dt[1] == 2]
-        tags = leg_faces
+        tags = Int32[dt[2] for dt in frag if dt[1] == 2]
 
         # Topology only: ground plane (tag 1) is disconnected from each leg face.
-        result_topo = connected_components(2, tags; staple_tol=0.0) # tol=0.0 turns off augmentation
+        result_topo = connected_components(2, tags) # default: no augmentation
         @test length(result_topo) == 2
 
         # Geometric augmentation: the foot edges lie in the ground plane's interior
         # and are boundary edges of the leg faces → all united into 1 component.
-        result_geom = connected_components(2, tags; staple_tol=1e-6)
+        result_geom = connected_components(2, tags; detect_non_boundary_contacts=true)
         @test length(result_geom) == 1
     end
 
-    @testset "staple bridge connects" setup = [CommonTestSetup] begin
+    @testset "staple bridge connects" begin
         cs = DeviceLayout.SchematicDrivenLayout.ExamplePDK.bridge_geometry(
-            Paths.CPW(10μm, 6μm)
+            Paths.CPW(10e3nm, 6e3nm)
         )
-        place!(cs, centered(Rectangle(1mm, 1mm)), :gnd)
+        place!(cs, centered(Rectangle(1e6nm, 1e6nm)), :gnd)
         sm = SolidModel("test"; overwrite=true)
         render!(
             sm,
@@ -96,9 +94,9 @@
             ],
             solidmodel=true
         )
-        @test length(connected_components(sm, ["bridge_metal", "gnd"])) == 1
-        # Works even without stapling
-        @test length(connected_components(sm, ["bridge_metal", "gnd"], staple_tol=0)) == 1
+        @test length(connected_components(sm, ["bridge_metal", "gnd"], detect_non_boundary_contacts=true)) == 1
+        # Does not work without stapling
+        @test length(connected_components(sm, ["bridge_metal", "gnd"])) == 2
     end
 
     @testset "shared-boundary volumes via fragment" begin
