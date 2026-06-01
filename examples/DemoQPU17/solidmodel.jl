@@ -14,17 +14,18 @@ if length(target.rendering_options.retained_physical_groups) < 10
     lumped_elements = [("lumped_element_$i", 2) for i = 1:34]
     append!(target.rendering_options.retained_physical_groups, ports, lumped_elements)
 end
-# # This is fine for geometry but broke meshing the one try I gave it
-# empty!(target.bounding_layers) # Model includes everything, no need to intersect with bounding box
-# # But then we have to make "exterior_boundary" ourselves
-# push!(target.postrenderer, ("exterior_boundary", SolidModels.get_boundary, ("simulated_area_extrusion", 3)))
 
 sm = SolidModel("demo"; overwrite=true)
 SolidModels.gmsh.option.set_number("General.Verbosity", 2)
-@time render!(sm, schematic, target) # ~30 min
+@time render!(sm, schematic, target) # ~30 min => 1 hr with mesh control on bridges
 
 DeviceLayout.save("qpu17.xao", sm)
 # Verify port connectivity (~2 min)
+# < 1s without staple detection
+# But still >2 min with mesh control on bridges (only staples are from intersection XSTY), why?
+# The bridges shouldn't need any isInside checks in that case because the bounding box checks fail
+# So maybe those are expensive? Need to investigate, may still be room for improvement
+# Otherwise might just leave QPU17 without the mesh control polygons
 @time conn = SolidModels.check_port_connectivity(sm, ["port_$i" for i=1:42], ["metal"]; dim=2)
 for i = 1:42
     port = "port_$i"

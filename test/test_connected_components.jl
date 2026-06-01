@@ -52,6 +52,7 @@
         fresh_model("stray_edge")
         gmsh.model.occ.addRectangle(-10, -10, 0, 20, 20)
         gmsh.model.occ.addRectangle(0, 0, 1, 1, 1)
+        gmsh.model.occ.addRectangle(0, 0, 0, 1, 1)
         gmsh.model.occ.addPoint(0, 0, 0)
         gmsh.model.occ.addPoint(0, 1, 0)
         gmsh.model.occ.addPoint(1, 1, 0)
@@ -59,10 +60,10 @@
         l1 = gmsh.model.occ.addLine(9, 10)
         l2 = gmsh.model.occ.addLine(11, 12)
         ext = gmsh.model.occ.extrude([(1, 9), (1, 10)], 0.0, 0.0, 1.0)
-        gmsh.model.occ.fragment([(1, l1), (1, l2)], [(2, 1), (2, 2), (2, 3), (2, 4)])
+        frag, _ = gmsh.model.occ.fragment([(1, l1), (1, l2)], [(2, 1), (2, 2), (2, 3), (2, 4), (2, 5)])
         gmsh.model.occ.synchronize()
-        leg_faces = Int32[dt[2] for dt in ext if dt[1] == 2]
-        tags = Int32[1; 2; leg_faces]
+        leg_faces = Int32[dt[2] for dt in frag if dt[1] == 2]
+        tags = leg_faces
 
         # Topology only: ground plane (tag 1) is disconnected from each leg face.
         result_topo = connected_components(2, tags; staple_tol=0.0) # tol=0.0 turns off augmentation
@@ -72,6 +73,21 @@
         # and are boundary edges of the leg faces → all united into 1 component.
         result_geom = connected_components(2, tags; staple_tol=1e-6)
         @test length(result_geom) == 1
+    end
+
+    @testset "staple bridge connects" setup = [CommonTestSetup] begin
+        cs = DeviceLayout.SchematicDrivenLayout.ExamplePDK.bridge_geometry(Paths.CPW(10μm, 6μm))
+        place!(cs, centered(Rectangle(1mm, 1mm)), :gnd)
+        sm = SolidModel("test"; overwrite=true)
+        render!(sm, cs; postrender_ops=[
+            SolidModels.staple_bridge_postrendering(;
+                base="bridge_base",
+                bridge="bridge",
+                bridge_height=10μm # Exaggerated, for visualization
+            )...,], solidmodel=true)
+        @test length(connected_components(sm, ["bridge_metal", "gnd"])) == 1
+        # Works even without stapling
+        @test length(connected_components(sm, ["bridge_metal", "gnd"], staple_tol=0)) == 1
     end
 
     @testset "shared-boundary volumes via fragment" begin
