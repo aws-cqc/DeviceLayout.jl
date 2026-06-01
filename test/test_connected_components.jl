@@ -60,7 +60,10 @@
         l1 = gmsh.model.occ.addLine(9, 10)
         l2 = gmsh.model.occ.addLine(11, 12)
         ext = gmsh.model.occ.extrude([(1, 9), (1, 10)], 0.0, 0.0, 1.0)
-        frag, _ = gmsh.model.occ.fragment([(1, l1), (1, l2)], [(2, 1), (2, 2), (2, 3), (2, 4), (2, 5)])
+        frag, _ = gmsh.model.occ.fragment(
+            [(1, l1), (1, l2)],
+            [(2, 1), (2, 2), (2, 3), (2, 4), (2, 5)]
+        )
         gmsh.model.occ.synchronize()
         leg_faces = Int32[dt[2] for dt in frag if dt[1] == 2]
         tags = leg_faces
@@ -76,15 +79,23 @@
     end
 
     @testset "staple bridge connects" setup = [CommonTestSetup] begin
-        cs = DeviceLayout.SchematicDrivenLayout.ExamplePDK.bridge_geometry(Paths.CPW(10μm, 6μm))
+        cs = DeviceLayout.SchematicDrivenLayout.ExamplePDK.bridge_geometry(
+            Paths.CPW(10μm, 6μm)
+        )
         place!(cs, centered(Rectangle(1mm, 1mm)), :gnd)
         sm = SolidModel("test"; overwrite=true)
-        render!(sm, cs; postrender_ops=[
-            SolidModels.staple_bridge_postrendering(;
-                base="bridge_base",
-                bridge="bridge",
-                bridge_height=10μm # Exaggerated, for visualization
-            )...,], solidmodel=true)
+        render!(
+            sm,
+            cs;
+            postrender_ops=[
+                SolidModels.staple_bridge_postrendering(;
+                    base="bridge_base",
+                    bridge="bridge",
+                    bridge_height=10μm # Exaggerated, for visualization
+                )...
+            ],
+            solidmodel=true
+        )
         @test length(connected_components(sm, ["bridge_metal", "gnd"])) == 1
         # Works even without stapling
         @test length(connected_components(sm, ["bridge_metal", "gnd"], staple_tol=0)) == 1

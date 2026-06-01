@@ -75,13 +75,9 @@ function bridge_geometry(style::Paths.SimpleCPW)
     rect_bridge = centered(
         Rectangle(bridge_width, h_ground_ground + 2 * (scaffold_gap + foot_length))
     )
-    rect_scaffold =
-        centered(Rectangle(scaffold_width, h_ground_ground + 2 * scaffold_gap))
+    rect_scaffold = centered(Rectangle(scaffold_width, h_ground_ground + 2 * scaffold_gap))
     place!(cs, rect_bridge, LayerVocabulary.BRIDGE)
     place!(cs, rect_scaffold, LayerVocabulary.BRIDGE_BASE)
-    # Mesh/conformality control -- avoid stray 1D "staple" attachment points
-    rect_control = intersect2d(rect_bridge, rect_scaffold)
-    place!(cs, only_solidmodel(rect_control), LayerVocabulary.MESH_CONTROL)
     return cs
 end
 

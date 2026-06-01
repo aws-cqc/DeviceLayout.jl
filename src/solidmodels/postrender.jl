@@ -1091,19 +1091,34 @@ function connected_components(dim::Integer, tags::Vector{Int32}; staple_tol=1e-6
     # staple-bridge foot landing on an interior of a metal plane. For dim=3, "face inside
     # volume interior" is not a typical Palace configuration so we skip it.
     if dim == 2 && staple_tol > 0
-        bbox_cache = Dict{Int32, NTuple{6, Float64}}()
-        get_bbox(d, t) =
-            get!(bbox_cache, t) do
-                return gmsh.model.getBoundingBox(d, t)
-            end
+        bbox_tree = RTree{Float64, 3}(Tuple{Int, Int32})
+        function convertel(enumtag)
+            bbox = gmsh.model.get_bounding_box(dim, enumtag[2])
+            return SpatialIndexing.SpatialElem(
+                SpatialIndexing.Rect((bbox[1:3]...,), (bbox[4:6]...,)),
+                nothing,
+                enumtag
+            )
+        end
+        SpatialIndexing.load!(bbox_tree, enumerate(tags); convertel=convertel)
+
         for (btag, ps) in boundary_to_parents
-            length(ps) == 1 || continue
+            length(ps) == 1 || continue # Only single-parent edges are problematic
             owner_idx = ps[1]
             ebbox = gmsh.model.getBoundingBox(dim - 1, btag)
-            for (j, ftag) in enumerate(tags)
+            candidates = SpatialIndexing.intersects_with(
+                bbox_tree,
+                SpatialIndexing.Rect((ebbox[1:3]...,), (ebbox[4:6]...,))
+            )
+            for elem in candidates
+                j, ftag = elem.val
                 j == owner_idx && continue
                 find(j) == find(owner_idx) && continue
-                _bbox_contains(get_bbox(dim, ftag), ebbox; pad=staple_tol) || continue
+                _bbox_contains(
+                    [elem.mbr.low..., elem.mbr.high...],
+                    ebbox;
+                    pad=staple_tol
+                ) || continue
                 _curve_lies_on_face(btag, ftag; tol=staple_tol) || continue
                 unite(owner_idx, j)
             end

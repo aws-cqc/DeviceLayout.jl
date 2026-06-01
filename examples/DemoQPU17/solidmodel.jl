@@ -64,7 +64,7 @@ config = Dict(
     "Domains" => Dict(
         "Materials" => [
             Dict(
-                # Vaccuum
+                # Vacuum
                 "Attributes" => [attributes["vacuum"]],
                 "Permeability" => 1.0,
                 "Permittivity" => 1.0
