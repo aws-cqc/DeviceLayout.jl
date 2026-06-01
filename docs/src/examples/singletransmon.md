@@ -61,14 +61,14 @@ function compute_eigenfrequencies(
     total_length=5000μm
 )
     # Construct the SolidModel
-    @time "SolidModel + Meshing" sm = single_transmon(
+    @time "SolidModel + Meshing" schematic, sm = single_transmon(
         save_mesh=true;
         cap_length=cap_length,
         total_length=total_length,
         mesh_order=mesh_order
     )
     # Assemble the configuration
-    @time "Configuration" config = configfile(sm; palace_build, solver_order=solver_order)
+    @time "Configuration" config = configfile(schematic, sm; palace_build, solver_order=solver_order)
     # Call Palace
     @time "Palace" freqs = palace_job(config; palace_build, np)
     return freqs
@@ -90,7 +90,7 @@ then call `single_transmon()`. This will construct the schematic and render the 
 ```julia
 using DeviceLayout
 include("examples/SingleTransmon/SingleTransmon.jl")
-sm = SingleTransmon.single_transmon()
+schematic, sm = SingleTransmon.single_transmon()
 SolidModels.gmsh.fltk.run() # Opens Gmsh GUI
 ```
 

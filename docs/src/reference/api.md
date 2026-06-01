@@ -60,6 +60,7 @@
     DeviceLayout.OptionalStyle
     DeviceLayout.optional_entity
     DeviceLayout.ToTolerance
+    DeviceLayout.WithDirection
 ```
 
 ### [GeometryStructure](@id api-geometrystructure)

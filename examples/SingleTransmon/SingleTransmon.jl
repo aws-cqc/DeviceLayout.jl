@@ -201,7 +201,8 @@ end
 Given a `SolidModel`, assemble a dictionary defining a configuration file for use within
 Palace.
 
-  - `sm`: The `SolidModel`from which to construct the configuration file
+  - `sch`: The `Schematic` corresponding to the model, which associates ports with design intent
+  - `sm`: The `SolidModel` for which to construct the configuration file
   - `palace_build = nothing`: Path to a Palace build directory, used to perform validation of
     the configuration file. If not present, no validation is performed.
   - `solver_order = 2`: Finite element order (degree) for the solver. Palace supports arbitrary

@@ -259,5 +259,19 @@ end
         place!(sch, WithDirection(0°)(rect), SemanticMeta(:zly, index=0))
         dirs = port_directions(sch, :zly)
         @test isempty(dirs)
+
+        # SchematicGraph with component and rotated sub-cs
+        cs = CoordinateSystem("comp")
+        cs2 = CoordinateSystem("subcs")
+        place!(cs2, WithDirection(0°)(rect1), SemanticMeta(:myport))
+        addref!(cs, sref(cs2, rot=90°))
+        comp = BasicComponent(cs)
+        g = SchematicGraph("test")
+        add_node!(g, comp)
+        sch = plan(g)
+        SchematicDrivenLayout.index_layer!(sch, :myport)
+        dirs = port_directions(sch, :myport)
+        @test length(dirs) == 1
+        @test dirs[1] == "+Y"
     end
 end
