@@ -20,6 +20,9 @@ coordinate system) with no `SolidModel` and no geometry kernel.
     numbers in `ExampleStarTransmon`/`ExampleStarIsland` geometry were extracted to
     parameters. `ExamplePDK` makes no API-stability guarantee, so these are not treated
     as breaking changes to DeviceLayout.jl.
+## Unreleased
+
+  -  Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
 
 ## 1.14.0 (2026-05-28)
 
@@ -33,7 +36,6 @@ coordinate system) with no `SolidModel` and no geometry kernel.
     `create_component(T, ps, address)`
     - Added `set_parameters(c, ps, address; kwargs...)` and the scoped form
   - Added `SchematicDrivenLayout.footprint_halo` for implementing fast custom halos with less boilerplate
-  - Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
   - Fixed incorrect loading of GDS array references with nonzero origin
   - Added `set_parameters(c, ps, address; kwargs...)` and the scoped form
     `set_parameters(c, sub::ParameterSet)` for the templates-aliasing pattern:
