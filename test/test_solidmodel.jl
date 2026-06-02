@@ -1438,6 +1438,36 @@
             )
         end
 
+        @testset "Primitive-level control points (no kernel)" begin
+            SolidModels.clear_mesh_control_points!()
+            SolidModels._collect_mesh_control_points!(
+                [Rectangle(10μm, 10μm)],
+                1.0,
+                0.75,
+                0.0
+            )
+            @test sum(length, values(SolidModels.mesh_control_points())) == 40
+            @test collect(keys(SolidModels.mesh_control_points())) == [(1.0, 0.75)]
+
+            SolidModels.clear_mesh_control_points!()
+            SolidModels._collect_mesh_control_points!(
+                [Rectangle(10μm, 10μm)],
+                0.0,
+                -1.0,
+                0.0
+            )
+            @test isempty(SolidModels.mesh_control_points())
+
+            pa = Path(Point(0nm, 0nm))
+            straight!(pa, 100μm, Paths.SimpleCPW(10μm, 6μm))
+            cr = pathtopolys(pa)
+            SolidModels.clear_mesh_control_points!()
+            SolidModels._collect_mesh_control_points!(cr, 2.0, 0.9, 5.0)
+            cps = first(values(SolidModels.mesh_control_points()))
+            @test !isempty(cps)
+            @test all(p -> p[3] == 5.0, cps)
+        end
+
         # Checking option access
         SolidModels.set_gmsh_option("Mesh.ElementOrder", 3)
         SolidModels.set_gmsh_option("Geometry.OCCTargetUnit", "M")
