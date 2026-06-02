@@ -182,8 +182,8 @@ end
     @testset "port_directions" begin
         # Not currently API functionality but worth testing alongside WithDirection
         using DeviceLayout.SchematicDrivenLayout
-        import .SchematicDrivenLayout.ExamplePDK:
-            port_directions, _extract_direction, _direction_config
+        import DeviceLayout: _extract_direction
+        import .SchematicDrivenLayout.ExamplePDK: port_directions, _direction_config
         ## Direction extraction
         rect = Rectangle(2μm, 3μm)
         @test to_polygons(sty(rect)) == to_polygons(rect)

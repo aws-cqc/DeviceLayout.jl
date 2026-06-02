@@ -270,7 +270,7 @@ function port_directions(sch::Schematic, ly::Symbol)
             layer(m) == ly || continue
             idx = layerindex(m)
             idx == 0 && continue
-            dir = _extract_direction(el)
+            dir = DeviceLayout._extract_direction(el)
             dir === nothing && continue
             haskey(dirs, idx) &&
                 error("Repeated index $idx. Before calling `port_directions`, \
@@ -280,20 +280,6 @@ include $ly (or indexed directly with `index_layer!`)")
         end
     end
     return dirs
-end
-
-# Walk through any nesting of StyledEntity wrappers and return the `direction`
-# angle of the outermost `WithDirection` style encountered, or `nothing` if no
-# `WithDirection` is present. Handles nesting like
-# WithDirection(MeshSized(only_simulated(rect))) and the reverse.
-_extract_direction(::DeviceLayout.GeometryEntity) = nothing
-function _extract_direction(ent::DeviceLayout.StyledEntity)
-    return _extract_direction(ent.ent)
-end
-function _extract_direction(
-    ent::DeviceLayout.StyledEntity{T, U, WithDirection}
-) where {T, U <: GeometryEntity{T}}
-    return ent.sty.direction
 end
 
 # Format a direction angle (CCW from +X, in degrees) as a Palace-compatible
