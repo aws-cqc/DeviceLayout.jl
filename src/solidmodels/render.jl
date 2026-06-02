@@ -1053,6 +1053,154 @@ function clear_mesh_control_points!()
     return empty!(MESHSIZE_PARAMS[:ct])
 end
 
+# ─── Kernel-independent mesh-size control-point sampling ──────────────────────
+#
+# These tools compute mesh-size control points directly from rendered geometry
+# primitives (the output of `to_primitives`), with NO geometry kernel involved.
+# They are the kernel-agnostic replacement for sampling boundary points by
+# querying the meshing backend (e.g. `gmsh.model.get_value` on fragmented OCC
+# curve entities). Sampling at primitive level means the size field can be
+# rebuilt from a `Schematic` alone (see `populate_size_fields!`) and is
+# unit-testable without rendering through any `SolidModel`.
+#
+# Every sample is appended to `MESHSIZE_PARAMS[:cp]` under `(h, α)` via
+# `add_mesh_size_point`. None of these call `finalize_size_fields!` — the
+# caller finalizes once after all elements are processed so manual
+# `add_mesh_size_point` additions and `α` changes can interleave first.
+
+"""
+    _collect_mesh_control_points!(prims, h, α, z)
+
+Append mesh-size control points for `prims` (a primitive or vector of
+primitives from [`to_primitives`](@ref)) under `(h, α)`, sampling each
+primitive's boundary at `⌈L / h⌉` evenly-spaced arc-length intervals at
+height `z`. No-op when `h <= 0` (background-sized entities). Does NOT
+finalize the size field.
+"""
+function _collect_mesh_control_points!(prims, h::Real, α::Real, z::Real)
+    h > 0 || return nothing
+    _sample_meshsize!(prims, Float64(h), Float64(α), Float64(z))
+    return nothing
+end
+
+# Vector of primitives — fan out.
+function _sample_meshsize!(prims::AbstractVector, h::Float64, α::Float64, z::Float64)
+    for p in prims
+        _sample_meshsize!(p, h, α, z)
+    end
+end
+
+# Polygon — walk consecutive vertex pairs as straight segments.
+function _sample_meshsize!(p::AbstractPolygon, h::Float64, α::Float64, z::Float64)
+    pts = points(p)
+    n = length(pts)
+    n >= 3 || return
+    for i in 1:n
+        _sample_straight_meshsize!(pts[i], pts[mod1(i + 1, n)], h, α, z)
+    end
+end
+
+# CurvilinearPolygon — walk vertex pairs; if a `Paths.Segment` is recorded at
+# this index, sample the segment with the per-`Paths.Segment` helper, otherwise
+# treat the edge as an implicit straight line. The sign of `curve_start_idx`
+# only encodes parametrisation direction relative to polygon traversal; the 3D
+# sample locations are direction-independent so we ignore it.
+function _sample_meshsize!(cp::CurvilinearPolygon, h::Float64, α::Float64, z::Float64)
+    pts = cp.p
+    n = length(pts)
+    n >= 3 || return
+    seg_at = Dict{Int, Paths.Segment}()
+    for (k, csi) in enumerate(cp.curve_start_idx)
+        seg_at[abs(csi)] = cp.curves[k]
+    end
+    for i in 1:n
+        if haskey(seg_at, i)
+            _sample_segment_meshsize!(seg_at[i], h, α, z)
+        else
+            _sample_straight_meshsize!(pts[i], pts[mod1(i + 1, n)], h, α, z)
+        end
+    end
+end
+
+# CurvilinearRegion — outer ring + each hole's perimeter.
+function _sample_meshsize!(cr::CurvilinearRegion, h::Float64, α::Float64, z::Float64)
+    _sample_meshsize!(cr.exterior, h, α, z)
+    for hole in cr.holes
+        _sample_meshsize!(hole, h, α, z)
+    end
+end
+
+# Ellipse — sample its perimeter at h-spacing (Ramanujan perimeter estimate for
+# the sample count; the parametric point evaluation is exact).
+function _sample_meshsize!(e::Ellipse, h::Float64, α::Float64, z::Float64)
+    a = ustrip(STP_UNIT, e.radii[1])
+    b = ustrip(STP_UNIT, e.radii[2])
+    perim = pi * (3 * (a + b) - sqrt((3a + b) * (a + 3b)))
+    Ns = max(8, ceil(Int, perim / h))
+    cx = ustrip(STP_UNIT, e.center.x)
+    cy = ustrip(STP_UNIT, e.center.y)
+    θ = ustrip(uconvert(°, e.angle)) * (π / 180)
+    cs = cos(θ); sn = sin(θ)
+    for i in 0:(Ns - 1)
+        t = 2π * (i + 0.5) / Ns
+        lx = a * cos(t); ly = b * sin(t)
+        x = cx + cs * lx - sn * ly
+        y = cy + sn * lx + cs * ly
+        add_mesh_size_point(Float64[x, y, z]; h = h, α = α < 0 ? -1 : α)
+    end
+end
+
+# Fallback: any primitive without a specific sampler contributes no points.
+_sample_meshsize!(::Any, ::Float64, ::Float64, ::Float64) = nothing
+
+# Generic `Paths.Segment` sampler. Every concrete `Paths.Segment` (Straight,
+# Turn, BSpline, ConstantOffset, …) supports `pathlength(seg)` and `seg(s)`
+# with `s` an arc-length parameter, so one uniform-in-s sampler at
+# `Ns = ⌈L / h⌉` captures all curve types. Offset curves on Path/CPW
+# boundaries are themselves `Paths.Segment` subtypes (e.g. `ConstantOffset`)
+# by the time they reach here via `to_primitives`, so this covers the full
+# CPW boundary without any per-style awareness.
+function _sample_segment_meshsize!(seg::Paths.Segment, h::Float64, α::Float64, z::Float64)
+    L = ustrip(STP_UNIT, pathlength(seg))
+    L > 0 || return
+    Ns = max(1, ceil(Int, L / h))
+    L_native = pathlength(seg)
+    for i in 0:(Ns - 1)
+        pt = seg((i + 0.5) / Ns * L_native)
+        add_mesh_size_point(
+            Float64[ustrip(STP_UNIT, pt.x), ustrip(STP_UNIT, pt.y), z];
+            h = h, α = α < 0 ? -1 : α
+        )
+    end
+end
+
+# `CompoundSegment` is a sequence of segments — walk each.
+function _sample_segment_meshsize!(
+    seg::Paths.CompoundSegment, h::Float64, α::Float64, z::Float64
+)
+    for sub in seg.segments
+        _sample_segment_meshsize!(sub, h, α, z)
+    end
+end
+
+# Straight line between two points. Sample `Ns = ⌈L / h⌉` evenly-spaced points
+# (interior, half-step offset so adjacent edges sample each shared corner from
+# both sides symmetrically).
+function _sample_straight_meshsize!(
+    a::Point, b::Point, h::Float64, α::Float64, z::Float64
+)
+    ax = ustrip(STP_UNIT, a.x); ay = ustrip(STP_UNIT, a.y)
+    bx = ustrip(STP_UNIT, b.x); by = ustrip(STP_UNIT, b.y)
+    dx = bx - ax; dy = by - ay
+    L = sqrt(dx * dx + dy * dy)
+    L > 0 || return
+    Ns = max(1, ceil(Int, L / h))
+    for i in 0:(Ns - 1)
+        t = (i + 0.5) / Ns
+        add_mesh_size_point(Float64[ax + t * dx, ay + t * dy, z]; h = h, α = α < 0 ? -1 : α)
+    end
+end
+
 """
     reset_mesh_control!()
 
