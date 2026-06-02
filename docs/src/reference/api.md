@@ -185,11 +185,6 @@
     clip
     Polygons.clip_tiled
     Polygons.StyleDict
-    recover_curves
-    difference2d_curved
-    union2d_curved
-    intersect2d_curved
-    xor2d_curved
 ```
 
 #### [Curvilinear geometry](@id api-curvilinear)
