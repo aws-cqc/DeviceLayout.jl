@@ -819,7 +819,7 @@
     # Reference transform should transform p0 too
     r = to_polygons(Rectangle(2μm, 1μm))
     cs_local = CoordinateSystem("test", nm)
-    sty = Rounded(0.25μm, p0=points(r))
+    sty = Rounded(0.25μm, p0=points(r), selection_tolerance=1nm)
     place!(cs_local, styled(r, sty), SemanticMeta(:test))
     cs = CoordinateSystem("outer", nm)
     addref!(cs, sref(cs_local, angle=π / 2))
@@ -829,7 +829,7 @@
     # Reference transform should transform p0 too
     r = to_polygons(Rectangle(2μm, 1μm))
     cs_local = CoordinateSystem("test", nm)
-    sty = RelativeRounded(0.25, p0=points(r)[[1, 2]])
+    sty = RelativeRounded(0.25, p0=points(r)[[1, 2]], selection_tolerance=1nm)
     place!(cs_local, styled(r, sty), SemanticMeta(:test))
     cs = CoordinateSystem("outer", nm)
     addref!(cs, sref(cs_local, angle=π / 2))
