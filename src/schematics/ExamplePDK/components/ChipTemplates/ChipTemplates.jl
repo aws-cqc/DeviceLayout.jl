@@ -25,14 +25,14 @@ A `Component` with rectangular geometry in the CHIP_AREA layer and uniformly spa
 # Parameters
 
   - `name = "chip"`: Name of component
-  - `num_ports_lr = 12`: Number of ports on the left and right edges
-  - `num_ports_tb = 12`: Number of ports on the top and bottom edges
-  - `length_x = 15mm`: x length of chip
-  - `length_y = 15mm`: y length of chip
-  - `dx = 1mm`: x spacing of ports on top and bottom
-  - `dy = 1mm`: y spacing of ports on left and right
-  - `edge_gap_lr = 0.050mm`: Gap between chip edge and ports on left and right
-  - `edge_gap_tb = 0.050mm`: Gap between chip edge and ports on top and bottom
+  - `port_lr_count = 12`: Number of ports on the left and right edges
+  - `port_tb_count = 12`: Number of ports on the top and bottom edges
+  - `chip_x_length = 15mm`: x length of chip
+  - `chip_y_length = 15mm`: y length of chip
+  - `port_tb_pitch = 1mm`: x spacing of ports on top and bottom
+  - `port_lr_pitch = 1mm`: y spacing of ports on left and right
+  - `port_lr_edge_gap = 0.050mm`: Gap between chip edge and ports on left and right
+  - `port_tb_edge_gap = 0.050mm`: Gap between chip edge and ports on top and bottom
 
 # Hooks
 
@@ -41,18 +41,18 @@ A `Component` with rectangular geometry in the CHIP_AREA layer and uniformly spa
 """
 @compdef struct ExampleChip <: Component
     name = "chip"
-    num_ports_lr = 12
-    num_ports_tb = 12
-    length_x = 15mm
-    length_y = 15mm
-    dx = 1mm
-    dy = 1mm
-    edge_gap_lr = 0.050mm
-    edge_gap_tb = 0.050mm
+    port_lr_count = 12
+    port_tb_count = 12
+    chip_x_length = 15mm
+    chip_y_length = 15mm
+    port_tb_pitch = 1mm
+    port_lr_pitch = 1mm
+    port_lr_edge_gap = 0.050mm
+    port_tb_edge_gap = 0.050mm
 end
 
 function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, c::ExampleChip)
-    chip_rect = centered(Rectangle(c.length_x, c.length_y))
+    chip_rect = centered(Rectangle(c.chip_x_length, c.chip_y_length))
     # only_simulated would make these invisible to `bounds`, which we don't want
     # so these render by default and ignore for artwork
     not_artwork =
@@ -62,24 +62,24 @@ function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, c::ExampleChip)
 end
 
 function SchematicDrivenLayout.hooks(c::ExampleChip)
-    x0 = c.dx * (c.num_ports_lr - 1) / 2
-    y0 = c.dy * (c.num_ports_tb - 1) / 2
+    x0 = c.port_tb_pitch * (c.port_lr_count - 1) / 2
+    y0 = c.port_lr_pitch * (c.port_tb_count - 1) / 2
     # Clockwise from left corner of top edge
-    xt = range(-x0, step=c.dx, length=c.num_ports_tb)
+    xt = range(-x0, step=c.port_tb_pitch, length=c.port_tb_count)
     xb = -xt
-    xl = fill(-c.length_x / 2 + c.edge_gap_lr, c.num_ports_lr)
+    xl = fill(-c.chip_x_length / 2 + c.port_lr_edge_gap, c.port_lr_count)
     xr = -xl
-    yb = fill(-c.length_y / 2 + c.edge_gap_tb, c.num_ports_tb)
+    yb = fill(-c.chip_y_length / 2 + c.port_tb_edge_gap, c.port_tb_count)
     yt = -yb
-    yl = range(-y0, step=c.dy, length=c.num_ports_lr)
+    yl = range(-y0, step=c.port_lr_pitch, length=c.port_lr_count)
     yr = -yl
     x = vcat(xt, xr, xb, xl)
     y = vcat(yt, yr, yb, yl)
     dirs = vcat(
-        fill(90°, c.num_ports_tb),
-        fill(0°, c.num_ports_lr),
-        fill(270°, c.num_ports_tb),
-        fill(180°, c.num_ports_lr)
+        fill(90°, c.port_tb_count),
+        fill(0°, c.port_lr_count),
+        fill(270°, c.port_tb_count),
+        fill(180°, c.port_lr_count)
     )
     return (; port=PointHook.(Point.(x, y), dirs), origin=PointHook(0mm, 0mm, -180°))
 end

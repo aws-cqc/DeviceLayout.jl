@@ -257,8 +257,12 @@ Here's how we define our main components, in `assemble_schematic_graph!`. The `@
 end
 ### Readout
 @component readout[1:5, 1:5] = ExampleFilteredHairpinReadout begin
-    filter_total_effective_length .= p.readout.RO_EFFECTIVE_LENGTH
-    readout_total_effective_length .= p.readout.RO_EFFECTIVE_LENGTH
+    # The components are parameterized by physical path length. Mapping a target frequency
+    # (here a tabulated effective quarter-wavelength) to a physical length is a device-level
+    # concern: subtract the ~1mm of effective length contributed by bends, bridges, and
+    # coupling capacitors that the resonators do not lay down as physical path.
+    filter_total_length .= p.readout.RO_EFFECTIVE_LENGTH .- 1.0mm
+    readout_total_length .= p.readout.RO_EFFECTIVE_LENGTH .- 1.0mm
     resonator_style = resonator_style
     resonator_bridge = RESONATOR_BRIDGE
     feedline_style = FEEDLINE_STYLE
@@ -266,17 +270,17 @@ end
     feedline_bridge = FEEDLINE_BRIDGE
 end
 # Manually set a few exceptions for floorplanning convenience
-readout[3, 1] = readout[3, 1](; extra_filter_l1=400μm)
-readout[2, 5] = readout[2, 5](; extra_filter_l1=700μm)
+readout[3, 1] = readout[3, 1](; extra_filter_length_1=400μm)
+readout[2, 5] = readout[2, 5](; extra_filter_length_1=700μm)
 readout[3, 3] = readout[3, 3](;
-    extra_filter_l1=550μm,
+    extra_filter_length_1=550μm,
     tap_position=0.45mm,
-    extra_filter_l2=710μm,
-    extra_filter_θ1=45°,
-    extra_filter_θ2=-45°,
+    extra_filter_length_2=710μm,
+    extra_filter_angle_1=45°,
+    extra_filter_angle_2=-45°,
     straight_length=1.0mm
 )
-readout[4, 1] = readout[4, 1](; extra_filter_l1=700μm)
+readout[4, 1] = readout[4, 1](; extra_filter_length_1=700μm)
 ```
 
 ### Connecting components

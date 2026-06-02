@@ -620,8 +620,8 @@ end
     @testset "IO round-trip with Unitful" begin
         ps = ParameterSet()
         ps.global.process_node = "fab_v3"
-        ps.components.jj.w_jj = 1μm
-        ps.components.jj.h_jj = 0.5μm
+        ps.components.jj.junction_width = 1μm
+        ps.components.jj.junction_lead_gap = 0.5μm
         ps.components.jj.count = 2
 
         # Write
@@ -633,8 +633,8 @@ end
         ps2 = ParameterSet(IOBuffer(yaml_bytes))
 
         @test ps2.global.process_node == "fab_v3"
-        @test ps2.components.jj.w_jj == 1μm
-        @test ps2.components.jj.h_jj == 0.5μm
+        @test ps2.components.jj.junction_width == 1μm
+        @test ps2.components.jj.junction_lead_gap == 0.5μm
         @test ps2.components.jj.count == 2
     end
 
@@ -675,7 +675,7 @@ end
         ps = ParameterSet()
         ps.components.transmon.island.cap_length = 520μm
         ps.components.transmon.island.cap_width = 24μm
-        ps.components.transmon.junction.w_jj = 1μm
+        ps.components.transmon.junction.junction_width = 1μm
 
         io = IOBuffer()
         save_parameter_set(io, ps)
@@ -683,7 +683,7 @@ end
 
         @test ps2.components.transmon.island.cap_length == 520μm
         @test ps2.components.transmon.island.cap_width == 24μm
-        @test ps2.components.transmon.junction.w_jj == 1μm
+        @test ps2.components.transmon.junction.junction_width == 1μm
     end
 
     @testset "Parsed lengths share DeviceLayout's promotion context" begin
@@ -753,7 +753,7 @@ end
             ps,
             "components.ps_flow_transmon.junction"
         )
-        junction = set_parameters(junction; h_ground_island=tr.junction_gap)
+        junction = set_parameters(junction; ground_island_length=tr.junction_gap)
         return (island, junction)
     end
 
@@ -774,8 +774,8 @@ end
         ps.components.ps_flow_transmon.junction_gap = 15μm
         ps.components.ps_flow_transmon.island.cap_width = 42μm
         ps.components.ps_flow_transmon.island.cap_length = 600μm
-        ps.components.ps_flow_transmon.junction.w_jj = 2μm
-        ps.components.ps_flow_transmon.junction.h_jj = 2μm
+        ps.components.ps_flow_transmon.junction.junction_width = 2μm
+        ps.components.ps_flow_transmon.junction.junction_lead_gap = 2μm
 
         tr = create_component(PSFlowTestTransmon, ps, "components.ps_flow_transmon")
         # PS is threaded into the composite's private graph - the core fix.
@@ -796,16 +796,16 @@ end
         # Leaf parameters from the PS were applied to the subcomponents.
         @test parameters(island).cap_width == 42μm
         @test parameters(island).cap_length == 600μm
-        @test parameters(junction).w_jj == 2μm
+        @test parameters(junction).junction_width == 2μm
         # Shared parameter forwarded via `set_parameters` from the composite.
         @test parameters(island).junction_gap == 15μm
-        @test parameters(junction).h_ground_island == 15μm
+        @test parameters(junction).ground_island_length == 15μm
 
         # Access tracking records qualified paths (both the composite's own
         # leaf and the subcomponent leaves).
         @test "components.ps_flow_transmon.junction_gap" in ps.accessed
         @test "components.ps_flow_transmon.island.cap_width" in ps.accessed
-        @test "components.ps_flow_transmon.junction.w_jj" in ps.accessed
+        @test "components.ps_flow_transmon.junction.junction_width" in ps.accessed
     end
 
     @testset "Top-level plan runs end-to-end" begin
@@ -813,7 +813,7 @@ end
         ps.components.ps_flow_transmon.junction_gap = 10μm
         ps.components.ps_flow_transmon.island.cap_width = 30μm
         ps.components.ps_flow_transmon.island.cap_length = 500μm
-        ps.components.ps_flow_transmon.junction.w_jj = 1μm
+        ps.components.ps_flow_transmon.junction.junction_width = 1μm
 
         g = SchematicGraph("chip", ps)
         tr = create_component(PSFlowTestTransmon, ps, "components.ps_flow_transmon")
@@ -867,7 +867,7 @@ end
         island = set_parameters(island; junction_gap=tr.junction_gap)
         junction =
             set_parameters(tr.templates.junction, ps, "components.$(name(tr)).junction")
-        junction = set_parameters(junction; h_ground_island=tr.junction_gap)
+        junction = set_parameters(junction; ground_island_length=tr.junction_gap)
         return (island, junction)
     end
 
@@ -887,7 +887,7 @@ end
         ps = ParameterSet()
         ps.components.template_transmon.junction_gap = 15μm
         ps.components.template_transmon.island.cap_length = 600μm
-        ps.components.template_transmon.junction.w_jj = 2μm
+        ps.components.template_transmon.junction.junction_width = 2μm
 
         tr = create_component(TestTemplatesTransmon, ps, "components.template_transmon")
         island = components(tr)[1]
@@ -895,7 +895,7 @@ end
         @test parameters(island).cap_length == 600μm
         # Template default for cap_width (30μm) is preserved - PS didn't set it
         @test parameters(island).cap_width == 30μm
-        @test parameters(junction).w_jj == 2μm
+        @test parameters(junction).junction_width == 2μm
     end
 
     @testset "Happy path - scoped form" begin
@@ -928,7 +928,7 @@ end
         ps.components.template_transmon.island.junction_gap = 99μm
         # junction namespace must exist for `set_parameters(..., ps, ".junction")`
         # to resolve; content is irrelevant here.
-        ps.components.template_transmon.junction.w_jj = 1μm
+        ps.components.template_transmon.junction.junction_width = 1μm
 
         tr = create_component(TestTemplatesTransmon, ps, "components.template_transmon")
         island = components(tr)[1]
@@ -1144,7 +1144,7 @@ end
         ps = ParameterSet()
         ps.components.template_transmon.junction_gap = 10μm
         ps.components.template_transmon.island.cap_length = 500μm
-        ps.components.template_transmon.junction.w_jj = 1μm
+        ps.components.template_transmon.junction.junction_width = 1μm
 
         g = SchematicGraph("chip_phase2", ps)
         tr = create_component(TestTemplatesTransmon, ps, "components.template_transmon")
@@ -1156,10 +1156,10 @@ end
         island = comps[1]
         junction = comps[2]
         @test parameters(island).cap_length == 500μm
-        @test parameters(junction).w_jj == 1μm
+        @test parameters(junction).junction_width == 1μm
         # Composite override wins over PS for shared parameter.
         @test parameters(island).junction_gap == 10μm
-        @test parameters(junction).h_ground_island == 10μm
+        @test parameters(junction).ground_island_length == 10μm
     end
 
     # The tutorial promises "subcomponents at any depth can access the same
@@ -1206,7 +1206,7 @@ end
         ps.components.outer.inner.junction_gap = 13μm
         # Inner composite's templates - read at `"components.$(name(inner)).*"`.
         ps.components.inner.island.cap_length = 700μm
-        ps.components.inner.junction.w_jj = 3μm
+        ps.components.inner.junction.junction_width = 3μm
 
         g = SchematicGraph("chip_nested", ps)
         outer = create_component(OuterTemplatesComposite, ps, "components.outer")
@@ -1224,11 +1224,11 @@ end
         inner_island = components(inner)[1]
         inner_junction = components(inner)[2]
         @test parameters(inner_island).cap_length == 700μm
-        @test parameters(inner_junction).w_jj == 3μm
+        @test parameters(inner_junction).junction_width == 3μm
 
         # Inner-composite override propagates to its subcomponents.
         @test parameters(inner_island).junction_gap == 13μm
-        @test parameters(inner_junction).h_ground_island == 13μm
+        @test parameters(inner_junction).ground_island_length == 13μm
 
         # `plan` runs end-to-end with nested PS-driven composites.
         floorplan = plan(g; log_dir=nothing)

@@ -62,13 +62,13 @@ A `CompositeComponent` uses `@compdef` just like a regular `Component`, but inhe
     junction_gap = 12μm
     junction_pos = :bottom
     island_rounding = 0μm
-    w_jj = 1μm
-    h_jj = 1μm
+    junction_width = 1μm
+    junction_lead_gap = 1μm
 end
 nothing # hide
 ```
 
-The parameters include both island parameters (`cap_width`, `cap_length`, `cap_gap`, `junction_pos`, `island_rounding`) and junction parameters (`w_jj`, `h_jj`). The composite owns all parameters and forwards the relevant subset to each subcomponent. The `junction_gap` parameter is shared — it controls both the island's gap on the junction side and the junction's total height.
+The parameters include both island parameters (`cap_width`, `cap_length`, `cap_gap`, `junction_pos`, `island_rounding`) and junction parameters (`junction_width`, `junction_lead_gap`). The composite owns all parameters and forwards the relevant subset to each subcomponent. The `junction_gap` parameter is shared — it controls both the island's gap on the junction side and the junction's total length.
 
 ## Step 3: Build the Subcomponents
 
@@ -88,9 +88,9 @@ function SchematicDrivenLayout._build_subcomponents(tr::SimpleTransmon)
 
     # Create the junction, forwarding its parameters
     @component junction = ExampleSimpleJunction(
-        w_jj = tr.w_jj,
-        h_jj = tr.h_jj,
-        h_ground_island = tr.junction_gap,
+        junction_width = tr.junction_width,
+        junction_lead_gap = tr.junction_lead_gap,
+        ground_island_length = tr.junction_gap,
     )
 
     return (island, junction)
@@ -98,7 +98,7 @@ end
 nothing # hide
 ```
 
-We use the `@component` macro to create each subcomponent — this automatically sets the component's `name` from the variable name. Notice how `junction_gap` on the composite maps to `junction_gap` on the island and `h_ground_island` on the junction — the composite provides a unified interface even when subcomponents use different parameter names for related or derived quantities.
+We use the `@component` macro to create each subcomponent — this automatically sets the component's `name` from the variable name. Notice how `junction_gap` on the composite maps to `junction_gap` on the island and `ground_island_length` on the junction — the composite provides a unified interface even when subcomponents use different parameter names for related or derived quantities.
 
 !!! tip "filter_parameters in real PDKs"
     DeviceLayout provides [`filter_parameters`](@ref) to automatically find parameters that share names between the composite and a subcomponent. This is convenient when many parameters pass through unchanged, but for this tutorial, explicit forwarding is clearer. See `ExampleRectangleTransmon` in the ExamplePDK source for this pattern.

@@ -42,8 +42,8 @@ This component is intended for use in demonstrations.
     ████████████████  ████ | ████████        ↕ output_style.gap        
                   ██  ████ ↓ ████  ██
                   ██  ███████████  ██  
-                  ██←→███████████  ██ 
-                  ██claw_width↕    ██
+                  ██←→███████████  ██
+                  ██claw_trace↕    ██
                  ↕███████████████████
     claw_outer_gap←→      ←—→ inner_cap_width
 
@@ -55,7 +55,7 @@ This component is intended for use in demonstrations.
   - `inner_cap_width = 20μm`: Width (short dimension, usually) of inner capacitor pad
   - `inner_cap_length = 200μm`: Length (long dimension) of inner capacitor pad
   - `claw_inner_gap = 5μm`: Gap between claw and inner pad
-  - `claw_width = 10μm`: Width of claw metal trace
+  - `claw_trace = 10μm`: Width of claw metal trace
   - `claw_outer_gap = 20μm`: Outer gap around claw
   - `output_style = Paths.CPW(10μm, 6μm)`: Style of output path
   - `rounding = 2μm`: Rounding radius applied to the capacitor
@@ -74,10 +74,10 @@ This component is intended for use in demonstrations.
     inner_cap_width = 20μm
     inner_cap_length = 200μm
     claw_inner_gap = 5μm
-    claw_width = 10μm
+    claw_trace::typeof(1.0μm) = 10μm
     claw_outer_gap = 20μm
     output_style = Paths.CPW(10μm, 6μm)
-    rounding = 2μm
+    rounding::typeof(1.0μm) = 2μm
 end
 
 function SchematicDrivenLayout._geometry!(
@@ -99,7 +99,7 @@ function _path(cc::ExampleSeriesClawCapacitor)
         input_style,
         rounding,
         claw_outer_gap,
-        claw_width,
+        claw_trace,
         claw_inner_gap,
         inner_cap_width
     ) = cc
@@ -109,7 +109,7 @@ function _path(cc::ExampleSeriesClawCapacitor)
     end
     straight!(
         pa,
-        2 * (claw_outer_gap + claw_width + claw_inner_gap + rounding) + inner_cap_width,
+        2 * (claw_outer_gap + claw_trace + claw_inner_gap + rounding) + inner_cap_width,
         Paths.NoRender()
     )
     return pa
@@ -120,13 +120,15 @@ function SchematicDrivenLayout.hooks(cc::ExampleSeriesClawCapacitor)
     return hooks(path)
 end
 
+# Shared by ExampleSeriesClawCapacitor and ExampleShuntClawCapacitor (the latter is
+# defined below, so the argument is left untyped to avoid a forward reference)
 function _series_claw(cc)
     (;
         input_style,
         inner_cap_width,
         inner_cap_length,
         claw_inner_gap,
-        claw_width,
+        claw_trace,
         claw_outer_gap,
         output_style,
         rounding
@@ -137,7 +139,7 @@ function _series_claw(cc)
     inner_pad = centered(Rectangle(inner_cap_length, inner_cap_width))
     output_trace = Rectangle(
         output_style.trace,
-        claw_inner_gap + claw_width + claw_outer_gap + rounding
+        claw_inner_gap + claw_trace + claw_outer_gap + rounding
     )
     output_trace = Align.below(output_trace, inner_pad; centered=true)
 
@@ -145,10 +147,10 @@ function _series_claw(cc)
     # Use `halo` to get larger rectangle around original
     # Halo returns a vector, but we know it's length 1
     inner_hole = only(halo(inner_pad, claw_inner_gap))
-    output_trace_hole = Rectangle(output_style.trace + 2 * claw_inner_gap, claw_width)
+    output_trace_hole = Rectangle(output_style.trace + 2 * claw_inner_gap, claw_trace)
     output_trace_hole = Align.below(output_trace_hole, inner_hole; centered=true)
     # Claw positive
-    claw_rect = only(halo(inner_hole, claw_width))
+    claw_rect = only(halo(inner_hole, claw_trace))
     claw_poly = only(to_polygons(difference2d(claw_rect, [inner_hole, output_trace_hole])))
     input_trace = Rectangle(input_style.trace, claw_outer_gap + rounding)
     input_trace = Align.above(input_trace, claw_poly; centered=true)
@@ -182,6 +184,8 @@ function _series_claw(cc)
     return rounded(cutout_poly)
 end
 
+# Shared by both claw capacitor types (see `_series_claw`); argument left untyped
+# because ExampleShuntClawCapacitor is defined below.
 function critical_dimension(cc)
     return min(
         cc.input_style.trace,
@@ -189,7 +193,7 @@ function critical_dimension(cc)
         cc.inner_cap_width,
         cc.inner_cap_length,
         cc.claw_inner_gap,
-        cc.claw_width,
+        cc.claw_trace,
         cc.claw_outer_gap,
         cc.output_style.trace,
         cc.output_style.gap
@@ -218,7 +222,7 @@ This component is intended for use in demonstrations.
   - `inner_cap_width = 20μm`: Width (short dimension, usually) of inner capacitor pad
   - `inner_cap_length = 200μm`: Length (long dimension) of inner capacitor pad
   - `claw_inner_gap = 5μm`: Gap between claw and inner pad
-  - `claw_width = 10μm`: Width of claw metal trace
+  - `claw_trace = 10μm`: Width of claw metal trace
   - `claw_outer_gap = 20μm`: Outer gap around claw
   - `output_style = Paths.CPW(10μm, 6μm)`: Style of output path
   - `rounding = 2μm`: Rounding radius applied to the capacitor
@@ -243,10 +247,10 @@ This component is intended for use in demonstrations.
     inner_cap_width = 20μm
     inner_cap_length = 200μm
     claw_inner_gap = 5μm
-    claw_width = 10μm
+    claw_trace::typeof(1.0μm) = 10μm
     claw_outer_gap = 20μm
     output_style = Paths.CPW(10μm, 10μm)
-    rounding = 2μm
+    rounding::typeof(1.0μm) = 2μm
     bridge = nothing
 end
 
@@ -282,11 +286,11 @@ function _paths(cc::ExampleShuntClawCapacitor)
 end
 
 function SchematicDrivenLayout.hooks(cc::ExampleShuntClawCapacitor)
-    (; inner_cap_width, claw_inner_gap, claw_width, claw_outer_gap, rounding) = cc
+    (; inner_cap_width, claw_inner_gap, claw_trace, claw_outer_gap, rounding) = cc
     pa, tap = _paths(cc) # Generate another copy of the paths so we can use their hooks
     straight!(
         tap, # Extend tap to get to the connection point on the other side
-        inner_cap_width + 2 * (rounding + claw_outer_gap + claw_width + claw_inner_gap)
+        inner_cap_width + 2 * (rounding + claw_outer_gap + claw_trace + claw_inner_gap)
     )
     return merge(hooks(pa), (; p2=p1_hook(tap), p2_lh=p1_hook(tap, false)))
 end

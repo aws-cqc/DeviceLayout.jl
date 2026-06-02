@@ -120,8 +120,10 @@ function calculate_readout_lengths(readout_nodes, readout_route_nodes, p)
             # Readout component contains feedline length; resonator is coupled halfway
             pathlength_from_input += readout_node.feedline_length / 2
             println("Length at $(site): $(uconvert(mm, pathlength_from_input))")
-            # Calculate remaining length to filter halfwavelength
-            filter_halfwavelength = 2 * readout_node.filter_total_effective_length
+            # Calculate remaining length to filter halfwavelength. The readout components are
+            # parameterized by physical length; add back the ~1mm device-level effective-length
+            # allowance (bends, bridges, coupling) to approximate the effective half-wavelength.
+            filter_halfwavelength = 2 * (readout_node.filter_total_length + 1.0mm)
             remainder = rem(pathlength_from_input, filter_halfwavelength)
             next_halfwave = filter_halfwavelength - remainder
             println(

@@ -47,8 +47,8 @@ ps.components.capacitor.finger_width = 5μm
 ps.components.capacitor.finger_gap = 3μm
 ps.components.capacitor.finger_count = 6
 
-ps.components.junction.w_jj = 1μm
-ps.components.junction.h_jj = 1μm
+ps.components.junction.junction_width = 1μm
+ps.components.junction.junction_lead_gap = 1μm
 ```
 
 If you have the `YAML` package installed, you can load directly from a file:
@@ -66,8 +66,8 @@ components:
     finger_gap: 3μm
     finger_count: 6
   junction:
-    w_jj: 1μm
-    h_jj: 1μm
+    junction_width: 1μm
+    junction_lead_gap: 1μm
 ```
 
 ```julia
@@ -187,8 +187,8 @@ ps.components.transmon.island.cap_width = 24μm
 ps.components.transmon.island.cap_length = 520μm
 ps.components.transmon.island.cap_gap = 30μm
 
-ps.components.transmon.junction.w_jj = 1μm
-ps.components.transmon.junction.h_jj = 1μm
+ps.components.transmon.junction.junction_width = 1μm
+ps.components.transmon.junction.junction_lead_gap = 1μm
 ```
 
 Inside `_build_subcomponents`, use `parameter_set(g)` to access the graph's `ParameterSet`, then `create_component` to instantiate each subcomponent from its subtree. The shared `junction_gap` is read from the parameter set and forwarded to both subcomponents under their respective parameter names using `set_parameters` kwargs:
@@ -207,7 +207,7 @@ function SchematicDrivenLayout._build_subcomponents(tr::SimpleTransmon)
     # Forward shared parameter from parameter set to the junction component
     # under a different parameter name. A missing PS lookup would surface as
     # ParameterKeyError at this call site.
-    junction = set_parameters(junction; h_ground_island=ps.components.transmon.junction_gap)
+    junction = set_parameters(junction; ground_island_length=ps.components.transmon.junction_gap)
 
     return (island, junction)
 end
@@ -254,7 +254,7 @@ function SchematicDrivenLayout._build_subcomponents(tr::SimpleTransmonTemplated)
 
     junction = set_parameters(
         tr.templates.junction, ps, "components.$(name(tr)).junction";
-        h_ground_island=tr.junction_gap,
+        ground_island_length=tr.junction_gap,
     )
 
     return (island, junction)
