@@ -262,6 +262,13 @@ pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.SimpleCPW; kwargs...) where {T} 
     pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
 pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.CPW; kwargs...) where {T} =
     pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
+pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.Strands; kwargs...) where {T} =
+    pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
+pathtopolys(
+    f::Paths.OffsetSegment{T},
+    s::Union{Paths.TraceTermination, Paths.CPWOpenTermination, Paths.CPWShortTermination};
+    kwargs...
+) where {T} = pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
 # Disambiguate OffsetSegment with NoRender and DecoratedStyle
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderContinuous; kwargs...) where {T} =
     Polygon{T}[]
@@ -298,6 +305,60 @@ function pathtopolys(
 ) where {T}
     return vcat(pathtopolys.(f.segments, s.styles; kwargs...)...)
 end
+
+# CompoundSegment with a non-CompoundStyle: iterate sub-segments and pin the style
+# to each sub-segment's parameter range (mirrors to_polygons in compound.jl:43-52).
+function _pathtopolys_compound(
+    f::Paths.CompoundSegment{T},
+    s::Paths.Style;
+    kwargs...
+) where {T}
+    # Cumulative arclength at the start of each sub-segment, so we can pin the style to
+    # each one's parameter range. starts[i] = sum of lengths of segments before i.
+    starts = cumsum([zero(T); pathlength.(f.segments[1:(end - 1)])])
+    stops = starts .+ pathlength.(f.segments)
+
+    # Convert each (sub-segment, pinned-style) pair. vcat normalizes the scalar-vs-vector
+    # shape (pathtopolys may return one CurvilinearPolygon or a Vector), wrapping a scalar
+    # as [x] and leaving a vector as-is — so no isa branch is needed (CLAUDE.md rule #1).
+    pieces = map(f.segments, starts, stops) do se, l0, l
+        return vcat(pathtopolys(se, Paths.pin(s; start=l0, stop=l); kwargs...))
+    end
+
+    # Don't pin a concrete element type: some sub-results route through _offset_to_bspline,
+    # whose BSpline control points carry a different unit parameter (base meters) than the
+    # parent segment's T. reduce(vcat, …) infers the common element type from the data.
+    return reduce(vcat, pieces)
+end
+pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.Style; kwargs...) where {T} =
+    _pathtopolys_compound(f, s; kwargs...)
+# Disambiguate CompoundSegment with concrete style types that also have Segment methods
+pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.SimpleTrace; kwargs...) where {T} =
+    _pathtopolys_compound(f, s; kwargs...)
+pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.Trace; kwargs...) where {T} =
+    _pathtopolys_compound(f, s; kwargs...)
+pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.SimpleCPW; kwargs...) where {T} =
+    _pathtopolys_compound(f, s; kwargs...)
+pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.CPW; kwargs...) where {T} =
+    _pathtopolys_compound(f, s; kwargs...)
+pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.Strands; kwargs...) where {T} =
+    _pathtopolys_compound(f, s; kwargs...)
+function pathtopolys(
+    f::Paths.CompoundSegment{T},
+    sty::Paths.AbstractDecoratedStyle;
+    kwargs...
+) where {T}
+    @warn "Ignoring attachments on path segment $f with style $sty when converting to polygons. Did you write `render!.(cell, path, ...)` instead of `render!(cell, path, ...)`?"
+    return pathtopolys(f, Paths.undecorated(sty); kwargs...)
+end
+pathtopolys(::Paths.CompoundSegment{T}, ::Paths.NoRender; kwargs...) where {T} =
+    Polygon{T}[]
+pathtopolys(::Paths.CompoundSegment{T}, ::Paths.NoRenderContinuous; kwargs...) where {T} =
+    Polygon{T}[]
+pathtopolys(::Paths.CompoundSegment{T}, ::Paths.NoRenderDiscrete; kwargs...) where {T} =
+    Polygon{T}[]
+pathtopolys(::Paths.CompoundSegment{T}, ::Paths.SimpleNoRender; kwargs...) where {T} =
+    Polygon{T}[]
 
 # 4-----3
 # trace->
@@ -519,14 +580,19 @@ function _strand_corners(seg::Paths.Segment{T}, inner_offset, outer_offset) wher
     ]
 end
 
-# Terminations are only used with Straight and generate one or two [Rounded] Polygons
+# Terminations generate one or two polygons (possibly with rounding → StyledEntity).
+# Render them directly via to_polygons since they're mostly linear geometry.
+const TerminationStyle =
+    Union{Paths.TraceTermination, Paths.CPWOpenTermination, Paths.CPWShortTermination}
+function pathtopolys(seg::Paths.Segment{T}, sty::TerminationStyle; kwargs...) where {T}
+    return to_polygons(seg, sty; kwargs...)
+end
 function pathtopolys(
-    seg::Paths.Straight{T},
-    sty::Union{Paths.TraceTermination, Paths.CPWOpenTermination, Paths.CPWShortTermination};
+    seg::Paths.CompoundSegment{T},
+    sty::TerminationStyle;
     kwargs...
 ) where {T}
-    p = DeviceLayout._poly(seg, sty)
-    return p isa Vector ? CurvilinearPolygon.(p) : CurvilinearPolygon(p)
+    return to_polygons(seg, sty; kwargs...)
 end
 
 # Types that together can use straight lines only
