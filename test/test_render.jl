@@ -310,64 +310,56 @@ end
         render!(c, pa, GDSMeta(0))
         @test all(isequal(1), Polygons.orientation.(c.elements))
 
-        # Test low-res rendering for simplicity
+        # Test low-res rendering: verify geometric correctness rather than exact points,
+        # since curvature-based discretization produces different vertex placement than the
+        # old analytic arc formula (both are correct within atol).
         c = Cell{Float64}("main")
         pa = Path{Float64}()
         turn!(pa, π / 2, 50.0, Paths.CPW(10.0, 6.0))
         render!(c, pa, atol=2.0)
-        @test points(c.elements[1]) == Point{Float64}[
-            p(0.0, -11.0),
-            p(23.343689374270475, -6.356651483188493),
-            p(43.1335136523794, 6.866486347620601),
-            p(56.35665148318849, 26.656310625729525),
-            p(61.0, 50.0),
-            p(55.0, 50.0),
-            p(50.81337428812077, 28.952411219920062),
-            p(38.890872965260115, 11.109127034739885),
-            p(21.047588780079938, -0.8133742881207695),
-            p(0.0, -5.0)
-        ]
-        @test points(c.elements[2]) == Point{Float64}[
-            p(0.0, 5.0),
-            p(17.22075445642904, 8.425421036992098),
-            p(31.81980515339464, 18.18019484660536),
-            p(41.5745789630079, 32.77924554357096),
-            p(45.0, 50.0),
-            p(39.0, 50.0),
-            p(36.031301767940185, 35.0753461377615),
-            p(27.577164466275356, 22.422835533724644),
-            p(14.924653862238502, 13.968698232059815),
-            p(0.0, 11.0)
-        ]
+        # Turn center is at (0, 50) with radii: outer gap from r=55 to r=61, inner gap from r=39 to r=45
+        center = p(0.0, 50.0)
+        # Element 1: outer gap polygon (radii 55 and 61)
+        pts1 = points(c.elements[1])
+        @test Polygons.orientation(c.elements[1]) == 1
+        @test pts1[1] ≈ p(0.0, -11.0) atol = 1e-10
+        @test pts1[end] ≈ p(0.0, -5.0) atol = 1e-10
+        for pt in pts1
+            r = norm(pt - center)
+            @test 55.0 - 2.0 <= r <= 61.0 + 2.0
+        end
+        # Element 2: inner gap polygon (radii 39 and 45)
+        pts2 = points(c.elements[2])
+        @test Polygons.orientation(c.elements[2]) == 1
+        @test pts2[1] ≈ p(0.0, 5.0) atol = 1e-10
+        @test pts2[end] ≈ p(0.0, 11.0) atol = 1e-10
+        for pt in pts2
+            r = norm(pt - center)
+            @test 39.0 - 2.0 <= r <= 45.0 + 2.0
+        end
 
+        # Same test with units
         c = Cell("main", DeviceLayout.PreferMicrons.nm)
         pa = Path(μm)
         turn!(pa, π / 2, 50.0μm, Paths.CPW(10.0μm, 6.0μm))
         render!(c, pa, atol=2.0μm)
-        @test points(c.elements[1]) == Point{typeof(1.0nm)}[
-            p(0.0nm, -11000.0nm),
-            p(23343.689374270474nm, -6356.651483188493nm),
-            p(43133.5136523794nm, 6866.486347620601nm),
-            p(56356.65148318849nm, 26656.310625729526nm),
-            p(61000.0nm, 50000.0nm),
-            p(55000.0nm, 50000.0nm),
-            p(50813.37428812077nm, 28952.41121992006nm),
-            p(38890.87296526012nm, 11109.127034739884nm),
-            p(21047.58878007994nm, -813.3742881207695nm),
-            p(0.0nm, -5000.0nm)
-        ]
-        @test points(c.elements[2]) == Point{typeof(1.0nm)}[
-            p(0.0nm, 5000.0nm),
-            p(17220.75445642904nm, 8425.421036992098nm),
-            p(31819.80515339464nm, 18180.19484660536nm),
-            p(41574.5789630079nm, 32779.245543570956nm),
-            p(45000.0nm, 50000.0nm),
-            p(39000.0nm, 50000.0nm),
-            p(36031.30176794018nm, 35075.3461377615nm),
-            p(27577.164466275357nm, 22422.835533724643nm),
-            p(14924.653862238501nm, 13968.698232059814nm),
-            p(0.0nm, 11000.0nm)
-        ]
+        center_nm = p(0.0nm, 50000.0nm)
+        pts1 = points(c.elements[1])
+        @test Polygons.orientation(c.elements[1]) == 1
+        @test pts1[1] ≈ p(0.0nm, -11000.0nm) atol = 0.001nm
+        @test pts1[end] ≈ p(0.0nm, -5000.0nm) atol = 0.001nm
+        for pt in pts1
+            r = norm(pt - center_nm)
+            @test 53000.0nm <= r <= 63000.0nm
+        end
+        pts2 = points(c.elements[2])
+        @test Polygons.orientation(c.elements[2]) == 1
+        @test pts2[1] ≈ p(0.0nm, 5000.0nm) atol = 0.001nm
+        @test pts2[end] ≈ p(0.0nm, 11000.0nm) atol = 0.001nm
+        for pt in pts2
+            r = norm(pt - center_nm)
+            @test 37000.0nm <= r <= 47000.0nm
+        end
 
         pa = Path(μm2μm)
         turn!(pa, π / 2, 50.0μm, Paths.CPW(10.0μm, 6.0μm))
@@ -482,10 +474,11 @@ end
         render!(c, pa, GDSMeta(0))
 
         # tests are confirming CCW orientation of the rendered polygons
-        @test (elements(c)[1]).p[1] ≈ p(0.0nm, 5000.0nm)
-        @test (elements(c)[1]).p[end] ≈ p(0.0nm, 11000.0nm)
-        @test (elements(c)[2]).p[1] ≈ p(0.0nm, -11000.0nm)
-        @test (elements(c)[2]).p[end] ≈ p(0.0nm, -5000.0nm)
+        # pathtopolys returns [minus, plus] order (outer gap first for CCW turn)
+        @test (elements(c)[1]).p[1] ≈ p(0.0nm, -11000.0nm) atol = 1.0nm
+        @test (elements(c)[1]).p[end] ≈ p(0.0nm, -5000.0nm) atol = 1.0nm
+        @test (elements(c)[2]).p[1] ≈ p(0.0nm, 5000.0nm) atol = 1.0nm
+        @test (elements(c)[2]).p[end] ≈ p(0.0nm, 11000.0nm) atol = 1.0nm
     end
 
     @testset "Straight, Strands" begin
@@ -774,16 +767,18 @@ end
 
             # Test Layout.jl#68
             els = initial ? reverse(elements(c)) : elements(c)
-            # First and second elements should be CPW polygons
-            straight_points = Set(reduce(vcat, points.(els[1:2])))
+            # Use rounded coordinates for approximate matching (curvature-based discretization
+            # may not land exactly on boundary points shared with termination polygons)
+            pts_approx(el) = [round.(pt, digits=9) for pt in ustrip.(nm, points(el))]
+            straight_points = Set(reduce(vcat, pts_approx.(els[1:2])))
 
             # Third and fourth elements will be the terminating polygons
-            termination_top_points = Set(points(els[3]))
-            termination_bottom_points = Set(points(els[4]))
+            termination_top_points = Set(pts_approx(els[3]))
+            termination_bottom_points = Set(pts_approx(els[4]))
 
-            # Test that there are four points in common with CPW polygons and terminating polygon
-            @test length(intersect(straight_points, termination_top_points)) == 2
-            @test length(intersect(straight_points, termination_bottom_points)) == 2
+            # Test that there are shared boundary points between CPW and termination
+            @test length(intersect(straight_points, termination_top_points)) >= 2
+            @test length(intersect(straight_points, termination_bottom_points)) >= 2
             @test length(intersect(termination_top_points, termination_bottom_points)) == 0
 
             # Test terminating polygon has correct orientation
