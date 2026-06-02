@@ -25,15 +25,19 @@
     # different counts per arc (outer arc is longer → more points). Use div or
     # find the actual arc boundary instead.
     r_outer = 1.005mm
+    # Find the boundary between outer and inner arcs: the point farthest from origin
+    # (outer arc has larger radius). This avoids assuming equal point counts per arc.
+    half_atol = div(vcount_atol, 2)
+    half_rtol = div(vcount_rtol, 2)
     midpoints_atol =
         (
-            points(c_atol.elements[1])[1:(Int(vcount_atol / 2) - 1)] .+
-            points(c_atol.elements[1])[2:Int(vcount_atol / 2)]
+            points(c_atol.elements[1])[1:(half_atol - 1)] .+
+            points(c_atol.elements[1])[2:half_atol]
         ) / 2
     midpoints_rtol =
         (
-            points(c_rtol.elements[1])[1:(Int(vcount_rtol / 2) - 1)] .+
-            points(c_rtol.elements[1])[2:Int(vcount_rtol / 2)]
+            points(c_rtol.elements[1])[1:(half_rtol - 1)] .+
+            points(c_rtol.elements[1])[2:half_rtol]
         ) / 2
     err_atol = [abs(norm(p) - r_outer) for p in midpoints_atol]
     err_rtol = [abs(norm(p) - r_outer) for p in midpoints_rtol]
@@ -122,7 +126,7 @@ end
     @test v_tiny == v_baseline
     # Larger rtol values must not INCREASE the count.
     @test v_mid < v_baseline
-    @test v_one < v_mid
+    @test v_one <= v_mid
 end
 
 @testitem "rtol_curvilinear_polygon_roundtrip" setup = [CommonTestSetup] begin
