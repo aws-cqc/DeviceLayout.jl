@@ -1,7 +1,7 @@
 module SolidModels
 
 import Gmsh: gmsh, gmsh.model.occ
-export gmsh
+export gmsh, populate_size_fields!
 
 # Explicit callback dictionary, to overcome closure limitation on apple silicon.
 import StaticArrays: SVector
