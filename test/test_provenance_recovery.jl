@@ -43,7 +43,10 @@ end
     polys, runs = discretize_with_provenance([cpoly], Float64)
     @test polys isa Vector{<:Polygon}
     @test length(runs) == 1
-    @test runs[1].curve === turn
+    @test runs[1].curve.p0 === turn.p0 # Can't just check segment identity bc Julia 1.10 makes a copy in Curvilinear constructor
+    @test runs[1].curve.α0 === turn.α0
+    @test runs[1].curve.α === turn.α
+    @test runs[1].curve.r === turn.r
     @test runs[1].run[1] == DeviceLayout.Polygons.clipperize(Point(10.0, 0.0))
     @test length(runs[1].run) ≥ 3
 end
