@@ -153,9 +153,8 @@ function substitute_curves(clipped::ClippedPolygon{T}, runs; report=nothing) whe
     function add_region(node)
         ext = build_cpoly(node)
         # Holes must be CCW, but come out CW from Clipper
-        holes = CurvilinearPolygon{T}[
-            _reverse(build_cpoly(child)) for child in node.children
-        ]
+        holes =
+            CurvilinearPolygon{T}[_reverse(build_cpoly(child)) for child in node.children]
         push!(out, CurvilinearRegion{T}(ext, holes))
         for child in node.children
             for gc in child.children
