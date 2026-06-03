@@ -173,6 +173,9 @@ end
     @test isempty(to_polygons(xor2d(a, b)))
     @test isempty(to_polygons(xor2d(b, c)))
     @test isempty(to_polygons(xor2d(c, d)))
+    # Mutli-polygon ClippedPolygon input
+    multi_cp = union2d(sq, sq + Point(10, 10))
+    @test isempty(to_polygons(xor2d(multi_cp, union2d_curved(multi_cp))))
 end
 
 @testitem "Provenance — Path round trips" setup = [CommonTestSetup] begin
@@ -347,6 +350,15 @@ end
     @test sum(sum(length(h.curves) for h in r.holes; init=0) for r in self_union) == 1
     @test isempty(to_polygons(xor2d(self_union, out)))
     @test isempty(to_polygons(xor2d(self_union, union2d(out))))
+
+    # Clipper op returns ClippedPolygon with grandchildren
+    outer = centered(Rectangle(100.0, 100.0))
+    curved_gc = difference2d_curved(outer, out)
+    @test length(curved_gc) == 2 # Inner is separate region
+    @test sum(length(r.exterior.curves) for r in curved_gc) == 1
+    @test sum(sum(length(h.curves) for h in r.holes; init=0) for r in curved_gc) == 0
+    @test isempty(to_polygons(xor2d(curved_gc, difference2d(outer, out))))
+    @test isempty(to_polygons(xor2d(curved_gc, difference2d(outer, out))))
 end
 
 @testitem "Provenance — arcs on exterior and a hole" setup = [CommonTestSetup] begin
