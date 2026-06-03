@@ -17,13 +17,10 @@ If there is no special handling for `ent` in the kernel, then the result will be
 """
 to_primitives(::SolidModel, ent::GeometryEntity; kwargs...) = to_polygons(ent; kwargs...)
 
-# Types that together can use straight lines only
-const LinearSegment{T} =
-    Union{Paths.Straight{T}, Paths.ConstantOffset{T, Paths.Straight{T}}}
-const LinearStyle =
-    Union{Paths.SimpleTrace, Paths.SimpleCPW, Paths.TaperTrace, Paths.TaperCPW}
-islinear(::LinearSegment{T}, ::LinearStyle) where {T} = Val(true)
-islinear(::Paths.Segment{T}, ::Paths.Style) where {T} = Val(false)
+# `islinear` (with its `LinearSegment`/`LinearStyle` type unions) is defined once in the
+# Curvilinear module (src/curvilinear.jl) and imported here via solidmodels.jl. It gates
+# "can this node be drawn with straight lines only?" identically for the GDS and SolidModel
+# render paths, so there is a single source of truth.
 
 # Dispatch node->primitive based on kernel and requirements for representing node exactly
 function to_primitives(sm::SolidModel{OpenCascade}, node::Paths.Node; kwargs...)
