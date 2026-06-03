@@ -46,14 +46,12 @@ end
 function _collect_provenance!(polys, runs, e::CurvilinearRegion, ::Type{R}, atol) where {R}
     _collect_provenance!(polys, runs, e.exterior, R, atol)
     for h in e.holes
-        _collect_provenance!(polys, runs, h, R, atol)
+        _collect_provenance!(polys, runs, _reverse(h), R, atol)
     end
     return nothing
 end
 
 # Any other entity: no curves to recover; discretize to polygons.
-# Operands that `clip` normalizes specially — `GeometryStructure`/`GeometryReference`/`Pair`
-# (see `_normalize_clip_arg` in clipping.jl) — are not handled here; recover_curves expects entity-level inputs.
 function _collect_provenance!(polys, runs, e, ::Type{R}, atol) where {R}
     # Convert to polygons and append. to_polygons returns a polygon or array.
     poly_result = DeviceLayout.to_polygons(e)
@@ -118,14 +116,11 @@ function substitute_curves(clipped::ClippedPolygon{T}, runs; report=nothing) whe
         for (ri, pr) in enumerate(runs)
             used[ri] && continue
             hit = match_run(snapped, pr.run)
-            hit === nothing && continue
-            if hit.reversed && !hasmethod(reverse, Tuple{typeof(pr.curve)})
-                continue                          # can't reverse → leave for :clipped
-            end
+            isnothing(hit) && continue
             seg = hit.reversed ? reverse(pr.curve) : pr.curve
             push!(matched, (hit.start, length(pr.run), seg))
             used[ri] = true
-            report !== nothing && push!(report, (:recovered, pr.curve, ci))
+            !isnothing(report) && push!(report, (:recovered, pr.curve, ci))
         end
         isempty(matched) && return CurvilinearPolygon{T}(pts, Paths.Segment[], Int[])
 
@@ -159,7 +154,7 @@ function substitute_curves(clipped::ClippedPolygon{T}, runs; report=nothing) whe
         ext = build_cpoly(node)
         # Holes must be CCW, but come out CW from Clipper
         holes = CurvilinearPolygon{T}[
-            _reverse_curvilinear_polygon(build_cpoly(child)) for child in node.children
+            _reverse(build_cpoly(child)) for child in node.children
         ]
         push!(out, CurvilinearRegion{T}(ext, holes))
         for child in node.children
@@ -171,21 +166,12 @@ function substitute_curves(clipped::ClippedPolygon{T}, runs; report=nothing) whe
     for child in clipped.tree.children
         add_region(child)
     end
-    if report !== nothing
+    if !isnothing(report)
         for (ri, pr) in enumerate(runs)
             used[ri] || push!(report, (:clipped, pr.curve, 0))
         end
     end
     return out
-end
-
-function _reverse_curvilinear_polygon(e::CurvilinearPolygon)
-    csi_rev = (i, N) -> mod1(i + 1, N) - N - 1
-    return CurvilinearPolygon(
-        reverse(e.p),
-        reverse(e.curves),
-        reverse(csi_rev.(e.curve_start_idx, length(e.p)))
-    )
 end
 
 # Normalize a clip operand into a flat Vector of entities, preserving curve-bearing

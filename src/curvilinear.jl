@@ -146,6 +146,15 @@ function to_polygons(
     return Polygon{T}(p)
 end
 
+function _reverse(e::CurvilinearPolygon)
+    csi_rev = (i, N) -> mod1(i + 1, N) - N - 1
+    return CurvilinearPolygon(
+        reverse(e.p),
+        reverse(e.curves),
+        reverse(csi_rev.(e.curve_start_idx, length(e.p)))
+    )
+end
+
 function transform(e::CurvilinearPolygon, f::Transformation)
     # If the transformation is a reflection, have to fix the winding.
     # curve_start_idx are shifted forward 1, reversed, then negated.

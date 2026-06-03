@@ -241,8 +241,6 @@ end
     @test isempty(to_polygons(xor2d(out, difference2d(Curvilinear._as_entities(rr), r2))))
 end
 
-# ── Acceptance fixtures ─────────────────────────────────────────────────────
-
 @testitem "Provenance — single untouched arc, varied radius" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout: recover_curves, union2d, to_polygons
@@ -277,7 +275,7 @@ end
 @testitem "Provenance — seam-rotation (union with self)" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout: recover_curves, union2d
-    # A rectangle with ONE rounded corner unioned with a copy of itself. Clipper
+    # A rectangle with one rounded corner unioned with a copy of itself. Clipper
     # rotates the start vertex of the output contour so the seam lands on a kink.
     # The cyclic match_run handles it.
     t = Paths.Turn(90.0°, 2.0; p0=Point(18.0, 0.0), α0=0.0°)  # (18,0) heading +x → (20,2)
@@ -304,7 +302,7 @@ end
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout.Curvilinear: recover_curves, difference2d, discretize_with_provenance
     # Differencing a curved region out of a solid square puts the arc on the
-    # resulting HOLE boundary, whose winding is reversed relative to the input
+    # resulting hole boundary, whose winding is reversed relative to the input
     # exterior. The reversed branch of match_run must fire to recover it.
     plus = Polygon([Point(0.0, 0), Point(30, 0), Point(30, 30), Point(0, 30)])
     tm = Paths.Turn(90.0°, 2.0; p0=Point(18.0, 10.0), α0=0.0°)  # (18,10) → (20,12)
@@ -342,6 +340,13 @@ end
         end
     walk(clipped.tree)
     @test saw_reversed[]
+
+    # Now curve recovery with CR with a hole as input
+    self_union = union2d_curved(out)
+    @test sum(length(r.exterior.curves) for r in self_union) == 0
+    @test sum(sum(length(h.curves) for h in r.holes; init=0) for r in self_union) == 1
+    @test isempty(to_polygons(xor2d(self_union, out)))
+    @test isempty(to_polygons(xor2d(self_union, union2d(out))))
 end
 
 @testitem "Provenance — arcs on exterior and a hole" setup = [CommonTestSetup] begin
@@ -350,9 +355,6 @@ end
     # A region with an arc on its exterior, differenced by a curved region that
     # becomes a hole carrying its own arc. Both arcs must be recovered, one on
     # the exterior contour and one on the hole contour.
-    # NOTE: union2d with a disjoint square cannot be used here — discretizing a
-    # CurvilinearRegion yields exterior+hole as separate polygons, and union2d
-    # fills the hole back in. difference2d preserves both contours.
     te = Paths.Turn(90.0°, 2.0; p0=Point(28.0, 0.0), α0=0.0°)  # exterior arc (28,0) → (30,2)
     plus = CurvilinearRegion(
         CurvilinearPolygon(
@@ -383,7 +385,7 @@ end
 @testitem "Provenance — annulus / collision probe" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout.Curvilinear: recover_curves, union2d, discretize_with_provenance
-    # Two arcs of DIFFERENT radii in one geometry. Each must map to its own curve.
+    # Two arcs of different radii in one geometry. Each must map to its own curve.
     # Different radii produce different integer runs, so no cross-match collision
     # is possible — we assert the runs differ to make that intent explicit.
     t1 = Paths.Turn(90.0°, 2.0; p0=Point(10.0, 0.0), α0=0.0°)   # r=2: (10,0) → (12,2)
@@ -417,7 +419,7 @@ end
     using DeviceLayout: recover_curves, difference2d
     # A straight rectangle that crosses the arc interior. Clipper inserts a new
     # intersection vertex on the arc, breaking its run. Recovery is all-or-nothing,
-    # so the cut arc is reported :clipped (NOT recovered) and falls back to polyline.
+    # so the cut arc is reported :clipped (not recovered) and falls back to polyline.
     t = Paths.Turn(90.0°, 2.0; p0=Point(18.0, 10.0), α0=0.0°)  # (18,10) → (20,12)
     region = CurvilinearRegion(
         CurvilinearPolygon(
