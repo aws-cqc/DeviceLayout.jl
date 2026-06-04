@@ -1088,9 +1088,7 @@ end
 
 # Vector of primitives — fan out.
 function _sample_meshsize!(prims::AbstractVector, h::Float64, α::Float64, z::Float64)
-    for p in prims
-        _sample_meshsize!(p, h, α, z)
-    end
+    return _sample_meshsize!.(prims, h, α, z)
 end
 
 # Polygon — walk consecutive vertex pairs as straight segments.
@@ -1187,9 +1185,7 @@ function _sample_segment_meshsize!(
     α::Float64,
     z::Float64
 )
-    for sub in seg.segments
-        _sample_segment_meshsize!(sub, h, α, z)
-    end
+    return _sample_segment_meshsize!.(seg.segments, h, α, z)
 end
 
 # Straight line between two points. Sample `Ns = ⌈L / h⌉` evenly-spaced points

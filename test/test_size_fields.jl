@@ -23,4 +23,15 @@
     SolidModels.clear_mesh_control_points!()
     cp = SolidModels.populate_size_fields!(cs)
     @test all(p -> p[3] == 0.0, Iterators.flatten(values(cp)))
+
+    # A 1-D primitive (LineSegment) has no boundary to sample: it hits the
+    # generic fallback and contributes no control points.
+    SolidModels.clear_mesh_control_points!()
+    SolidModels._collect_mesh_control_points!(
+        [DeviceLayout.LineSegment(Point(0μm, 0μm), Point(10μm, 0μm))],
+        1.0,
+        0.5,
+        0.0
+    )
+    @test isempty(SolidModels.mesh_control_points())
 end
