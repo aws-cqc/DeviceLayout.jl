@@ -436,6 +436,13 @@ end
 
         check!(floorplan)
 
+        SolidModels.clear_mesh_control_points!()
+        cp_schematic = deepcopy(
+            SolidModels.populate_size_fields!(floorplan.coordinate_system; fine_mesh=true)
+        )
+        @test !isempty(cp_schematic)
+        @test (1.0, 0.8) in keys(cp_schematic) || (10.0, 0.9) in keys(cp_schematic)
+
         # Render to a solid model
         tech = ProcessTechnology(
             (;
@@ -518,6 +525,9 @@ end
         sm = SolidModel("test", overwrite=true)
         # SolidModels.set_gmsh_option("")
         render!(sm, floorplan, target)
+        cp_rendered = SolidModels.mesh_control_points()
+        @test !isempty(cp_rendered)
+        @test Set(keys(cp_rendered)) == Set(keys(cp_schematic))
 
         @test SolidModels.hasgroup(sm, "substrates", 3)
         @test SolidModels.hasgroup(sm, "vacuum", 3)
