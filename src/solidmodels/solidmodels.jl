@@ -81,7 +81,13 @@ import DeviceLayout.Polygons:
     r1,
     r2,
     radius
-import DeviceLayout.Curvilinear: edge_type_at_vertex, line_arc_cornerindices, islinear
+import DeviceLayout.Curvilinear:
+    edge_type_at_vertex,
+    line_arc_cornerindices,
+    islinear,
+    round_to_curvilinearpolygon,
+    rounded_corner_segment,
+    rounded_corner_segment_line_arc
 import Unitful: μm, mm, ustrip, °, uconvert, Length
 import FileIO: File
 
