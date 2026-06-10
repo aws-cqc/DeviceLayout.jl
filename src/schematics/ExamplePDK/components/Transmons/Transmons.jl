@@ -50,12 +50,16 @@ This component is intended for use in demonstrations.
   - `star_tip_width = 50μm`: Width of star tips
   - `rounding = 5μm`: Rounding applied to ground plane geometry
   - `jj_template = ExampleSimpleSQUID()`: Template to generate JJ or SQUID,
-    where `name` and `h_ground_island` will be overridden
+    where `name` and `ground_island_length` will be overridden
   - `lattice_spacing = 1.65mm`: Spacing between transmons (determines coupler length)
   - `right_handed = true`: If `false`, is reflected when attached to right-handed transmons
   - `coupler_style = Paths.CPW(10μm, 10μm)`: `Path` style for couplers
   - `resonator_style = Paths.CPW(10μm, 10μm)`: `Path` style for readout resonator (coupler index `5`
     includes a taper from `coupler_style` to `resonator_style`)
+  - `coupler_bend_radius = 50μm`: Bend radius (and initial straight length) used when routing
+    each coupler away from the island
+  - `coupler_straight_length = 50μm`: Length of the initial straight segment on each coupler
+    before bending toward its destination
   - `grounded_couplers = Int[]`: List of grounded coupler indices (1 to 5, clockwise from 12 o'clock)
   - `coupler_bridge = nothing`: `CoordinateSystem` holding a bridge to place over couplers
   - `feedline_style = Paths.CPW(10μm, 6μm)`: XY/Z control feedline style (before taper)
@@ -102,6 +106,8 @@ This component is intended for use in demonstrations.
     right_handed = true
     coupler_style = Paths.CPW(10μm, 10μm)
     resonator_style = Paths.CPW(10μm, 10μm)
+    coupler_bend_radius = 50μm
+    coupler_straight_length = 50μm
     grounded_couplers = Int[]
     coupler_bridge = nothing
     feedline_style = Paths.CPW(10μm, 6μm)
@@ -120,14 +126,21 @@ function SchematicDrivenLayout._build_subcomponents(tr::ExampleStarTransmon)
     island_params = filter_parameters(ExampleStarIsland, tr)
     @component island = ExampleStarIsland(; island_params...)
     @component junction = tr.jj_template begin
-        h_ground_island = tr.island_ground_gap
+        ground_island_length = tr.island_ground_gap
     end
     # Coupler subcomponents are Paths
     couplers = coupler_paths(tr, island)
     readout_coupler = Path(nm; name="readout_coupler", metadata=METAL_NEGATIVE)
-    straight!(readout_coupler, 50μm, Paths.TaperCPW(tr.coupler_style, tr.resonator_style))
-    !isnothing(tr.coupler_bridge) && attach!(readout_coupler, sref(tr.coupler_bridge), 25μm)
-    turn!(readout_coupler, π / 4 - π / 5, 50μm, tr.resonator_style)
+    straight!(
+        readout_coupler,
+        tr.coupler_straight_length,
+        Paths.TaperCPW(tr.coupler_style, tr.resonator_style)
+    )
+    !isnothing(tr.coupler_bridge) &&
+        attach!(readout_coupler, sref(tr.coupler_bridge), tr.coupler_straight_length / 2)
+    # Turn from the cardinal coupler grid (2π/5 spacing) onto the readout direction (π/4)
+    readout_coupler_turn = π / 4 - π / 5
+    turn!(readout_coupler, readout_coupler_turn, tr.coupler_bend_radius, tr.resonator_style)
     @component xy = ExampleXYTermination(; filter_parameters(ExampleXYTermination, tr)...) begin
         bridge = tr.control_bridge
     end
@@ -156,24 +169,41 @@ function SchematicDrivenLayout._graph!(
     return fuse!(g, island_node => :z, subcomps.z => :qubit)
 end
 
+# Graph node indices, in the order subcomponents are returned by `_build_subcomponents`
+# (and added in `_graph!`). Keeping the index↔subcomponent mapping in one named place means
+# `map_hooks` does not hardcode bare integers that must be kept in sync by hand: if the build
+# order changes, only this NamedTuple needs to be updated.
+const _STAR_TRANSMON_NODES = (
+    island=1,
+    junction=2,
+    readout_coupler=3,
+    coupler_N=4,
+    coupler_E=5,
+    coupler_S=6,
+    coupler_W=7,
+    xy=8,
+    z=9
+)
+
 function SchematicDrivenLayout.map_hooks(tr::ExampleStarTransmon)
     ###### Dictionary mapping (graph node index => subcomp hook name) => MyComp hook name
+    n = _STAR_TRANSMON_NODES
     path_hook = tr.right_handed ? :p1 : :p1_lh
     return Dict(
-        (1 => :origin) => :origin,
-        (3 => :p1) => :readout,
-        (4 => path_hook) => :coupler_N,
-        (5 => path_hook) => :coupler_E,
-        (6 => path_hook) => :coupler_S,
-        (7 => path_hook) => :coupler_W,
-        (8 => :line) => :xy,
-        (9 => :line) => :z
+        (n.island => :origin) => :origin,
+        (n.readout_coupler => :p1) => :readout,
+        (n.coupler_N => path_hook) => :coupler_N,
+        (n.coupler_E => path_hook) => :coupler_E,
+        (n.coupler_S => path_hook) => :coupler_S,
+        (n.coupler_W => path_hook) => :coupler_W,
+        (n.xy => :line) => :xy,
+        (n.z => :line) => :z
     )
 end
 ###
 
 function coupler_paths(tr::ExampleStarTransmon, isl::ExampleStarIsland)
-    (; coupler_style, lattice_spacing) = tr
+    (; coupler_style, lattice_spacing, coupler_bend_radius, coupler_straight_length) = tr
     h0s = hooks(isl).coupler[1:4] # Starting hooks for paths (clockwise from 12 o'clock)
     h_N = PointHook(0μm, lattice_spacing / 2, -90°)
     h1s = [h_N, RotationPi(-1 // 2)(h_N), RotationPi()(h_N), RotationPi(1 // 2)(h_N)]
@@ -184,14 +214,19 @@ function coupler_paths(tr::ExampleStarTransmon, isl::ExampleStarIsland)
         path = path_out(h_start)
         path.name = "coupler_$idx"
         path.metadata = METAL_NEGATIVE
-        straight!(path, 50μm, coupler_style)
+        straight!(path, coupler_straight_length, coupler_style)
         add_bridges!(path, tr.coupler_bridge)
         # Turn to get correct orientation
         α = rem(α_end - α_start, 360°, RoundNearest)
-        !(iszero(α)) && turn!(path, α, 50μm)
+        !(iszero(α)) && turn!(path, α, coupler_bend_radius)
         # Snake to get to correct position
         # If unreachable, reduce above straight length and/or decrease assumed_coupler_extent
-        route!(path, h_end.p, α_end, Paths.StraightAnd45(min_bend_radius=50μm))
+        route!(
+            path,
+            h_end.p,
+            α_end,
+            Paths.StraightAnd45(min_bend_radius=coupler_bend_radius)
+        )
         push!(paths, path)
     end
     return paths
@@ -208,7 +243,7 @@ Transmon component with a rectangular island acting as a shunt capacitor across 
 
   - `name = "tr"`: Name of component
   - `jj_template = ExampleSimpleJunction()`: Template to generate JJ or SQUID,
-    where `name` and `h_ground_island` will be overridden
+    where `name` and `ground_island_length` will be overridden
   - `cap_width = 24μm`: The width of the rectangular island
   - `cap_length = 520μm`: The length of the rectangular island
   - `cap_gap = 30μm`: The gap surrounding the rectangular island, except the side with the junction/SQUID
@@ -234,9 +269,9 @@ Transmon component with a rectangular island acting as a shunt capacitor across 
     cap_width = 24μm
     cap_length = 520μm
     cap_gap = 30μm
-    junction_gap = 12.0μm
+    junction_gap = 12μm
     junction_pos = :bottom
-    island_rounding = 0µm
+    island_rounding::typeof(1.0µm) = 0µm
 end
 
 island(tr::ExampleRectangleTransmon) = component(tr[1])
@@ -246,7 +281,7 @@ function SchematicDrivenLayout._build_subcomponents(tr::ExampleRectangleTransmon
     @component island = ExampleRectangleIsland(; island_params...)
 
     @component junction = tr.jj_template begin
-        h_ground_island = tr.junction_gap
+        ground_island_length = tr.junction_gap
     end
 
     return (island, junction)
@@ -265,8 +300,8 @@ function SchematicDrivenLayout.map_hooks(::Type{ExampleRectangleTransmon})
     return Dict((1 => :readout) => :readout, (1 => :xy) => :xy, (1 => :z) => :z)
 end
 
-check_rotation(::ExampleRectangleTransmon) = true
-allowed_rotation_angles(::ExampleRectangleTransmon) = [0]
+SchematicDrivenLayout.check_rotation(::ExampleRectangleTransmon) = true
+SchematicDrivenLayout.allowed_rotation_angles(::ExampleRectangleTransmon) = [0]
 
 """
     ExampleRectangleIsland <: Component
@@ -303,7 +338,7 @@ overwritten.
     cap_gap = 30μm
     junction_gap = 12μm
     junction_pos = :bottom
-    island_rounding = 0µm
+    island_rounding::typeof(1.0µm) = 0µm
 end
 
 function SchematicDrivenLayout.hooks(r::ExampleRectangleIsland)
@@ -325,17 +360,21 @@ end
 function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, r::ExampleRectangleIsland)
     (; junction_gap, junction_pos, cap_width, cap_length, cap_gap, island_rounding) = r
     sgn = junction_pos == :bottom ? 1 : -1
-    r1 = Rectangle(
+    island_rect = Rectangle(
         Point(-cap_width / 2, sgn * junction_gap),
         Point(cap_width / 2, sgn * (junction_gap + cap_length))
     )
-    r2 = Rectangle(
+    cutout_rect = Rectangle(
         Point(-cap_width / 2 - cap_gap, zero(cap_gap)),
         Point(cap_width / 2 + cap_gap, sgn * (junction_gap + cap_length + cap_gap))
     )
-    diff = Rounded(island_rounding)(difference2d(r2, r1))
+    cutout = Rounded(island_rounding)(difference2d(cutout_rect, island_rect))
 
-    return render!(cs, meshsized_entity(diff, 2 * min(cap_width, cap_gap)), METAL_NEGATIVE)
+    return render!(
+        cs,
+        meshsized_entity(cutout, 2 * min(cap_width, cap_gap)),
+        METAL_NEGATIVE
+    )
 end
 
 end # module

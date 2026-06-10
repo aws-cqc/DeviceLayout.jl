@@ -4,6 +4,20 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+  - Renamed `ExamplePDK` component parameters to follow the component style guide
+    (`<feature>_<dimension>` naming, `_count`/`_trace`/`_radius`/`_gap` suffixes, no
+    `w_`/`h_`/`l_`/`n_` prefixes or non-searchable names) and added length-type
+    annotations to absolute `rounding` parameters. Affected components include
+    `ExampleChip`, `ExampleSeriesClawCapacitor`/`ExampleShuntClawCapacitor`,
+    `ExampleSimpleJunction`/`ExampleSimpleSQUID`, `ExampleTappedHairpin`,
+    `ExampleFilteredHairpinReadout`, `ExampleClawedMeanderReadout`, `ExampleStarTransmon`,
+    `ExampleStarIsland`, and `ExampleRectangleTransmon`/`ExampleRectangleIsland`. Magic
+    numbers in `ExampleStarTransmon`/`ExampleStarIsland` geometry were extracted to
+    parameters. `ExamplePDK` makes no API-stability guarantee, so these are not treated
+    as breaking changes to DeviceLayout.jl.
+
 ## 1.14.0 (2026-05-28)
 
   - Added `ParameterSet`, a nested dictionary wrapper with dot-access for reading and

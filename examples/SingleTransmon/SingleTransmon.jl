@@ -15,14 +15,14 @@ using PRIMA
 
 """
     single_transmon(
-        w_shield=2μm,
+        shield_width=2μm,
         claw_gap=6μm,
-        w_claw=34μm,
-        l_claw=121μm,
+        claw_trace=34μm,
+        claw_length=121μm,
         cap_width=24μm,
         cap_length=620μm,
         cap_gap=30μm,
-        n_meander_turns=5,
+        meander_turn_count=5,
         hanger_length=500μm,
         bend_radius=50μm,
         wave_ports::Bool=false,
@@ -32,15 +32,15 @@ using PRIMA
 Generate a SolidModel and mesh for a single transmon design, using a rectangular transmon island and claw resonator.
 """
 function single_transmon(;
-    w_shield=2μm,
+    shield_width=2μm,
     claw_gap=6μm,
-    w_claw=34μm,
-    l_claw=121μm,
+    claw_trace=34μm,
+    claw_length=121μm,
     cap_width=24μm,
     cap_length=620μm,
     cap_gap=30μm,
     total_length=5000μm,
-    n_meander_turns=5,
+    meander_turn_count=5,
     hanger_length=500μm,
     bend_radius=50μm,
     wave_ports::Bool=false,
@@ -58,14 +58,14 @@ function single_transmon(;
     PATH_STYLE = Paths.SimpleCPW(cpw_width, cpw_gap)
     BRIDGE_STYLE = ExamplePDK.bridge_geometry(PATH_STYLE)
     coupling_gap = 5μm
-    w_grasp = cap_width + 2 * cap_gap
+    grasp_width = cap_width + 2 * cap_gap
     arm_length = 428μm # straight length from meander exit to claw
-    total_height =
+    total_y_length =
         arm_length +
         coupling_gap +
         Paths.extent(PATH_STYLE) +
         hanger_length +
-        (3 + n_meander_turns * 2) * bend_radius
+        (3 + meander_turn_count * 2) * bend_radius
     ### Create abstract components
     ## Transmon
     qubit = ExampleRectangleTransmon(;
@@ -81,13 +81,13 @@ function single_transmon(;
         coupling_length=400μm,
         coupling_gap,
         total_length,
-        w_shield,
-        w_claw,
-        l_claw,
+        shield_width,
+        claw_trace,
+        claw_length,
         claw_gap,
-        w_grasp,
-        n_meander_turns,
-        total_height,
+        grasp_width,
+        meander_turn_count,
+        total_y_length,
         hanger_length,
         bend_radius,
         bridge=BRIDGE_STYLE

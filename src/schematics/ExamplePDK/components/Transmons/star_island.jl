@@ -20,6 +20,8 @@ these defaults are overridden.
   - `star_tip_width = 50μm`: Width of star tips
   - `coupler_style = Paths.CPW(10μm, 10μm)`: `Path` style for couplers
   - `rounding = 5μm`: Rounding applied to ground plane geometry
+  - `coupler_lead_overlap = 5μm`: Extra length each coupler lead rectangle extends past the
+    island-ground gap toward the island
 
 # Hooks
 
@@ -40,7 +42,8 @@ these defaults are overridden.
     island_coupler_gap = 15μm
     star_tip_width = 50μm
     coupler_style = Paths.CPW(10μm, 10μm)
-    rounding = 5μm
+    rounding::typeof(1.0μm) = 5μm
+    coupler_lead_overlap = 5μm
 end
 
 function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, isl::ExampleStarIsland)
@@ -51,7 +54,8 @@ function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, isl::ExampleStar
         island_coupler_gap,
         star_tip_width,
         coupler_style,
-        rounding
+        rounding,
+        coupler_lead_overlap
     ) = isl
     θ_outer = range(π / 2, step=2π / 5, length=5)
     θ_inner = θ_outer .+ π / 5
@@ -90,7 +94,7 @@ function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, isl::ExampleStar
     outer, interface_pts = _outer_cutout(isl)
 
     ## Draw the coupler lead rectangles
-    lead = Rectangle(coupler_style.trace, island_ground_gap + 5μm)
+    lead = Rectangle(coupler_style.trace, island_ground_gap + coupler_lead_overlap)
     lead = Align.flushbottom(lead, outer, centered=true)
     append!(positive_polys, [Rotation(θ - π / 2)(lead) for θ in θ_outer])
 
