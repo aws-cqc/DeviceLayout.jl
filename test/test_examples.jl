@@ -1,7 +1,15 @@
 @testitem "ExamplePDK" setup = [CommonTestSetup] begin
     include("../examples/DemoQPU17/DemoQPU17.jl")
     @time "Total" schematic, artwork = DemoQPU17.qpu17_demo(dir=tdir)
-
+    # Check for changes to geometry
+    fingerprint = Cells.geometry_fingerprint(artwork)
+    expected = "d410651b9adfffb19db2182e9713d6599539181fea85644d6c1b3631a17acb9d"
+    @test fingerprint == expected
+    fingerprint != expected && println("""
+        Expected QPU17 artwork fingerprint: $expected
+        Found: $fingerprint
+        If rendering changes were intentional, update the expected fingerprint.
+    """)
     # Check target constructor
     fc_target = SchematicDrivenLayout.ExamplePDK.flipchip_solidmodel_target([
         "port_1",
