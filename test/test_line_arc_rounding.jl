@@ -263,59 +263,10 @@
     region_polys = to_polygons(region, Rounded(fillet_r))
     @test length(region_polys) > 0
 
-    # SolidModel segment version: rounded_corner_segment_line_arc
-    # Verify that the Turn-returning variant produces tangent points and
-    # endpoints consistent with the discretized rounded_corner_line_arc.
-
-    import DeviceLayout.SolidModels: rounded_corner_segment_line_arc
-    using DeviceLayout.Curvilinear: rounded_corner_line_arc
-
-    n_pts = length(pts)
-    for i = 1:n_pts
-        edge = edge_type_at_vertex(cp, i)
-        is_line_arc = (edge.incoming == :straight) != (edge.outgoing == :straight)
-        !is_line_arc && continue
-
-        arc_is_outgoing = edge.outgoing != :straight
-        arc_curve = arc_is_outgoing ? edge.outgoing : edge.incoming
-        p_line = arc_is_outgoing ? pts[mod1(i - 1, n_pts)] : pts[mod1(i + 1, n_pts)]
-
-        seg = rounded_corner_segment_line_arc(
-            p_line,
-            pts[i],
-            arc_curve,
-            arc_is_outgoing,
-            fillet_r
-        )
-        disc = rounded_corner_line_arc(p_line, pts[i], arc_curve, arc_is_outgoing, fillet_r)
-
-        if isnothing(disc.T_arc)
-            @test isnothing(seg)
-        else
-            @test !isnothing(seg)
-            isnothing(seg) && continue
-
-            # Tangent points match
-            @test isapprox(seg.T_arc, disc.T_arc, atol=1.0nm)
-            # T_line matches first or last discretized point
-            @test isapprox(seg.T_line, disc.points[1], atol=1.0nm) ||
-                  isapprox(seg.T_line, disc.points[end], atol=1.0nm)
-
-            # Turn endpoints match tangent points
-            p0_f = Paths.p0(seg.fillet)
-            p1_f = Paths.p1(seg.fillet)
-            if arc_is_outgoing
-                @test isapprox(p0_f, seg.T_line, atol=1.0nm)
-                @test isapprox(p1_f, seg.T_arc, atol=1.0nm)
-            else
-                @test isapprox(p0_f, seg.T_arc, atol=1.0nm)
-                @test isapprox(p1_f, seg.T_line, atol=1.0nm)
-            end
-
-            # Fillet radius is correct
-            @test seg.fillet.r ≈ fillet_r
-        end
-    end
+    # Each line-arc corner's fillet is geometrically valid (tangent points on arc/line,
+    # endpoints, G1 tangency, radius, center distances, on-circle sweep). See
+    # check_line_arc_fillets in CommonTestSetup.
+    check_line_arc_fillets(cp, pts, fillet_r)
 
     # round_to_curvilinearpolygon (SolidModel pipeline)
     # Verify that styled_loop produces a CurvilinearPolygon with fillet curves
@@ -627,63 +578,11 @@ end
         cs
     end)
 
-    # SolidModel segment version on horseshoe geometry (large-sweep arcs)
-    import DeviceLayout.SolidModels: rounded_corner_segment_line_arc
-    using DeviceLayout.Curvilinear: rounded_corner_line_arc
-
+    # Same per-corner fillet property checks as the rectangle block, exercised here on the
+    # horseshoe's large-sweep (~270°) arcs. See check_line_arc_fillets in CommonTestSetup.
     horseshoe_fillet_r = 20.0μm
     horseshoe_pts_list = [outer_start, outer_end, x1, x2, inner_start, inner_end, x3, x4]
-    n_horse = length(horseshoe_pts_list)
-    for i = 1:n_horse
-        edge = edge_type_at_vertex(horseshoe, i)
-        is_line_arc = (edge.incoming == :straight) != (edge.outgoing == :straight)
-        !is_line_arc && continue
-
-        arc_is_outgoing = edge.outgoing != :straight
-        arc_curve = arc_is_outgoing ? edge.outgoing : edge.incoming
-        p_line =
-            arc_is_outgoing ? horseshoe_pts_list[mod1(i - 1, n_horse)] :
-            horseshoe_pts_list[mod1(i + 1, n_horse)]
-
-        seg = rounded_corner_segment_line_arc(
-            p_line,
-            horseshoe_pts_list[i],
-            arc_curve,
-            arc_is_outgoing,
-            horseshoe_fillet_r
-        )
-        disc = rounded_corner_line_arc(
-            p_line,
-            horseshoe_pts_list[i],
-            arc_curve,
-            arc_is_outgoing,
-            horseshoe_fillet_r
-        )
-
-        if isnothing(disc.T_arc)
-            @test isnothing(seg)
-        else
-            @test !isnothing(seg)
-            isnothing(seg) && continue
-            @test isapprox(seg.T_arc, disc.T_arc, atol=1.0nm)
-            # T_line matches first or last discretized point
-            @test isapprox(seg.T_line, disc.points[1], atol=1.0nm) ||
-                  isapprox(seg.T_line, disc.points[end], atol=1.0nm)
-
-            # Turn endpoints match tangent points
-            p0_f = Paths.p0(seg.fillet)
-            p1_f = Paths.p1(seg.fillet)
-            if arc_is_outgoing
-                @test isapprox(p0_f, seg.T_line, atol=1.0nm)
-                @test isapprox(p1_f, seg.T_arc, atol=1.0nm)
-            else
-                @test isapprox(p0_f, seg.T_arc, atol=1.0nm)
-                @test isapprox(p1_f, seg.T_line, atol=1.0nm)
-            end
-
-            @test seg.fillet.r ≈ horseshoe_fillet_r
-        end
-    end
+    check_line_arc_fillets(horseshoe, horseshoe_pts_list, horseshoe_fillet_r)
 
     # SolidModel styled_loop test for horseshoe
     import DeviceLayout.SolidModels: styled_loop
