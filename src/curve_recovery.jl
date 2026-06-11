@@ -183,7 +183,7 @@ _as_entities(p::Pair{<:Union{GeometryStructure, GeometryReference}}) =
     _as_entities(flat_elements(p))
 function _as_entities(p::Paths.Node)
     iszero(pathlength(p.seg)) && p.sty isa ContinuousStyle && return []
-    return _as_entities(pathtopolys(p.seg, p.sty))
+    return _as_entities(pathtopolys(p)) # Use `islinear` dispatch on segment and style
 end
 # A Rounded-styled straight Polygon recovers as its exact-arc CurvilinearPolygon, so
 # corners survive the clip. Mirrors to_primitives(::SolidModel, ::StyledEntity{Polygon,Rounded}).
