@@ -563,7 +563,15 @@ include("render/render.jl")
 # After render.jl to ensure access to `to_polygons`
 include("curvilinear.jl")
 using .Curvilinear
-export Curvilinear, CurvilinearPolygon, CurvilinearRegion, pathtopolys
+export Curvilinear,
+    CurvilinearPolygon,
+    CurvilinearRegion,
+    pathtopolys,
+    recover_curves,
+    difference2d_curved,
+    union2d_curved,
+    intersect2d_curved,
+    xor2d_curved
 
 include("simple_shapes.jl")
 import .SimpleShapes:

@@ -45,6 +45,34 @@ A [`CurvilinearRegion`](@ref) pairs a `CurvilinearPolygon` exterior with zero or
 
 See [API Reference: Curvilinear geometry](@ref api-curvilinear).
 
+### Recovering curves through clipping
+
+Boolean operations (`union2d`, `difference2d`, etc.) discretize curved geometry to polygons
+before passing them to the Clipper library. Normally, the original curves (arcs, splines)
+are lost in this process. The [`recover_curves`](@ref) function and its convenience
+wrappers (`difference2d_curved`, `union2d_curved`, `intersect2d_curved`, `xor2d_curved`)
+track each input curve's discretized integer-grid footprint and substitute the original
+curve back into the result wherever that footprint survived the boolean operation intact.
+
+The curve-preserving variants return a `Vector{CurvilinearRegion}` rather than a single
+`ClippedPolygon`. Each region in the vector corresponds to one outer contour in the clipped
+result (the disjoint pieces each become a separate region). For example:
+
+```julia
+# Standard clipping discretizes curves to polygons:
+result = difference2d(a, b)  # ClippedPolygon
+
+# Curve-preserving variant recovers arcs where possible:
+regions = difference2d_curved(a, b)  # Vector{CurvilinearRegion}, arcs preserved
+```
+
+**Current limitations:** A curve is recovered only if its entire discretized run survives
+the boolean operation with exact integer equality. If the operation cuts through a curve
+(e.g., a straight edge crossing an arc's interior), that curve falls back to a polyline.
+Additionally, curves can only be recovered on CurvilinearRegion/CurvilinearPolygon,
+Path nodes, and `Rounded`-styled `Polygon`/`Rectangle` entities. `Rounded` applied to
+other entities, styled Curvilinear entities, and nested styles do not yet support curve recovery.
+
 ## Styles
 
 In addition to other generic [entity styles](./geometry.md#Entity-Styles) like `NoRender`, `AbstractPolygon`s can be paired with the `Rounded` style. `ClippedPolygon`s support `StyleDict`, which allows for different styles to be applied to different contours in its tree.
