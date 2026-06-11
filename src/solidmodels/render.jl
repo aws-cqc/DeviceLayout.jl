@@ -313,14 +313,7 @@ function round_to_curvilinearpolygon(
             push!(new_curve_start_idx, csi)
         end
     end
-
-    # Sort curves by start index so to_polygons can iterate in vertex order
-    if length(new_curve_start_idx) > 1
-        perm = sortperm(new_curve_start_idx)
-        new_curves = new_curves[perm]
-        new_curve_start_idx = new_curve_start_idx[perm]
-    end
-
+    # Constructor will sort curves by start index
     return CurvilinearPolygon(new_points, new_curves, new_curve_start_idx)
 end
 

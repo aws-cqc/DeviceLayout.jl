@@ -99,6 +99,16 @@ struct CurvilinearPolygon{T} <: GeometryEntity{T}
         for (curve_idx, start_idx) in enumerate(csi)
             csi[curve_idx] = start_idx - count(dup_idx .< start_idx)
         end
+        # Consumers (`to_polygons`, `_collect_provenance!`) walk curves with a running
+        # cursor and slice `p[i:csi]`, which requires `csi` ascending. Producers such as
+        # `_reverse` and reflective `transform` can emit unsorted indices when a curve
+        # wraps around to the last vertex, so sort curves and indices jointly here to
+        # restore the invariant for every producer.
+        if length(csi) > 1
+            perm = sortperm(csi)
+            c = c[perm]
+            csi = csi[perm]
+        end
         return new{T}(p, c, csi)
     end
 end

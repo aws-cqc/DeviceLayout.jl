@@ -533,3 +533,38 @@ end
     @test any(t -> t[1] == :clipped, report)
     @test all(isempty(r.exterior.curves) for r in out)
 end
+
+@testitem "Provenance — curve_start_idx sorted invariant" setup = [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, Paths, to_polygons, Reflection, °
+    using DeviceLayout.Curvilinear: _reverse
+    # to_polygons walks curves with a running cursor and slices p[i:csi], which requires
+    # curve_start_idx ascending. _reverse and reflective transform both flip a curve that
+    # wraps to the last vertex into the unsorted order [4, 2], which either throws an
+    # AssertionError or silently duplicates vertices (corrupt geometry). The constructor
+    # sorts curves and indices jointly so every producer preserves the invariant.
+
+    # Stadium: straight bottom/top, semicircle caps. The left cap (vertex 4 → vertex 1)
+    # is the wrap-around curve that triggers the bug under reversal/reflection.
+    pts = Point{Float64}[(0, 0), (10, 0), (10, 10), (0, 10)]
+    cap_r = Paths.Turn(180.0°, 5.0; p0=Point(10.0, 0.0), α0=0.0°)    # (10,0) → (10,10)
+    cap_l = Paths.Turn(180.0°, 5.0; p0=Point(0.0, 10.0), α0=180.0°)  # (0,10) → (0,0)
+    cp = CurvilinearPolygon(copy(pts), [cap_r, cap_l], [2, 4])
+    n_fwd = length(to_polygons(cp).p)
+
+    # Constructor reorders curves jointly with indices when given unsorted input.
+    unsorted = CurvilinearPolygon(copy(pts), [cap_l, cap_r], [4, 2])
+    @test issorted(unsorted.curve_start_idx)
+    @test unsorted.curves == cp.curves
+    @test to_polygons(unsorted).p == to_polygons(cp).p
+
+    # _reverse produces a wrap-around curve (csi would be [4, 2]) — must stay sorted and
+    # round-trip without the extra vertices the corrupt path introduced.
+    rev = _reverse(cp)
+    @test issorted(rev.curve_start_idx)
+    @test length(to_polygons(rev).p) == n_fwd
+
+    # Reflective transform uses the same csi-flip logic and had the identical bug.
+    refl = DeviceLayout.transform(cp, Reflection(0.0°))
+    @test issorted(refl.curve_start_idx)
+    @test length(to_polygons(refl).p) == n_fwd
+end
