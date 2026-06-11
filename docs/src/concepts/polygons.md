@@ -21,7 +21,7 @@ Geometric Boolean operations on polygons are called "clipping" operations. For 2
 
 !!! info
 
-    Boolean operations in 3D with `SolidModel` are handled by the Open CASCADE Technology kernel, which works directly with rich geometry types rendered from our native `CoordinateSystem`. If you need boolean operations involving curved geometry whose results can't be achieved by clipping-then-rounding, then your 2D geometry should defer the boolean operation until `SolidModel` postrendering so that the result will still be represented with curves.
+    Boolean operations in 3D with `SolidModel` are handled by the Open CASCADE Technology kernel, which works directly with rich geometry types rendered from our native `CoordinateSystem`. If you need boolean operations involving curved geometry whose results can't be achieved by clipping-then-rounding, you have two options: keep curves in 2D using the curve-preserving Boolean variants (see [Recovering curves through clipping](@ref) below), or defer the boolean operation until `SolidModel` postrendering so that the result will still be represented with curves.
 
 For many use cases, `union2d`, `difference2d`, `intersect2d`, and `xor2d` behave as expected and are easiest to use.
 More general operations may be accomplished using the `clip` function.

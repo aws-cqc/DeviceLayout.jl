@@ -4,6 +4,10 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+  - Added `recover_curves` and the curve-preserving Boolean variants `union2d_curved`, `difference2d_curved`, `intersect2d_curved`, and `xor2d_curved`, which recover original curves (arcs, splines) from a clipped result wherever their discretized footprint survived the operation intact, returning a `Vector{CurvilinearRegion}`
+
 ## 1.14.0 (2026-05-28)
 
   - Added `ParameterSet`, a nested dictionary wrapper with dot-access for reading and

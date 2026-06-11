@@ -222,10 +222,15 @@ disjoint piece becomes a separate region).
 The first argument `op` must be one of the polygon clipping operations: `difference2d`,
 `union2d`, `intersect2d`, or `xor2d`.
 
-The second and third arguments (`plus` and `minus`) may each be a `GeometryEntity` or array
-of `GeometryEntity`. Curve-bearing entities (`CurvilinearPolygon`, `CurvilinearRegion`, and
-`Path` segments like `Turn`/`BSpline`) have their curves tracked through discretization and
-recovered in the result. All other entities are discretized via `to_polygons`.
+The second and third arguments (`plus` and `minus`) accept the same forms as the
+corresponding clipping operation: a `GeometryEntity` or array of `GeometryEntity`, a
+`GeometryStructure` or `GeometryReference` (whose flattened elements are used), or a pair
+`geom => layer` selecting only elements in those layers from the flattened structure.
+
+Curve-bearing entities have their curves tracked through discretization and recovered in
+the result: `CurvilinearPolygon`, `CurvilinearRegion`, `Path` nodes (e.g. `Turn`/`BSpline`
+segments rendered with a `Style`), and `Rounded`-styled `Polygon`/`Rectangle`. All other
+entities are discretized via `to_polygons`.
 
 ## Keyword arguments
 
@@ -261,7 +266,9 @@ function recover_curves(op, plus, minus; report=nothing)
     R = _recover_coordtype(plus, minus)
     pp, runs_p = discretize_with_provenance(_as_entities(plus), R)
     pm, runs_m = discretize_with_provenance(_as_entities(minus), R)
-    clipped = op(pp, pm)
+    # Annotate the result so a wrong `op` (not one of difference2d/union2d/intersect2d/
+    # xor2d) fails here with a clear TypeError rather than deep inside substitute_curves.
+    clipped = op(pp, pm)::ClippedPolygon
     return substitute_curves(clipped, vcat(runs_p, runs_m); report=report)
 end
 
@@ -274,8 +281,11 @@ See [`recover_curves`](@ref).
 difference2d_curved(p, m; kwargs...) = recover_curves(difference2d, p, m; kwargs...)
 """
     union2d_curved(p1, p2; report=nothing)
+    union2d_curved(p; report=nothing)
 
 Curve-preserving variant of [`union2d`](@ref), returning `Vector{CurvilinearRegion}`.
+The single-argument form self-unions `p` (equivalent to `union2d_curved(p, [])`), which is
+useful for merging a collection of overlapping curved entities into one region per piece.
 See [`recover_curves`](@ref).
 """
 union2d_curved(p, m; kwargs...) = recover_curves(union2d, p, m; kwargs...)
