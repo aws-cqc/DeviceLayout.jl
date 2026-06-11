@@ -251,6 +251,10 @@ end
 # the offset segment's tangent direction) and Paths.offset (which nests offsets on the
 # base segment's coordinate system). Resolve by converting to a BSpline approximation
 # first, which traces the offset curve, then construct CurvilinearPolygons from that.
+# TODO: this makes OffsetSegment the one segment type whose canonical CurvilinearPolygon is
+# an atol approximation rather than geometrically exact. The exact fix is to reconcile the two
+# parameter frames so the Trace/CPW construction works on OffsetSegment directly; until then
+# the BSpline fit is correct within atol.
 function _offset_to_bspline(
     f::Paths.OffsetSegment{T};
     atol=DeviceLayout.onenanometer(T),
