@@ -1011,9 +1011,11 @@ function remove_group!(group::PhysicalGroup; recursive=true, remove_entities=tru
 end
 
 """
-    connected_components(dim::Int, tags::Vector{Int32}; detect_non_boundary_contacts=false)
-    connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; detect_non_boundary_contacts=false)
-    connected_components(sm::SolidModel, groups, dim=2; detect_non_boundary_contacts=false)
+    connected_components(dim::Int, tags::Vector{Int32};
+        detect_non_boundary_contacts=false, 
+        non_boundary_contact_tol=0.0)
+    connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; kwargs...)
+    connected_components(sm::SolidModel, groups, dim=2; kwargs...)
 
 Find connected components among SolidModel entities at dimension `dim` with the given `tags` or physical group names.
 
@@ -1025,7 +1027,9 @@ For `dim == 2`, set `detect_non_boundary_contacts=true` to unite entities that s
 necessary even after embedding with `fragment` because OpenCascade's `getAdjacencies`
 does not see the connection (a typical case is the foot edge of a "staple" air-bridge leg
 landing on a ground plane). Checking stray 1D entities can be relatively slow if they exist, so
-it may be preferable to add dummy 2D entities that attach to them.
+it may be preferable to add dummy 2D entities that attach to them. Tolerance (in microns)
+for determining whether a 1D entity lies in a 2D entity is controlled
+by the `non_boundary_contact_tol` keyword.
 
 Returns a `Vector{Vector{Tuple{Int32, Int32}}}` where each inner vector contains the entity dimtags
 of one connected component.
@@ -1033,6 +1037,8 @@ of one connected component.
 # Notes
 
   - Requires Gmsh model to be synchronized before calling
+  - Requires groups to consist of non-overlapping Boolean fragments with shared edges
+    (as guaranteed by `render!`)
   - Works for any dimension ≥ 1 (uses dim - 1 boundary adjacencies)
   - For dim=3 (volumes): shares boundary surfaces (dim=2)
   - For dim=2 (surfaces): shares boundary curves (dim=1)
@@ -1048,7 +1054,8 @@ connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; kwargs
 function connected_components(
     dim::Integer,
     tags::Vector{Int32};
-    detect_non_boundary_contacts=false
+    detect_non_boundary_contacts=false,
+    non_boundary_contact_tol=0.0
 )
     n = length(tags)
     isempty(tags) && return Vector{Tuple{Int32, Int32}}[]
@@ -1120,7 +1127,7 @@ function connected_components(
                 find(j) == find(owner_idx) && continue
                 _bbox_contains([elem.mbr.low..., elem.mbr.high...], ebbox, pad=0.0) ||
                     continue
-                _curve_lies_on_face(btag, ftag; tol=0.0) || continue
+                _curve_lies_on_face(btag, ftag; tol=non_boundary_contact_tol) || continue
                 unite(owner_idx, j)
             end
         end
@@ -1150,13 +1157,15 @@ function _bbox_contains(a, b; pad::Real=0.0)
            (b[6] - pad <= a[6])
 end
 
-# Sample a 1D entity (curve) at `n_samples` parametric points and test whether each
+# Sample a 1D entity (curve) at `n_samples` parametric points and test whether the
 # sample lies on the 2D entity (face) within `tol`. Two filters: (1) `getClosestPoint`
 # distance ≤ tol confirms the sample is on the face's underlying surface (an infinite
 # plane for a planar face — does NOT respect trim curves / holes); (2) batched
 # `isInside` in parametric uv-space confirms the sample is on the *trimmed* portion
 # of the face. The parametric form of `isInside` skips an internal world→parametric
 # reprojection, which is the slow part on large CPW-style faces.
+# Default samples only the 2 endpoints (fragmented geometry is expected for checking
+# connectivity, so only endpoints are needed).
 function _curve_lies_on_face(curve_tag::Integer, face_tag::Integer; tol, n_samples::Int=2)
     tmin, tmax = gmsh.model.getParametrizationBounds(1, curve_tag)
     isempty(tmin) && return false
@@ -1174,11 +1183,17 @@ function _curve_lies_on_face(curve_tag::Integer, face_tag::Integer; tol, n_sampl
 end
 
 """
-    check_port_connectivity(sm::SolidModel, port_names, metal_groups; dim=2)
-        -> Dict{String, Symbol}
+    check_port_connectivity(sm::SolidModel, port_names, metal_groups;
+        dim=2,
+        detect_non_boundary_contacts=false,
+        non_boundary_contact_tol=0.0) -> Dict{String, Symbol}
 
-Classify each port in `port_names` by its connectivity to the metal regions defined by
-`metal_groups`. Returns a `Dict` mapping each port name (as `String`) to one of:
+Classify each lumped port in `port_names` by whether its two terminals are connected through entities in `metal_groups`.
+
+Ports are assumed to be rectangular, with exactly two opposite metal-touching sides.
+Invalid ports may be misclassified.
+
+Returns a `Dict` mapping each port name (as `String`) to one of:
 
   - `:short` — at least two of the port's boundary entities touch metal, and every
     metal-touching boundary lands on the same connected metal component. You can
@@ -1212,6 +1227,8 @@ classify them algorithmically but the results are generally not electrically mea
   - `detect_non_boundary_contacts=false`: If `true` and `dim == 2`, then `connected_components`
     finds non-conformal contacts (1D edges in the interior of 2D surfaces, like the foot edge
     of a "staple" air-bridge leg landing on a ground plane) and treats them as connections
+  - `non_boundary_contact_tol=0.0`: Tolerance in microns for determining whether a 1D edge
+    lies in a 2D entity
 
 # Algorithm
 
@@ -1232,14 +1249,21 @@ function check_port_connectivity(
     port_names,
     metal_groups;
     dim::Integer=2,
-    detect_non_boundary_contacts=false
+    detect_non_boundary_contacts=false,
+    non_boundary_contact_tol=0.0
 )
     SolidModels._synchronize!(sm)
 
     # Build connected-components tag → component-index map.
     tag_to_comp = Dict{Int32, Int}()
     if !isempty(metal_groups)
-        comps = connected_components(sm, metal_groups, dim; detect_non_boundary_contacts)
+        comps = connected_components(
+            sm,
+            metal_groups,
+            dim;
+            detect_non_boundary_contacts,
+            non_boundary_contact_tol
+        )
         for (ci, comp_dimtags) in enumerate(comps)
             for (_, tag) in comp_dimtags
                 tag_to_comp[tag] = ci

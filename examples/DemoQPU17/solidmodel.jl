@@ -154,7 +154,7 @@ function driven_configfile(
     )
 
     if !isnothing(palace_build)
-        validate_schema(config)
+        validate_schema(config, palace_build)
     end
 
     return config
@@ -213,7 +213,7 @@ function eigenmode_configfile(
     )
 
     if !isnothing(palace_build)
-        validate_schema(config)
+        validate_schema(config, palace_build)
     end
 
     return config
@@ -303,7 +303,7 @@ function base_config(sm, schematic;
     return config
 end
 
-function validate_schema(config)
+function validate_schema(config, palace_build)
     # Lazy-load JSONSchema so the example stays usable without it as a hard dep.
     @eval Main import JSONSchema
     schema_dir = joinpath(palace_build, "bin", "schema")
