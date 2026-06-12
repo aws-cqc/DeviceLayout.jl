@@ -767,8 +767,8 @@ end
 
             # Test Layout.jl#68
             els = initial ? reverse(elements(c)) : elements(c)
-            # Use rounded coordinates for approximate matching (curvature-based discretization
-            # may not land exactly on boundary points shared with termination polygons)
+            # Round to picometers before intersecting: the CPW straight and the termination
+            # compute shared corners via different render paths.
             pts_approx(el) = [round.(pt, digits=9) for pt in ustrip.(nm, points(el))]
             straight_points = Set(reduce(vcat, pts_approx.(els[1:2])))
 
@@ -776,9 +776,9 @@ end
             termination_top_points = Set(pts_approx(els[3]))
             termination_bottom_points = Set(pts_approx(els[4]))
 
-            # Test that there are shared boundary points between CPW and termination
-            @test length(intersect(straight_points, termination_top_points)) >= 2
-            @test length(intersect(straight_points, termination_bottom_points)) >= 2
+            # Each terminating polygon shares two corners with the CPW polygons
+            @test length(intersect(straight_points, termination_top_points)) == 2
+            @test length(intersect(straight_points, termination_bottom_points)) == 2
             @test length(intersect(termination_top_points, termination_bottom_points)) == 0
 
             # Test terminating polygon has correct orientation
