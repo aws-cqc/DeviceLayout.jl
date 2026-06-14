@@ -4,8 +4,11 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 1.15.0 (2026-06-14)
 
+  - Added `SolidModels.populate_size_fields!(cs::AbstractCoordinateSystem)`
+so the size-field control points can be built from a `Schematic` (or any
+coordinate system) with no `SolidModel` and no geometry kernel.
   - Renamed `ExamplePDK` component parameters to follow the component style guide
     (`<feature>_<dimension>` naming, `_count`/`_trace`/`_radius`/`_gap` suffixes, no
     `w_`/`h_`/`l_`/`n_` prefixes or non-searchable names) and added length-type
