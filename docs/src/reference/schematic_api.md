@@ -58,7 +58,9 @@ SchematicDrivenLayout.map_hooks
     SchematicDrivenLayout.Hook
     SchematicDrivenLayout.PointHook
     SchematicDrivenLayout.HandedPointHook
-    DeviceLayout.hooks(::Path) 
+    StyledHook
+    DeviceLayout.hooks(::Path)
+    hook_style
     SchematicDrivenLayout.p0_hook
     SchematicDrivenLayout.p1_hook
     SchematicDrivenLayout.in_direction
