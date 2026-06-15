@@ -15,6 +15,7 @@ import DeviceLayout:
     Reflection,
     Rotation,
     ScaledIsometry,
+    StyledEntity,
     Transformation,
     Translation
 import DeviceLayout:
@@ -577,23 +578,43 @@ function _strand_corners(seg::Paths.Segment{T}, inner_offset, outer_offset) wher
     ]
 end
 
-# Terminations generate one or two polygons (possibly with rounding → StyledEntity).
-# Render them directly via to_polygons since they're mostly linear geometry.
+# Terminations generate one or two polygons (Paths._poly), each plain (no rounding) or a
+# Rounded-styled Polygon. Route the rounded ones through the shared round_to_curvilinearpolygon
+# producer (same as the SolidModel side, render.jl) so the corner fillets stay symbolic arcs in
+# the CurvilinearPolygon and the GDS pipeline discretizes them like every other path element,
+# rather than the legacy _round_poly discretizer that to_polygons(::Polygon, ::Rounded) uses.
 const TerminationStyle =
     Union{Paths.TraceTermination, Paths.CPWOpenTermination, Paths.CPWShortTermination}
+
+# A non-rounded termination polygon is already exact; keep it as-is.
+_termination_curvilinear(e::Polygon) = e
+# A rounded termination polygon: build the symbolic CurvilinearPolygon from its corner fillets.
+function _termination_curvilinear(
+    e::StyledEntity{T, Polygon{T}, <:Polygons.Rounded}
+) where {T}
+    return round_to_curvilinearpolygon(
+        e.ent,
+        Polygons.radius(e.sty);
+        corner_indices=cornerindices(points(e.ent), e.sty),
+        min_side_len=e.sty.min_side_len,
+        min_angle=e.sty.min_angle
+    )
+end
+
 function pathtopolys(
     seg::BaseContinuousSegment{T},
     sty::TerminationStyle;
     kwargs...
 ) where {T}
-    return to_polygons(seg, sty; kwargs...)
+    # vcat normalizes the scalar-vs-vector shape of _poly (one or two polygons).
+    return _termination_curvilinear.(vcat(DeviceLayout._poly(seg, sty)))
 end
 function pathtopolys(
     seg::Paths.CompoundSegment{T},
     sty::TerminationStyle;
     kwargs...
 ) where {T}
-    return to_polygons(seg, sty; kwargs...)
+    return _termination_curvilinear.(vcat(DeviceLayout._poly(seg, sty)))
 end
 
 # Types that together can use straight lines only
