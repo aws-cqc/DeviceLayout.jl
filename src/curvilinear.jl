@@ -118,7 +118,7 @@ function CurvilinearPolygon(points::Vector{Point{T}}) where {T}
     # Straight segments are implicit
     return CurvilinearPolygon{T}(points, Paths.Segment[], Int[])
 end
-CurvilinearPolygon(p::Polygon{T}) where {T} = CurvilinearPolygon(points(p))
+CurvilinearPolygon(p::Polygon{T}) where {T} = CurvilinearPolygon{T}(points(p))
 
 ### Conversion methods
 function to_polygons(

@@ -2,7 +2,6 @@
 # Included in Curvilinear — needs CurvilinearRegion, discretize_curve, and the Polygons clip functions.
 
 using .Polygons: clipperize, ClippedPolygon, union2d, difference2d, intersect2d, xor2d
-import ..Paths: ContinuousStyle
 
 # One discretized curve's footprint on the integer grid, paired with its source segment.
 # The integer-grid coordinate type P matches whatever Polygons.clipperize(::Point{R}) produces.
@@ -201,6 +200,15 @@ function _as_entities(
         )
     ]
 end
+# A geometrically-transparent style (e.g. MeshSized — a mesh-density hint applied via
+# `to_polygons(ent, ::MeshSized) = to_polygons(ent)`) must NOT block curve recovery: a
+# MeshSized-wrapped Node / Rounded-Polygon / CurvilinearPolygon carries the same curves as
+# the bare entity. Without this, such a wrapped entity falls to the generic
+# `_as_entities(::GeometryEntity) = [p]` and is discretized by `to_polygons`, silently losing
+# its arcs through the boolean. Recurse to the inner entity (mirrors the render-side default
+# `to_primitives(::SolidModel, ::StyledEntity) = to_primitives(sm, ent.ent)`). The specific
+# Rounded method above is more specific and still wins for Rounded-styled Polygon/Rectangle.
+_as_entities(p::StyledEntity) = _as_entities(p.ent)
 
 # Promoted coordinate type matching what clip's promote_type would pick.
 function _recover_coordtype(plus, minus)
