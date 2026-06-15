@@ -2,6 +2,7 @@
 # Included in Curvilinear — needs CurvilinearRegion, discretize_curve, and the Polygons clip functions.
 
 using .Polygons: clipperize, ClippedPolygon, union2d, difference2d, intersect2d, xor2d
+import ..Paths: ContinuousStyle
 
 # One discretized curve's footprint on the integer grid, paired with its source segment.
 # The integer-grid coordinate type P matches whatever Polygons.clipperize(::Point{R}) produces.
