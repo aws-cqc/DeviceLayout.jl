@@ -203,6 +203,25 @@ function _as_entities(
         )
     ]
 end
+# A Rounded- or StyleDict{Rounded}-styled ClippedPolygon (e.g. the output of a non-curved
+# `difference2d`/`union2d` then rounded — followed by post-clip rounding) recovers as exact
+# fillet arcs per contour, so its corners survive the clip instead of discretizing. The render
+# path already does this conversion (`to_curvilinear_regions` walks the clipped tree, applying
+# `styled_loop`+`round_to_curvilinearpolygon` per contour → CurvilinearRegions with arcs); we
+# reuse that exact function so boolean recovery matches the render. `SolidModels` loads after
+# this file, but `_as_entities` only runs at boolean time (all modules loaded), so the qualified
+# name resolves at call time. Returns a Vector{CurvilinearRegion}; `_as_entities(::AbstractArray)`
+# flattens it, and `_collect_provenance!(::CurvilinearRegion)` records each contour's curve runs.
+function _as_entities(
+    p::StyledEntity{T, ClippedPolygon{T}, <:Polygons.StyleDict}
+) where {T}
+    return DeviceLayout.SolidModels.to_curvilinear_regions(p.ent, p.sty)
+end
+function _as_entities(
+    p::StyledEntity{T, ClippedPolygon{T}, <:Polygons.Rounded}
+) where {T}
+    return DeviceLayout.SolidModels.to_curvilinear_regions(p.ent, Polygons.StyleDict(p.sty))
+end
 # A geometrically-transparent style (e.g. MeshSized — a mesh-density hint applied via
 # `to_polygons(ent, ::MeshSized) = to_polygons(ent)`) must NOT block curve recovery: a
 # MeshSized-wrapped Node / Rounded-Polygon / CurvilinearPolygon carries the same curves as
@@ -210,7 +229,7 @@ end
 # `_as_entities(::GeometryEntity) = [p]` and is discretized by `to_polygons`, silently losing
 # its arcs through the boolean. Recurse to the inner entity (mirrors the render-side default
 # `to_primitives(::SolidModel, ::StyledEntity) = to_primitives(sm, ent.ent)`). The specific
-# Rounded method above is more specific and still wins for Rounded-styled Polygon/Rectangle.
+# Rounded / ClippedPolygon methods above are more specific and still win.
 _as_entities(p::StyledEntity) = _as_entities(p.ent)
 
 # Promoted coordinate type matching what clip's promote_type would pick.
