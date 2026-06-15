@@ -247,39 +247,19 @@ function pathtopolys(f::Paths.Segment{T}, s::Paths.Style; kwargs...) where {T}
     return to_polygons(f, s; kwargs...)
 end
 
-# OffsetSegments have a parameterization mismatch between corner_points (which uses
-# the offset segment's tangent direction) and Paths.offset (which nests offsets on the
-# base segment's coordinate system). Resolve by converting to a BSpline approximation
-# first, which traces the offset curve, then construct CurvilinearPolygons from that.
-# TODO: this makes OffsetSegment the one segment type whose canonical CurvilinearPolygon is
-# an atol approximation rather than geometrically exact. The exact fix is to reconcile the two
-# parameter frames so the Trace/CPW construction works on OffsetSegment directly; until then
-# the BSpline fit is correct within atol.
-function _offset_to_bspline(
-    f::Paths.OffsetSegment{T};
-    atol=DeviceLayout.onenanometer(T),
-    rtol=nothing,
-    kwargs...
-) where {T}
-    return Paths.bspline_approximation(f; atol, rtol)
+# An OffsetSegment can't build a CurvilinearPolygon directly (its corner_points and
+# Paths.offset use mismatched parameter frames). Resolve it to a concrete segment, re-fit a
+# length-carrying style to the resolved pathlength (_withlength! is a no-op otherwise), then
+# re-dispatch through Node so islinear runs again on the resolved (concrete) type.
+# TODO: the BSpline fallback in resolve_offset is an atol approximation, not exact. See #237.
+function pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.Style; kwargs...) where {T}
+    # resolve_offset only understands atol/rtol, not the render kwargs (map_meta, …).
+    kw = values(kwargs)
+    resolved =
+        Paths.resolve_offset(f; atol=get(kw, :atol, nothing), rtol=get(kw, :rtol, nothing))
+    s = Paths._withlength!(s, pathlength(resolved))
+    return pathtopolys(Paths.Node(resolved, s); kwargs...)
 end
-pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.Style; kwargs...) where {T} =
-    pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
-pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.SimpleTrace; kwargs...) where {T} =
-    pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
-pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.Trace; kwargs...) where {T} =
-    pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
-pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.SimpleCPW; kwargs...) where {T} =
-    pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
-pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.CPW; kwargs...) where {T} =
-    pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
-pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.Strands; kwargs...) where {T} =
-    pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
-pathtopolys(
-    f::Paths.OffsetSegment{T},
-    s::Union{Paths.TraceTermination, Paths.CPWOpenTermination, Paths.CPWShortTermination};
-    kwargs...
-) where {T} = pathtopolys(_offset_to_bspline(f; kwargs...), s; kwargs...)
 # Disambiguate OffsetSegment with NoRender and DecoratedStyle
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderContinuous; kwargs...) where {T} =
     Polygon{T}[]
@@ -336,24 +316,16 @@ function _pathtopolys_compound(
         return vcat(pathtopolys(se, Paths.pin(s; start=l0, stop=l); kwargs...))
     end
 
-    # Don't pin a concrete element type: some sub-results route through _offset_to_bspline,
-    # whose BSpline control points carry a different unit parameter (base meters) than the
-    # parent segment's T. reduce(vcat, …) infers the common element type from the data.
+    # Don't pin a concrete element type: an offset sub-segment resolves to a BSpline
+    # approximation (via resolve_offset) whose control points carry a different unit
+    # parameter (base meters) than the parent segment's T. reduce(vcat, …) infers the
+    # common element type from the data.
     return reduce(vcat, pieces)
 end
 pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.Style; kwargs...) where {T} =
     _pathtopolys_compound(f, s; kwargs...)
-# Disambiguate CompoundSegment with concrete style types that also have Segment methods
-pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.SimpleTrace; kwargs...) where {T} =
-    _pathtopolys_compound(f, s; kwargs...)
-pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.Trace; kwargs...) where {T} =
-    _pathtopolys_compound(f, s; kwargs...)
-pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.SimpleCPW; kwargs...) where {T} =
-    _pathtopolys_compound(f, s; kwargs...)
-pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.CPW; kwargs...) where {T} =
-    _pathtopolys_compound(f, s; kwargs...)
-pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.Strands; kwargs...) where {T} =
-    _pathtopolys_compound(f, s; kwargs...)
+# No per-style disambiguation methods needed: the concrete-style methods dispatch on
+# BaseContinuousSegment, which excludes wrappers, so (CompoundSegment, style) routes here.
 function pathtopolys(
     f::Paths.CompoundSegment{T},
     sty::Paths.AbstractDecoratedStyle;
@@ -467,9 +439,19 @@ function corner_points(seg::Paths.Segment{T}, sty::Paths.CPW, clip::Bool) where 
     return origins .+ tangents
 end
 
+# The "base" continuous segment types a CurvilinearPolygon can be built from directly. The
+# per-style methods below dispatch on this rather than Paths.Segment so the wrapper segments
+# (CompoundSegment, OffsetSegment) route to their own generic-Style methods without a dispatch
+# ambiguity (which otherwise forced one disambiguation method per wrapper/style pair).
+const BaseContinuousSegment{T} = Union{Paths.Straight{T}, Paths.Turn{T}, Paths.BSpline{T}}
+
 # Traces generate one surface
 # SimpleTrace can use constant offset
-function pathtopolys(seg::Paths.Segment{T}, sty::Paths.SimpleTrace; kwargs...) where {T}
+function pathtopolys(
+    seg::BaseContinuousSegment{T},
+    sty::Paths.SimpleTrace;
+    kwargs...
+) where {T}
     pts = corner_points(seg, sty, true)
     # Check if the points are degenerate
     if isapprox(pts[1], pts[2])
@@ -484,7 +466,7 @@ function pathtopolys(seg::Paths.Segment{T}, sty::Paths.SimpleTrace; kwargs...) w
     )
 end
 
-function pathtopolys(seg::Paths.Segment{T}, sty::Paths.Trace; kwargs...) where {T}
+function pathtopolys(seg::BaseContinuousSegment{T}, sty::Paths.Trace; kwargs...) where {T}
     pts = corner_points(seg, sty, false)
     return CurvilinearPolygon(
         pts,
@@ -497,7 +479,11 @@ function pathtopolys(seg::Paths.Segment{T}, sty::Paths.Trace; kwargs...) where {
 end
 
 # CPWs generate two surfaces
-function pathtopolys(seg::Paths.Segment{T}, sty::Paths.SimpleCPW; kwargs...) where {T}
+function pathtopolys(
+    seg::BaseContinuousSegment{T},
+    sty::Paths.SimpleCPW;
+    kwargs...
+) where {T}
     pts = corner_points(seg, sty, true)
     return [
         isapprox(pts[1], pts[2]) ?
@@ -520,7 +506,7 @@ function pathtopolys(seg::Paths.Segment{T}, sty::Paths.SimpleCPW; kwargs...) whe
     ]
 end
 
-function pathtopolys(seg::Paths.Segment{T}, sty::Paths.CPW; kwargs...) where {T}
+function pathtopolys(seg::BaseContinuousSegment{T}, sty::Paths.CPW; kwargs...) where {T}
     pts = corner_points(seg, sty, false)
     return [
         CurvilinearPolygon(
@@ -544,7 +530,7 @@ end
 
 # Strands generate 2*num polygons (plus and minus side for each strand).
 # Each strand is a trace-like shape at a computed offset from center.
-function pathtopolys(seg::Paths.Segment{T}, sty::Paths.Strands; kwargs...) where {T}
+function pathtopolys(seg::BaseContinuousSegment{T}, sty::Paths.Strands; kwargs...) where {T}
     polys = Union{CurvilinearPolygon{T}, Polygon{T}}[]
     for i = 0:(Paths.num(sty) - 1)
         # Offset to center of strand i, plus half-width for edges
@@ -595,7 +581,11 @@ end
 # Render them directly via to_polygons since they're mostly linear geometry.
 const TerminationStyle =
     Union{Paths.TraceTermination, Paths.CPWOpenTermination, Paths.CPWShortTermination}
-function pathtopolys(seg::Paths.Segment{T}, sty::TerminationStyle; kwargs...) where {T}
+function pathtopolys(
+    seg::BaseContinuousSegment{T},
+    sty::TerminationStyle;
+    kwargs...
+) where {T}
     return to_polygons(seg, sty; kwargs...)
 end
 function pathtopolys(
@@ -625,20 +615,22 @@ function pathtopolys(
     return pathtopolys(seg, Paths.undecorated(sty); kwargs...)
 end
 
-# Linear segments with linear styles produce exact polygons without curves.
-# This handles the case where pathtopolys is called at the segment level
-# (e.g. from CompoundSegment+CompoundStyle recursion) bypassing the Node-level
-# islinear gate.
+# A straight segment with a linear style produces exact polygons without curves. Handles
+# pathtopolys called at the segment level (e.g. from CompoundSegment recursion), bypassing
+# the Node-level islinear gate. Dispatch on concrete Paths.Straight (not the LinearSegment
+# Union): Straight ⊊ BaseContinuousSegment, so these win over the per-style methods above
+# instead of tying. The other LinearSegment member, ConstantOffset{Straight}, gets here only
+# after the OffsetSegment method resolves it to an exact Straight.
 # TODO: Could return CurvilinearPolygon(corner_points(...)) with empty curve list instead,
 # keeping everything in the CurvilinearPolygon representation. Currently falls back to
 # to_polygons because discretize_curve doesn't handle zero-curvature segments efficiently.
-pathtopolys(seg::LinearSegment{T}, sty::Paths.SimpleTrace; kwargs...) where {T} =
+pathtopolys(seg::Paths.Straight{T}, sty::Paths.SimpleTrace; kwargs...) where {T} =
     to_polygons(seg, sty; kwargs...)
-pathtopolys(seg::LinearSegment{T}, sty::Paths.SimpleCPW; kwargs...) where {T} =
+pathtopolys(seg::Paths.Straight{T}, sty::Paths.SimpleCPW; kwargs...) where {T} =
     to_polygons(seg, sty; kwargs...)
-pathtopolys(seg::LinearSegment{T}, sty::Paths.TaperTrace; kwargs...) where {T} =
+pathtopolys(seg::Paths.Straight{T}, sty::Paths.TaperTrace; kwargs...) where {T} =
     to_polygons(seg, sty; kwargs...)
-pathtopolys(seg::LinearSegment{T}, sty::Paths.TaperCPW; kwargs...) where {T} =
+pathtopolys(seg::Paths.Straight{T}, sty::Paths.TaperCPW; kwargs...) where {T} =
     to_polygons(seg, sty; kwargs...)
 
 # Dispatch node->primitive based on kernel and requirements for representing node exactly
