@@ -182,8 +182,11 @@ _as_entities(p::Union{GeometryStructure, GeometryReference}) =
 _as_entities(p::Pair{<:Union{GeometryStructure, GeometryReference}}) =
     _as_entities(flat_elements(p))
 function _as_entities(p::Paths.Node)
-    iszero(pathlength(p.seg)) && p.sty isa ContinuousStyle && return []
-    return _as_entities(pathtopolys(p)) # Use `islinear` dispatch on segment and style
+    # Paths.-qualified: ContinuousStyle is defined in the Paths submodule but is NOT in scope
+    # unqualified inside Curvilinear (a bare `ContinuousStyle` throws UndefVarError on the L1
+    # zero-length-node path). Qualifying is robust and needs no import.
+    iszero(pathlength(p.seg)) && p.sty isa Paths.ContinuousStyle && return []
+    return _as_entities(pathtopolys(p.seg, p.sty)) # Use `islinear` dispatch on segment and style
 end
 # A Rounded-styled straight Polygon recovers as its exact-arc CurvilinearPolygon, so
 # corners survive the clip. Mirrors to_primitives(::SolidModel, ::StyledEntity{Polygon,Rounded}).
