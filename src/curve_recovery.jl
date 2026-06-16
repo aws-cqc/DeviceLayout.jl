@@ -51,17 +51,71 @@ function _collect_provenance!(polys, runs, e::CurvilinearRegion, ::Type{R}, atol
     return nothing
 end
 
-# Any other entity: no curves to recover; discretize to polygons.
+# Count, in already-clipperized integer space, runs of short edges that fit a circle — a cheap
+# proxy for "this discretized polygon CONTAINS curve geometry we are about to lose". Used only to
+# warn on the silent-discretization path below; not exact, just enough to flag a likely loss.
+function _count_arclike_runs(pts; short_nm=6000.0, min_run=4, resid_nm=2.0)
+    n = length(pts); n < min_run + 1 && return 0
+    xy = [(Float64(ustrip(getx(p))) / 1000, Float64(ustrip(gety(p))) / 1000) for p in pts]  # → ~nm scale-agnostic
+    # edge lengths in the same units as xy
+    el = [hypot(xy[mod1(i + 1, n)][1] - xy[i][1], xy[mod1(i + 1, n)][2] - xy[i][2]) for i in 1:n]
+    short = short_nm / 1000
+    cnt = 0; i = 1
+    while i <= n
+        if !(0 < el[i] < short); i += 1; continue; end
+        j = i; while j < n && 0 < el[mod1(j + 1, n)] < short; j += 1; end
+        rl = j - i + 1
+        if rl >= min_run
+            vx = [xy[mod1(i + k, n)][1] for k in 0:rl]; vy = [xy[mod1(i + k, n)][2] for k in 0:rl]
+            m = length(vx); sx = sum(vx); sy = sum(vy)
+            sxx = sum(vx .^ 2); syy = sum(vy .^ 2); sxy = sum(vx .* vy)
+            sxxx = sum(vx .^ 3); syyy = sum(vy .^ 3); sxyy = sum(vx .* vy .^ 2); sxxy = sum(vx .^ 2 .* vy)
+            A = m * sxx - sx^2; B = m * sxy - sx * sy; Cc = m * syy - sy^2
+            D = 0.5 * (m * sxxx + m * sxyy - sx * sxx - sx * syy); E = 0.5 * (m * syyy + m * sxxy - sy * syy - sy * sxx)
+            den = A * Cc - B^2
+            if abs(den) > 1e-12
+                cx = (D * Cc - B * E) / den; cy = (A * E - B * D) / den
+                r = sqrt(max(0.0, (sxx + syy - 2cx * sx - 2cy * sy) / m + cx^2 + cy^2))
+                if 1e-3 < r < 1e5
+                    mr = maximum(abs(hypot(vx[k] - cx, vy[k] - cy) - r) for k in 1:m)
+                    mr < resid_nm / 1000 && (cnt += 1)
+                end
+            end
+        end
+        i = j + 1
+    end
+    return cnt
+end
+
+# Module-level switch for the silent-discretization warning (default ON; set false to silence).
+const warn_on_curve_loss = Ref(true)
+# Track per-(entity-type) loss counts so a run can report which entity classes lost curves.
+const _curve_loss_log = Dict{String, Int}()
+curve_loss_log() = _curve_loss_log
+reset_curve_loss_log!() = empty!(_curve_loss_log)
+
+# Any other entity: no curves to recover; discretize to polygons. THIS is the silent-loss path —
+# a curve-bearing entity whose (type, style) combination has no `_as_entities`/`_collect_provenance!`
+# method falls here and is discretized to polyline with NO provenance, so its curves can never be
+# recovered downstream. We detect the likely-loss case (the discretized polygon contains short-edge
+# runs that fit a circle) and warn once per entity type, and tally it in `_curve_loss_log`, so such
+# losses are observable instead of silent. (Plain rectilinear polygons fit nothing → no warning.)
 function _collect_provenance!(polys, runs, e, ::Type{R}, atol) where {R}
     # Convert to polygons and append. to_polygons returns a polygon or array.
     poly_result = DeviceLayout.to_polygons(e)
-    if poly_result isa Polygon
-        push!(polys, convert(Polygon{R}, poly_result))
-    else
-        # It's a vector or other collection of polygons
-        for poly in poly_result
-            push!(polys, convert(Polygon{R}, poly))
-        end
+    polylist = poly_result isa Polygon ? (poly_result,) : poly_result
+    arclike = 0
+    for poly in polylist
+        push!(polys, convert(Polygon{R}, poly))
+        warn_on_curve_loss[] && (arclike += _count_arclike_runs(points(poly)))
+    end
+    if warn_on_curve_loss[] && arclike > 0
+        key = string(nameof(typeof(e)))
+        e isa StyledEntity && (key = "Styled{" * string(nameof(typeof(e.ent))) * "," * string(nameof(typeof(e.sty))) * "}")
+        first_seen = !haskey(_curve_loss_log, key)
+        _curve_loss_log[key] = get(_curve_loss_log, key, 0) + arclike
+        first_seen && @warn "recover_curves: discretizing a curve-bearing entity with no provenance — its arcs are LOST. " *
+                            "Add an _as_entities method for this (type, style) to recover them." entity_type=key arclike_runs=arclike
     end
     return nothing
 end
