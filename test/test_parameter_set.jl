@@ -590,6 +590,36 @@ end
         @test ps.components.qubit.finger_count == 4
     end
 
+    @testset "ParameterSet from IO parses unit arrays" begin
+        # Each element is its own YAML scalar (`0μm`), so the array walk in
+        # `_parse_units!` converts them element-wise to ContextUnits quantities.
+        yaml_str = """
+        components:
+          routing:
+            pad_offsets: [0μm, 25μm, 50μm]
+        """
+        ps = ParameterSet(IOBuffer(yaml_str))
+
+        offsets = ps.components.routing.pad_offsets
+        @test offsets == [0μm, 25μm, 50μm]
+        @test all(x -> x isa Unitful.Quantity, offsets)
+        @test all(x -> Unitful.unit(x) isa Unitful.ContextUnits, offsets)
+        @test leaf_params(ps.components.routing).pad_offsets == offsets
+    end
+
+    @testset "Factored unit after a flow sequence is not valid YAML" begin
+        # `[0, 25, 50]μm` is not a YAML scalar: a token after the closing `]` of
+        # a flow sequence is a syntax error, so YAML.load rejects it before any
+        # unit conversion can run. We deliberately do not preprocess this
+        # notation - write the unit on each element (`[0μm, 25μm, 50μm]`).
+        yaml_str = """
+        components:
+          routing:
+            pad_offsets: [0, 25, 50]μm
+        """
+        @test_throws YAML.ParserError ParameterSet(IOBuffer(yaml_str))
+    end
+
     @testset "Bare unit strings are preserved as strings" begin
         # Strings that `Unitful.uparse` recognizes as bare units (not Quantities)
         # must NOT be coerced - `process_node: "s"` should stay the string "s",

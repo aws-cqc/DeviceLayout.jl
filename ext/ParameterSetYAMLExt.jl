@@ -8,8 +8,9 @@ import Unitful
 """
     _parse_units!(data::Dict{String, Any})
 
-Recursively walk a parsed YAML dict. String values that parse into a
-`Unitful.Quantity` (e.g. `"150μm"`) are converted in place via
+Recursively walk a parsed YAML dict. String values, including strings inside
+array leaves, that parse into a `Unitful.Quantity` (e.g. `"150μm"`) are
+converted via
 [`DeviceLayout.uparse`](@ref), so length-dimensioned values share the
 package's promotion context (`ContextUnits`) instead of carrying bare
 `FreeUnits` (which would later trip the mixed-context promotion bug
@@ -20,18 +21,26 @@ Bare unit names like `"s"`, `"m"`, `"cm"` parse into `Unitful.Units`, not
 `Quantity` - those are left as strings so that ordinary text values (e.g.
 `process_node: "s"`) are not silently coerced into the seconds unit.
 """
+function _parse_unit_value(v::AbstractString)
+    try
+        parsed = DeviceLayout.uparse(v)
+        return parsed isa Unitful.Quantity ? parsed : v
+    catch
+        return v
+    end
+end
+
+function _parse_unit_value(v::Dict{String, Any})
+    _parse_units!(v)
+    return v
+end
+
+_parse_unit_value(v::AbstractVector) = map(_parse_unit_value, v)
+_parse_unit_value(v) = v
+
 function _parse_units!(data::Dict{String, Any})
     for (k, v) in data
-        if v isa Dict{String, Any}
-            _parse_units!(v)
-        elseif v isa AbstractString
-            try
-                parsed = DeviceLayout.uparse(v)
-                parsed isa Unitful.Quantity && (data[k] = parsed)
-            catch
-                # not a valid unit expression, keep as-is
-            end
-        end
+        data[k] = _parse_unit_value(v)
     end
     return data
 end
@@ -39,19 +48,22 @@ end
 """
     _serialize_units(data::Dict{String, Any}) -> Dict{String, Any}
 
-Return a deep copy of `data` with `Unitful.Quantity` values converted to
-strings like `"150μm"` (no space, round-trips through `Unitful.uparse`).
+Return a deep copy of `data` with `Unitful.Quantity` values, including values
+inside arrays, converted to strings like `"150μm"` (no space, round-trips
+through `Unitful.uparse`).
 """
+function _serialize_unit_value(v::Dict{String, Any})
+    return _serialize_units(v)
+end
+
+_serialize_unit_value(v::AbstractVector) = map(_serialize_unit_value, v)
+_serialize_unit_value(v::Unitful.Quantity) = "$(Unitful.ustrip(v))$(Unitful.unit(v))"
+_serialize_unit_value(v) = v
+
 function _serialize_units(data::Dict{String, Any})
     out = Dict{String, Any}()
     for (k, v) in data
-        if v isa Dict{String, Any}
-            out[k] = _serialize_units(v)
-        elseif v isa Unitful.Quantity
-            out[k] = "$(Unitful.ustrip(v))$(Unitful.unit(v))"
-        else
-            out[k] = v
-        end
+        out[k] = _serialize_unit_value(v)
     end
     return out
 end
