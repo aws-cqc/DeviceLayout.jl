@@ -130,7 +130,18 @@ function to_polygons(
     i = 1
     p = Point{T}[]
 
-    for (idx, (csi, c)) ∈ enumerate(zip(e.curve_start_idx, e.curves))
+    # Walk curves in ascending start-index order. The running index `i` and `e.p[i:csi]` below
+    # assume `curve_start_idx` is monotonically increasing; a curve supplied out of order — in
+    # particular one at the wrap seam (csi == length(e.p)) listed first — would make `e.p[i:csi]`
+    # dump the whole point ring up front and append that curve's arc points at the tail, ending
+    # one step short of its endpoint and leaving a sub-µm near-pinch. Sorting locally (without
+    # mutating `e`) makes the walk robust to any curve ordering, including deserialized polygons
+    # that predate constructor-side normalization.
+    order = issorted(e.curve_start_idx) ? eachindex(e.curve_start_idx) : sortperm(e.curve_start_idx)
+
+    for idx in order
+        csi = e.curve_start_idx[idx]
+        c = e.curves[idx]
         # Add the points from current to start of curve
         append!(p, e.p[i:csi])
 

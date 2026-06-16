@@ -28,7 +28,14 @@ function _collect_provenance!(polys, runs, e::CurvilinearPolygon, ::Type{R}, ato
     ec = convert(CurvilinearPolygon{R}, e)
     i = 1
     p = Point{R}[]
-    for (csi, c) in zip(ec.curve_start_idx, ec.curves)
+    # Walk in ascending start-index order — must match to_polygons(::CurvilinearPolygon) exactly
+    # so the Clipper polygon and these provenance runs share the same point ordering. See the
+    # note there: an out-of-order (e.g. wrap-seam-first) curve list otherwise emits the wrong
+    # `ec.p[i:csi]` spans and a sub-µm near-pinch.
+    order = issorted(ec.curve_start_idx) ? eachindex(ec.curve_start_idx) : sortperm(ec.curve_start_idx)
+    for idx in order
+        csi = ec.curve_start_idx[idx]
+        c = ec.curves[idx]
         append!(p, ec.p[i:csi])
         wrapped_end = mod1(csi + 1, length(ec.p))
         pp = DeviceLayout.discretize_curve(c, atol; rtol=nothing)
@@ -56,7 +63,7 @@ end
 # warn on the silent-discretization path below; not exact, just enough to flag a likely loss.
 function _count_arclike_runs(pts; short_nm=6000.0, min_run=4, resid_nm=2.0)
     n = length(pts); n < min_run + 1 && return 0
-    xy = [(Float64(ustrip(getx(p))) / 1000, Float64(ustrip(gety(p))) / 1000) for p in pts]  # → ~nm scale-agnostic
+    xy = [(Float64(DeviceLayout.ustrip(getx(p))) / 1000, Float64(DeviceLayout.ustrip(gety(p))) / 1000) for p in pts]  # → ~nm scale-agnostic
     # edge lengths in the same units as xy
     el = [hypot(xy[mod1(i + 1, n)][1] - xy[i][1], xy[mod1(i + 1, n)][2] - xy[i][2]) for i in 1:n]
     short = short_nm / 1000
