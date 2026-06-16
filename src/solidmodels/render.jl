@@ -22,12 +22,11 @@ to_primitives(::SolidModel, ent::GeometryEntity; kwargs...) = to_polygons(ent; k
 # "can this node be drawn with straight lines only?" identically for the GDS and SolidModel
 # render paths, so there is a single source of truth.
 
-# Dispatch node->primitive based on kernel and requirements for representing node exactly
-function to_primitives(sm::SolidModel{OpenCascade}, node::Paths.Node; kwargs...)
+# Both kernels build node primitives the same way: islinear gates the exact CurvilinearPolygon
+# representation (Val(false)) vs plain polygons (Val(true)). GmshNative discretizes any curves at
+# the kernel sink (it can't ingest native arcs).
+function to_primitives(sm::SolidModel, node::Paths.Node; kwargs...)
     return to_primitives(sm, node, islinear(node.seg, node.sty); kwargs...)
-end
-function to_primitives(sm::SolidModel{GmshNative}, node::Paths.Node; kwargs...)
-    return to_primitives(sm, node, Val(true); kwargs...)
 end
 # Path nodes that can be drawn with only polygons (in OCC) or all paths (GmshNative)
 function to_primitives(::SolidModel, node::Paths.Node, ::Val{true}; kwargs...)
@@ -1357,6 +1356,25 @@ _add_to_current_solidmodel!(
     points_tree=nothing,
     kwargs...
 ) = _add_to_current_solidmodel!(CurvilinearRegion(x), m, k; zmap, points_tree, kwargs...)
+
+# GmshNative can't ingest native arcs/splines (no `_add_curve!` methods), so flatten curvilinear
+# primitives to plain polygons before the sink via the shared `to_polygons`/`discretize_curve`
+# (the GDS pipeline's chord-height discretizer, not legacy adapted_grid). The resulting Polygon{T}
+# hits the AbstractPolygon sink, whose only kernel call is add_line.
+_add_to_current_solidmodel!(
+    x::CurvilinearPolygon{T},
+    m::Meta,
+    k::GmshNative;
+    atol=DeviceLayout.onenanometer(T),
+    kwargs...
+) where {T} = _add_to_current_solidmodel!(to_polygons(x; atol), m, k; kwargs...)
+_add_to_current_solidmodel!(
+    x::CurvilinearRegion{T},
+    m::Meta,
+    k::GmshNative;
+    atol=DeviceLayout.onenanometer(T),
+    kwargs...
+) where {T} = _add_to_current_solidmodel!(to_polygons(x; atol), m, k; kwargs...)
 
 function _add_to_current_solidmodel!(
     surf::CurvilinearRegion{T},
