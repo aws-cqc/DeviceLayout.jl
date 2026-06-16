@@ -298,23 +298,18 @@ function pathtopolys(
     return vcat(pathtopolys.(f.segments, s.styles; kwargs...)...)
 end
 
-# CompoundSegment with a non-CompoundStyle: iterate sub-segments and pin the style
-# to each sub-segment's parameter range (mirrors to_polygons in compound.jl:43-52).
-function _pathtopolys_compound(
-    f::Paths.CompoundSegment{T},
-    s::Paths.Style;
-    kwargs...
-) where {T}
-    # Cumulative arclength at the start of each sub-segment, so we can pin the style to
-    # each one's parameter range. starts[i] = sum of lengths of segments before i.
+# Shared compound style-pinning loop. A CompoundSegment shares one arclength parameter; with a
+# single (non-compound) Style, each sub-segment renders the style slice over its window [l0, l].
+# GDS (`pathtopolys`) and SolidModel (`to_primitives`) differ only in the per-sub-segment `leaf`
+# renderer, which returns one element or a vector. Mirrors to_polygons in compound.jl:43-52.
+function _compound_pin_render(f::Paths.CompoundSegment{T}, s::Paths.Style, leaf) where {T}
+    # Cumulative arclength: starts[i] = sum of lengths of segments before i.
     starts = cumsum([zero(T); pathlength.(f.segments[1:(end - 1)])])
     stops = starts .+ pathlength.(f.segments)
 
-    # Convert each (sub-segment, pinned-style) pair. vcat normalizes the scalar-vs-vector
-    # shape (pathtopolys may return one CurvilinearPolygon or a Vector), wrapping a scalar
-    # as [x] and leaving a vector as-is — so no isa branch is needed (CLAUDE.md rule #1).
+    # vcat normalizes leaf's scalar-vs-vector result, so no isa branch is needed (CLAUDE.md rule #1).
     pieces = map(f.segments, starts, stops) do se, l0, l
-        return vcat(pathtopolys(se, Paths.pin(s; start=l0, stop=l); kwargs...))
+        return vcat(leaf(se, Paths.pin(s; start=l0, stop=l)))
     end
 
     # Don't pin a concrete element type: an offset sub-segment resolves to a BSpline
@@ -324,7 +319,7 @@ function _pathtopolys_compound(
     return reduce(vcat, pieces)
 end
 pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.Style; kwargs...) where {T} =
-    _pathtopolys_compound(f, s; kwargs...)
+    _compound_pin_render(f, s, (se, sty) -> pathtopolys(se, sty; kwargs...))
 # No per-style disambiguation methods needed: the concrete-style methods dispatch on
 # BaseContinuousSegment, which excludes wrappers, so (CompoundSegment, style) routes here.
 function pathtopolys(
