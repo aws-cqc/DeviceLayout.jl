@@ -121,14 +121,14 @@
     @testset "GmshNative honors rtol" begin
         gmsh_turn_points(rtol) = begin
             cs_t = CoordinateSystem("rtol_t", nm)
-            pa_t = Path(0nm, 0nm)
-            turn!(pa_t, 90°, 500μm, Paths.SimpleTrace(10μm))
+            pa_t = Path(0.0nm, 0.0nm)
+            turn!(pa_t, 90°, 500.0μm, Paths.SimpleTrace(10.0μm))
             place!(cs_t, pa_t, SemanticMeta(:l1))
             sm_t = SolidModel("rtol_t", SolidModels.GmshNative(); overwrite=true)
             if isnothing(rtol)
-                render!(sm_t, cs_t, zmap=(_) -> 0μm)
+                render!(sm_t, cs_t, zmap=(_) -> 0.0μm)
             else
-                render!(sm_t, cs_t, zmap=(_) -> 0μm, rtol=rtol)
+                render!(sm_t, cs_t, zmap=(_) -> 0.0μm, rtol=rtol)
             end
             return length(SolidModels.gmsh.model.getEntities(0)) # count points (dim-0 entities)
         end
