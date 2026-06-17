@@ -319,6 +319,7 @@ end
         render!(c, pa, atol=2.0)
         # Turn center is at (0, 50) with radii: outer gap from r=55 to r=61, inner gap from r=39 to r=45
         center = p(0.0, 50.0)
+        is_on_radius(r, rs, atol) = any(r0 -> isapprox(r, r0; atol=atol), rs)
         # Element 1: outer gap polygon (radii 55 and 61)
         pts1 = points(c.elements[1])
         @test Polygons.orientation(c.elements[1]) == 1
@@ -326,7 +327,7 @@ end
         @test pts1[end] ≈ p(0.0, -5.0) atol = 1e-10
         for pt in pts1
             r = norm(pt - center)
-            @test 55.0 - 2.0 <= r <= 61.0 + 2.0
+            @test is_on_radius(r, (55.0, 61.0), 1e-10)
         end
         # Element 2: inner gap polygon (radii 39 and 45)
         pts2 = points(c.elements[2])
@@ -335,7 +336,7 @@ end
         @test pts2[end] ≈ p(0.0, 11.0) atol = 1e-10
         for pt in pts2
             r = norm(pt - center)
-            @test 39.0 - 2.0 <= r <= 45.0 + 2.0
+            @test is_on_radius(r, (39.0, 45.0), 1e-10)
         end
 
         # Same test with units
@@ -350,7 +351,7 @@ end
         @test pts1[end] ≈ p(0.0nm, -5000.0nm) atol = 0.001nm
         for pt in pts1
             r = norm(pt - center_nm)
-            @test 53000.0nm <= r <= 63000.0nm
+            @test is_on_radius(r, (55000.0nm, 61000.0nm), 0.001nm)
         end
         pts2 = points(c.elements[2])
         @test Polygons.orientation(c.elements[2]) == 1
@@ -358,7 +359,7 @@ end
         @test pts2[end] ≈ p(0.0nm, 11000.0nm) atol = 0.001nm
         for pt in pts2
             r = norm(pt - center_nm)
-            @test 37000.0nm <= r <= 47000.0nm
+            @test is_on_radius(r, (39000.0nm, 45000.0nm), 0.001nm)
         end
 
         pa = Path(μm2μm)
@@ -790,8 +791,7 @@ end
 
             # Test Layout.jl#68
             els = initial ? reverse(elements(c)) : elements(c)
-            # Round to picometers before intersecting: the CPW straight and the termination
-            # compute shared corners via different render paths.
+            # Normalize tiny floating-point differences before intersecting shared corners.
             pts_approx(el) = [round.(pt, digits=9) for pt in ustrip.(nm, points(el))]
             straight_points = Set(reduce(vcat, pts_approx.(els[1:2])))
 
