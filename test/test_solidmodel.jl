@@ -117,6 +117,24 @@
         )
     )
 
+    # rtol must reach GmshNative's curve-flattening path.
+    @testset "GmshNative honors rtol" begin
+        gmsh_turn_points(rtol) = begin
+            cs_t = CoordinateSystem("rtol_t", nm)
+            pa_t = Path(0nm, 0nm)
+            turn!(pa_t, 90°, 500μm, Paths.SimpleTrace(10μm))
+            place!(cs_t, pa_t, SemanticMeta(:l1))
+            sm_t = SolidModel("rtol_t", SolidModels.GmshNative(); overwrite=true)
+            if isnothing(rtol)
+                render!(sm_t, cs_t, zmap=(_) -> 0μm)
+            else
+                render!(sm_t, cs_t, zmap=(_) -> 0μm, rtol=rtol)
+            end
+            return length(SolidModels.gmsh.model.getEntities(0)) # count points (dim-0 entities)
+        end
+        @test gmsh_turn_points(0.1) < gmsh_turn_points(nothing)
+    end
+
     # Try BSpline approximations
     cs = CoordinateSystem("test", nm)
     pa = Path(-0.5mm, 0nm)

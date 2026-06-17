@@ -1361,20 +1361,22 @@ _add_to_current_solidmodel!(
 # primitives to plain polygons before the sink via the shared `to_polygons`/`discretize_curve`
 # (the GDS pipeline's chord-height discretizer, not legacy adapted_grid). The resulting Polygon{T}
 # hits the AbstractPolygon sink, whose only kernel call is add_line.
+# GmshNative flattens curves here, so discretization kwargs such as rtol must
+# reach to_polygons before the plain polygons are added to the kernel.
 _add_to_current_solidmodel!(
     x::CurvilinearPolygon{T},
     m::Meta,
     k::GmshNative;
     atol=DeviceLayout.onenanometer(T),
     kwargs...
-) where {T} = _add_to_current_solidmodel!(to_polygons(x; atol), m, k; kwargs...)
+) where {T} = _add_to_current_solidmodel!(to_polygons(x; atol, kwargs...), m, k; kwargs...)
 _add_to_current_solidmodel!(
     x::CurvilinearRegion{T},
     m::Meta,
     k::GmshNative;
     atol=DeviceLayout.onenanometer(T),
     kwargs...
-) where {T} = _add_to_current_solidmodel!(to_polygons(x; atol), m, k; kwargs...)
+) where {T} = _add_to_current_solidmodel!(to_polygons(x; atol, kwargs...), m, k; kwargs...)
 
 function _add_to_current_solidmodel!(
     surf::CurvilinearRegion{T},
