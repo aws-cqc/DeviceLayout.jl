@@ -65,13 +65,7 @@ using TestItemRunner
     Assert that `rounded_corner_segment_line_arc` produces valid fillets at line-arc
     corners. Every detected line-arc corner must fillet.
     """
-    function check_line_arc_fillets(
-        cp,
-        pts,
-        fillet_r;
-        atol_length=1.0nm,
-        atol_angle=1e-6
-    )
+    function check_line_arc_fillets(cp, pts, fillet_r; atol_length=1.0nm, atol_angle=1e-6)
         n_pts = length(pts)
         n_line_arc = 0
         n_filleted = 0
