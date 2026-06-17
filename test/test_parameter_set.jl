@@ -668,6 +668,25 @@ end
         @test ps2.components.jj.count == 2
     end
 
+    @testset "IO round-trip with a Unitful array" begin
+        # Arrays of quantities serialize element-wise to unit strings and parse
+        # back element-wise, so the vector survives the round-trip with its
+        # values intact and re-enters as ContextUnits quantities.
+        ps = ParameterSet()
+        ps.components.routing.pad_offsets = [0μm, 25μm, 50μm]
+
+        io = IOBuffer()
+        save_parameter_set(io, ps)
+        yaml_bytes = take!(io)
+
+        ps2 = ParameterSet(IOBuffer(yaml_bytes))
+
+        offsets = ps2.components.routing.pad_offsets
+        @test offsets == [0μm, 25μm, 50μm]
+        @test all(x -> x isa Unitful.Quantity, offsets)
+        @test all(x -> Unitful.unit(x) isa Unitful.ContextUnits, offsets)
+    end
+
     @testset "ParameterSet from IO with path" begin
         yaml_str = """
         global:
