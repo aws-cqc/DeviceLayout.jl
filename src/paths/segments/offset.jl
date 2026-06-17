@@ -190,7 +190,8 @@ resolve_offset(
     x::ConstantOffset{T, CompoundSegment{T}};
     atol=nothing,
     rtol=nothing
-) where {T} = CompoundSegment(resolve_offset.(offset.(x.seg.segments, x.offset)))
+) where {T} =
+    CompoundSegment(resolve_offset.(offset.(x.seg.segments, x.offset); atol, rtol))
 function resolve_offset(
     x::GeneralOffset{T, CompoundSegment{T}};
     atol=nothing,
@@ -198,9 +199,11 @@ function resolve_offset(
 ) where {T}
     s0s = [zero(T); cumsum(pathlength.(x.seg.segments))[1:(end - 1)]]
     return CompoundSegment(
-        resolve_offset.([
-            offset(seg, s -> x.offset(s + s0)) for (seg, s0) in zip(x.seg.segments, s0s)
-        ])
+        resolve_offset.(
+            [offset(seg, s -> x.offset(s + s0)) for (seg, s0) in zip(x.seg.segments, s0s)];
+            atol,
+            rtol
+        )
     )
 end
 # Everything else gets BSpline approximation. Forward a tolerance only if given, so
