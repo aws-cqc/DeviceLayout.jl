@@ -54,24 +54,32 @@ using TestItemRunner
     using DeviceLayout.Curvilinear: edge_type_at_vertex, rounded_corner_segment_line_arc
 
     """
-        check_line_arc_fillets(cp, pts, fillet_r; atol_length=1.0nm, atol_angle=1e-6)
+        check_line_arc_fillets(
+            cp,
+            pts,
+            fillet_r;
+            atol_length=1.0nm,
+            atol_angle=1e-6
+        )
 
-    Assert that `rounded_corner_segment_line_arc` produces a geometrically valid fillet at
-    every line-arc corner of CurvilinearPolygon `cp` (vertex list `pts`, requested radius
-    `fillet_r`). These are self-sufficient property checks against analytic ground truth —
-    the arc's center/radius and tangency — rather than a comparison to another
-    implementation.
-
-    `atol_length` is the positional tolerance (matches `Polygons._round_atol` for `Length`
-    coordinates); `atol_angle` is the tangent-direction tolerance in radians.
+    Assert that `rounded_corner_segment_line_arc` produces valid fillets at line-arc
+    corners. Every detected line-arc corner must fillet.
     """
-    function check_line_arc_fillets(cp, pts, fillet_r; atol_length=1.0nm, atol_angle=1e-6)
+    function check_line_arc_fillets(
+        cp,
+        pts,
+        fillet_r;
+        atol_length=1.0nm,
+        atol_angle=1e-6
+    )
         n_pts = length(pts)
+        n_line_arc = 0
         n_filleted = 0
         for i = 1:n_pts
             edge = edge_type_at_vertex(cp, i)
             is_line_arc = (edge.incoming == :straight) != (edge.outgoing == :straight)
             !is_line_arc && continue
+            n_line_arc += 1
 
             arc_is_outgoing = edge.outgoing != :straight
             arc_curve = arc_is_outgoing ? edge.outgoing : edge.incoming
@@ -86,10 +94,6 @@ using TestItemRunner
                 fillet_r
             )
 
-            # The solver returns `nothing` for corners it declines (edge too short, already
-            # tangent, degenerate geometry). With no reference impl we can't predict which,
-            # so assert geometry only where a fillet exists; the counter (checked > 0 below)
-            # guards against the loop silently testing nothing.
             isnothing(seg) && continue
             n_filleted += 1
 
@@ -98,19 +102,13 @@ using TestItemRunner
             O = Paths.curvaturecenter(arc_curve)   # center of the original arc
             arc_r = abs(arc_curve.r)
 
-            # (1) T_arc lies on the original arc (not implied by (6): those distances don't force collinearity).
             @test isapprox(norm(seg.T_arc - O), arc_r, atol=atol_length)
 
-            # (2) T_line lies on the straight edge from p_line to p_corner: T_line's perpendicular
-            #     distance to the line through p_line and p_corner is ~0. Built from the unit
-            #     edge vector to keep units consistent (avoids a cross-product's length^2 type).
             v_line = (p_corner - p_line) / norm(p_corner - p_line)
             w = seg.T_line - p_line
             perp = w - (w.x * v_line.x + w.y * v_line.y) * v_line
             @test isapprox(norm(perp), zero(atol_length), atol=atol_length)
 
-            # (3) Fillet Turn endpoints equal the tangent points (orientation-dependent):
-            #     outgoing arc → polygon runs line→fillet→arc, so p0=T_line, p1=T_arc.
             p0_f = Paths.p0(seg.fillet)
             p1_f = Paths.p1(seg.fillet)
             if arc_is_outgoing # line → fillet → arc
@@ -121,9 +119,6 @@ using TestItemRunner
                 @test isapprox(p1_f, seg.T_line, atol=atol_length)
             end
 
-            # (4) G1 tangency: the fillet meets the line and the arc tangentially (no corner).
-            #     Tangent of a Turn is a unit-bearing degree angle → compare with isapprox_angle;
-            #     a tangent is a line (mod π), so accept a match to either the angle or angle + π.
             p0_α = Paths.α0(seg.fillet)
             p1_α = Paths.α1(seg.fillet)
             T_line_α = atan(v_line.y, v_line.x)
@@ -141,11 +136,8 @@ using TestItemRunner
                       isapprox_angle(p1_α, T_line_α + π, atol=atol_angle)
             end
 
-            # (5) Fillet radius equals the requested radius.
             @test seg.fillet.r ≈ fillet_r
 
-            # (6) Fillet center is fillet_r from both tangent points, and arc_r ± fillet_r from
-            #     the arc center (external vs internal tangency — the solver produces one).
             C_f = Paths.curvaturecenter(seg.fillet)
             @test isapprox(norm(C_f - seg.T_line), fillet_r, atol=atol_length)
             @test isapprox(norm(C_f - seg.T_arc), fillet_r, atol=atol_length)
@@ -153,14 +145,14 @@ using TestItemRunner
             @test isapprox(d_centers, arc_r + fillet_r, atol=atol_length) ||
                   isapprox(d_centers, abs(arc_r - fillet_r), atol=atol_length)
 
-            # (7) Sweep sanity: sampled points along the fillet all lie on its own circle.
             L_f = Paths.pathlength(seg.fillet)
             n_samples = 9
             for t in range(zero(L_f), L_f, length=n_samples)
                 @test isapprox(norm(seg.fillet(t) - C_f), fillet_r, atol=atol_length)
             end
         end
-        @test n_filleted > 0
+
+        @test n_filleted == n_line_arc
     end
 end
 
