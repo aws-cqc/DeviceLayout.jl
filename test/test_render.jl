@@ -570,6 +570,29 @@ end
         render!(c, pa, grid_step=50.0)
         @test points(c.elements[1]) ≈ [p(0, -0.5), p(20, -0.5), p(20, 0.5), p(0, 0.5)]
 
+        # Mismatched tags must use the CompoundStyle grid, not the original segment boundary.
+        c = Cell{Float64}("main")
+        pa3 = Path{Float64}()
+        straight!(pa3, 20.0, Paths.Trace(1))
+        straight!(pa3, 30.0, Paths.Trace(2))
+        simplify!(pa3)
+        swapped = Paths.CompoundStyle(
+            Paths.Style[Paths.Trace(1.0), Paths.Trace(2.0)],
+            [0.0, 25.0, 50.0],
+            gensym()
+        )
+        setstyle!(pa3[1], swapped)
+        render!(c, pa3, grid_step=50.0)
+        # The first style spans 0..25 from the style grid; zipping would stop at 20.
+        e1x = getx.(points(c.elements[1]))
+        e1y = gety.(points(c.elements[1]))
+        @test extrema(e1x) == (0.0, 25.0)
+        @test extrema(e1y) == (-0.5, 0.5)
+        e2x = getx.(points(c.elements[2]))
+        e2y = gety.(points(c.elements[2]))
+        @test extrema(e2x) == (25.0, 50.0)
+        @test extrema(e2y) == (-1.0, 1.0)
+
         # Test behavior if we swap out the segment
         c = Cell("main", nm)
         pa = Path(μm)

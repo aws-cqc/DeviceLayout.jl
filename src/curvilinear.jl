@@ -295,7 +295,13 @@ function pathtopolys(
     s::Paths.CompoundStyle;
     kwargs...
 ) where {T}
-    return vcat(pathtopolys.(f.segments, s.styles; kwargs...)...)
+    # Matching tags mean this style came from the same simplification as the segment, so
+    # segment/style boundaries align and we can preserve symbolic curves.
+    if f.tag == s.tag
+        return vcat(pathtopolys.(f.segments, s.styles; kwargs...)...)
+    end
+    # A replaced CompoundStyle owns its own grid; render over the whole compound path.
+    return to_polygons(f, pathlength(f), s; kwargs...)
 end
 
 # Shared compound style-pinning loop. A CompoundSegment shares one arclength parameter; with a
