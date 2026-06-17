@@ -706,6 +706,32 @@
     sm = SolidModel("test"; overwrite=true)
     @test_nowarn render!(sm, cs)
 
+    @testset "pathtopolys(::Path) is flat and forwards kwargs" begin
+        # CPW nodes return multiple polygons; the path-level result should be flat.
+        pac = Path(0nm, 0nm)
+        turn!(pac, 90°, 100μm, Paths.SimpleCPW(10μm, 6μm))
+        turn!(pac, -90°, 100μm, Paths.SimpleCPW(10μm, 6μm))
+        crc = pathtopolys(pac)
+        @test crc isa AbstractVector
+        @test !any(x -> x isa AbstractVector, crc)
+        @test length(crc) == 4
+
+        # Tighter atol must reach the offset BSpline approximation.
+        build_off() = begin
+            p = Path(0nm, 0nm)
+            bspline!(
+                p,
+                [Point(300μm, 200μm), Point(600μm, 0μm)],
+                0°,
+                Paths.SimpleTrace(10μm)
+            )
+            p[1].seg = Paths.offset(p[1].seg, 5μm)
+            p
+        end
+        @test length(pathtopolys(build_off(); atol=1nm)) >
+              length(pathtopolys(build_off(); atol=5μm))
+    end
+
     # A 2π rotation should do nothing
     t = RotationPi(2)
     crt = t.(cr)

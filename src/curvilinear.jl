@@ -287,8 +287,12 @@ pathtopolys(seg::Paths.Segment{T}, s::Paths.SimpleNoRender; kwargs...) where {T}
     Polygon{T}[]
 pathtopolys(seg::Paths.Segment{T}, s::Paths.NoRender; kwargs...) where {T} = Polygon{T}[]
 
-pathtopolys(p::Paths.Path; kwargs...) =
-    vcat(pathtopolys.(filter(x -> !iszero(pathlength(x)), p.nodes)))
+function pathtopolys(p::Paths.Path{T}; kwargs...) where {T}
+    nodes = filter(x -> !iszero(pathlength(x)), p.nodes)
+    isempty(nodes) && return CurvilinearPolygon{T}[]
+    # Normalize scalar and vector node outputs into one flat result.
+    return reduce(vcat, vcat.(pathtopolys.(nodes; kwargs...)))
+end
 
 function pathtopolys(
     f::Paths.CompoundSegment{T},
