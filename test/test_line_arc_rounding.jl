@@ -508,6 +508,11 @@
     @test length(points(rel_rounded)) != length(rounded_pts) ||
           !isapprox(points(rel_rounded)[1], rounded_pts[1]; atol=0.1nm)
 
+    # RelativeRounded with a p0 selection must not error on the unit promotion
+    corner = points(cp)[1]
+    rel_p0 = to_polygons(cp, RelativeRounded(0.15; p0=[corner]))
+    @test length(points(rel_p0)) > 30
+
     # Unitful issue addressed by Unitful.jl PR#845 bypassed
     rect = Rectangle(10.0μm2μm, 10.0μm2μm)
     cr = CurvilinearRegion(CurvilinearPolygon(points(rect)))
