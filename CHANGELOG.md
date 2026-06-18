@@ -10,6 +10,16 @@ The format of this changelog is based on
   - Added `SolidModels.check_port_connectivity`, using `SolidModels.connected_components` to report ports as `:open`, `:short`, `:floating`, or `:missing`
   - Added `detect_non_boundary_contacts=false` keyword argument to `SolidModels.connected_components`; when `true`, 1d edges embedded in the interior of 2D surfaces (like the feet of staple air bridges) will be treated as connecting
   - Added `examples/DemoQPU17/solidmodel.jl` demonstrating large-scale SolidModel construction and configuration, including a check for open charge lines and shorted flux lines with the new functionality above
+## In progress
+
+  - Routed GDS path rendering through the shared `pathtopolys`/`CurvilinearPolygon`
+    pipeline used for path polygonization, aligning GDS and SolidModel corner-rounding
+    and curve discretization behavior. Relative line-arc rounding in GDS now matches
+    the SolidModel path.
+  - Fixed render tolerance propagation through compound offset resolution, path-level
+    `pathtopolys`, GmshNative curve flattening, and known curved `Trace`/`CPW`/`Strands`
+    style renderers. Legacy `adapted_grid` remains only for opaque-callable fallback
+    renderers.
 
 ## 1.15.0 (2026-06-14)
 
