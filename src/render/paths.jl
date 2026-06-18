@@ -20,6 +20,17 @@ end
 to_polygons(seg::Paths.Segment{T}, s::Paths.Style; kwargs...) where {T} =
     to_polygons(seg, pathlength(seg), s; kwargs...)
 
+function _to_polygons_via_bspline(
+    seg::Paths.Segment{T},
+    s;
+    atol=DeviceLayout.onenanometer(T),
+    rtol=nothing,
+    kwargs...
+) where {T}
+    bsp = Paths.bspline_approximation(seg; atol, rtol)
+    return to_polygons(bsp, s; atol, rtol, kwargs...)
+end
+
 function to_polygons(n::Paths.Node; kwargs...)
     result = pathtopolys(n; kwargs...)
     return _pathtopolys_to_polygons(result; kwargs...)
