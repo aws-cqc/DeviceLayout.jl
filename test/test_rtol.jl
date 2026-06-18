@@ -159,9 +159,28 @@ end
     @test points(polys_nil) == points(polys_none)
 end
 
-@testitem "rtol_bspline" setup = [CommonTestSetup] begin
-    # Taper and General Trace/CPWs on turns still use adapted_grid, which does not respect rtol
-    # BSplines are exceptions, so test those
+@testitem "rtol_known_segment_style_renderers" setup = [CommonTestSetup] begin
+    function test_rtol_reduces(seg, sty)
+        poly_atol = vcat(Polygon[], to_polygons(seg, sty; atol=1nm))
+        poly_rtol = vcat(Polygon[], to_polygons(seg, sty; atol=1nm, rtol=1e-4))
+        vcount_atol = sum(length(points(e)) for e in poly_atol)
+        vcount_rtol = sum(length(points(e)) for e in poly_rtol)
+        @test vcount_rtol > 0
+        @test vcount_rtol < 0.5 * vcount_atol
+    end
+
+    turn_seg = Paths.Turn(pi / 2, 1000.0μm)
+    turn_stys = [
+        Paths.Trace(x -> 10.0μm + x / 100),
+        Paths._withlength!(Paths.TaperTrace(10μm, 2μm), pathlength(turn_seg)),
+        Paths.CPW(x -> 10.0μm + x / 100, x -> 6.0μm + x / 100),
+        Paths._withlength!(Paths.TaperCPW(10μm, 6μm, 2μm, 1μm), pathlength(turn_seg)),
+        Paths.Strands(2μm, 1μm, 1μm, 2)
+    ]
+    for sty in turn_stys
+        test_rtol_reduces(turn_seg, sty)
+    end
+
     pa = Path(μm)
     bspline!(
         pa,
@@ -169,22 +188,17 @@ end
         0°,
         Paths.CPW(10μm, 6μm)
     )
-    stys = [
+    bspline_seg = pa[1].seg
+    bspline_stys = [
         pa[1].sty,
-        Paths.TaperCPW(10μm, 6μm, 2μm, 1μm),
+        Paths._withlength!(Paths.TaperCPW(10μm, 6μm, 2μm, 1μm), pathlength(bspline_seg)),
         Paths.CPW(x -> 10.0μm + x / 100, x -> 6.0μm + x / 100),
         Paths.Trace(10μm),
         Paths.Trace(x -> 10μm + x / 100),
-        Paths.TaperTrace(10μm, 2μm)
+        Paths._withlength!(Paths.TaperTrace(10μm, 2μm), pathlength(bspline_seg)),
+        Paths.Strands(2μm, 1μm, 1μm, 2)
     ]
-    for sty in stys
-        Paths.setstyle!(pa[1], sty)
-        n = pa[1]
-        poly_atol = vcat(Polygon[], to_polygons(n; atol=1nm))
-        poly_rtol = vcat(Polygon[], to_polygons(n; atol=1nm, rtol=1e-4))
-        vcount_atol = sum(length(points(e)) for e in poly_atol)
-        vcount_rtol = sum(length(points(e)) for e in poly_rtol)
-        @test vcount_rtol > 0
-        @test vcount_rtol < 0.5 * vcount_atol
+    for sty in bspline_stys
+        test_rtol_reduces(bspline_seg, sty)
     end
 end

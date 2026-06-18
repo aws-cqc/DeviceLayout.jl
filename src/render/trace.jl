@@ -14,14 +14,30 @@ function to_polygons(f, len, s::Paths.Trace; kwargs...)
 end
 
 function to_polygons(
+    seg::Paths.Turn{T},
+    s::Paths.Trace;
+    atol=DeviceLayout.onenanometer(T),
+    rtol=nothing,
+    kwargs...
+) where {T}
+    grid = discretization_grid(seg, atol; rtol=rtol) * pathlength(seg)
+    g = (t, sgn) -> begin
+        d = Paths.direction(seg, t) + sgn * 90.0°
+        return seg(t) + Paths.extent(s, t) * Point(cos(d), sin(d))
+    end
+
+    pts = [g.(grid, -1); @view (g.(grid, 1))[end:-1:1]]
+    return Polygon(uniquepoints(pts))
+end
+
+function to_polygons(
     seg::Paths.OffsetSegment{T},
     s::Paths.Trace;
     atol=DeviceLayout.onenanometer(T),
     rtol=nothing,
     kwargs...
 ) where {T}
-    bsp = Paths.bspline_approximation(seg; atol, rtol)
-    return to_polygons(bsp, s; atol, rtol, kwargs...)
+    return _to_polygons_via_bspline(seg, s; atol, rtol, kwargs...)
 end
 
 function to_polygons(segment::Paths.Straight{T}, s::Paths.SimpleTrace; kwargs...) where {T}
