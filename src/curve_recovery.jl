@@ -150,6 +150,137 @@ function match_run(contour::AbstractVector{P}, run::AbstractVector{P}) where {P}
     return nothing
 end
 
+# Find ALL maximal contiguous sub-blocks of `run` that exist in `contour` (treated as cyclic),
+# considering forward and reversed orientations. Returns a Vector of named-tuples
+# `(contour_start, run_lo, run_hi, reversed)` where:
+#   - `contour_start` is the 1-based start position in the contour
+#   - `run_lo`, `run_hi` are 1-based inclusive indices into `run` (or `reverse(run)` if reversed)
+#   - `reversed::Bool` indicates orientation
+# Each returned block has length ≥ `min_len` (default 3 — meaningful sub-arc, not a single edge).
+# Sub-blocks that are subsumed by a larger block at the same contour position are dropped.
+#
+# Used by `substitute_curves` for partial recovery: when a curve is "genuinely cut" by a
+# boolean operation (e.g. a Turn arc bisected by another polygon's edge), the run survives
+# as multiple disjoint contiguous sub-blocks. Each sub-block becomes a sub-curve via the
+# original segment's `Paths.split` interface.
+function match_run_partial(contour::AbstractVector{P}, run::AbstractVector{P};
+                            min_len::Int = 3) where {P}
+    n = length(contour)
+    m = length(run)
+    (m == 0 || n == 0) && return NamedTuple{(:contour_start, :run_lo, :run_hi, :reversed),
+                                              Tuple{Int,Int,Int,Bool}}[]
+    # Build a position lookup: for each run point value, what indices in run have that value?
+    # Run is short (typically 50-200 points for an arc), contour can be longer; this trades a
+    # bit of memory for fast search.
+    run_pos = Dict{P, Vector{Int}}()
+    for (i, v) in enumerate(run)
+        push!(get!(run_pos, v, Int[]), i)
+    end
+    rev_run = reverse(run)
+    rev_pos = Dict{P, Vector{Int}}()
+    for (i, v) in enumerate(rev_run)
+        push!(get!(rev_pos, v, Int[]), i)
+    end
+
+    matches = NamedTuple{(:contour_start, :run_lo, :run_hi, :reversed),
+                         Tuple{Int,Int,Int,Bool}}[]
+
+    # Try to extend a contiguous run-match starting at contour position s, run position r0,
+    # in the given orientation. Returns the longest extension length k such that
+    # contour[s..s+k-1] == run[r0..r0+k-1] (orientation-respecting).
+    extend_match(s::Int, r0::Int, src::AbstractVector{P}) = begin
+        m_local = length(src)
+        k = 0
+        while r0 + k <= m_local && contour[mod1(s + k, n)] == src[r0 + k]
+            k += 1
+        end
+        k
+    end
+
+    for orient in (false, true)
+        src = orient ? rev_run : run
+        pos_lookup = orient ? rev_pos : run_pos
+        s = 1
+        while s <= n
+            cv = contour[s]
+            candidates = get(pos_lookup, cv, nothing)
+            if candidates === nothing
+                s += 1
+                continue
+            end
+            best_k = 0
+            best_r0 = 0
+            for r0 in candidates
+                k = extend_match(s, r0, src)
+                if k > best_k
+                    best_k = k
+                    best_r0 = r0
+                end
+            end
+            if best_k >= min_len
+                run_lo = orient ? (m + 1 - (best_r0 + best_k - 1)) : best_r0
+                run_hi = orient ? (m + 1 - best_r0) : (best_r0 + best_k - 1)
+                push!(matches, (contour_start=s, run_lo=run_lo, run_hi=run_hi, reversed=orient))
+                s += best_k                # skip the matched block; no overlap
+            else
+                s += 1
+            end
+        end
+    end
+
+    # Drop entries that are subsumed by a longer entry covering the same contour range.
+    # Sort by length descending; keep an entry only if no kept entry already covers its
+    # contour_start..contour_start+(hi-lo).
+    isempty(matches) && return matches
+    by_len = sort(matches; by=t -> -(t.run_hi - t.run_lo + 1))
+    kept = empty(by_len)
+    for t in by_len
+        len = t.run_hi - t.run_lo + 1
+        overlap = false
+        for kt in kept
+            klen = kt.run_hi - kt.run_lo + 1
+            # Check cyclic overlap of [t.contour_start, t.contour_start+len-1]
+            # with [kt.contour_start, kt.contour_start+klen-1].
+            for i = 0:(len-1)
+                pos = mod1(t.contour_start + i, n)
+                # Is pos inside kt's span?
+                for j = 0:(klen-1)
+                    if mod1(kt.contour_start + j, n) == pos
+                        overlap = true; break
+                    end
+                end
+                overlap && break
+            end
+            overlap && break
+        end
+        overlap || push!(kept, t)
+    end
+    return kept
+end
+
+# Given a curve and a sub-run [run_lo, run_hi] of its full discretization (length m),
+# return the corresponding sub-segment (the same kind of curve restricted to the
+# parametric range `t ∈ [(run_lo-1)/(m-1), (run_hi-1)/(m-1)] * pathlength(curve)`).
+# Reversed sub-runs return a reversed sub-segment.
+function _sub_curve(curve::Paths.Segment, m::Int, run_lo::Int, run_hi::Int, reversed::Bool)
+    pl = Paths.pathlength(curve)
+    t_lo = (run_lo - 1) / (m - 1) * pl
+    t_hi = (run_hi - 1) / (m - 1) * pl
+    # Take three-way split: pre, middle (the surviving sub-arc), post
+    if t_lo > zero(pl)
+        _, rest = Paths.split(curve, t_lo)
+    else
+        rest = curve
+    end
+    mid_len = t_hi - t_lo
+    if mid_len < Paths.pathlength(rest)
+        mid, _ = Paths.split(rest, mid_len)
+    else
+        mid = rest
+    end
+    return reversed ? Paths.reverse(mid) : mid
+end
+
 # Walk a ClippedPolygon's PolyNode tree, substituting known curves back into each contour
 # wherever a ProvenanceRun's discretized integer-grid point-run survived a boolean op intact.
 # Returns Vector{CurvilinearRegion{T}}: one region per outer contour (its direct children are
@@ -158,6 +289,11 @@ end
 # Each run matches at most once globally — `used` is shared across all contours.
 # `report`, if given, collects (status::Symbol, curve, contour_index) tuples with
 # status ∈ (:recovered, :clipped); :clipped runs (never matched) carry contour_index 0.
+# When true, `substitute_curves` falls back to longest-contiguous-substring matching
+# for curves whose full run was cut by another polygon's edge — recovering each surviving
+# sub-block as a sub-segment via `Paths.split`, instead of dropping the whole curve to polyline.
+const substitute_curves_partial = Ref(false)
+
 function substitute_curves(clipped::ClippedPolygon{T}, runs; report=nothing) where {T}
     out = CurvilinearRegion{T}[]
     contour_index = Ref(0)
@@ -177,9 +313,26 @@ function substitute_curves(clipped::ClippedPolygon{T}, runs; report=nothing) whe
         for (ri, pr) in enumerate(runs)
             used[ri] && continue
             hit = match_run(snapped, pr.run)
-            isnothing(hit) && continue
-            seg = hit.reversed ? reverse(pr.curve) : pr.curve
-            push!(matched, (hit.start, length(pr.run), seg))
+            if !isnothing(hit)
+                seg = hit.reversed ? reverse(pr.curve) : pr.curve
+                push!(matched, (hit.start, length(pr.run), seg))
+                used[ri] = true
+                !isnothing(report) && push!(report, (:recovered, pr.curve, ci))
+                continue
+            end
+            # Partial recovery: the full run didn't match (curve was cut by a boolean edge).
+            # Try longest-contiguous-substring matching: each surviving sub-block of the
+            # original run becomes a sub-segment of the original curve via Paths.split.
+            substitute_curves_partial[] || continue
+            partial_matches = match_run_partial(snapped, pr.run; min_len=3)
+            isempty(partial_matches) && continue
+            m_full = length(pr.run)
+            for pm in partial_matches
+                sub_len = pm.run_hi - pm.run_lo + 1
+                # sub_len includes both endpoints; the contour occupies sub_len positions.
+                sub_seg = _sub_curve(pr.curve, m_full, pm.run_lo, pm.run_hi, pm.reversed)
+                push!(matched, (pm.contour_start, sub_len, sub_seg))
+            end
             used[ri] = true
             !isnothing(report) && push!(report, (:recovered, pr.curve, ci))
         end
@@ -265,8 +418,8 @@ function _as_entities(
     ]
 end
 # A Rounded- or StyleDict{Rounded}-styled ClippedPolygon (e.g. the output of a non-curved
-# `difference2d`/`union2d` then rounded — followed by post-clip rounding) recovers as exact
-# fillet arcs per contour, so its corners survive the clip instead of discretizing. The render
+# `difference2d`/`union2d` followed by post-clip rounding) recovers as exact fillet arcs
+# per contour, so its corners survive the clip instead of discretizing. The render
 # path already does this conversion (`to_curvilinear_regions` walks the clipped tree, applying
 # `styled_loop`+`round_to_curvilinearpolygon` per contour → CurvilinearRegions with arcs); we
 # reuse that exact function so boolean recovery matches the render. `SolidModels` loads after
