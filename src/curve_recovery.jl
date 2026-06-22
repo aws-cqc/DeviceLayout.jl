@@ -28,7 +28,14 @@ function _collect_provenance!(polys, runs, e::CurvilinearPolygon, ::Type{R}, ato
     ec = convert(CurvilinearPolygon{R}, e)
     i = 1
     p = Point{R}[]
-    for (csi, c) in zip(ec.curve_start_idx, ec.curves)
+    # Walk in ascending start-index order — must match to_polygons(::CurvilinearPolygon) exactly
+    # so the Clipper polygon and these provenance runs share the same point ordering. See the
+    # note there: an out-of-order (e.g. wrap-seam-first) curve list otherwise emits the wrong
+    # `ec.p[i:csi]` spans and a sub-µm near-pinch.
+    order = issorted(ec.curve_start_idx) ? eachindex(ec.curve_start_idx) : sortperm(ec.curve_start_idx)
+    for idx in order
+        csi = ec.curve_start_idx[idx]
+        c = ec.curves[idx]
         append!(p, ec.p[i:csi])
         wrapped_end = mod1(csi + 1, length(ec.p))
         pp = DeviceLayout.discretize_curve(c, atol; rtol=nothing)
@@ -51,17 +58,71 @@ function _collect_provenance!(polys, runs, e::CurvilinearRegion, ::Type{R}, atol
     return nothing
 end
 
-# Any other entity: no curves to recover; discretize to polygons.
+# Count, in already-clipperized integer space, runs of short edges that fit a circle — a cheap
+# proxy for "this discretized polygon CONTAINS curve geometry we are about to lose". Used only to
+# warn on the silent-discretization path below; not exact, just enough to flag a likely loss.
+function _count_arclike_runs(pts; short_nm=6000.0, min_run=4, resid_nm=2.0)
+    n = length(pts); n < min_run + 1 && return 0
+    xy = [(Float64(DeviceLayout.ustrip(getx(p))) / 1000, Float64(DeviceLayout.ustrip(gety(p))) / 1000) for p in pts]  # → ~nm scale-agnostic
+    # edge lengths in the same units as xy
+    el = [hypot(xy[mod1(i + 1, n)][1] - xy[i][1], xy[mod1(i + 1, n)][2] - xy[i][2]) for i in 1:n]
+    short = short_nm / 1000
+    cnt = 0; i = 1
+    while i <= n
+        if !(0 < el[i] < short); i += 1; continue; end
+        j = i; while j < n && 0 < el[mod1(j + 1, n)] < short; j += 1; end
+        rl = j - i + 1
+        if rl >= min_run
+            vx = [xy[mod1(i + k, n)][1] for k in 0:rl]; vy = [xy[mod1(i + k, n)][2] for k in 0:rl]
+            m = length(vx); sx = sum(vx); sy = sum(vy)
+            sxx = sum(vx .^ 2); syy = sum(vy .^ 2); sxy = sum(vx .* vy)
+            sxxx = sum(vx .^ 3); syyy = sum(vy .^ 3); sxyy = sum(vx .* vy .^ 2); sxxy = sum(vx .^ 2 .* vy)
+            A = m * sxx - sx^2; B = m * sxy - sx * sy; Cc = m * syy - sy^2
+            D = 0.5 * (m * sxxx + m * sxyy - sx * sxx - sx * syy); E = 0.5 * (m * syyy + m * sxxy - sy * syy - sy * sxx)
+            den = A * Cc - B^2
+            if abs(den) > 1e-12
+                cx = (D * Cc - B * E) / den; cy = (A * E - B * D) / den
+                r = sqrt(max(0.0, (sxx + syy - 2cx * sx - 2cy * sy) / m + cx^2 + cy^2))
+                if 1e-3 < r < 1e5
+                    mr = maximum(abs(hypot(vx[k] - cx, vy[k] - cy) - r) for k in 1:m)
+                    mr < resid_nm / 1000 && (cnt += 1)
+                end
+            end
+        end
+        i = j + 1
+    end
+    return cnt
+end
+
+# Module-level switch for the silent-discretization warning (default ON; set false to silence).
+const warn_on_curve_loss = Ref(true)
+# Track per-(entity-type) loss counts so a run can report which entity classes lost curves.
+const _curve_loss_log = Dict{String, Int}()
+curve_loss_log() = _curve_loss_log
+reset_curve_loss_log!() = empty!(_curve_loss_log)
+
+# Any other entity: no curves to recover; discretize to polygons. THIS is the silent-loss path —
+# a curve-bearing entity whose (type, style) combination has no `_as_entities`/`_collect_provenance!`
+# method falls here and is discretized to polyline with NO provenance, so its curves can never be
+# recovered downstream. We detect the likely-loss case (the discretized polygon contains short-edge
+# runs that fit a circle) and warn once per entity type, and tally it in `_curve_loss_log`, so such
+# losses are observable instead of silent. (Plain rectilinear polygons fit nothing → no warning.)
 function _collect_provenance!(polys, runs, e, ::Type{R}, atol) where {R}
     # Convert to polygons and append. to_polygons returns a polygon or array.
     poly_result = DeviceLayout.to_polygons(e)
-    if poly_result isa Polygon
-        push!(polys, convert(Polygon{R}, poly_result))
-    else
-        # It's a vector or other collection of polygons
-        for poly in poly_result
-            push!(polys, convert(Polygon{R}, poly))
-        end
+    polylist = poly_result isa Polygon ? (poly_result,) : poly_result
+    arclike = 0
+    for poly in polylist
+        push!(polys, convert(Polygon{R}, poly))
+        warn_on_curve_loss[] && (arclike += _count_arclike_runs(points(poly)))
+    end
+    if warn_on_curve_loss[] && arclike > 0
+        key = string(nameof(typeof(e)))
+        e isa StyledEntity && (key = "Styled{" * string(nameof(typeof(e.ent))) * "," * string(nameof(typeof(e.sty))) * "}")
+        first_seen = !haskey(_curve_loss_log, key)
+        _curve_loss_log[key] = get(_curve_loss_log, key, 0) + arclike
+        first_seen && @warn "recover_curves: discretizing a curve-bearing entity with no provenance — its arcs are LOST. " *
+                            "Add an _as_entities method for this (type, style) to recover them." entity_type=key arclike_runs=arclike
     end
     return nothing
 end
@@ -89,6 +150,137 @@ function match_run(contour::AbstractVector{P}, run::AbstractVector{P}) where {P}
     return nothing
 end
 
+# Find ALL maximal contiguous sub-blocks of `run` that exist in `contour` (treated as cyclic),
+# considering forward and reversed orientations. Returns a Vector of named-tuples
+# `(contour_start, run_lo, run_hi, reversed)` where:
+#   - `contour_start` is the 1-based start position in the contour
+#   - `run_lo`, `run_hi` are 1-based inclusive indices into `run` (or `reverse(run)` if reversed)
+#   - `reversed::Bool` indicates orientation
+# Each returned block has length ≥ `min_len` (default 3 — meaningful sub-arc, not a single edge).
+# Sub-blocks that are subsumed by a larger block at the same contour position are dropped.
+#
+# Used by `substitute_curves` for partial recovery: when a curve is "genuinely cut" by a
+# boolean operation (e.g. a Turn arc bisected by another polygon's edge), the run survives
+# as multiple disjoint contiguous sub-blocks. Each sub-block becomes a sub-curve via the
+# original segment's `Paths.split` interface.
+function match_run_partial(contour::AbstractVector{P}, run::AbstractVector{P};
+                            min_len::Int = 3) where {P}
+    n = length(contour)
+    m = length(run)
+    (m == 0 || n == 0) && return NamedTuple{(:contour_start, :run_lo, :run_hi, :reversed),
+                                              Tuple{Int,Int,Int,Bool}}[]
+    # Build a position lookup: for each run point value, what indices in run have that value?
+    # Run is short (typically 50-200 points for an arc), contour can be longer; this trades a
+    # bit of memory for fast search.
+    run_pos = Dict{P, Vector{Int}}()
+    for (i, v) in enumerate(run)
+        push!(get!(run_pos, v, Int[]), i)
+    end
+    rev_run = reverse(run)
+    rev_pos = Dict{P, Vector{Int}}()
+    for (i, v) in enumerate(rev_run)
+        push!(get!(rev_pos, v, Int[]), i)
+    end
+
+    matches = NamedTuple{(:contour_start, :run_lo, :run_hi, :reversed),
+                         Tuple{Int,Int,Int,Bool}}[]
+
+    # Try to extend a contiguous run-match starting at contour position s, run position r0,
+    # in the given orientation. Returns the longest extension length k such that
+    # contour[s..s+k-1] == run[r0..r0+k-1] (orientation-respecting).
+    extend_match(s::Int, r0::Int, src::AbstractVector{P}) = begin
+        m_local = length(src)
+        k = 0
+        while r0 + k <= m_local && contour[mod1(s + k, n)] == src[r0 + k]
+            k += 1
+        end
+        k
+    end
+
+    for orient in (false, true)
+        src = orient ? rev_run : run
+        pos_lookup = orient ? rev_pos : run_pos
+        s = 1
+        while s <= n
+            cv = contour[s]
+            candidates = get(pos_lookup, cv, nothing)
+            if candidates === nothing
+                s += 1
+                continue
+            end
+            best_k = 0
+            best_r0 = 0
+            for r0 in candidates
+                k = extend_match(s, r0, src)
+                if k > best_k
+                    best_k = k
+                    best_r0 = r0
+                end
+            end
+            if best_k >= min_len
+                run_lo = orient ? (m + 1 - (best_r0 + best_k - 1)) : best_r0
+                run_hi = orient ? (m + 1 - best_r0) : (best_r0 + best_k - 1)
+                push!(matches, (contour_start=s, run_lo=run_lo, run_hi=run_hi, reversed=orient))
+                s += best_k                # skip the matched block; no overlap
+            else
+                s += 1
+            end
+        end
+    end
+
+    # Drop entries that are subsumed by a longer entry covering the same contour range.
+    # Sort by length descending; keep an entry only if no kept entry already covers its
+    # contour_start..contour_start+(hi-lo).
+    isempty(matches) && return matches
+    by_len = sort(matches; by=t -> -(t.run_hi - t.run_lo + 1))
+    kept = empty(by_len)
+    for t in by_len
+        len = t.run_hi - t.run_lo + 1
+        overlap = false
+        for kt in kept
+            klen = kt.run_hi - kt.run_lo + 1
+            # Check cyclic overlap of [t.contour_start, t.contour_start+len-1]
+            # with [kt.contour_start, kt.contour_start+klen-1].
+            for i = 0:(len-1)
+                pos = mod1(t.contour_start + i, n)
+                # Is pos inside kt's span?
+                for j = 0:(klen-1)
+                    if mod1(kt.contour_start + j, n) == pos
+                        overlap = true; break
+                    end
+                end
+                overlap && break
+            end
+            overlap && break
+        end
+        overlap || push!(kept, t)
+    end
+    return kept
+end
+
+# Given a curve and a sub-run [run_lo, run_hi] of its full discretization (length m),
+# return the corresponding sub-segment (the same kind of curve restricted to the
+# parametric range `t ∈ [(run_lo-1)/(m-1), (run_hi-1)/(m-1)] * pathlength(curve)`).
+# Reversed sub-runs return a reversed sub-segment.
+function _sub_curve(curve::Paths.Segment, m::Int, run_lo::Int, run_hi::Int, reversed::Bool)
+    pl = Paths.pathlength(curve)
+    t_lo = (run_lo - 1) / (m - 1) * pl
+    t_hi = (run_hi - 1) / (m - 1) * pl
+    # Take three-way split: pre, middle (the surviving sub-arc), post
+    if t_lo > zero(pl)
+        _, rest = Paths.split(curve, t_lo)
+    else
+        rest = curve
+    end
+    mid_len = t_hi - t_lo
+    if mid_len < Paths.pathlength(rest)
+        mid, _ = Paths.split(rest, mid_len)
+    else
+        mid = rest
+    end
+    return reversed ? Paths.reverse(mid) : mid
+end
+
 # Walk a ClippedPolygon's PolyNode tree, substituting known curves back into each contour
 # wherever a ProvenanceRun's discretized integer-grid point-run survived a boolean op intact.
 # Returns Vector{CurvilinearRegion{T}}: one region per outer contour (its direct children are
@@ -97,6 +289,11 @@ end
 # Each run matches at most once globally — `used` is shared across all contours.
 # `report`, if given, collects (status::Symbol, curve, contour_index) tuples with
 # status ∈ (:recovered, :clipped); :clipped runs (never matched) carry contour_index 0.
+# When true, `substitute_curves` falls back to longest-contiguous-substring matching
+# for curves whose full run was cut by another polygon's edge — recovering each surviving
+# sub-block as a sub-segment via `Paths.split`, instead of dropping the whole curve to polyline.
+const substitute_curves_partial = Ref(false)
+
 function substitute_curves(clipped::ClippedPolygon{T}, runs; report=nothing) where {T}
     out = CurvilinearRegion{T}[]
     contour_index = Ref(0)
@@ -116,9 +313,26 @@ function substitute_curves(clipped::ClippedPolygon{T}, runs; report=nothing) whe
         for (ri, pr) in enumerate(runs)
             used[ri] && continue
             hit = match_run(snapped, pr.run)
-            isnothing(hit) && continue
-            seg = hit.reversed ? reverse(pr.curve) : pr.curve
-            push!(matched, (hit.start, length(pr.run), seg))
+            if !isnothing(hit)
+                seg = hit.reversed ? reverse(pr.curve) : pr.curve
+                push!(matched, (hit.start, length(pr.run), seg))
+                used[ri] = true
+                !isnothing(report) && push!(report, (:recovered, pr.curve, ci))
+                continue
+            end
+            # Partial recovery: the full run didn't match (curve was cut by a boolean edge).
+            # Try longest-contiguous-substring matching: each surviving sub-block of the
+            # original run becomes a sub-segment of the original curve via Paths.split.
+            substitute_curves_partial[] || continue
+            partial_matches = match_run_partial(snapped, pr.run; min_len=3)
+            isempty(partial_matches) && continue
+            m_full = length(pr.run)
+            for pm in partial_matches
+                sub_len = pm.run_hi - pm.run_lo + 1
+                # sub_len includes both endpoints; the contour occupies sub_len positions.
+                sub_seg = _sub_curve(pr.curve, m_full, pm.run_lo, pm.run_hi, pm.reversed)
+                push!(matched, (pm.contour_start, sub_len, sub_seg))
+            end
             used[ri] = true
             !isnothing(report) && push!(report, (:recovered, pr.curve, ci))
         end
@@ -182,8 +396,11 @@ _as_entities(p::Union{GeometryStructure, GeometryReference}) =
 _as_entities(p::Pair{<:Union{GeometryStructure, GeometryReference}}) =
     _as_entities(flat_elements(p))
 function _as_entities(p::Paths.Node)
-    iszero(pathlength(p.seg)) && p.sty isa ContinuousStyle && return []
-    return _as_entities(pathtopolys(p)) # Use `islinear` dispatch on segment and style
+    # Paths.-qualified: ContinuousStyle is defined in the Paths submodule but is NOT in scope
+    # unqualified inside Curvilinear (a bare `ContinuousStyle` throws UndefVarError on the L1
+    # zero-length-node path). Qualifying is robust and needs no import.
+    iszero(pathlength(p.seg)) && p.sty isa Paths.ContinuousStyle && return []
+    return _as_entities(pathtopolys(p.seg, p.sty)) # Use `islinear` dispatch on segment and style
 end
 # A Rounded-styled straight Polygon recovers as its exact-arc CurvilinearPolygon, so
 # corners survive the clip. Mirrors to_primitives(::SolidModel, ::StyledEntity{Polygon,Rounded}).
@@ -200,6 +417,34 @@ function _as_entities(
         )
     ]
 end
+# A Rounded- or StyleDict{Rounded}-styled ClippedPolygon (e.g. the output of a non-curved
+# `difference2d`/`union2d` followed by post-clip rounding) recovers as exact fillet arcs
+# per contour, so its corners survive the clip instead of discretizing. The render
+# path already does this conversion (`to_curvilinear_regions` walks the clipped tree, applying
+# `styled_loop`+`round_to_curvilinearpolygon` per contour → CurvilinearRegions with arcs); we
+# reuse that exact function so boolean recovery matches the render. `SolidModels` loads after
+# this file, but `_as_entities` only runs at boolean time (all modules loaded), so the qualified
+# name resolves at call time. Returns a Vector{CurvilinearRegion}; `_as_entities(::AbstractArray)`
+# flattens it, and `_collect_provenance!(::CurvilinearRegion)` records each contour's curve runs.
+function _as_entities(
+    p::StyledEntity{T, ClippedPolygon{T}, <:Polygons.StyleDict}
+) where {T}
+    return DeviceLayout.SolidModels.to_curvilinear_regions(p.ent, p.sty)
+end
+function _as_entities(
+    p::StyledEntity{T, ClippedPolygon{T}, <:Polygons.Rounded}
+) where {T}
+    return DeviceLayout.SolidModels.to_curvilinear_regions(p.ent, Polygons.StyleDict(p.sty))
+end
+# A geometrically-transparent style (e.g. MeshSized — a mesh-density hint applied via
+# `to_polygons(ent, ::MeshSized) = to_polygons(ent)`) must NOT block curve recovery: a
+# MeshSized-wrapped Node / Rounded-Polygon / CurvilinearPolygon carries the same curves as
+# the bare entity. Without this, such a wrapped entity falls to the generic
+# `_as_entities(::GeometryEntity) = [p]` and is discretized by `to_polygons`, silently losing
+# its arcs through the boolean. Recurse to the inner entity (mirrors the render-side default
+# `to_primitives(::SolidModel, ::StyledEntity) = to_primitives(sm, ent.ent)`). The specific
+# Rounded / ClippedPolygon methods above are more specific and still win.
+_as_entities(p::StyledEntity) = _as_entities(p.ent)
 
 # Promoted coordinate type matching what clip's promote_type would pick.
 function _recover_coordtype(plus, minus)

@@ -739,3 +739,55 @@ end
     place!(cs_sm, tiny_poly, GDSMeta(0, 0))
     @test_nowarn render!(sm, cs_sm)
 end
+
+@testitem "CurvilinearPolygon walk is curve-order independent (wrap-seam regression)" setup =
+    [CommonTestSetup] begin
+    using DeviceLayout: Point, CurvilinearPolygon, Rounded, to_polygons, points
+    import DeviceLayout.SolidModels: styled_loop
+    # Regression for the seam-ordering bug: to_polygons(::CurvilinearPolygon) and
+    # _collect_provenance! advance a running index `i` and emit `p[i:csi]` before each curve,
+    # which assumes `curve_start_idx` is ascending. A curve at the wrap seam (csi == length(p))
+    # listed out of order makes the walk dump the whole ring up front and append that curve's arc
+    # at the tail, ending one discretization step (~tens of nm) short of its endpoint → a sub-µm
+    # near-pinch that a downstream boolean closes into a zero-area sliver (a degenerate mesh
+    # element). The walk must be independent of the order curves are supplied in.
+
+    # styled_loop on a box produces a valid multi-arc CurvilinearPolygon (one fillet per corner),
+    # including a corner at the wrap seam — exactly the shape that triggered the bug.
+    box = CurvilinearPolygon(Point{Float64}[(0, 0), (10, 0), (10, 10), (0, 10)] .* μm)
+    cp = styled_loop(box, Rounded(1.0μm))
+    @test cp isa CurvilinearPolygon
+    @test !isempty(cp.curves)
+
+    # Antenna signature: two vertices far apart on the ring (gap > 5) but spatially < 0.5µm,
+    # both sitting on long (> 0.5µm) edges — i.e. two boundary strands that should have met.
+    function has_pinch(poly)
+        q = [(Float64(ustrip(μm, DeviceLayout.getx(z))),
+              Float64(ustrip(μm, DeviceLayout.gety(z)))) for z in points(poly)]
+        m = length(q)
+        for i in 1:m, j in (i + 5):m
+            (i <= 2 && j >= m - 1) && continue
+            d = hypot(q[i][1] - q[j][1], q[i][2] - q[j][2])
+            (0.001 < d < 0.5) || continue
+            ei = max(hypot(q[mod1(i + 1, m)][1] - q[i][1], q[mod1(i + 1, m)][2] - q[i][2]),
+                     hypot(q[i][1] - q[mod1(i - 1, m)][1], q[i][2] - q[mod1(i - 1, m)][2]))
+            ej = max(hypot(q[mod1(j + 1, m)][1] - q[j][1], q[mod1(j + 1, m)][2] - q[j][2]),
+                     hypot(q[j][1] - q[mod1(j - 1, m)][1], q[j][2] - q[mod1(j - 1, m)][2]))
+            (ei > 0.5 && ej > 0.5) && return true
+        end
+        return false
+    end
+
+    # Natural order (as styled_loop produced it) — must be clean.
+    poly_natural = to_polygons(cp)
+    @test !has_pinch(poly_natural)
+
+    # Reverse the curve order so a high-index (seam-adjacent) curve is processed first. This is
+    # the condition a deserialized polygon hits when its curves were stored out of canonical order. The constructor normalizes by sorting,
+    # and the walk sorts locally, so the result must match the natural order and stay pinch-free.
+    perm = reverse(eachindex(cp.curve_start_idx))
+    cp_perm = CurvilinearPolygon(copy(cp.p), cp.curves[perm], cp.curve_start_idx[perm])
+    poly_perm = to_polygons(cp_perm)
+    @test !has_pinch(poly_perm)
+    @test length(points(poly_perm)) == length(points(poly_natural))
+end
