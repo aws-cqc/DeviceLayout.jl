@@ -296,6 +296,56 @@ function pathtopolys(p::Paths.Path{T}; kwargs...) where {T}
     return reduce(vcat, vcat.(pathtopolys.(nodes; kwargs...)))
 end
 
+function _compound_segment_slice(f::Paths.CompoundSegment{T}, start, stop) where {T}
+    len = pathlength(f)
+    start == zero(T) && stop == len && return f
+
+    if start == zero(T)
+        piece, _ = split(f, stop)
+        return piece
+    elseif stop == len
+        _, piece = split(f, start)
+        return piece
+    end
+
+    _, tail = split(f, start)
+    piece, _ = split(tail, stop - start)
+    return piece
+end
+
+function _compound_style_grid_render(
+    f::Paths.CompoundSegment{T},
+    s::Paths.CompoundStyle;
+    kwargs...
+) where {T}
+    if length(s.styles) != length(s.grid) - 1
+        throw(
+            ArgumentError(
+                "Number of grid points in compound style must equal the number of styles minus one."
+            )
+        )
+    end
+
+    len = pathlength(f)
+    last_style = lastindex(s.styles)
+    valid = filter(eachindex(s.styles)) do i
+        start = max(s.grid[i], zero(T))
+        stop = min(i == last_style ? len : s.grid[i + 1], len)
+        return start < stop
+    end
+    isempty(valid) && return Polygon{T}[]
+
+    pieces = map(valid) do i
+        grid_start = s.grid[i]
+        start = max(grid_start, zero(T))
+        stop = min(i == last_style ? len : s.grid[i + 1], len)
+        piece = _compound_segment_slice(f, start, stop)
+        sty = Paths.pin(s.styles[i]; start=start - grid_start, stop=stop - grid_start)
+        return vcat(pathtopolys(Paths.Node(piece, sty); kwargs...))
+    end
+    return reduce(vcat, pieces)
+end
+
 function pathtopolys(
     f::Paths.CompoundSegment{T},
     s::Paths.CompoundStyle;
@@ -311,7 +361,7 @@ function pathtopolys(
         )
     end
     # Mismatched tags use the CompoundStyle grid over the whole path.
-    return to_polygons(f, pathlength(f), s; kwargs...)
+    return _compound_style_grid_render(f, s; kwargs...)
 end
 
 # Shared compound style-pinning loop. A CompoundSegment shares one arclength parameter; with a
