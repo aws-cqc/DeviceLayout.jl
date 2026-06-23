@@ -585,14 +585,18 @@ end
         setstyle!(pa3[1], swapped)
         render!(c, pa3, grid_step=50.0)
         # The first style spans 0..25 from the style grid; zipping would stop at 20.
-        e1x = getx.(points(c.elements[1]))
-        e1y = gety.(points(c.elements[1]))
-        @test extrema(e1x) == (0.0, 25.0)
-        @test extrema(e1y) == (-0.5, 0.5)
-        e2x = getx.(points(c.elements[2]))
-        e2y = gety.(points(c.elements[2]))
-        @test extrema(e2x) == (25.0, 50.0)
-        @test extrema(e2y) == (-1.0, 1.0)
+        # The curvilinear path still emits leaves at the underlying segment boundary.
+        style1 = filter(e -> extrema(gety.(points(e))) == (-0.5, 0.5), c.elements)
+        style2 = filter(e -> extrema(gety.(points(e))) == (-1.0, 1.0), c.elements)
+        @test length(style1) == 2
+        @test length(style2) == 1
+
+        style1_pts = vcat(points.(style1)...)
+        @test extrema(getx.(style1_pts)) == (0.0, 25.0)
+        @test extrema(gety.(style1_pts)) == (-0.5, 0.5)
+        style2_pts = vcat(points.(style2)...)
+        @test extrema(getx.(style2_pts)) == (25.0, 50.0)
+        @test extrema(gety.(style2_pts)) == (-1.0, 1.0)
 
         # Test behavior if we swap out the segment
         c = Cell("main", nm)
@@ -629,6 +633,23 @@ end
         @test upperright(bounds(c.elements[2])) ≈ Point(40μm, 7.5μm)
         @test lowerleft(bounds(c.elements[3])) ≈ Point(40μm, -10μm)
         @test upperright(bounds(c.elements[3])) ≈ Point(120μm, 10μm)
+
+        # Split-then-render should preserve a curved compound node with a translated style grid.
+        pa_curved = Path(0.0μm, 0.0μm)
+        turn!(pa_curved, 90°, 50μm, Paths.Trace(10μm))
+        turn!(pa_curved, -90°, 50μm, Paths.Trace(6μm))
+        simplify!(pa_curved)
+        c_ref = Cell("ref", nm)
+        render!(c_ref, pa_curved, GDSMeta())
+        L = pathlength(pa_curved[1].seg)
+        pa_split = split(pa_curved[1], 0.6L) # 0.6L lands inside the second turn
+        # The second piece is exactly the negative-grid, tag-mismatched case under test.
+        @test segment(pa_split[2]).tag != style(pa_split[2]).tag
+        @test first(style(pa_split[2]).grid) < zero(L)
+        c_split = Cell("split", nm)
+        render!(c_split, pa_split, GDSMeta())
+        @test lowerleft(bounds(c_split)) ≈ lowerleft(bounds(c_ref)) atol = 1nm
+        @test upperright(bounds(c_split)) ≈ upperright(bounds(c_ref)) atol = 1nm
     end
 
     @testset "Auto Taper" begin
