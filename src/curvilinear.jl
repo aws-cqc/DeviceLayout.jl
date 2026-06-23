@@ -247,6 +247,8 @@ function pathtopolys(f::Paths.Segment{T}, s::Paths.Style; kwargs...) where {T}
     @warn "Discretizing path segment ($f, $s) for CurvilinearRegion construction"
     return to_polygons(f, s; kwargs...)
 end
+pathtopolys(f::Paths.Corner{T}, s::Paths.SimpleTraceCorner; kwargs...) where {T} =
+    to_polygons(f, s; kwargs...)
 
 # An OffsetSegment can't build a CurvilinearPolygon directly (its corner_points and
 # Paths.offset use mismatched parameter frames). Resolve it to a concrete segment, re-fit a
@@ -299,12 +301,16 @@ function pathtopolys(
     s::Paths.CompoundStyle;
     kwargs...
 ) where {T}
-    # Matching tags mean this style came from the same simplification as the segment, so
-    # segment/style boundaries align and we can preserve symbolic curves.
+    # Same simplification tag: segment/style boundaries align.
     if f.tag == s.tag
-        return vcat(pathtopolys.(f.segments, s.styles; kwargs...)...)
+        return vcat(
+            (
+                pathtopolys(Paths.Node(se, st); kwargs...) for
+                (se, st) in zip(f.segments, s.styles)
+            )...
+        )
     end
-    # A replaced CompoundStyle owns its own grid; render over the whole compound path.
+    # Mismatched tags use the CompoundStyle grid over the whole path.
     return to_polygons(f, pathlength(f), s; kwargs...)
 end
 
@@ -317,15 +323,12 @@ function _compound_pin_render(f::Paths.CompoundSegment{T}, s::Paths.Style, leaf)
     starts = cumsum([zero(T); pathlength.(f.segments[1:(end - 1)])])
     stops = starts .+ pathlength.(f.segments)
 
-    # vcat normalizes leaf's scalar-vs-vector result, so no isa branch is needed (CLAUDE.md rule #1).
+    # vcat normalizes leaf's scalar-vs-vector result, so no isa branch is needed.
     pieces = map(f.segments, starts, stops) do se, l0, l
         return vcat(leaf(se, Paths.pin(s; start=l0, stop=l)))
     end
 
-    # Don't pin a concrete element type: an offset sub-segment resolves to a BSpline
-    # approximation (via resolve_offset) whose control points carry a different unit
-    # parameter (base meters) than the parent segment's T. reduce(vcat, …) infers the
-    # common element type from the data.
+    # Leaf renderers may return different concrete output types. Let reduce infer the common element type.
     return reduce(vcat, pieces)
 end
 pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.Style; kwargs...) where {T} =
@@ -472,6 +475,15 @@ function pathtopolys(
     )
 end
 
+function pathtopolys(seg::Paths.BSpline{T}, sty::Paths.SimpleTrace; kwargs...) where {T}
+    pts = corner_points(seg, sty, false)
+    return CurvilinearPolygon(
+        pts,
+        [Paths.offset(seg, -Paths.extent(sty)), Paths.offset(seg, Paths.extent(sty))],
+        [1, -3]
+    )
+end
+
 function pathtopolys(seg::BaseContinuousSegment{T}, sty::Paths.Trace; kwargs...) where {T}
     pts = corner_points(seg, sty, false)
     return CurvilinearPolygon(
@@ -504,6 +516,25 @@ function pathtopolys(
         ),
         isapprox(pts[7], pts[8]) ?
         CurvilinearPolygon(pts[5:7], [Paths.offset(seg, Paths.trace(sty) / 2)], [1]) :
+        CurvilinearPolygon(
+            pts[5:8],
+            [Paths.offset(seg, Paths.trace(sty) / 2), Paths.offset(seg, Paths.extent(sty))],
+            [1, -3]
+        )
+    ]
+end
+
+function pathtopolys(seg::Paths.BSpline{T}, sty::Paths.SimpleCPW; kwargs...) where {T}
+    pts = corner_points(seg, sty, false)
+    return [
+        CurvilinearPolygon(
+            pts[1:4],
+            [
+                Paths.offset(seg, -Paths.extent(sty)),
+                Paths.offset(seg, -Paths.trace(sty) / 2)
+            ],
+            [1, -3]
+        ),
         CurvilinearPolygon(
             pts[5:8],
             [Paths.offset(seg, Paths.trace(sty) / 2), Paths.offset(seg, Paths.extent(sty))],
