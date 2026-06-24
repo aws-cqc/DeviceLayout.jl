@@ -1019,6 +1019,44 @@ end
         @test bounds(c2) ≈ bounds(transformation(pathref)(c_path)) atol = 1e-6nm
     end
 
+    @testset "to_polygons(seg, sty) direct render methods" begin
+        # Normal Path rendering routes nodes through pathtopolys instead of these direct
+        # segment/style renderers, so render!(Cell, Path) no longer covers them incidentally.
+        # They remain reachable through explicit to_polygons(seg, sty) dispatch.
+        function test_direct_polygons(polys, expected_count)
+            @test length(polys) == expected_count
+            @test all(poly -> length(points(poly)) >= 4, polys)
+            @test all(poly -> isproper(bounds(poly)), polys)
+            @test all(poly -> !iszero(Polygons.area(poly)), polys)
+        end
+
+        straight = let pa = Path(μm)
+            straight!(pa, 20μm, Paths.Trace(2μm))
+            pa[1].seg
+        end
+
+        # OffsetSegment + SimpleStrands (src/render/strands.jl): 2 polygons per strand.
+        sstr = Paths.Strands(10μm, 2μm, 2μm, 2)
+        test_direct_polygons(
+            to_polygons(Paths.offset(straight, 5μm), sstr),
+            2 * Paths.num(sstr)
+        )
+
+        # OffsetSegment + CPW (src/render/cpw.jl): gap polygon on each side.
+        test_direct_polygons(
+            to_polygons(Paths.offset(straight, 5μm), Paths.CPW(10μm, 6μm)),
+            2
+        )
+
+        # Straight + SimpleStrands (src/render/strands.jl).
+        test_direct_polygons(to_polygons(straight, sstr), 2 * Paths.num(sstr))
+
+        # GeneralStrands (function-valued widths) on a Straight routes through the generic
+        # to_polygons(f, len, ::Strands) adapted_grid fallback (src/render/strands.jl).
+        gstr = Paths.Strands(x -> 10μm, 2μm, 2μm, 2)
+        test_direct_polygons(to_polygons(straight, gstr), 2 * Paths.num(gstr))
+    end
+
     @testset "ClippedPolygons" begin
         r1 = centered(Rectangle(12μm, 12μm))
         r2 = centered(Rectangle(4μm, 4μm))
