@@ -19,7 +19,16 @@ import DeviceLayout:
     Transformation,
     Translation
 import DeviceLayout:
-    to_polygons, points, rotation, origin, mag, xrefl, transform, perimeter, isapprox_angle
+    _compound_pin_render,
+    to_polygons,
+    points,
+    rotation,
+    origin,
+    mag,
+    xrefl,
+    transform,
+    perimeter,
+    isapprox_angle
 using DeviceLayout.Paths
 import DeviceLayout.Polygons: cornerindices, RelativeRounded, radius
 import Unitful: uconvert, °, Length
@@ -364,23 +373,6 @@ function pathtopolys(
     return _compound_style_grid_render(f, s; kwargs...)
 end
 
-# Shared compound style-pinning loop. A CompoundSegment shares one arclength parameter; with a
-# single (non-compound) Style, each sub-segment renders the style slice over its window [l0, l].
-# GDS (`pathtopolys`) and SolidModel (`to_primitives`) differ only in the per-sub-segment `leaf`
-# renderer, which returns one element or a vector. Mirrors to_polygons in compound.jl:43-52.
-function _compound_pin_render(f::Paths.CompoundSegment{T}, s::Paths.Style, leaf) where {T}
-    # Cumulative arclength: starts[i] = sum of lengths of segments before i.
-    starts = cumsum([zero(T); pathlength.(f.segments[1:(end - 1)])])
-    stops = starts .+ pathlength.(f.segments)
-
-    # vcat normalizes leaf's scalar-vs-vector result, so no isa branch is needed.
-    pieces = map(f.segments, starts, stops) do se, l0, l
-        return vcat(leaf(se, Paths.pin(s; start=l0, stop=l)))
-    end
-
-    # Leaf renderers may return different concrete output types. Let reduce infer the common element type.
-    return reduce(vcat, pieces)
-end
 pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.Style; kwargs...) where {T} =
     _compound_pin_render(f, s, (se, sty) -> pathtopolys(se, sty; kwargs...))
 # No per-style disambiguation methods needed: the concrete-style methods dispatch on
