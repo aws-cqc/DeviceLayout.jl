@@ -61,6 +61,7 @@ import DeviceLayout:
     dimension,
     elements,
     element_metadata,
+    _compound_pin_render,
     to_polygons,
     layer,
     level,
@@ -82,7 +83,6 @@ import DeviceLayout.Polygons:
     r2,
     radius
 import DeviceLayout.Curvilinear:
-    _compound_pin_render,
     edge_type_at_vertex,
     line_arc_cornerindices,
     islinear,

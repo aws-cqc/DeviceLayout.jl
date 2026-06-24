@@ -21,6 +21,18 @@ function to_polygons(f, len, s::Paths.CompoundStyle; kwargs...)
     return p
 end
 
+# Shared compound style-pinning loop. Callers provide the per-subsegment renderer.
+function _compound_pin_render(f::Paths.CompoundSegment{T}, s::Paths.Style, leaf) where {T}
+    starts = cumsum([zero(T); pathlength.(f.segments[1:(end - 1)])])
+    stops = starts .+ pathlength.(f.segments)
+
+    pieces = map(f.segments, starts, stops) do se, l0, l
+        return vcat(leaf(se, Paths.pin(s; start=l0, stop=l)))
+    end
+
+    return reduce(vcat, pieces)
+end
+
 function to_polygons(
     seg::Paths.CompoundSegment{T},
     sty::Paths.CompoundStyle;
@@ -40,13 +52,5 @@ function to_polygons(
     end
 end
 
-function to_polygons(seg::Paths.CompoundSegment{T}, sty::Paths.Style; kwargs...) where {T}
-    p = Polygon{T}[]
-    l0 = zero(T)
-    for se in seg.segments
-        l = l0 + pathlength(se)
-        p = vcat(p, to_polygons(se, Paths.pin(sty; start=l0, stop=l); kwargs...))
-        l0 = l
-    end
-    return p
-end
+to_polygons(seg::Paths.CompoundSegment{T}, sty::Paths.Style; kwargs...) where {T} =
+    _compound_pin_render(seg, sty, (se, st) -> to_polygons(se, st; kwargs...))

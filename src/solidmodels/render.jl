@@ -307,7 +307,7 @@ function to_primitives(
     return vcat(to_primitives.(sm, f.segments, s.styles; kwargs...)...)
 end
 
-# Compound segment + single style: shared loop (`_compound_pin_render`, curvilinear.jl) with the
+# Compound segment + single style: shared loop with the
 # SolidModel leaf `to_primitives(sm, …)`, which adds the zero-length guard the GDS leaf lacks.
 function to_primitives(
     sm::SolidModel,
