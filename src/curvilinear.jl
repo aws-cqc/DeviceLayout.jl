@@ -259,20 +259,18 @@ end
 pathtopolys(f::Paths.Corner{T}, s::Paths.SimpleTraceCorner; kwargs...) where {T} =
     to_polygons(f, s; kwargs...)
 
-# An OffsetSegment can't build a CurvilinearPolygon directly (its corner_points and
-# Paths.offset use mismatched parameter frames). Resolve it to a concrete segment, re-fit a
-# length-carrying style to the resolved pathlength (_withlength! is a no-op otherwise), then
-# re-dispatch through Node so islinear runs again on the resolved (concrete) type.
+# Offset segments must be resolved before building curvilinear polygons: corner_points and
+# Paths.offset use different parameter frames. After resolving, update any length-carrying style
+# and re-dispatch through Node so the linearity check sees the concrete segment type.
 # TODO: the BSpline fallback in resolve_offset is an atol approximation, not exact. See #237.
 function pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.Style; kwargs...) where {T}
-    # resolve_offset only understands atol/rtol, not the render kwargs (map_meta, …).
+    # Keep render-only kwargs away from bspline_approximation inside resolve_offset.
     kw = values(kwargs)
     resolved =
         Paths.resolve_offset(f; atol=get(kw, :atol, nothing), rtol=get(kw, :rtol, nothing))
     s = Paths._withlength!(s, pathlength(resolved))
     return pathtopolys(Paths.Node(resolved, s); kwargs...)
 end
-# Disambiguate OffsetSegment with NoRender and DecoratedStyle
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderContinuous; kwargs...) where {T} =
     Polygon{T}[]
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderDiscrete; kwargs...) where {T} =
@@ -375,8 +373,7 @@ end
 
 pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.Style; kwargs...) where {T} =
     _compound_pin_render(f, s, (se, sty) -> pathtopolys(se, sty; kwargs...))
-# No per-style disambiguation methods needed: the concrete-style methods dispatch on
-# BaseContinuousSegment, which excludes wrappers, so (CompoundSegment, style) routes here.
+# Wrapper segments route here; concrete-style methods only accept BaseContinuousSegment.
 function pathtopolys(
     f::Paths.CompoundSegment{T},
     sty::Paths.AbstractDecoratedStyle;
@@ -656,17 +653,12 @@ function _strand_corners(seg::Paths.Segment{T}, inner_offset, outer_offset) wher
     ]
 end
 
-# Terminations generate one or two polygons (Paths._poly), each plain (no rounding) or a
-# Rounded-styled Polygon. Route the rounded ones through the shared round_to_curvilinearpolygon
-# producer (same as the SolidModel side, render.jl) so the corner fillets stay symbolic arcs in
-# the CurvilinearPolygon and the GDS pipeline discretizes them like every other path element,
-# rather than the legacy _round_poly discretizer that to_polygons(::Polygon, ::Rounded) uses.
+# Rounded terminations use the shared symbolic rounding producer so GDS and SolidModel keep the
+# same fillet geometry until the final renderer decides whether to discretize.
 const TerminationStyle =
     Union{Paths.TraceTermination, Paths.CPWOpenTermination, Paths.CPWShortTermination}
 
-# A non-rounded termination polygon is already exact; keep it as-is.
 _termination_curvilinear(e::Polygon) = e
-# A rounded termination polygon: build the symbolic CurvilinearPolygon from its corner fillets.
 function _termination_curvilinear(
     e::StyledEntity{T, Polygon{T}, <:Polygons.Rounded}
 ) where {T}
@@ -714,12 +706,9 @@ function pathtopolys(
     return pathtopolys(seg, Paths.undecorated(sty); kwargs...)
 end
 
-# A straight segment with a linear style produces exact polygons without curves. Handles
-# pathtopolys called at the segment level (e.g. from CompoundSegment recursion), bypassing
-# the Node-level islinear gate. Dispatch on concrete Paths.Straight (not the LinearSegment
-# Union): Straight ⊊ BaseContinuousSegment, so these win over the per-style methods above
-# instead of tying. The other LinearSegment member, ConstantOffset{Straight}, gets here only
-# after the OffsetSegment method resolves it to an exact Straight.
+# Segment-level calls bypass the Node linearity gate, so straight linear cases need explicit
+# polygon-producing methods. Dispatch on Paths.Straight keeps these methods below the wrapper
+# handlers and above the generic curvilinear segment methods.
 # TODO: Could return CurvilinearPolygon(corner_points(...)) with empty curve list instead,
 # keeping everything in the CurvilinearPolygon representation. Currently falls back to
 # to_polygons because discretize_curve doesn't handle zero-curvature segments efficiently.
@@ -871,14 +860,10 @@ package — paths and rounding alike — goes through one tolerance-controlled c
 This is the GDS-side consumer; the SolidModel side keeps the `CurvilinearPolygon` symbolic
 as native arcs. Both call the same producer (see `round_to_curvilinearpolygon`).
 
-TODO: Routing GDS rounding through the shared marching discretizer (instead of the old
-closed-form `circular_arc`) over-refines SMALL fillets — a 0.3μm-radius fillet now emits
-~4× the vertices it needs (e.g. the rounded-rectangle test geometry went 600 → 2329
-points), while large/gentle arcs are unaffected. The geometry is correct (vertices lie on
-the true arc within `atol`); only the point density is excessive. Root cause is the
-t_scale-dependent curvature guard in `discretization_grid` (see the TODO at
-`render/discretization.jl`); fixing it there touches the whole path-rendering pipeline, so
-it is intentionally deferred and NOT part of the rounding unification.
+Known limitation: routing GDS rounding through the shared marching discretizer can over-refine
+small fillets. The geometry stays within tolerance; only the point density is excessive. The
+root cause is the t_scale-dependent curvature guard in `discretization_grid`, so the fix belongs
+there rather than in the rounding producer.
 """
 function to_polygons(
     ent::CurvilinearPolygon{S},
@@ -889,11 +874,8 @@ function to_polygons(
 ) where {S, T}
     iszero(Polygons.radius(sty)) && return to_polygons(ent; atol=atol, rtol=rtol, kwargs...)
 
-    # Produce the rounded CurvilinearPolygon (symbolic fillets + trimmed arcs). Corner
-    # SELECTION is preserved by passing the same index sets the Rounded style resolves to:
-    # straight-straight corners via cornerindices, line-arc corners via line_arc_cornerindices.
-    # `radius(sty)` may be a plain Real (relative rounding) or dimensional; the producer
-    # detects which and converts per-corner, matching the style's semantics.
+    # Reuse Rounded's corner selection and radius semantics, but keep fillets symbolic until
+    # the CurvilinearPolygon discretizer runs.
     rounded = round_to_curvilinearpolygon(
         ent,
         Polygons.radius(sty);
@@ -905,19 +887,13 @@ function to_polygons(
     return to_polygons(rounded; atol=atol, rtol=rtol, kwargs...)
 end
 
-# ---------------------------------------------------------------------------
-# Symbolic rounding producer
-#
-# `round_to_curvilinearpolygon` is the single implementation that rounds a polygon's
-# corners and returns a `CurvilinearPolygon` whose fillets are kept as symbolic
-# `Paths.Turn` arcs (not yet discretized). Both render paths consume it:
-#   - SolidModel/OpenCascade keeps the CurvilinearPolygon as native arcs.
-#   - GDS (`to_polygons(::CurvilinearPolygon, ::Rounded)`) discretizes it via the shared
-#     `to_polygons(::CurvilinearPolygon; atol)` discretizer.
-# It lives in Curvilinear (rather than solidmodels/) so both paths — the GDS one defined
-# above and the SolidModel one defined later in the include order — can call it.
-# ---------------------------------------------------------------------------
+"""
+    round_to_curvilinearpolygon(pol, radius; kwargs...)
 
+Round selected polygon corners and return a `CurvilinearPolygon` whose fillets remain symbolic
+`Paths.Turn` arcs. GDS later discretizes those arcs through `to_polygons(::CurvilinearPolygon)`;
+SolidModel/OpenCascade can keep them native.
+"""
 function round_to_curvilinearpolygon(
     pol::GeometryEntity{T},
     radius::S;
@@ -942,7 +918,7 @@ function round_to_curvilinearpolygon(
         if !(i in corner_indices)
             push!(new_points, poly[i])
         else
-            p0 = poly[mod1(i - 1, len)] # handles the cyclic boundary condition
+            p0 = poly[mod1(i - 1, len)]
             p1 = poly[i]
             p2 = poly[mod1(i + 1, len)]
             radius_dim = relative ? radius * min(norm(p0 - p1), norm(p1 - p2)) : radius
@@ -1047,7 +1023,7 @@ function round_to_curvilinearpolygon(
         elseif !(i in corner_indices)
             push!(new_points, poly[i])
         else
-            p0 = poly[mod1(i - 1, len)] # handles the cyclic boundary condition
+            p0 = poly[mod1(i - 1, len)]
             p1 = poly[i]
             p2 = poly[mod1(i + 1, len)]
             radius_dim = relative ? radius * min(norm(p0 - p1), norm(p1 - p2)) : radius
@@ -1139,16 +1115,16 @@ function rounded_corner_segment(
     α1 = atan(v1.y, v1.x) # between -π and π
     α2 = atan(v2.y, v2.x)
 
-    if min_side_len > norm(p1 - p0) || min_side_len > norm(p2 - p1) # checks that the side lengths against min_side_len
+    if min_side_len > norm(p1 - p0) || min_side_len > norm(p2 - p1)
         return p1
-    elseif isapprox(rem2pi(α1 - α2, RoundNearest), 0, atol=min_angle) # checks if the points are collinear, within tolerance
+    elseif isapprox(rem2pi(α1 - α2, RoundNearest), 0, atol=min_angle)
         return p1
     end
 
-    dir = DeviceLayout.orientation(p0, p1, p2) # checks the direction of the corner
-    dα = α2 - α1 # always between +/- 2π
-    if sign(dα) != dir # Make sure turn is in the correct direction
-        dα = dα + dir * 2π # Still between +/- 2π
+    dir = DeviceLayout.orientation(p0, p1, p2)
+    dα = α2 - α1
+    if sign(dα) != dir
+        dα = dα + dir * 2π
     end
 
     # p0_seg is the start of the arc, determined by the intersection

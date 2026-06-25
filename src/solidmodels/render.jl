@@ -17,14 +17,8 @@ If there is no special handling for `ent` in the kernel, then the result will be
 """
 to_primitives(::SolidModel, ent::GeometryEntity; kwargs...) = to_polygons(ent; kwargs...)
 
-# `islinear` (with its `LinearSegment`/`LinearStyle` type unions) is defined once in the
-# Curvilinear module (src/curvilinear.jl) and imported here via solidmodels.jl. It gates
-# "can this node be drawn with straight lines only?" identically for the GDS and SolidModel
-# render paths, so there is a single source of truth.
-
-# Both kernels build node primitives the same way: islinear gates the exact CurvilinearPolygon
-# representation (Val(false)) vs plain polygons (Val(true)). GmshNative discretizes any curves at
-# the kernel sink (it can't ingest native arcs).
+# Use the same linearity gate as the GDS path renderer so both paths choose plain polygons vs
+# symbolic curvilinear geometry from one source of truth.
 function to_primitives(sm::SolidModel, node::Paths.Node; kwargs...)
     return to_primitives(sm, node, islinear(node.seg, node.sty); kwargs...)
 end

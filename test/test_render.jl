@@ -1020,9 +1020,8 @@ end
     end
 
     @testset "to_polygons(seg, sty) direct render methods" begin
-        # Normal Path rendering routes nodes through pathtopolys instead of these direct
-        # segment/style renderers, so render!(Cell, Path) no longer covers them incidentally.
-        # They remain reachable through explicit to_polygons(seg, sty) dispatch.
+        # Normal Path rendering goes through pathtopolys, so explicit to_polygons(seg, sty)
+        # calls are the only coverage for these direct dispatch paths.
         as_polygons(p::Polygon) = (p,)
         as_polygons(ps) = ps
         function test_direct_polygons(output, expected_count)
@@ -1038,30 +1037,23 @@ end
             pa[1].seg
         end
 
-        # OffsetSegment + SimpleStrands (src/render/strands.jl): 2 polygons per strand.
         sstr = Paths.Strands(10μm, 2μm, 2μm, 2)
         test_direct_polygons(
             to_polygons(Paths.offset(straight, 5μm), sstr),
             2 * Paths.num(sstr)
         )
 
-        # OffsetSegment + CPW (src/render/cpw.jl): gap polygon on each side.
         test_direct_polygons(
             to_polygons(Paths.offset(straight, 5μm), Paths.CPW(10μm, 6μm)),
             2
         )
 
-        # Straight + SimpleStrands (src/render/strands.jl).
         test_direct_polygons(to_polygons(straight, sstr), 2 * Paths.num(sstr))
 
-        # GeneralStrands (function-valued widths) on a Straight routes through the generic
-        # to_polygons(f, len, ::Strands) adapted_grid fallback (src/render/strands.jl).
+        # Function-valued strands still route through the generic adapted_grid fallback.
         gstr = Paths.Strands(x -> 10μm, 2μm, 2μm, 2)
         test_direct_polygons(to_polygons(straight, gstr), 2 * Paths.num(gstr))
 
-        # CompoundSegment dispatch + generic (f, len, s) fallbacks
-        # These are not reached by normal Node rendering, which routes through pathtopolys.
-        # They are reached by explicit to_polygons on CompoundSegment or by the 3-arg fallback.
         comp, compsty = let pa = Path(μm)
             straight!(pa, 10μm, Paths.CPW(10μm, 6μm))
             straight!(pa, 10μm, Paths.CPW(10μm, 6μm))
@@ -1069,11 +1061,10 @@ end
             pa[1].seg, pa[1].sty
         end
 
-        # CompoundSegment + CompoundStyle with matching tags: zip subsegments (src/render/compound.jl).
         @test comp.tag == compsty.tag
         test_direct_polygons(to_polygons(comp, compsty), 4)   # 2 CPW gaps x 2 subsegments
 
-        # CompoundSegment + CompoundStyle with mismatched tags: generic fallback (src/render/compound.jl).
+        # Mismatched tags should use the generic CompoundStyle grid fallback.
         mismatched_compsty = let pa = Path(μm)
             straight!(pa, 10μm, Paths.CPW(10μm, 6μm))
             straight!(pa, 10μm, Paths.CPW(10μm, 6μm))
@@ -1083,12 +1074,10 @@ end
         @test comp.tag != mismatched_compsty.tag
         test_direct_polygons(to_polygons(comp, mismatched_compsty), 4)
 
-        # CompoundSegment + PeriodicStyle (src/render/periodic.jl): disambiguation method.
         psty =
             Paths.PeriodicStyle([Paths.CPW(10μm, 6μm), Paths.CPW(8μm, 4μm)], [10μm, 10μm])
         test_direct_polygons(to_polygons(comp, psty), 4)
 
-        # CompoundSegment + terminations (src/render/termination.jl): disambiguation methods.
         # Build compounds whose lengths match each termination's `_termlength`. The short and
         # trace cases use nonzero rounding so the output has area to validate.
         compof(tl) =
@@ -1110,15 +1099,13 @@ end
             to_polygons(compof(Paths._termlength(traceterm)), traceterm),
             1
         )
-        # Segment + TraceTermination (the non-compound method, src/render/termination.jl)
         trseg = let pa = Path(μm)
             straight!(pa, Paths._termlength(traceterm), Paths.Trace(10μm))
             pa[1].seg
         end
         test_direct_polygons(to_polygons(trseg, traceterm), 1)
 
-        # Generic to_polygons(f, len, ::Taper*) adapted_grid fallbacks (src/render/tapers.jl),
-        # reached via the 3-arg form (e.g. from the CompoundStyle grid renderer).
+        # The 3-arg form covers generic Taper* adapted_grid fallbacks.
         tt = Paths._withlength!(Paths.TaperTrace(10μm, 2μm), 20μm)
         tc = Paths._withlength!(Paths.TaperCPW(10μm, 6μm, 2μm, 1μm), 20μm)
         test_direct_polygons(to_polygons(straight, 20μm, tt), 1)  # TaperTrace -> one Polygon
