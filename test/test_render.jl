@@ -1023,7 +1023,10 @@ end
         # Normal Path rendering routes nodes through pathtopolys instead of these direct
         # segment/style renderers, so render!(Cell, Path) no longer covers them incidentally.
         # They remain reachable through explicit to_polygons(seg, sty) dispatch.
-        function test_direct_polygons(polys, expected_count)
+        as_polygons(p::Polygon) = (p,)
+        as_polygons(ps) = ps
+        function test_direct_polygons(output, expected_count)
+            polys = as_polygons(output)
             @test length(polys) == expected_count
             @test all(poly -> length(points(poly)) >= 4, polys)
             @test all(poly -> isproper(bounds(poly)), polys)
@@ -1055,6 +1058,63 @@ end
         # to_polygons(f, len, ::Strands) adapted_grid fallback (src/render/strands.jl).
         gstr = Paths.Strands(x -> 10μm, 2μm, 2μm, 2)
         test_direct_polygons(to_polygons(straight, gstr), 2 * Paths.num(gstr))
+
+        # CompoundSegment dispatch + generic (f, len, s) fallbacks
+        # These are not reached by normal Node rendering, which routes through pathtopolys.
+        # They are reached by explicit to_polygons on CompoundSegment or by the 3-arg fallback.
+        comp, compsty = let pa = Path(μm)
+            straight!(pa, 10μm, Paths.CPW(10μm, 6μm))
+            straight!(pa, 10μm, Paths.CPW(10μm, 6μm))
+            simplify!(pa)            # -> a CompoundSegment + CompoundStyle (matching tags)
+            pa[1].seg, pa[1].sty
+        end
+
+        # CompoundSegment + CompoundStyle with matching tags: zip subsegments (src/render/compound.jl).
+        @test comp.tag == compsty.tag
+        test_direct_polygons(to_polygons(comp, compsty), 4)   # 2 CPW gaps x 2 subsegments
+
+        # CompoundSegment + CompoundStyle with mismatched tags: generic fallback (src/render/compound.jl).
+        mismatched_compsty = let pa = Path(μm)
+            straight!(pa, 10μm, Paths.CPW(10μm, 6μm))
+            straight!(pa, 10μm, Paths.CPW(10μm, 6μm))
+            simplify!(pa)
+            pa[1].sty
+        end
+        @test comp.tag != mismatched_compsty.tag
+        test_direct_polygons(to_polygons(comp, mismatched_compsty), 4)
+
+        # CompoundSegment + PeriodicStyle (src/render/periodic.jl): disambiguation method.
+        psty = Paths.PeriodicStyle([Paths.CPW(10μm, 6μm), Paths.CPW(8μm, 4μm)], [10μm, 10μm])
+        test_direct_polygons(to_polygons(comp, psty), 4)
+
+        # CompoundSegment + terminations (src/render/termination.jl): disambiguation methods.
+        # Build compounds whose lengths match each termination's `_termlength`. The short and
+        # trace cases use nonzero rounding so the output has area to validate.
+        compof(tl) = let pa = Path(μm)
+            straight!(pa, tl / 2, Paths.CPW(10μm, 6μm))
+            straight!(pa, tl / 2, Paths.CPW(10μm, 6μm))
+            simplify!(pa)
+            pa[1].seg
+        end
+        openterm = Paths.CPWOpenTermination(10μm, 6μm, 6μm, 0μm, false)
+        shortterm = Paths.CPWShortTermination(10μm, 6μm, 0μm, 2μm, false)
+        traceterm = Paths.TraceTermination(10μm, 2μm, false)
+        test_direct_polygons(to_polygons(compof(Paths._termlength(openterm)), openterm), 1)
+        test_direct_polygons(to_polygons(compof(Paths._termlength(shortterm)), shortterm), 2)
+        test_direct_polygons(to_polygons(compof(Paths._termlength(traceterm)), traceterm), 1)
+        # Segment + TraceTermination (the non-compound method, src/render/termination.jl)
+        trseg = let pa = Path(μm)
+            straight!(pa, Paths._termlength(traceterm), Paths.Trace(10μm))
+            pa[1].seg
+        end
+        test_direct_polygons(to_polygons(trseg, traceterm), 1)
+
+        # Generic to_polygons(f, len, ::Taper*) adapted_grid fallbacks (src/render/tapers.jl),
+        # reached via the 3-arg form (e.g. from the CompoundStyle grid renderer).
+        tt = Paths._withlength!(Paths.TaperTrace(10μm, 2μm), 20μm)
+        tc = Paths._withlength!(Paths.TaperCPW(10μm, 6μm, 2μm, 1μm), 20μm)
+        test_direct_polygons(to_polygons(straight, 20μm, tt), 1)  # TaperTrace -> one Polygon
+        test_direct_polygons(to_polygons(straight, 20μm, tc), 2)  # TaperCPW -> two gap polygons
     end
 
     @testset "ClippedPolygons" begin
