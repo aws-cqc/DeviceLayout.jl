@@ -262,7 +262,13 @@ function discretization_grid(s::Paths.BSpline, tolerance; rtol=nothing)
     )
 end
 
-# Discretize using marching algorithm based on Hessian or curvature
+# Discretize using marching algorithm based on Hessian or curvature.
+#
+# Known limitation: the curvature guard below is t_scale-dependent, so it over-refines
+# short, tight arcs (a 30°/2μm fillet gets ~101 points vs ~10 from circular_arc).
+# A correct fix must be t_scale-independent while still sampling the middle of
+# variable-curvature curves whose endpoints have cc≈0. That touches the broader
+# path-rendering pipeline, so it is deferred from the rounding unification.
 function discretization_grid(
     ddf,
     tolerance,
@@ -283,21 +289,8 @@ function discretization_grid(
         # Effective tolerance: use rtol * radius_of_curvature when it exceeds atol.
         # cc has units (curvature, e.g., rad/μm) so compare with zero(cc), not `0`.
         eff_tol = (!isnothing(rtol) && !iszero(cc)) ? max(tolerance, rtol / cc) : tolerance
-        # Set dt based on distance from chord assuming constant curvature
-        # TODO: This "is curvature near zero?" guard over-refines SHORT, TIGHT arcs. The
-        # threshold scales as 1/t_scale^2, so for a short arc (small pathlength → small
-        # t_scale) it can exceed the actual curvature `cc` even when the arc is sharply
-        # curved — the adaptive `dt` update is then skipped and the initial fixed
-        # dt = 0.01*bnds[2] (≈100 steps) is used instead, producing ~10× more points than
-        # necessary (e.g. a 30°/2μm fillet gets ~101 points vs ~10 from circular_arc).
-        # Surfaced by the rounding unification (small fillets now discretize here instead
-        # of via circular_arc). A correct fix must be t_scale-INDEPENDENT, but cannot be a
-        # blanket `!iszero(cc)`: that breaks VARIABLE-curvature curves (BSplines/offsets)
-        # whose endpoints sample cc≈0, causing the marcher to leap over a curved middle in
-        # a single step. The real fix likely splits constant-curvature arcs (one sample is
-        # exact → unbounded sagitta step OK) from variable-curvature curves (need a
-        # max-step ceiling so the middle is sampled). Touches the whole path-rendering
-        # pipeline, so it is intentionally NOT bundled with the rounding unification.
+        # Set dt based on distance from chord assuming constant curvature.
+        # See the known limitation above for the curvature guard below.
         if cc >= 100 * 8 * eff_tol / (bnds[2]^2 * t_scale^2) # Update dt if curvature is not near zero
             dt = uconvert(NoUnits, sqrt(8 * eff_tol / cc) / t_scale)
         end
