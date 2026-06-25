@@ -185,6 +185,16 @@ end
     c = curv[8].curves[1] # ConstantOffset Turn
     @test Paths.curvatureradius(c, 10μm) == sign(c.seg.α) * c.seg.r - c.offset
     @test curvatureradius_fd(c, 10μm) ≈ Paths.curvatureradius(c, 10μm) atol = 1nm
+    # Direct ConstantOffset discretization is bypassed by rendering; check its t_scale correction.
+    co_pts = DeviceLayout.discretize_curve(c, 100.0nm)
+    co_approx = vcat(
+        DeviceLayout.discretize_curve.(
+            Paths.bspline_approximation(c, atol=100.0nm).segments,
+            100.0nm
+        )...
+    )
+    co_poly = Polygon([co_pts; reverse(co_approx)])
+    @test abs(Polygons.area(co_poly) / perimeter(co_poly)) < 100nm
 
     # Failure due to self-intersection
     pa2 = Path(Point(0.0, 0.0)nm, α0=90°)
