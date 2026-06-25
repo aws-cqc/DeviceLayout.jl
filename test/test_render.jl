@@ -1084,24 +1084,32 @@ end
         test_direct_polygons(to_polygons(comp, mismatched_compsty), 4)
 
         # CompoundSegment + PeriodicStyle (src/render/periodic.jl): disambiguation method.
-        psty = Paths.PeriodicStyle([Paths.CPW(10μm, 6μm), Paths.CPW(8μm, 4μm)], [10μm, 10μm])
+        psty =
+            Paths.PeriodicStyle([Paths.CPW(10μm, 6μm), Paths.CPW(8μm, 4μm)], [10μm, 10μm])
         test_direct_polygons(to_polygons(comp, psty), 4)
 
         # CompoundSegment + terminations (src/render/termination.jl): disambiguation methods.
         # Build compounds whose lengths match each termination's `_termlength`. The short and
         # trace cases use nonzero rounding so the output has area to validate.
-        compof(tl) = let pa = Path(μm)
-            straight!(pa, tl / 2, Paths.CPW(10μm, 6μm))
-            straight!(pa, tl / 2, Paths.CPW(10μm, 6μm))
-            simplify!(pa)
-            pa[1].seg
-        end
+        compof(tl) =
+            let pa = Path(μm)
+                straight!(pa, tl / 2, Paths.CPW(10μm, 6μm))
+                straight!(pa, tl / 2, Paths.CPW(10μm, 6μm))
+                simplify!(pa)
+                pa[1].seg
+            end
         openterm = Paths.CPWOpenTermination(10μm, 6μm, 6μm, 0μm, false)
         shortterm = Paths.CPWShortTermination(10μm, 6μm, 0μm, 2μm, false)
         traceterm = Paths.TraceTermination(10μm, 2μm, false)
         test_direct_polygons(to_polygons(compof(Paths._termlength(openterm)), openterm), 1)
-        test_direct_polygons(to_polygons(compof(Paths._termlength(shortterm)), shortterm), 2)
-        test_direct_polygons(to_polygons(compof(Paths._termlength(traceterm)), traceterm), 1)
+        test_direct_polygons(
+            to_polygons(compof(Paths._termlength(shortterm)), shortterm),
+            2
+        )
+        test_direct_polygons(
+            to_polygons(compof(Paths._termlength(traceterm)), traceterm),
+            1
+        )
         # Segment + TraceTermination (the non-compound method, src/render/termination.jl)
         trseg = let pa = Path(μm)
             straight!(pa, Paths._termlength(traceterm), Paths.Trace(10μm))
