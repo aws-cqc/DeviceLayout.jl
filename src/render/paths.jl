@@ -15,10 +15,10 @@ function render!(c::Cell{S}, p::Path, meta::GDSMeta; kwargs...) where {S}
     return _render!(c, p; kwargs...)
 end
 
-# Generic fallback method
-# If there's no specific method for this segment type, use the fallback method for the style.
+# Generic fallback method. Route direct segment/style rendering through the same Node path
+# used by normal Path rendering.
 to_polygons(seg::Paths.Segment{T}, s::Paths.Style; kwargs...) where {T} =
-    to_polygons(seg, pathlength(seg), s; kwargs...)
+    to_polygons(Paths.Node(seg, s); kwargs...)
 
 function _to_polygons_via_bspline(
     seg::Paths.Segment{T},
