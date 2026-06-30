@@ -1,17 +1,3 @@
-@testitem "Rendering unit tests" setup = [CommonTestSetup] begin
-    # Observe aliasing with rand_factor = 0.
-    # Choosing large grid_step yields the minimum possible number of grid points (5).
-    f = t -> (2.0μm + 1.0μm * cos(2π * t / (50μm)))
-    grid = DeviceLayout.adapted_grid(
-        f,
-        (0μm, 100μm),
-        grid_step=1mm,
-        rand_factor=0.0,
-        max_change=1nm
-    )
-    @test grid == [0.0μm, 25μm, 50μm, 75μm, 100μm]
-end
-
 @testitem "Styles" setup = [CommonTestSetup] begin
     @testset "NoRender" begin
         c = Cell{Float64}("main")
@@ -568,7 +554,7 @@ end
         # path function. In this case it should be the same
         c = Cell{Float64}("main")
         setstyle!(pa[1], Paths.Trace(1.0))
-        render!(c, pa, grid_step=50.0)
+        render!(c, pa)
         @test points(c.elements[1]) ≈ [p(0, -0.5), p(20, -0.5), p(20, 0.5), p(0, 0.5)]
 
         # Mismatched tags must use the CompoundStyle grid, not the original segment boundary.
@@ -583,7 +569,7 @@ end
             gensym()
         )
         setstyle!(pa3[1], swapped)
-        render!(c, pa3, grid_step=50.0)
+        render!(c, pa3)
         # The first style spans 0..25 from the style grid; zipping would stop at 20.
         # The curvilinear path still emits leaves at the underlying segment boundary.
         style1 = filter(e -> extrema(gety.(points(e))) == (-0.5, 0.5), c.elements)

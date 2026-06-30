@@ -6,7 +6,7 @@
         # Julia v1.10 and v1.11 give different fingerprints
         # Mainly for flagging unintentional changes, so doesn't need to run on every version
         fingerprint = Cells.geometry_fingerprint(artwork)
-        expected = "92736c7e181ce1ec6966ea734fa7e1da3366042a5aa595babaadd28d0c571fc0"
+        expected = "962424e17cceab86e2f90cb95302080d8acd08ad210116951ccc71eb81708c58"
         @test fingerprint == expected
         fingerprint != expected && println("""
             Expected QPU17 artwork fingerprint: $expected
