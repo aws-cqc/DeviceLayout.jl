@@ -733,6 +733,12 @@ const LinearStyle =
 islinear(::LinearSegment{T}, ::LinearStyle) where {T} = Val(true)
 islinear(::Paths.Segment{T}, ::Paths.Style) where {T} = Val(false)
 
+to_polygons(
+    seg::Paths.ConstantOffset{T, Paths.Straight{T}},
+    sty::LinearStyle;
+    kwargs...
+) where {T} = to_polygons(Paths.resolve_offset(seg), sty; kwargs...)
+
 # DecoratedStyles: strip the decoration and delegate to the underlying style.
 # Attachments are handled by render!(Cell, Path), not here.
 function pathtopolys(
