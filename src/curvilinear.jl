@@ -254,7 +254,7 @@ rather than as part of the SchematicGraph.
 """
 function pathtopolys(f::Paths.Segment{T}, s::Paths.Style; kwargs...) where {T}
     @warn "Discretizing path segment ($f, $s) for CurvilinearRegion construction"
-    return to_polygons(f, s; kwargs...)
+    return to_polygons(f, pathlength(f), s; kwargs...)
 end
 pathtopolys(f::Paths.Corner{T}, s::Paths.SimpleTraceCorner; kwargs...) where {T} =
     to_polygons(f, s; kwargs...)
@@ -263,7 +263,11 @@ pathtopolys(f::Paths.Corner{T}, s::Paths.SimpleTraceCorner; kwargs...) where {T}
 # Paths.offset use different parameter frames. After resolving, update any length-carrying style
 # and re-dispatch through Node so the linearity check sees the concrete segment type.
 # TODO: the BSpline fallback in resolve_offset is an atol approximation, not exact. See #237.
-function pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.Style; kwargs...) where {T}
+function _pathtopolys_resolved_offset(
+    f::Paths.OffsetSegment{T},
+    s::Paths.Style;
+    kwargs...
+) where {T}
     # Keep render-only kwargs away from bspline_approximation inside resolve_offset.
     kw = values(kwargs)
     resolved =
@@ -271,6 +275,10 @@ function pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.Style; kwargs...) where
     s = Paths._withlength!(s, pathlength(resolved))
     return pathtopolys(Paths.Node(resolved, s); kwargs...)
 end
+pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.Style; kwargs...) where {T} =
+    _pathtopolys_resolved_offset(f, s; kwargs...)
+pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.PeriodicStyle; kwargs...) where {T} =
+    _pathtopolys_resolved_offset(f, s; kwargs...)
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderContinuous; kwargs...) where {T} =
     Polygon{T}[]
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderDiscrete; kwargs...) where {T} =
@@ -301,6 +309,33 @@ function pathtopolys(p::Paths.Path{T}; kwargs...) where {T}
     isempty(nodes) && return CurvilinearPolygon{T}[]
     # Normalize scalar and vector node outputs into one flat result.
     return reduce(vcat, vcat.(pathtopolys.(nodes; kwargs...)))
+end
+
+function pathtopolys(seg::Paths.Segment{T}, sty::Paths.PeriodicStyle; kwargs...) where {T}
+    subsegs, substys = Paths.resolve_periodic(seg, sty)
+    return reduce(
+        vcat,
+        (
+            vcat(pathtopolys(Paths.Node(se, st); kwargs...)) for
+            (se, st) in zip(subsegs, substys)
+        ),
+        init=GeometryEntity{T}[]
+    )
+end
+function pathtopolys(
+    seg::Paths.CompoundSegment{T},
+    sty::Paths.PeriodicStyle;
+    kwargs...
+) where {T}
+    subsegs, substys = Paths.resolve_periodic(seg, sty)
+    return reduce(
+        vcat,
+        (
+            vcat(pathtopolys(Paths.Node(se, st); kwargs...)) for
+            (se, st) in zip(subsegs, substys)
+        ),
+        init=GeometryEntity{T}[]
+    )
 end
 
 function _compound_segment_slice(f::Paths.CompoundSegment{T}, start, stop) where {T}
