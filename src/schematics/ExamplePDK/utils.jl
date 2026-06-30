@@ -68,12 +68,16 @@ Return a `CoordinateSystem` with a simple scaffolded bridge that spans `style`.
 function bridge_geometry(style::Paths.SimpleCPW)
     cs = CoordinateSystem(uniquename("bridge"))
     h_ground_ground = 2 * Paths.extent(style)
-    place!(cs, centered(Rectangle(10μm, h_ground_ground + 20μm)), LayerVocabulary.BRIDGE)
-    place!(
-        cs,
-        centered(Rectangle(16μm, h_ground_ground + 10μm)),
-        LayerVocabulary.BRIDGE_BASE
+    bridge_width = 10μm
+    scaffold_width = 16μm
+    scaffold_gap = 5μm
+    foot_length = 5μm
+    rect_bridge = centered(
+        Rectangle(bridge_width, h_ground_ground + 2 * (scaffold_gap + foot_length))
     )
+    rect_scaffold = centered(Rectangle(scaffold_width, h_ground_ground + 2 * scaffold_gap))
+    place!(cs, rect_bridge, LayerVocabulary.BRIDGE)
+    place!(cs, rect_scaffold, LayerVocabulary.BRIDGE_BASE)
     return cs
 end
 

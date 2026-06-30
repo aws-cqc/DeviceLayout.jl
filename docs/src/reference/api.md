@@ -300,6 +300,7 @@ See [Shapes](./shapes.md).
 
 ```@docs
     SolidModels.box_selection
+    SolidModels.check_port_connectivity
     SolidModels.connected_components
     SolidModels.difference_geom!
     SolidModels.extrude_z!
