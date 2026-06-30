@@ -338,7 +338,7 @@ function pathtopolys(
     )
 end
 
-function _compound_segment_slice(f::Paths.CompoundSegment{T}, start, stop) where {T}
+function _compound_segment_slice(f::Paths.Segment{T}, start, stop) where {T}
     len = pathlength(f)
     start == zero(T) && stop == len && return f
 
@@ -356,7 +356,7 @@ function _compound_segment_slice(f::Paths.CompoundSegment{T}, start, stop) where
 end
 
 function _compound_style_grid_render(
-    f::Paths.CompoundSegment{T},
+    f::Paths.Segment{T},
     s::Paths.CompoundStyle;
     kwargs...
 ) where {T}
@@ -527,6 +527,9 @@ end
 # (CompoundSegment, OffsetSegment) route to their own generic-Style methods without a dispatch
 # ambiguity (which otherwise forced one disambiguation method per wrapper/style pair).
 const BaseContinuousSegment{T} = Union{Paths.Straight{T}, Paths.Turn{T}, Paths.BSpline{T}}
+
+pathtopolys(f::BaseContinuousSegment{T}, s::Paths.CompoundStyle; kwargs...) where {T} =
+    _compound_style_grid_render(f, s; kwargs...)
 
 # Traces generate one surface
 # SimpleTrace can use constant offset
