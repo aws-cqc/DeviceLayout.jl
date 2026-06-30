@@ -1352,7 +1352,7 @@ _add_to_current_solidmodel!(
 
 # GmshNative can't ingest native arcs/splines (no `_add_curve!` methods), so flatten curvilinear
 # primitives to plain polygons before the sink via the shared `to_polygons`/`discretize_curve`
-# (the GDS pipeline's chord-height discretizer, not legacy adapted_grid). The resulting Polygon{T}
+# (the GDS pipeline's chord-height discretizer). The resulting Polygon{T}
 # hits the AbstractPolygon sink, whose only kernel call is add_line.
 # GmshNative flattens curves here, so discretization kwargs such as rtol must
 # reach to_polygons before the plain polygons are added to the kernel.

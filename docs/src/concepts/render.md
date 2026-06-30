@@ -13,10 +13,9 @@ See [API Reference: Rendering](@ref api-rendering).
 
 The behavior of [`render!`](@ref) can be customized with keyword arguments. Many of these are built in:
 
-- Arbitrary curves discretized by `adapted_grid` use `max_recursions, max_change, rand_factor, grid_step` (see [Rendering Arbitrary Paths](#Rendering-Arbitrary-Paths) below)
-- `atol` is the absolute tolerance used for discretizing other curves (default `1.0nm`)
+- `atol` is the absolute tolerance used for discretizing curves (default `1.0nm`)
 - `Δθ` can be provided to render circles and ellipses with an angular step rather than `atol`
-- `rtol` can be provided to render tolerance-controlled (non-`adapted_grid`) curves with tolerance `max(atol, rtol*local_curvature_radius)`
+- `rtol` can be provided to render tolerance-controlled curves with tolerance `max(atol, rtol*local_curvature_radius)`
 - `map_meta` is a function that takes metadata as input and returns metadata suitable for the backend
 
 Additional rendering options can be provided for user-defined [conditional rendering](#Conditional-Rendering).
@@ -65,8 +64,8 @@ This lets a single design produce different outputs for fabrication versus simul
 
 A `Segment` and `Style` together define one or more closed curves in the plane.
 The job of rendering to a `Cell` is to approximate these curves by closed polygons. In many cases, including circular arcs and simple styles along B-spline segments, [DeviceLayout.discretize_curve](@ref) is used. This discretization uses curvature information to render the curve to a tolerance provided to `render!` using the `atol` keyword (default `1.0nm`). For these curves, assuming slowly varying curvature, no point on the true curve is more than approximately `atol` from the discretization. To enable rendering
-of styles along generic paths in the plane, an adaptive algorithm based on a maximum allowed change in direction `max_change` ([DeviceLayout.adapted_grid](@ref)) is used when no other
-method is available.
+of styles along generic paths in the plane, segment/style rendering falls back to this same
+curvature-based discretization when no specialized polygon method is available.
 
 In some cases, custom rendering methods are implemented when it would improve performance
 for simple structures or when special attention is required. The rendering methods can

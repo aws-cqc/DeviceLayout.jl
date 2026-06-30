@@ -176,8 +176,7 @@ If `ent` is a `StyledEntity`, all styles will be applied before conversion to po
 
 Keyword arguments can be used to control how certain entity types are converted to polygons:
 
-  - Legacy opaque-callable path renderers discretized by [`DeviceLayout.adapted_grid`](@ref) use `max_recursions, max_change, rand_factor, grid_step`
-  - `atol` is the absolute tolerance used for discretizing other curves (default `1.0nm`)
+  - `atol` is the absolute tolerance used for discretizing curves (default `1.0nm`)
   - `Δθ` can be provided to render circles and ellipses with an angular step rather than `atol`
   - `rtol` can be provided to render curvature-controlled curves with tolerance `max(atol, rtol*local_curvature_radius)`
   - Additional rendering options can be provided for user-defined conditional rendering with [`OptionalStyle`](@ref)
