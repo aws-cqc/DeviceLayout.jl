@@ -161,8 +161,8 @@ end
 
 @testitem "rtol_known_segment_style_renderers" setup = [CommonTestSetup] begin
     function test_rtol_reduces(seg, sty)
-        poly_atol = vcat(Polygon[], to_polygons(seg, sty; atol=1nm))
-        poly_rtol = vcat(Polygon[], to_polygons(seg, sty; atol=1nm, rtol=1e-4))
+        poly_atol = vcat(Polygon[], to_polygons(Paths.Node(seg, sty); atol=1nm))
+        poly_rtol = vcat(Polygon[], to_polygons(Paths.Node(seg, sty); atol=1nm, rtol=1e-4))
         vcount_atol = sum(length(points(e)) for e in poly_atol)
         vcount_rtol = sum(length(points(e)) for e in poly_rtol)
         @test vcount_rtol > 0

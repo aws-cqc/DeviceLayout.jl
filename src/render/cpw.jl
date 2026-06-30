@@ -46,22 +46,6 @@ function to_polygons(f, len, s::Paths.CPW; kwargs...)
 end
 
 function to_polygons(
-    seg::Paths.Turn{T},
-    s::Paths.CPW;
-    atol=DeviceLayout.onenanometer(T),
-    rtol=nothing,
-    kwargs...
-) where {T}
-    g = cpw_points(seg, s)
-    grid = discretization_grid(seg, atol; rtol=rtol) * pathlength(seg)
-
-    ppts = [g.(grid, 1, -1); @view (g.(grid, 1, 1))[end:-1:1]]
-    mpts = [g.(grid, -1, 1); @view (g.(grid, -1, -1))[end:-1:1]]
-
-    return [Polygon(uniquepoints(ppts)), Polygon(uniquepoints(mpts))]
-end
-
-function to_polygons(
     seg::Paths.OffsetSegment{T},
     s::Paths.CPW;
     atol=DeviceLayout.onenanometer(T),
