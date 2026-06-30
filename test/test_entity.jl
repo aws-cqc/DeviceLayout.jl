@@ -182,7 +182,7 @@ end
     @testset "port_directions" begin
         # Not currently API functionality but worth testing alongside WithDirection
         using DeviceLayout.SchematicDrivenLayout
-        import DeviceLayout: _extract_direction
+        import DeviceLayout: extract_direction
         import .SchematicDrivenLayout.ExamplePDK: port_directions, _direction_config
         ## Direction extraction
         rect = Rectangle(2μm, 3μm)
@@ -194,14 +194,14 @@ end
         msz2 = meshsized_entity(wd_inner, 0.5μm)
         opt2 = optional_entity(msz2, :foo; default=true)
         # Extract direction
-        @test _extract_direction(wd_outer) == 90°
-        @test _extract_direction(wd_inner) == 45°
-        @test _extract_direction(opt2) == 45°
-        @test _extract_direction(opt) === nothing
-        @test _extract_direction(rect) === nothing
+        @test extract_direction(wd_outer) == 90°
+        @test extract_direction(wd_inner) == 45°
+        @test extract_direction(opt2) == 45°
+        @test extract_direction(opt) === nothing
+        @test extract_direction(rect) === nothing
         # If multiple WithDirection layers exist, outer wins (expected behavior, not a contract)
         double = WithDirection(0°)(WithDirection(90°)(rect))
-        @test _extract_direction(double) == 0°
+        @test extract_direction(double) == 0°
         ## _direction_config
         @test _direction_config(0°) == "+X"
         @test _direction_config(90°) == "+Y"

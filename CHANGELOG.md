@@ -4,6 +4,10 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+  -  Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
+
 ## 1.15.0 (2026-06-14)
 
   - Added `SolidModels.populate_size_fields!(cs::AbstractCoordinateSystem)`
@@ -20,9 +24,6 @@ coordinate system) with no `SolidModel` and no geometry kernel.
     numbers in `ExampleStarTransmon`/`ExampleStarIsland` geometry were extracted to
     parameters. `ExamplePDK` makes no API-stability guarantee, so these are not treated
     as breaking changes to DeviceLayout.jl.
-## Unreleased
-
-  -  Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
 
 ## 1.14.0 (2026-05-28)
 

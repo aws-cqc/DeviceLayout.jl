@@ -390,11 +390,11 @@ transform(sty::WithDirection, f::Transformation) =
 # angle of the first `WithDirection` style encountered (from outside in), or `nothing` if no
 # `WithDirection` is present. Handles nesting like
 # WithDirection(MeshSized(only_simulated(rect))) and the reverse.
-_extract_direction(::DeviceLayout.GeometryEntity) = nothing
-function _extract_direction(ent::DeviceLayout.StyledEntity)
-    return _extract_direction(ent.ent)
+extract_direction(::DeviceLayout.GeometryEntity) = nothing
+function extract_direction(ent::DeviceLayout.StyledEntity)
+    return extract_direction(ent.ent)
 end
-function _extract_direction(
+function extract_direction(
     ent::DeviceLayout.StyledEntity{T, U, WithDirection}
 ) where {T, U <: GeometryEntity{T}}
     return ent.sty.direction

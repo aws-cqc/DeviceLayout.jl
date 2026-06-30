@@ -270,7 +270,7 @@ function port_directions(sch::Schematic, ly::Symbol)
             layer(m) == ly || continue
             idx = layerindex(m)
             idx == 0 && continue
-            dir = DeviceLayout._extract_direction(el)
+            dir = DeviceLayout.extract_direction(el)
             dir === nothing && continue
             haskey(dirs, idx) &&
                 error("Repeated index $idx. Before calling `port_directions`, \
