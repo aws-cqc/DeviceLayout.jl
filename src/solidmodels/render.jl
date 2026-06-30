@@ -24,7 +24,7 @@ function to_primitives(sm::SolidModel, node::Paths.Node; kwargs...)
 end
 # Path nodes that can be drawn with only polygons (in OCC) or all paths (GmshNative)
 function to_primitives(::SolidModel, node::Paths.Node, ::Val{true}; kwargs...)
-    return to_polygons(node.seg, node.sty; kwargs...)
+    return to_polygons(node; kwargs...)
 end
 
 to_primitives(sm::SolidModel, ent::StyledEntity{T, U, S}; kwargs...) where {T, U, S} =
@@ -816,7 +816,7 @@ function reset_mesh_control!()
 end
 
 _default_size_primitives(node::Paths.Node; kwargs...) =
-    to_polygons(node.seg, node.sty; kwargs...)
+    to_polygons(node; kwargs...)
 _default_size_primitives(el; kwargs...) = to_polygons(el; kwargs...)
 
 """
