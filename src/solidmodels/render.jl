@@ -815,8 +815,7 @@ function reset_mesh_control!()
     return mesh_grading_default(0.75)
 end
 
-_default_size_primitives(node::Paths.Node; kwargs...) =
-    to_polygons(node; kwargs...)
+_default_size_primitives(node::Paths.Node; kwargs...) = to_polygons(node; kwargs...)
 _default_size_primitives(el; kwargs...) = to_polygons(el; kwargs...)
 
 """
