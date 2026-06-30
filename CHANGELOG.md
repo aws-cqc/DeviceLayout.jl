@@ -6,15 +6,16 @@ The format of this changelog is based on
 
 ## Unreleased
 
-  -  Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
+  - Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
+  - Added `SolidModels.check_port_connectivity`, using `SolidModels.connected_components` to report ports as `:open`, `:short`, `:floating`, or `:missing`
+  - Added `detect_non_boundary_contacts=false` keyword argument to `SolidModels.connected_components`; when `true`, 1d edges embedded in the interior of 2D surfaces (like the feet of staple air bridges) will be treated as connecting
+  - Added `examples/DemoQPU17/solidmodel.jl` demonstrating large-scale SolidModel construction and configuration, including a check for open charge lines and shorted flux lines with the new functionality above
 
 ## 1.15.0 (2026-06-14)
 
   - Added `SolidModels.populate_size_fields!(cs::AbstractCoordinateSystem)`
 so the size-field control points can be built from a `Schematic` (or any
 coordinate system) with no `SolidModel` and no geometry kernel.
-  - Added `SolidModels.check_port_connectivity`, using `SolidModels.connected_components` to report ports as `:open`, `:short`, `:floating`, or `:missing`
-  - Added `detect_non_boundary_contacts=false` keyword argument to `SolidModels.connected_components`; when `true`, 1d edges embedded in the interior of 2D surfaces (like the feet of staple air bridges) will be treated as connecting
   - Renamed `ExamplePDK` component parameters to follow the component style guide
     (`<feature>_<dimension>` naming, `_count`/`_trace`/`_radius`/`_gap` suffixes, no
     `w_`/`h_`/`l_`/`n_` prefixes or non-searchable names) and added length-type
