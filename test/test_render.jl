@@ -1020,8 +1020,8 @@ end
     end
 
     @testset "to_polygons(seg, sty) direct render methods" begin
-        # Normal Path rendering goes through pathtopolys, so explicit to_polygons(seg, sty)
-        # calls are the only coverage for these direct dispatch paths.
+        # Explicit to_polygons(seg, sty) calls should preserve legacy direct-call behavior
+        # while routing through Paths.Node rendering.
         as_polygons(p::Polygon) = (p,)
         as_polygons(ps) = ps
         function test_direct_polygons(output, expected_count)
@@ -1050,7 +1050,6 @@ end
 
         test_direct_polygons(to_polygons(straight, sstr), 2 * Paths.num(sstr))
 
-        # Function-valued strands still route through the generic adapted_grid fallback.
         gstr = Paths.Strands(x -> 10μm, 2μm, 2μm, 2)
         test_direct_polygons(to_polygons(straight, gstr), 2 * Paths.num(gstr))
 
@@ -1105,11 +1104,10 @@ end
         end
         test_direct_polygons(to_polygons(trseg, traceterm), 1)
 
-        # The 3-arg form covers generic Taper* adapted_grid fallbacks.
         tt = Paths._withlength!(Paths.TaperTrace(10μm, 2μm), 20μm)
         tc = Paths._withlength!(Paths.TaperCPW(10μm, 6μm, 2μm, 1μm), 20μm)
-        test_direct_polygons(to_polygons(straight, 20μm, tt), 1)  # TaperTrace -> one Polygon
-        test_direct_polygons(to_polygons(straight, 20μm, tc), 2)  # TaperCPW -> two gap polygons
+        test_direct_polygons(to_polygons(Paths.Node(straight, tt)), 1)  # TaperTrace -> one Polygon
+        test_direct_polygons(to_polygons(Paths.Node(straight, tc)), 2)  # TaperCPW -> two gap polygons
     end
 
     @testset "ClippedPolygons" begin
