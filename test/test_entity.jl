@@ -156,3 +156,122 @@
               Paths.TaperCPW{typeof(1.0μm)}(30μm, 10μm, 40μm, 10μm, 10μm)
     end
 end
+
+@testitem "WithDirection" setup = [CommonTestSetup] begin
+    ## Construction
+    @test WithDirection().direction == 0°
+    # Numeric argument converts to degrees
+    @test WithDirection(pi / 4).direction ≈ 45°
+    ## Transformation
+    sty = WithDirection(90°)
+    @test transform(sty, Rotation(90°)).direction == 180°
+    @test transform(sty, Rotation(270°)).direction % 360° == 0°
+    @test isapprox_angle(transform(sty, XReflection()).direction, 270°)
+    @test transform(WithDirection(), XReflection()).direction == 0°
+    @test transform(WithDirection(), ScaledIsometry(nothing, 90°, true, 1.0)).direction ==
+          90°
+    @test isapprox_angle(
+        transform(sty, ScaledIsometry(nothing, 90°, true, 1.0)).direction,
+        0°
+    )
+    @test transform(sty, Transformations.IdentityTransformation()).direction == 90°
+    ## Rendering
+    rect = Rectangle(2μm, 3μm)
+    @test to_polygons(sty(rect)) == to_polygons(rect)
+
+    @testset "port_directions" begin
+        # Not currently API functionality but worth testing alongside WithDirection
+        using DeviceLayout.SchematicDrivenLayout
+        import DeviceLayout: extract_direction
+        import .SchematicDrivenLayout.ExamplePDK: port_directions, _direction_config
+        ## Direction extraction
+        rect = Rectangle(2μm, 3μm)
+        @test to_polygons(sty(rect)) == to_polygons(rect)
+        opt = optional_entity(rect, :foo; default=true)
+        msz = meshsized_entity(opt, 0.5μm)
+        wd_outer = WithDirection(90°)(msz)
+        wd_inner = WithDirection(45°)(rect)
+        msz2 = meshsized_entity(wd_inner, 0.5μm)
+        opt2 = optional_entity(msz2, :foo; default=true)
+        # Extract direction
+        @test extract_direction(wd_outer) == 90°
+        @test extract_direction(wd_inner) == 45°
+        @test extract_direction(opt2) == 45°
+        @test extract_direction(opt) === nothing
+        @test extract_direction(rect) === nothing
+        # If multiple WithDirection layers exist, outer wins (expected behavior, not a contract)
+        double = WithDirection(0°)(WithDirection(90°)(rect))
+        @test extract_direction(double) == 0°
+        ## _direction_config
+        @test _direction_config(0°) == "+X"
+        @test _direction_config(90°) == "+Y"
+        @test _direction_config(180°) == "-X"
+        @test _direction_config(270°) == "-Y"
+
+        # Normalization: 360° → +X, -90° → -Y, 450° → +Y
+        @test _direction_config(360°) == "+X"
+        @test _direction_config(-90°) == "-Y"
+        @test _direction_config(450°) == "+Y"
+
+        # Off-axis: [dx, dy, 0.0] format
+        s45 = _direction_config(45°)
+        @test s45 ≈ [cos(45°), sin(45°), 0.0]
+
+        ## Port directions
+        # Within atol tolerance → still +X
+        @test _direction_config(0.0005°) == "+X"
+        @test _direction_config(-0.0005°) == "+X"
+        @test _direction_config(359.9995°) == "+X"
+        # Place three rectangles directly on the schematic's top-level coordsys.
+        # Two of them carry WithDirection; one is bare.
+        g = SchematicGraph("test-g")
+        sch = plan(g)
+        rect1 = centered(Rectangle(1μm, 1μm))
+        rect2 = centered(Rectangle(1μm, 1μm))
+        rect3 = centered(Rectangle(1μm, 1μm))
+        place!(sch, WithDirection(0°)(rect1), SemanticMeta(:myport))
+        place!(sch, WithDirection(90°)(rect2), SemanticMeta(:myport))
+        place!(sch, rect3, SemanticMeta(:myport))  # bare, no direction
+        # Needs to be indexed first
+        @test_throws "Repeated index" port_directions(sch, :myport)
+
+        SchematicDrivenLayout.index_layer!(sch, :myport)
+        dirs = port_directions(sch, :myport)
+        # Indexed entities 1 and 2 have directions; entity 3 is bare so no entry.
+        @test length(dirs) == 2
+        @test dirs[1] == "+X"
+        @test dirs[2] == "+Y"
+        @test !haskey(dirs, 3)
+
+        g = SchematicGraph("test-g-empty")
+        sch = plan(g)
+        rect = centered(Rectangle(1μm, 1μm))
+        place!(sch, rect, SemanticMeta(:bareport))  # no WithDirection
+        SchematicDrivenLayout.index_layer!(sch, :bareport)
+        dirs = port_directions(sch, :bareport)
+        @test isempty(dirs)
+        # Entities with explicit index=0 (e.g. inner component entities after a
+        # Phase-2 `index_layer!` flatten-and-clear pass) must be skipped by
+        # port_directions.
+        g = SchematicGraph("test-g-zeroidx")
+        sch = plan(g)
+        rect = centered(Rectangle(1μm, 1μm))
+        place!(sch, WithDirection(0°)(rect), SemanticMeta(:zly, index=0))
+        dirs = port_directions(sch, :zly)
+        @test isempty(dirs)
+
+        # SchematicGraph with component and rotated sub-cs
+        cs = CoordinateSystem("comp")
+        cs2 = CoordinateSystem("subcs")
+        place!(cs2, WithDirection(0°)(rect1), SemanticMeta(:myport))
+        addref!(cs, sref(cs2, rot=90°))
+        comp = BasicComponent(cs)
+        g = SchematicGraph("test")
+        add_node!(g, comp)
+        sch = plan(g)
+        SchematicDrivenLayout.index_layer!(sch, :myport)
+        dirs = port_directions(sch, :myport)
+        @test length(dirs) == 1
+        @test dirs[1] == "+Y"
+    end
+end

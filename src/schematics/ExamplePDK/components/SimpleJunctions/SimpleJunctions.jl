@@ -76,7 +76,7 @@ function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, jj::ExampleSimpl
         centered=true
     )
     bot_lead = Align.below(top_lead, jj_rect)
-    place!(cs, only_simulated(jj_rect), LUMPED_ELEMENT)
+    place!(cs, only_simulated(WithDirection(jj_rect, 90°)), LUMPED_ELEMENT)
     place!(cs, MeshSized(2 * junction_width)(only_simulated(top_lead)), METAL_POSITIVE)
     place!(cs, MeshSized(2 * junction_width)(only_simulated(bot_lead)), METAL_POSITIVE)
     # artwork geometry

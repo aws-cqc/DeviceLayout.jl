@@ -231,3 +231,66 @@ end
 
 @deprecate filter_params filter_parameters # For backward compatibility
 # (No one should be using methods from ExamplePDK but just in case)
+
+"""
+    port_directions(sch::Schematic, ly::Symbol) -> Dict{Int, Union{String, Vector{Float64}}}
+
+For every entity on layer `ly` in `sch.coordinate_system` that has been indexed
+(i.e., `layerindex(metadata) != 0`) AND carries a [`WithDirection`](@ref) style in
+its wrapper chain, return a dictionary mapping `layerindex(metadata) -> direction config value` suitable for Palace's `LumpedPort`/`WavePort` `Direction` field.
+
+Direction config value is a string `"+X"`, `"-X"`, `"+Y"`, or `"-Y"` for axis-aligned orientations
+(within `atol=1e-3` degrees of the nearest axis), or a unit vector `[dx, dy, 0.0]::Vector{Float64}`
+for arbitrary orientations.
+
+Must be called AFTER indexing has run. Typical usage is after `render!(sm, sch, target)` or `Cell(sch, target)` for a target whose `indexed_layers(target)`
+includes `ly`. If no entities on `ly` are indexed or none carry `WithDirection`,
+returns an empty `Dict`. This function does NOT call `index_layer!` itself.
+
+# Example
+
+```julia
+render!(sm, sch, target)
+dirs = port_directions(sch, :lumped_element)
+# Dict(1 => "+Y", 2 => "-X")
+```
+
+See also: [`WithDirection`](@ref).
+"""
+function port_directions(sch::Schematic, ly::Symbol)
+    dirs = Dict{Int, Union{String, Vector{Float64}}}()
+    # Traverse all reachable coordinate systems in the schematic (the schematic's
+    # own `coordinate_system` plus every reference descendant). `index_layer!`
+    # places indexed entities onto per-node coordsyses, recording the node for
+    # each index in `sch.index_dict[ly]` and setting in-component indices to 0.
+    # Each `(cs, trans)` pair includes the accumulated reference transform;
+    # applying it makes the returned direction reflect the entity's global orientation.
+    for (cs, trans) in DeviceLayout.traversal(sch.coordinate_system)
+        for (el, m) in zip(elements(cs), element_metadata(cs))
+            layer(m) == ly || continue
+            idx = layerindex(m)
+            idx == 0 && continue
+            dir = DeviceLayout.extract_direction(el)
+            dir === nothing && continue
+            haskey(dirs, idx) &&
+                error("Repeated index $idx. Before calling `port_directions`, \
+layer $ly should be indexed by rendering with a target whose `indexed_layers` \
+include $ly (or indexed directly with `index_layer!`)")
+            dirs[idx] = _direction_config(rotated_direction(dir, trans))
+        end
+    end
+    return dirs
+end
+
+# Format a direction angle (CCW from +X, in degrees) as a Palace-compatible
+# `Direction` config value. Axis-aligned directions return one of "+X", "-X", "+Y",
+# "-Y"; off-axis returns a unit-vector [dx, dy, 0.0]. Input is normalized modulo 360°.
+function _direction_config(angle; atol=1e-3)
+    a_deg = mod(DeviceLayout.ustrip(°, angle), 360.0)
+    abs(a_deg - 0.0) < atol && return "+X"
+    abs(a_deg - 90.0) < atol && return "+Y"
+    abs(a_deg - 180.0) < atol && return "-X"
+    abs(a_deg - 270.0) < atol && return "-Y"
+    abs(a_deg - 360.0) < atol && return "+X"
+    return [cos(angle), sin(angle), 0.0]
+end

@@ -350,3 +350,52 @@ struct ToTolerance{T <: Coordinate} <: GeometryEntityStyle
 end
 to_polygons(ent::GeometryEntity, sty::ToTolerance; kwargs...) =
     to_polygons(ent; merge((; kwargs...), (; atol=sty.atol))...)
+
+"""
+    struct WithDirection <: GeometryEntityStyle
+        direction::typeof(1.0°)
+    end
+    WithDirection(direction=0°)
+
+Style that annotates a `GeometryEntity` with a direction angle (CCW from the +X axis
+in the entity's local frame) for use in simulation configuration. For example, a
+lumped-port rectangle can carry its electrical orientation so that Palace's
+`LumpedPort`/`WavePort` `Direction` field can be populated after rendering.
+
+Rendering is unaffected: `to_polygons` and `to_primitives` pass through to the underlying entity.
+The direction transforms with the entity under rotation or reflection via
+`transform(sty::WithDirection, f::Transformation) = WithDirection(rotated_direction(sty.direction, f))`,
+so after `plan!`/`build!`/`index_layer!` the carried angle describes the global
+orientation.
+
+If an angle is given without units, it is assumed to be in radians.
+The stored angle is **not** automatically normalized to `[0°, 360°)`.
+"""
+struct WithDirection <: GeometryEntityStyle
+    direction::typeof(1.0°)
+    # Constrain the inner constructor to a Number so WithDirection(::GeometryEntity)
+    # routes via the generic `(T::Type{<:GeometryEntityStyle})(x::GeometryEntity, args...)`
+    # fallback instead of colliding with this constructor (silences Aqua).
+    WithDirection(direction::Number) = new(uconvert(°, direction))
+end
+# Default constructor — no-arg form is unambiguous.
+WithDirection() = WithDirection(0°)
+
+to_polygons(ent::GeometryEntity, ::WithDirection; kwargs...) = to_polygons(ent; kwargs...)
+
+transform(sty::WithDirection, f::Transformation) =
+    WithDirection(rotated_direction(sty.direction, f))
+
+# Walk through any nesting of StyledEntity wrappers and return the `direction`
+# angle of the first `WithDirection` style encountered (from outside in), or `nothing` if no
+# `WithDirection` is present. Handles nesting like
+# WithDirection(MeshSized(only_simulated(rect))) and the reverse.
+extract_direction(::DeviceLayout.GeometryEntity) = nothing
+function extract_direction(ent::DeviceLayout.StyledEntity)
+    return extract_direction(ent.ent)
+end
+function extract_direction(
+    ent::DeviceLayout.StyledEntity{T, U, WithDirection}
+) where {T, U <: GeometryEntity{T}}
+    return ent.sty.direction
+end
