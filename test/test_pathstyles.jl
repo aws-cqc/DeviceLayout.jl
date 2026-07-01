@@ -17,6 +17,12 @@
     # Unit tests
     @test copy(psty).styles !== psty.styles
     @test contains(Paths.summary(psty), "2 substyles")
+
+    # Direct 2-arg call for the generic Segment/PeriodicStyle method.
+    seg = Paths.Straight{typeof(1.0μm)}(50μm, Point(0.0μm, 0.0μm), 0.0)
+    periodic_polys = to_polygons(seg, psty)
+    @test !isempty(periodic_polys)
+    @test all(p -> p isa Polygon, periodic_polys)
     pa = Path()
     straight!(pa, 10μm, psty)
     straight!(pa, 1μm, Paths.SimpleNoRender(10μm, virtual=true))
