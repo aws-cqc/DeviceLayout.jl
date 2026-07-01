@@ -44,6 +44,14 @@ end
 _pathtopolys_to_polygons(p::Polygon; kwargs...) = p
 _pathtopolys_to_polygons(p::Vector{<:Polygon}; kwargs...) = p
 _pathtopolys_to_polygons(entity::GeometryEntity; kwargs...) = to_polygons(entity; kwargs...)
+function _pathtopolys_to_polygons(v::Vector{<:GeometryEntity{T}}; kwargs...) where {T}
+    polys = Polygon{T}[]
+    for item in v
+        r = _pathtopolys_to_polygons(item; kwargs...)
+        r isa Polygon ? push!(polys, r) : append!(polys, r)
+    end
+    return polys
+end
 function _pathtopolys_to_polygons(v::Vector; kwargs...)
     polys = Polygon[]
     for item in v
