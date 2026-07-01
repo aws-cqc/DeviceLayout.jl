@@ -117,6 +117,24 @@
         )
     )
 
+    # rtol must reach GmshNative's curve-flattening path.
+    @testset "GmshNative honors rtol" begin
+        gmsh_turn_points(rtol) = begin
+            cs_t = CoordinateSystem("rtol_t", nm)
+            pa_t = Path(0.0nm, 0.0nm)
+            turn!(pa_t, 90°, 500.0μm, Paths.SimpleTrace(10.0μm))
+            place!(cs_t, pa_t, SemanticMeta(:l1))
+            sm_t = SolidModel("rtol_t", SolidModels.GmshNative(); overwrite=true)
+            if isnothing(rtol)
+                render!(sm_t, cs_t, zmap=(_) -> 0.0μm)
+            else
+                render!(sm_t, cs_t, zmap=(_) -> 0.0μm, rtol=rtol)
+            end
+            return length(SolidModels.gmsh.model.getEntities(0)) # count points (dim-0 entities)
+        end
+        @test gmsh_turn_points(0.1) < gmsh_turn_points(nothing)
+    end
+
     # Try BSpline approximations
     cs = CoordinateSystem("test", nm)
     pa = Path(-0.5mm, 0nm)
@@ -469,6 +487,12 @@
     @test SolidModels.to_primitives(sm, e; rounded=true) === e
     @test length(points(SolidModels.to_primitives(sm, e; rounded=false))) == 8
     @test length(points(SolidModels.to_primitives(sm, e; Δθ=pi / 2))) == 4
+    smg = SolidModel("test_gmsh_ellipse", SolidModels.GmshNative(); overwrite=true)
+    @test SolidModels.to_primitives(smg, e) isa Polygon
+    @test length(points(SolidModels.to_primitives(smg, e; rounded=false))) == 8
+    cs = CoordinateSystem("test_gmsh_ellipse", nm)
+    place!(cs, e, SemanticMeta(:test))
+    @test_nowarn render!(smg, cs)
 
     # CurvilinearPolygon
     # A basic, noncurved polygon
@@ -687,6 +711,32 @@
     @test length(cr) == 2 # The zero length path is erased
     sm = SolidModel("test"; overwrite=true)
     @test_nowarn render!(sm, cs)
+
+    @testset "pathtopolys(::Path) is flat and forwards kwargs" begin
+        # CPW nodes return multiple polygons; the path-level result should be flat.
+        pac = Path(0nm, 0nm)
+        turn!(pac, 90°, 100μm, Paths.SimpleCPW(10μm, 6μm))
+        turn!(pac, -90°, 100μm, Paths.SimpleCPW(10μm, 6μm))
+        crc = pathtopolys(pac)
+        @test crc isa AbstractVector
+        @test !any(x -> x isa AbstractVector, crc)
+        @test length(crc) == 4
+
+        # Tighter atol must reach the offset BSpline approximation.
+        build_off() = begin
+            p = Path(0nm, 0nm)
+            bspline!(
+                p,
+                [Point(300μm, 200μm), Point(600μm, 0μm)],
+                0°,
+                Paths.SimpleTrace(10μm)
+            )
+            p[1].seg = Paths.offset(p[1].seg, 5μm)
+            p
+        end
+        @test length(pathtopolys(build_off(); atol=1nm)) >
+              length(pathtopolys(build_off(); atol=5μm))
+    end
 
     # A 2π rotation should do nothing
     t = RotationPi(2)

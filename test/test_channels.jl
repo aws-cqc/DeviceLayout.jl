@@ -219,6 +219,21 @@
     @test p1(resolved.segments[1]) == Point(2, 4)
     @test p1(resolved.segments[2]) == Point(3, 9)
 
+    @testset "compound resolve_offset propagates atol" begin
+        pb = Path(0nm, 0nm)
+        straight!(pb, 100μm, Paths.SimpleTrace(10μm))
+        bspline!(pb, [Point(300μm, 200μm), Point(500μm, 0μm)], 0°, Paths.SimpleTrace(10μm))
+        simplify!(pb)
+        off = Paths.offset(pb[1].seg, 5μm)
+        # Tighter atol must reach the BSpline fallback inside the compound segment.
+        count_bspline(s) =
+            s isa Paths.BSpline ? length(s.p) :
+            (s isa Paths.CompoundSegment ? sum(count_bspline.(s.segments); init=0) : 0)
+        n_loose = count_bspline(Paths.resolve_offset(off; atol=5μm))
+        n_tight = count_bspline(Paths.resolve_offset(off; atol=1nm))
+        @test n_tight > n_loose
+    end
+
     ## reverse(::OffsetSegment) tests
     @testset "reverse ConstantOffset" begin
         seg = Paths.Straight(10.0μm)

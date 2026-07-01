@@ -1,17 +1,3 @@
-@testitem "Rendering unit tests" setup = [CommonTestSetup] begin
-    # Observe aliasing with rand_factor = 0.
-    # Choosing large grid_step yields the minimum possible number of grid points (5).
-    f = t -> (2.0μm + 1.0μm * cos(2π * t / (50μm)))
-    grid = DeviceLayout.adapted_grid(
-        f,
-        (0μm, 100μm),
-        grid_step=1mm,
-        rand_factor=0.0,
-        max_change=1nm
-    )
-    @test grid == [0.0μm, 25μm, 50μm, 75μm, 100μm]
-end
-
 @testitem "Styles" setup = [CommonTestSetup] begin
     @testset "NoRender" begin
         c = Cell{Float64}("main")
@@ -19,6 +5,17 @@ end
         straight!(pa, 21.2345, Paths.NoRender())
         render!(c, pa)
         @test isempty(c.elements)
+
+        template_path = Path()
+        straight!(template_path, 100μm, Paths.NoRender())
+        periodic_norender = Paths.PeriodicStyle(template_path)
+        pa = Path(0nm, 0nm)
+        straight!(pa, 100μm, periodic_norender)
+        node = only(Paths.nodes(pa))
+        polys = to_polygons(node)
+        @test isempty(polys)
+        @test eltype(polys) <: Polygon{coordinatetype(node)}
+        @test_nowarn bounds(node)
 
         # === Issue 83 === #
         c = Cell("main", nm2μm)
@@ -310,64 +307,57 @@ end
         render!(c, pa, GDSMeta(0))
         @test all(isequal(1), Polygons.orientation.(c.elements))
 
-        # Test low-res rendering for simplicity
+        # Test low-res rendering: verify geometric correctness rather than exact points,
+        # since curvature-based discretization produces different vertex placement than the
+        # old analytic arc formula (both are correct within atol).
         c = Cell{Float64}("main")
         pa = Path{Float64}()
         turn!(pa, π / 2, 50.0, Paths.CPW(10.0, 6.0))
         render!(c, pa, atol=2.0)
-        @test points(c.elements[1]) == Point{Float64}[
-            p(0.0, -11.0),
-            p(23.343689374270475, -6.356651483188493),
-            p(43.1335136523794, 6.866486347620601),
-            p(56.35665148318849, 26.656310625729525),
-            p(61.0, 50.0),
-            p(55.0, 50.0),
-            p(50.81337428812077, 28.952411219920062),
-            p(38.890872965260115, 11.109127034739885),
-            p(21.047588780079938, -0.8133742881207695),
-            p(0.0, -5.0)
-        ]
-        @test points(c.elements[2]) == Point{Float64}[
-            p(0.0, 5.0),
-            p(17.22075445642904, 8.425421036992098),
-            p(31.81980515339464, 18.18019484660536),
-            p(41.5745789630079, 32.77924554357096),
-            p(45.0, 50.0),
-            p(39.0, 50.0),
-            p(36.031301767940185, 35.0753461377615),
-            p(27.577164466275356, 22.422835533724644),
-            p(14.924653862238502, 13.968698232059815),
-            p(0.0, 11.0)
-        ]
+        # Turn center is at (0, 50) with radii: outer gap from r=55 to r=61, inner gap from r=39 to r=45
+        center = p(0.0, 50.0)
+        is_on_radius(r, rs, atol) = any(r0 -> isapprox(r, r0; atol=atol), rs)
+        # Element 1: outer gap polygon (radii 55 and 61)
+        pts1 = points(c.elements[1])
+        @test Polygons.orientation(c.elements[1]) == 1
+        @test pts1[1] ≈ p(0.0, -11.0) atol = 1e-10
+        @test pts1[end] ≈ p(0.0, -5.0) atol = 1e-10
+        for pt in pts1
+            r = norm(pt - center)
+            @test is_on_radius(r, (55.0, 61.0), 1e-10)
+        end
+        # Element 2: inner gap polygon (radii 39 and 45)
+        pts2 = points(c.elements[2])
+        @test Polygons.orientation(c.elements[2]) == 1
+        @test pts2[1] ≈ p(0.0, 5.0) atol = 1e-10
+        @test pts2[end] ≈ p(0.0, 11.0) atol = 1e-10
+        for pt in pts2
+            r = norm(pt - center)
+            @test is_on_radius(r, (39.0, 45.0), 1e-10)
+        end
 
+        # Same test with units
         c = Cell("main", DeviceLayout.PreferMicrons.nm)
         pa = Path(μm)
         turn!(pa, π / 2, 50.0μm, Paths.CPW(10.0μm, 6.0μm))
         render!(c, pa, atol=2.0μm)
-        @test points(c.elements[1]) == Point{typeof(1.0nm)}[
-            p(0.0nm, -11000.0nm),
-            p(23343.689374270474nm, -6356.651483188493nm),
-            p(43133.5136523794nm, 6866.486347620601nm),
-            p(56356.65148318849nm, 26656.310625729526nm),
-            p(61000.0nm, 50000.0nm),
-            p(55000.0nm, 50000.0nm),
-            p(50813.37428812077nm, 28952.41121992006nm),
-            p(38890.87296526012nm, 11109.127034739884nm),
-            p(21047.58878007994nm, -813.3742881207695nm),
-            p(0.0nm, -5000.0nm)
-        ]
-        @test points(c.elements[2]) == Point{typeof(1.0nm)}[
-            p(0.0nm, 5000.0nm),
-            p(17220.75445642904nm, 8425.421036992098nm),
-            p(31819.80515339464nm, 18180.19484660536nm),
-            p(41574.5789630079nm, 32779.245543570956nm),
-            p(45000.0nm, 50000.0nm),
-            p(39000.0nm, 50000.0nm),
-            p(36031.30176794018nm, 35075.3461377615nm),
-            p(27577.164466275357nm, 22422.835533724643nm),
-            p(14924.653862238501nm, 13968.698232059814nm),
-            p(0.0nm, 11000.0nm)
-        ]
+        center_nm = p(0.0nm, 50000.0nm)
+        pts1 = points(c.elements[1])
+        @test Polygons.orientation(c.elements[1]) == 1
+        @test pts1[1] ≈ p(0.0nm, -11000.0nm) atol = 0.001nm
+        @test pts1[end] ≈ p(0.0nm, -5000.0nm) atol = 0.001nm
+        for pt in pts1
+            r = norm(pt - center_nm)
+            @test is_on_radius(r, (55000.0nm, 61000.0nm), 0.001nm)
+        end
+        pts2 = points(c.elements[2])
+        @test Polygons.orientation(c.elements[2]) == 1
+        @test pts2[1] ≈ p(0.0nm, 5000.0nm) atol = 0.001nm
+        @test pts2[end] ≈ p(0.0nm, 11000.0nm) atol = 0.001nm
+        for pt in pts2
+            r = norm(pt - center_nm)
+            @test is_on_radius(r, (39000.0nm, 45000.0nm), 0.001nm)
+        end
 
         pa = Path(μm2μm)
         turn!(pa, π / 2, 50.0μm, Paths.CPW(10.0μm, 6.0μm))
@@ -482,10 +472,11 @@ end
         render!(c, pa, GDSMeta(0))
 
         # tests are confirming CCW orientation of the rendered polygons
-        @test (elements(c)[1]).p[1] ≈ p(0.0nm, 5000.0nm)
-        @test (elements(c)[1]).p[end] ≈ p(0.0nm, 11000.0nm)
-        @test (elements(c)[2]).p[1] ≈ p(0.0nm, -11000.0nm)
-        @test (elements(c)[2]).p[end] ≈ p(0.0nm, -5000.0nm)
+        # pathtopolys returns [minus, plus] order (outer gap first for CCW turn)
+        @test (elements(c)[1]).p[1] ≈ p(0.0nm, -11000.0nm) atol = 1.0nm
+        @test (elements(c)[1]).p[end] ≈ p(0.0nm, -5000.0nm) atol = 1.0nm
+        @test (elements(c)[2]).p[1] ≈ p(0.0nm, 5000.0nm) atol = 1.0nm
+        @test (elements(c)[2]).p[end] ≈ p(0.0nm, 11000.0nm) atol = 1.0nm
     end
 
     @testset "Straight, Strands" begin
@@ -574,8 +565,35 @@ end
         # path function. In this case it should be the same
         c = Cell{Float64}("main")
         setstyle!(pa[1], Paths.Trace(1.0))
-        render!(c, pa, grid_step=50.0)
+        render!(c, pa)
         @test points(c.elements[1]) ≈ [p(0, -0.5), p(20, -0.5), p(20, 0.5), p(0, 0.5)]
+
+        # Mismatched tags must use the CompoundStyle grid, not the original segment boundary.
+        c = Cell{Float64}("main")
+        pa3 = Path{Float64}()
+        straight!(pa3, 20.0, Paths.Trace(1))
+        straight!(pa3, 30.0, Paths.Trace(2))
+        simplify!(pa3)
+        swapped = Paths.CompoundStyle(
+            Paths.Style[Paths.Trace(1.0), Paths.Trace(2.0)],
+            [0.0, 25.0, 50.0],
+            gensym()
+        )
+        setstyle!(pa3[1], swapped)
+        render!(c, pa3)
+        # The first style spans 0..25 from the style grid; zipping would stop at 20.
+        # The curvilinear path still emits leaves at the underlying segment boundary.
+        style1 = filter(e -> extrema(gety.(points(e))) == (-0.5, 0.5), c.elements)
+        style2 = filter(e -> extrema(gety.(points(e))) == (-1.0, 1.0), c.elements)
+        @test length(style1) == 2
+        @test length(style2) == 1
+
+        style1_pts = vcat(points.(style1)...)
+        @test extrema(getx.(style1_pts)) == (0.0, 25.0)
+        @test extrema(gety.(style1_pts)) == (-0.5, 0.5)
+        style2_pts = vcat(points.(style2)...)
+        @test extrema(getx.(style2_pts)) == (25.0, 50.0)
+        @test extrema(gety.(style2_pts)) == (-1.0, 1.0)
 
         # Test behavior if we swap out the segment
         c = Cell("main", nm)
@@ -612,6 +630,23 @@ end
         @test upperright(bounds(c.elements[2])) ≈ Point(40μm, 7.5μm)
         @test lowerleft(bounds(c.elements[3])) ≈ Point(40μm, -10μm)
         @test upperright(bounds(c.elements[3])) ≈ Point(120μm, 10μm)
+
+        # Split-then-render should preserve a curved compound node with a translated style grid.
+        pa_curved = Path(0.0μm, 0.0μm)
+        turn!(pa_curved, 90°, 50μm, Paths.Trace(10μm))
+        turn!(pa_curved, -90°, 50μm, Paths.Trace(6μm))
+        simplify!(pa_curved)
+        c_ref = Cell("ref", nm)
+        render!(c_ref, pa_curved, GDSMeta())
+        L = pathlength(pa_curved[1].seg)
+        pa_split = split(pa_curved[1], 0.6L) # 0.6L lands inside the second turn
+        # The second piece is exactly the negative-grid, tag-mismatched case under test.
+        @test segment(pa_split[2]).tag != style(pa_split[2]).tag
+        @test first(style(pa_split[2]).grid) < zero(L)
+        c_split = Cell("split", nm)
+        render!(c_split, pa_split, GDSMeta())
+        @test lowerleft(bounds(c_split)) ≈ lowerleft(bounds(c_ref)) atol = 1nm
+        @test upperright(bounds(c_split)) ≈ upperright(bounds(c_ref)) atol = 1nm
     end
 
     @testset "Auto Taper" begin
@@ -774,14 +809,15 @@ end
 
             # Test Layout.jl#68
             els = initial ? reverse(elements(c)) : elements(c)
-            # First and second elements should be CPW polygons
-            straight_points = Set(reduce(vcat, points.(els[1:2])))
+            # Normalize tiny floating-point differences before intersecting shared corners.
+            pts_approx(el) = [round.(pt, digits=9) for pt in ustrip.(nm, points(el))]
+            straight_points = Set(reduce(vcat, pts_approx.(els[1:2])))
 
             # Third and fourth elements will be the terminating polygons
-            termination_top_points = Set(points(els[3]))
-            termination_bottom_points = Set(points(els[4]))
+            termination_top_points = Set(pts_approx(els[3]))
+            termination_bottom_points = Set(pts_approx(els[4]))
 
-            # Test that there are four points in common with CPW polygons and terminating polygon
+            # Each terminating polygon shares two corners with the CPW polygons
             @test length(intersect(straight_points, termination_top_points)) == 2
             @test length(intersect(straight_points, termination_bottom_points)) == 2
             @test length(intersect(termination_top_points, termination_bottom_points)) == 0
@@ -978,6 +1014,108 @@ end
         c_path = Cell("pathonly", nm)
         render!(c_path, pa2, GDSMeta())
         @test bounds(c2) ≈ bounds(transformation(pathref)(c_path)) atol = 1e-6nm
+    end
+
+    @testset "to_polygons(seg, sty) direct render methods" begin
+        # Explicit to_polygons(seg, sty) calls should preserve legacy direct-call behavior
+        # while routing through Paths.Node rendering.
+        as_polygons(p::Polygon) = (p,)
+        as_polygons(ps) = ps
+        function test_direct_polygons(output, expected_count)
+            polys = as_polygons(output)
+            @test length(polys) == expected_count
+            @test all(poly -> length(points(poly)) >= 4, polys)
+            @test all(poly -> isproper(bounds(poly)), polys)
+            @test all(poly -> !iszero(Polygons.area(poly)), polys)
+        end
+
+        straight = let pa = Path(μm)
+            straight!(pa, 20μm, Paths.Trace(2μm))
+            pa[1].seg
+        end
+
+        sstr = Paths.Strands(10μm, 2μm, 2μm, 2)
+        test_direct_polygons(
+            to_polygons(Paths.offset(straight, 5μm), sstr),
+            2 * Paths.num(sstr)
+        )
+
+        test_direct_polygons(
+            to_polygons(Paths.offset(straight, 5μm), Paths.CPW(10μm, 6μm)),
+            2
+        )
+
+        test_direct_polygons(to_polygons(straight, sstr), 2 * Paths.num(sstr))
+
+        gstr = Paths.Strands(x -> 10μm, 2μm, 2μm, 2)
+        test_direct_polygons(to_polygons(straight, gstr), 2 * Paths.num(gstr))
+
+        comp, compsty = let pa = Path(μm)
+            straight!(pa, 10μm, Paths.CPW(10μm, 6μm))
+            straight!(pa, 10μm, Paths.CPW(10μm, 6μm))
+            simplify!(pa)            # -> a CompoundSegment + CompoundStyle (matching tags)
+            pa[1].seg, pa[1].sty
+        end
+
+        @test comp.tag == compsty.tag
+        test_direct_polygons(to_polygons(comp, compsty), 4)   # 2 CPW gaps x 2 subsegments
+
+        # Mismatched tags should use the generic CompoundStyle grid fallback.
+        mismatched_compsty = let pa = Path(μm)
+            straight!(pa, 10μm, Paths.CPW(10μm, 6μm))
+            straight!(pa, 10μm, Paths.CPW(10μm, 6μm))
+            simplify!(pa)
+            pa[1].sty
+        end
+        @test comp.tag != mismatched_compsty.tag
+        test_direct_polygons(to_polygons(comp, mismatched_compsty), 4)
+
+        psty =
+            Paths.PeriodicStyle([Paths.CPW(10μm, 6μm), Paths.CPW(8μm, 4μm)], [10μm, 10μm])
+        test_direct_polygons(to_polygons(comp, psty), 4)
+
+        # Build compounds whose lengths match each termination's `_termlength`. The short and
+        # trace cases use nonzero rounding so the output has area to validate.
+        compof(tl) =
+            let pa = Path(μm)
+                straight!(pa, tl / 2, Paths.CPW(10μm, 6μm))
+                straight!(pa, tl / 2, Paths.CPW(10μm, 6μm))
+                simplify!(pa)
+                pa[1].seg
+            end
+        openterm = Paths.CPWOpenTermination(10μm, 6μm, 6μm, 0μm, false)
+        shortterm = Paths.CPWShortTermination(10μm, 6μm, 0μm, 2μm, false)
+        traceterm = Paths.TraceTermination(10μm, 2μm, false)
+        test_direct_polygons(to_polygons(compof(Paths._termlength(openterm)), openterm), 1)
+        test_direct_polygons(
+            to_polygons(compof(Paths._termlength(shortterm)), shortterm),
+            2
+        )
+        test_direct_polygons(
+            to_polygons(compof(Paths._termlength(traceterm)), traceterm),
+            1
+        )
+        trseg = let pa = Path(μm)
+            straight!(pa, Paths._termlength(traceterm), Paths.Trace(10μm))
+            pa[1].seg
+        end
+        test_direct_polygons(to_polygons(trseg, traceterm), 1)
+
+        tt = Paths._withlength!(Paths.TaperTrace(10μm, 2μm), 20μm)
+        tc = Paths._withlength!(Paths.TaperCPW(10μm, 6μm, 2μm, 1μm), 20μm)
+        test_direct_polygons(to_polygons(Paths.Node(straight, tt)), 1)  # TaperTrace -> one Polygon
+        test_direct_polygons(to_polygons(Paths.Node(straight, tc)), 2)  # TaperCPW -> two gap polygons
+
+        # NoRender styles produce no geometry through the direct fallback path.
+        for norender in (
+            Paths.NoRender(),
+            Paths.NoRenderContinuous(),
+            Paths.NoRenderDiscrete(),
+            Paths.SimpleNoRender(2μm)
+        )
+            @test isempty(to_polygons(straight, norender))
+            @test isempty(to_polygons(comp, norender))
+        end
     end
 
     @testset "ClippedPolygons" begin

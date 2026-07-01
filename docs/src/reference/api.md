@@ -272,7 +272,6 @@ See [Shapes](./shapes.md).
 
 ```@docs
     render!
-    DeviceLayout.adapted_grid
     DeviceLayout.discretize_curve
 ```
 

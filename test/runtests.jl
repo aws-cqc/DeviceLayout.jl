@@ -50,6 +50,104 @@ using TestItemRunner
             end
         end
     end
+
+    using DeviceLayout.Curvilinear: edge_type_at_vertex, rounded_corner_segment_line_arc
+
+    """
+        check_line_arc_fillets(
+            cp,
+            pts,
+            fillet_r;
+            atol_length=1.0nm,
+            atol_angle=1e-6
+        )
+
+    Assert that `rounded_corner_segment_line_arc` produces valid fillets at line-arc
+    corners. Every detected line-arc corner must fillet.
+    """
+    function check_line_arc_fillets(cp, pts, fillet_r; atol_length=1.0nm, atol_angle=1e-6)
+        n_pts = length(pts)
+        n_line_arc = 0
+        n_filleted = 0
+        for i = 1:n_pts
+            edge = edge_type_at_vertex(cp, i)
+            is_line_arc = (edge.incoming == :straight) != (edge.outgoing == :straight)
+            !is_line_arc && continue
+            n_line_arc += 1
+
+            arc_is_outgoing = edge.outgoing != :straight
+            arc_curve = arc_is_outgoing ? edge.outgoing : edge.incoming
+            p_corner = pts[i]
+            p_line = arc_is_outgoing ? pts[mod1(i - 1, n_pts)] : pts[mod1(i + 1, n_pts)]
+
+            seg = rounded_corner_segment_line_arc(
+                p_line,
+                p_corner,
+                arc_curve,
+                arc_is_outgoing,
+                fillet_r
+            )
+
+            isnothing(seg) && continue
+            n_filleted += 1
+
+            @test seg.fillet isa Paths.Turn
+
+            O = Paths.curvaturecenter(arc_curve)   # center of the original arc
+            arc_r = abs(arc_curve.r)
+
+            @test isapprox(norm(seg.T_arc - O), arc_r, atol=atol_length)
+
+            v_line = (p_corner - p_line) / norm(p_corner - p_line)
+            w = seg.T_line - p_line
+            perp = w - (w.x * v_line.x + w.y * v_line.y) * v_line
+            @test isapprox(norm(perp), zero(atol_length), atol=atol_length)
+
+            p0_f = Paths.p0(seg.fillet)
+            p1_f = Paths.p1(seg.fillet)
+            if arc_is_outgoing # line → fillet → arc
+                @test isapprox(p0_f, seg.T_line, atol=atol_length)
+                @test isapprox(p1_f, seg.T_arc, atol=atol_length)
+            else # arc → fillet → line
+                @test isapprox(p0_f, seg.T_arc, atol=atol_length)
+                @test isapprox(p1_f, seg.T_line, atol=atol_length)
+            end
+
+            p0_α = Paths.α0(seg.fillet)
+            p1_α = Paths.α1(seg.fillet)
+            T_line_α = atan(v_line.y, v_line.x)
+            T_arc_α =
+                Paths.direction(arc_curve, Paths.pathlength_nearest(arc_curve, seg.T_arc))
+            if arc_is_outgoing # line → fillet → arc
+                @test isapprox_angle(p0_α, T_line_α, atol=atol_angle) ||
+                      isapprox_angle(p0_α, T_line_α + π, atol=atol_angle)
+                @test isapprox_angle(p1_α, T_arc_α, atol=atol_angle) ||
+                      isapprox_angle(p1_α, T_arc_α + π, atol=atol_angle)
+            else # arc → fillet → line
+                @test isapprox_angle(p0_α, T_arc_α, atol=atol_angle) ||
+                      isapprox_angle(p0_α, T_arc_α + π, atol=atol_angle)
+                @test isapprox_angle(p1_α, T_line_α, atol=atol_angle) ||
+                      isapprox_angle(p1_α, T_line_α + π, atol=atol_angle)
+            end
+
+            @test seg.fillet.r ≈ fillet_r
+
+            C_f = Paths.curvaturecenter(seg.fillet)
+            @test isapprox(norm(C_f - seg.T_line), fillet_r, atol=atol_length)
+            @test isapprox(norm(C_f - seg.T_arc), fillet_r, atol=atol_length)
+            d_centers = norm(C_f - O)
+            @test isapprox(d_centers, arc_r + fillet_r, atol=atol_length) ||
+                  isapprox(d_centers, abs(arc_r - fillet_r), atol=atol_length)
+
+            L_f = Paths.pathlength(seg.fillet)
+            n_samples = 9
+            for t in range(zero(L_f), L_f, length=n_samples)
+                @test isapprox(norm(seg.fillet(t) - C_f), fillet_r, atol=atol_length)
+            end
+        end
+
+        @test n_filleted == n_line_arc
+    end
 end
 
 @run_package_tests filter =

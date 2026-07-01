@@ -178,23 +178,40 @@ function Turn(x::ConstantOffset{T, Turn{T}}) where {T}
     return Turn(x.seg.α, x.seg.r - sign(x.seg.α) * x.offset, p0(x), x.seg.α0)
 end
 
-# Note that resolving offsets changes pathlength, so this is unsafe on styled segments,
-# because styles that use lengths (compound and taper) will also need to be updated
-# This function (as with offset segments in general) should be considered internal
-resolve_offset(x::ConstantOffset{T, Straight{T}}) where {T} = Straight(x)
-resolve_offset(x::ConstantOffset{T, Turn{T}}) where {T} = Turn(x)
-resolve_offset(x::ConstantOffset{T, CompoundSegment{T}}) where {T} =
-    CompoundSegment(resolve_offset.(offset.(x.seg.segments, x.offset)))
-function resolve_offset(x::GeneralOffset{T, CompoundSegment{T}}) where {T}
+# Resolving an offset changes pathlength, so length-carrying styles (compound, taper) must be
+# updated separately by the caller; this (like offset segments generally) is internal.
+# Only the BSpline fallback uses atol/rtol; the exact cases ignore them. Kwargs are limited to
+# atol/rtol — callers must not forward render-time kwargs (bspline_approximation rejects them).
+resolve_offset(x::ConstantOffset{T, Straight{T}}; atol=nothing, rtol=nothing) where {T} =
+    Straight(x)
+resolve_offset(x::ConstantOffset{T, Turn{T}}; atol=nothing, rtol=nothing) where {T} =
+    Turn(x)
+resolve_offset(
+    x::ConstantOffset{T, CompoundSegment{T}};
+    atol=nothing,
+    rtol=nothing
+) where {T} =
+    CompoundSegment(resolve_offset.(offset.(x.seg.segments, x.offset); atol, rtol))
+function resolve_offset(
+    x::GeneralOffset{T, CompoundSegment{T}};
+    atol=nothing,
+    rtol=nothing
+) where {T}
     s0s = [zero(T); cumsum(pathlength.(x.seg.segments))[1:(end - 1)]]
     return CompoundSegment(
-        resolve_offset.([
-            offset(seg, s -> x.offset(s + s0)) for (seg, s0) in zip(x.seg.segments, s0s)
-        ])
+        resolve_offset.(
+            [offset(seg, s -> x.offset(s + s0)) for (seg, s0) in zip(x.seg.segments, s0s)];
+            atol,
+            rtol
+        )
     )
 end
-# Everything else gets BSpline approximation
-resolve_offset(x::OffsetSegment) = bspline_approximation(x)
+# Everything else gets BSpline approximation. Forward a tolerance only if given, so
+# bspline_approximation's own defaults apply otherwise.
+function resolve_offset(x::OffsetSegment; atol=nothing, rtol=nothing)
+    tol = (; (k => v for (k, v) in (:atol => atol, :rtol => rtol) if !isnothing(v))...)
+    return bspline_approximation(x; tol...)
+end
 
 # Methods for true length of offset curves
 # Note that t parameterization is not necessarily arclength parameterization for BSplines
