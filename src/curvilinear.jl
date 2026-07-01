@@ -30,7 +30,7 @@ import DeviceLayout:
     perimeter,
     isapprox_angle
 using DeviceLayout.Paths
-import DeviceLayout.Polygons: cornerindices, RelativeRounded, radius
+import DeviceLayout.Polygons: cornerindices
 import Unitful: uconvert, °, Length
 
 using ..Points
@@ -340,9 +340,9 @@ end
 
 function _compound_segment_slice(f::Paths.Segment{T}, start, stop) where {T}
     len = pathlength(f)
-    start == zero(T) && stop == len && return f
+    iszero(start) && stop == len && return f
 
-    if start == zero(T)
+    if iszero(start)
         piece, _ = split(f, stop)
         return piece
     elseif stop == len
@@ -728,8 +728,13 @@ end
 # Types that together can use straight lines only
 const LinearSegment{T} =
     Union{Paths.Straight{T}, Paths.ConstantOffset{T, Paths.Straight{T}}}
-const LinearStyle =
-    Union{Paths.SimpleTrace, Paths.SimpleCPW, Paths.TaperTrace, Paths.TaperCPW}
+const LinearStyle = Union{
+    Paths.SimpleTrace,
+    Paths.SimpleCPW,
+    Paths.SimpleStrands,
+    Paths.TaperTrace,
+    Paths.TaperCPW
+}
 islinear(::LinearSegment{T}, ::LinearStyle) where {T} = Val(true)
 islinear(::Paths.Segment{T}, ::Paths.Style) where {T} = Val(false)
 
@@ -759,6 +764,8 @@ end
 pathtopolys(seg::Paths.Straight{T}, sty::Paths.SimpleTrace; kwargs...) where {T} =
     to_polygons(seg, sty; kwargs...)
 pathtopolys(seg::Paths.Straight{T}, sty::Paths.SimpleCPW; kwargs...) where {T} =
+    to_polygons(seg, sty; kwargs...)
+pathtopolys(seg::Paths.Straight{T}, sty::Paths.SimpleStrands; kwargs...) where {T} =
     to_polygons(seg, sty; kwargs...)
 pathtopolys(seg::Paths.Straight{T}, sty::Paths.TaperTrace; kwargs...) where {T} =
     to_polygons(seg, sty; kwargs...)
