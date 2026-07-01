@@ -487,6 +487,12 @@
     @test SolidModels.to_primitives(sm, e; rounded=true) === e
     @test length(points(SolidModels.to_primitives(sm, e; rounded=false))) == 8
     @test length(points(SolidModels.to_primitives(sm, e; Δθ=pi / 2))) == 4
+    smg = SolidModel("test_gmsh_ellipse", SolidModels.GmshNative(); overwrite=true)
+    @test SolidModels.to_primitives(smg, e) isa Polygon
+    @test length(points(SolidModels.to_primitives(smg, e; rounded=false))) == 8
+    cs = CoordinateSystem("test_gmsh_ellipse", nm)
+    place!(cs, e, SemanticMeta(:test))
+    @test_nowarn render!(smg, cs)
 
     # CurvilinearPolygon
     # A basic, noncurved polygon

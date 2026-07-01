@@ -22,7 +22,12 @@ to_primitives(::SolidModel, ent::GeometryEntity; kwargs...) = to_polygons(ent; k
 function to_primitives(sm::SolidModel, node::Paths.Node; kwargs...)
     return to_primitives(sm, node, islinear(node.seg, node.sty); kwargs...)
 end
-# Path nodes that can be drawn with only polygons (in OCC) or all paths (GmshNative)
+# GmshNative can't ingest native arcs/splines, so flatten all path nodes here.
+# Keeping this in to_primitives makes mesh-size sampling use the same polygons
+# that are added to the kernel.
+to_primitives(::SolidModel{GmshNative}, node::Paths.Node; kwargs...) =
+    to_polygons(node; kwargs...)
+# Path nodes that can be drawn with only polygons.
 function to_primitives(::SolidModel, node::Paths.Node, ::Val{true}; kwargs...)
     return to_polygons(node; kwargs...)
 end
@@ -86,6 +91,15 @@ function to_curvilinear_regions(ent::ClippedPolygon{T}, sty::StyleDict; kwargs..
     return flat
 end
 
+# GmshNative flattens clipped regions up front for the same reason as path nodes.
+to_primitives(::SolidModel{GmshNative}, ent::ClippedPolygon; kwargs...) =
+    to_polygons(ent; kwargs...)
+to_primitives(
+    ::SolidModel{GmshNative},
+    ent::StyledEntity{T, ClippedPolygon{T}, <:StyleDict};
+    kwargs...
+) where {T} = to_polygons(ent.ent, ent.sty; kwargs...)
+
 function to_primitives(::SolidModel, ent::Ellipse; rounded=nothing, Δθ=nothing, kwargs...)
     if !isnothing(rounded)
         Base.depwarn(
@@ -101,6 +115,24 @@ function to_primitives(::SolidModel, ent::Ellipse; rounded=nothing, Δθ=nothing
         return to_polygons(ent; Δθ, kwargs...)  # Discretize to polygon
     end
 end
+function to_primitives(
+    ::SolidModel{GmshNative},
+    ent::Ellipse;
+    rounded=nothing,
+    Δθ=nothing,
+    kwargs...
+)
+    if !isnothing(rounded)
+        Base.depwarn(
+            "The `rounded` keyword for Ellipse is deprecated. Use `Δθ` to control ellipse discretization.",
+            :to_primitives
+        )
+        if !rounded && isnothing(Δθ)
+            return to_polygons(ent; Δθ=360° / 8, kwargs...)
+        end
+    end
+    return to_polygons(ent; Δθ, kwargs...)
+end
 
 # Path nodes that can be drawn with native curves (in OCC)
 # Gmsh does have its own native curves but we don't use them (the APIs and particularly
@@ -112,6 +144,11 @@ end
 # CurvilinearRegion is a primitive
 to_primitives(::SolidModel, ent::CurvilinearPolygon; kwargs...) = CurvilinearRegion(ent)
 to_primitives(::SolidModel, ent::CurvilinearRegion; kwargs...) = ent
+# GmshNative flattens curvilinear primitives before they reach the kernel.
+to_primitives(::SolidModel{GmshNative}, ent::CurvilinearPolygon; kwargs...) =
+    to_polygons(ent; kwargs...)
+to_primitives(::SolidModel{GmshNative}, ent::CurvilinearRegion; kwargs...) =
+    to_polygons(ent; kwargs...)
 
 # LineSegment is a primitive
 to_primitives(::SolidModel, ent::LineSegment; kwards...) = ent
@@ -1350,27 +1387,8 @@ _add_to_current_solidmodel!(
     kwargs...
 ) = _add_to_current_solidmodel!(CurvilinearRegion(x), m, k; zmap, points_tree, kwargs...)
 
-# GmshNative can't ingest native arcs/splines (no `_add_curve!` methods), so flatten curvilinear
-# primitives to plain polygons before the sink via the shared `to_polygons`/`discretize_curve`
-# (the GDS pipeline's chord-height discretizer). The resulting Polygon{T}
-# hits the AbstractPolygon sink, whose only kernel call is add_line.
-# GmshNative flattens curves here, so discretization kwargs such as rtol must
-# reach to_polygons before the plain polygons are added to the kernel.
-_add_to_current_solidmodel!(
-    x::CurvilinearPolygon{T},
-    m::Meta,
-    k::GmshNative;
-    atol=DeviceLayout.onenanometer(T),
-    kwargs...
-) where {T} = _add_to_current_solidmodel!(to_polygons(x; atol, kwargs...), m, k; kwargs...)
-_add_to_current_solidmodel!(
-    x::CurvilinearRegion{T},
-    m::Meta,
-    k::GmshNative;
-    atol=DeviceLayout.onenanometer(T),
-    kwargs...
-) where {T} = _add_to_current_solidmodel!(to_polygons(x; atol, kwargs...), m, k; kwargs...)
-
+# GmshNative flattens curvilinear primitives in `to_primitives`, so this sink is
+# OpenCascade-only in normal rendering.
 function _add_to_current_solidmodel!(
     surf::CurvilinearRegion{T},
     m::Meta,
