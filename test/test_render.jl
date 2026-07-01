@@ -6,6 +6,17 @@
         render!(c, pa)
         @test isempty(c.elements)
 
+        template_path = Path()
+        straight!(template_path, 100μm, Paths.NoRender())
+        periodic_norender = Paths.PeriodicStyle(template_path)
+        pa = Path(0nm, 0nm)
+        straight!(pa, 100μm, periodic_norender)
+        node = only(Paths.nodes(pa))
+        polys = to_polygons(node)
+        @test isempty(polys)
+        @test eltype(polys) <: Polygon{coordinatetype(node)}
+        @test_nowarn bounds(node)
+
         # === Issue 83 === #
         c = Cell("main", nm2μm)
         pth = DeviceLayout.Path(DeviceLayout.Point(0μm, 350μm); α0=π / 2)
