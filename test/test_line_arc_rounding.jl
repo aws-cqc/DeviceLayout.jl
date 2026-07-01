@@ -643,3 +643,34 @@ end
     place!(cs_sm, tiny_poly, GDSMeta(0, 0))
     @test_nowarn render!(sm, cs_sm)
 end
+
+@testitem "Un-roundable corner in line-line rounding producer" setup = [CommonTestSetup] begin
+    # Call the SolidModels producer directly; `to_polygons(::Polygon, ::Rounded)` uses
+    # the separate Polygons-module line-line rounding path.
+    import DeviceLayout.SolidModels: round_to_curvilinearpolygon
+    r = 5.0μm
+
+    # Near-collinear corner: below min_angle, with sides long enough to pass min_side_len.
+    ε = 0.005μm # ~5e-5 rad bend over a 100μm span, safely < min_angle
+    collinear_poly = Polygon([
+        Point(0.0μm, 0.0μm),
+        Point(100.0μm, ε),
+        Point(200.0μm, 0.0μm),
+        Point(200.0μm, 100.0μm),
+        Point(0.0μm, 100.0μm)
+    ])
+    collinear_rounded = round_to_curvilinearpolygon(collinear_poly, r)
+    @test collinear_rounded isa CurvilinearPolygon
+    @test any(p -> isapprox(p, Point(100.0μm, ε)), points(collinear_rounded))
+
+    # Short side: the min_side_len guard skips this corner.
+    short_side_poly = Polygon([
+        Point(0.0μm, 0.0μm),
+        Point(1.0μm, 0.0μm),
+        Point(1.0μm, 50.0μm),
+        Point(0.0μm, 50.0μm)
+    ])
+    short_rounded = round_to_curvilinearpolygon(short_side_poly, r)
+    @test short_rounded isa CurvilinearPolygon
+    @test any(p -> isapprox(p, Point(1.0μm, 0.0μm)), points(short_rounded))
+end

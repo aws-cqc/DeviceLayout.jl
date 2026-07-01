@@ -22,11 +22,6 @@ function cpw_points(f, s, scaler=identity)
     end
 end
 
-function cpw_points(f::Paths.BSpline{T}, s::Paths.CPW) where {T}
-    arclength(t) = Paths.t_to_arclength(f, t)
-    return cpw_points(f.r, s, arclength)
-end
-
 function to_polygons(f::Paths.Straight{T}, s::Paths.SimpleCPW; kwargs...) where {T}
     g = cpw_points(f, s)
 

@@ -1105,6 +1105,17 @@
         tc = Paths._withlength!(Paths.TaperCPW(10μm, 6μm, 2μm, 1μm), 20μm)
         test_direct_polygons(to_polygons(Paths.Node(straight, tt)), 1)  # TaperTrace -> one Polygon
         test_direct_polygons(to_polygons(Paths.Node(straight, tc)), 2)  # TaperCPW -> two gap polygons
+
+        # NoRender styles produce no geometry through the direct fallback path.
+        for norender in (
+            Paths.NoRender(),
+            Paths.NoRenderContinuous(),
+            Paths.NoRenderDiscrete(),
+            Paths.SimpleNoRender(2μm)
+        )
+            @test isempty(to_polygons(straight, norender))
+            @test isempty(to_polygons(comp, norender))
+        end
     end
 
     @testset "ClippedPolygons" begin
