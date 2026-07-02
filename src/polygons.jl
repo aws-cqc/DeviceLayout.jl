@@ -683,11 +683,14 @@ Rounded(r::Coordinate; kwargs...) = Rounded{float(typeof(r))}(; abs_r=r, kwargs.
 p0(r::Rounded) = r.p0
 
 function RelativeRounded(r::Float64; kwargs...)
-    # if missing, type won't matter
-    T = haskey(kwargs, :p0) ? eltype(eltype(kwargs[:p0])) : typeof(1.0Unitful.μm)
+    # Fall back to the preferred units so the promoted element type matches the
+    # `ContextUnits` used by the coordinates rather than bare `Unitful` units.
+    T =
+        haskey(kwargs, :p0) ? eltype(eltype(kwargs[:p0])) :
+        typeof(1.0DeviceLayout.UPREFERRED)
     S =
         haskey(kwargs, :min_side_len) ? eltype(eltype(kwargs[:min_side_len])) :
-        typeof(1.0Unitful.μm)
+        typeof(1.0DeviceLayout.UPREFERRED)
     return Rounded{promote_type(T, S)}(; rel_r=r, kwargs...)
 end
 
