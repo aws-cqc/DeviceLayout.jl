@@ -218,7 +218,8 @@ export transform,
 
 # Entity styles
 include("styles.jl")
-export OptionalStyle, ToTolerance, optional_entity, MeshSized, meshsized_entity, styled
+export OptionalStyle,
+    ToTolerance, WithDirection, optional_entity, MeshSized, meshsized_entity, styled
 
 """
     abstract type GeometryStructure{S} <: AbstractGeometry{S}

@@ -24,7 +24,7 @@
         tags = Int32[1]
         result = connected_components(3, tags)
         @test length(result) == 1
-        @test result[1] == (Int32(3), Int32(1))
+        @test result[1] == [(Int32(3), Int32(1))]
     end
 
     @testset "two disconnected volumes" begin
@@ -38,6 +38,69 @@
         # Each component should have exactly one volume
         sizes = sort([length(c) for c in result])
         @test sizes == [1, 1]
+    end
+
+    @testset "stray edge embedded in face interior connects two faces" begin
+        # Two coplanar surfaces that share no topological boundary in gmsh's adjacency
+        # graph, but are bridged geometrically by 1D edges lying in the interior of
+        # one and on the boundary of the other. Mirrors the staple-airbridge foot
+        # edges landing on a ground plane: OCC's global fragment leaves these curves
+        # geometrically embedded but topologically detached, so getAdjacencies returns
+        # only the ground plane's outer rectangle. Geometry matches the minimal
+        # reproduction observed empirically — the second loose-rectangle is irrelevant
+        # but kept to match the exact tag layout the reproduction relies on.
+        fresh_model("stray_edge")
+        gmsh.model.occ.addRectangle(-10, -10, 0, 20, 20)
+        gmsh.model.occ.addRectangle(0, 0, 1, 1, 1)
+        gmsh.model.occ.addPoint(0, 0, 0)
+        gmsh.model.occ.addPoint(0, 1, 0)
+        gmsh.model.occ.addPoint(1, 1, 0)
+        gmsh.model.occ.addPoint(1, 0, 0)
+        l1 = gmsh.model.occ.addLine(9, 10)
+        l2 = gmsh.model.occ.addLine(11, 12)
+        ext = gmsh.model.occ.extrude([(1, 9), (1, 10)], 0.0, 0.0, 1.0)
+        frag, _ =
+            gmsh.model.occ.fragment([(1, l1), (1, l2)], [(2, 1), (2, 2), (2, 3), (2, 4)])
+        gmsh.model.occ.synchronize()
+        tags = Int32[dt[2] for dt in frag if dt[1] == 2]
+
+        # Topology only: ground plane (tag 1) is disconnected from each leg face.
+        result_topo = connected_components(2, tags) # default: no augmentation
+        @test length(result_topo) == 2
+
+        # Geometric augmentation: the foot edges lie in the ground plane's interior
+        # and are boundary edges of the leg faces → all united into 1 component.
+        result_geom = connected_components(2, tags; detect_non_boundary_contacts=true)
+        @test length(result_geom) == 1
+    end
+
+    @testset "staple bridge connects" begin
+        cs = DeviceLayout.SchematicDrivenLayout.ExamplePDK.bridge_geometry(
+            Paths.CPW(10e3nm, 6e3nm)
+        )
+        place!(cs, centered(Rectangle(1e6nm, 1e6nm)), :gnd)
+        sm = SolidModel("test"; overwrite=true)
+        render!(
+            sm,
+            cs;
+            postrender_ops=[
+                SolidModels.staple_bridge_postrendering(;
+                    base="bridge_base",
+                    bridge="bridge",
+                    bridge_height=10μm # Exaggerated, for visualization
+                )...
+            ],
+            solidmodel=true
+        )
+        @test length(
+            connected_components(
+                sm,
+                ["bridge_metal", "gnd"],
+                detect_non_boundary_contacts=true
+            )
+        ) == 1
+        # Does not work without stapling
+        @test length(connected_components(sm, ["bridge_metal", "gnd"])) == 2
     end
 
     @testset "shared-boundary volumes via fragment" begin

@@ -1011,44 +1011,55 @@ function remove_group!(group::PhysicalGroup; recursive=true, remove_entities=tru
 end
 
 """
-    connected_components(dim::Int, tags::Vector{Int32})
-    connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2)
-    connected_components(sm::SolidModel, groups, dim=2)
+    connected_components(dim::Int, tags::Vector{Int32};
+        detect_non_boundary_contacts=false, 
+        non_boundary_contact_tol=0.0)
+    connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; kwargs...)
+    connected_components(sm::SolidModel, groups, dim=2; kwargs...)
 
 Find connected components among SolidModel entities at dimension `dim` with the given `tags` or physical group names.
 
 Two entities are connected if they share any boundary entity (dimension `dim - 1`).
 Uses union-find with path compression on the adjacency graph from `gmsh.model.getAdjacencies`.
 
+For `dim == 2`, set `detect_non_boundary_contacts=true` to unite entities that share a "stray"
+1D entity that lies in the interior of a 2D entity without being one of its topological boundary curves. This is
+necessary even after embedding with `fragment` because OpenCascade's `getAdjacencies`
+does not see the connection (a typical case is the foot edge of a "staple" air-bridge leg
+landing on a ground plane). Checking stray 1D entities can be relatively slow if they exist, so
+it may be preferable to add dummy 2D entities that attach to them. Tolerance (in microns)
+for determining whether a 1D entity lies in a 2D entity is controlled
+by the `non_boundary_contact_tol` keyword.
+
 Returns a `Vector{Vector{Tuple{Int32, Int32}}}` where each inner vector contains the entity dimtags
 of one connected component.
-
-# Algorithm
-
- 1. Query downward adjacencies (boundary entities) for each tag via getAdjacencies
- 2. Build a mapping from boundary tags to parent entity indices
- 3. Use union-find to merge entities sharing boundaries
- 4. Collect and return connected component groups
 
 # Notes
 
   - Requires Gmsh model to be synchronized before calling
+  - Requires groups to consist of non-overlapping Boolean fragments with shared edges
+    (as guaranteed by `render!`)
   - Works for any dimension ≥ 1 (uses dim - 1 boundary adjacencies)
   - For dim=3 (volumes): shares boundary surfaces (dim=2)
   - For dim=2 (surfaces): shares boundary curves (dim=1)
 """
-function connected_components(sm::SolidModel, groups, dim=2)
+function connected_components(sm::SolidModel, groups, dim=2; kwargs...)
     tags = reduce(vcat, [entitytags(sm[name, dim]) for name in groups], init=Int32[])
     unique!(tags)
-    return connected_components(dim, tags)
+    return connected_components(dim, tags; kwargs...)
 end
-connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2) =
-    connected_components(dim, entitytags(sm[group, dim]))
+connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; kwargs...) =
+    connected_components(dim, entitytags(sm[group, dim]); kwargs...)
 
-function connected_components(dim::Integer, tags::Vector{Int32})
+function connected_components(
+    dim::Integer,
+    tags::Vector{Int32};
+    detect_non_boundary_contacts=false,
+    non_boundary_contact_tol=0.0
+)
     n = length(tags)
     isempty(tags) && return Vector{Tuple{Int32, Int32}}[]
-    n == 1 && return [(Int32(dim), only(tags))]
+    n == 1 && return [[(Int32(dim), only(tags))]]
 
     # Build adjacency: map boundary entities to parent entity indices
     boundary_to_parents = Dict{Int32, Vector{Int}}()
@@ -1085,6 +1096,43 @@ function connected_components(dim::Integer, tags::Vector{Int32})
         end
     end
 
+    # Geometric augmentation: connect entities through stray (dim-1) entities that lie
+    # on the interior of another entity's geometry without being its topological boundary.
+    # Only the dim=2 / dim-1=1 case (curve in face) is handled — this catches the
+    # staple-bridge foot landing on an interior of a metal plane. For dim=3, "face inside
+    # volume interior" is not a typical Palace configuration so we skip it.
+    if dim == 2 && detect_non_boundary_contacts
+        bbox_tree = RTree{Float64, 3}(Tuple{Int, Int32})
+        function convertel(enumtag)
+            bbox = gmsh.model.get_bounding_box(dim, enumtag[2])
+            return SpatialIndexing.SpatialElem(
+                SpatialIndexing.Rect((bbox[1:3]...,), (bbox[4:6]...,)),
+                nothing,
+                enumtag
+            )
+        end
+        SpatialIndexing.load!(bbox_tree, enumerate(tags); convertel=convertel)
+
+        for (btag, ps) in boundary_to_parents
+            length(ps) == 1 || continue # Only single-parent edges are problematic
+            owner_idx = ps[1]
+            ebbox = gmsh.model.getBoundingBox(dim - 1, btag)
+            candidates = SpatialIndexing.intersects_with(
+                bbox_tree,
+                SpatialIndexing.Rect((ebbox[1:3]...,), (ebbox[4:6]...,))
+            )
+            for elem in candidates
+                j, ftag = elem.val
+                j == owner_idx && continue
+                find(j) == find(owner_idx) && continue
+                _bbox_contains([elem.mbr.low..., elem.mbr.high...], ebbox, pad=0.0) ||
+                    continue
+                _curve_lies_on_face(btag, ftag; tol=non_boundary_contact_tol) || continue
+                unite(owner_idx, j)
+            end
+        end
+    end
+
     # Collect components
     components = Dict{Int, Vector{Tuple{Int32, Int32}}}()
     for (i, tag) in enumerate(tags)
@@ -1097,6 +1145,172 @@ function connected_components(dim::Integer, tags::Vector{Int32})
     end
 
     return collect(values(components))
+end
+
+# Axis-aligned bbox containment test (a contains b). `bbox` is gmsh's (xmin, ymin, zmin, xmax, ymax, zmax).
+function _bbox_contains(a, b; pad::Real=0.0)
+    return (a[1] - pad <= b[1]) &&
+           (b[4] - pad <= a[4]) &&
+           (a[2] - pad <= b[2]) &&
+           (b[5] - pad <= a[5]) &&
+           (a[3] - pad <= b[3]) &&
+           (b[6] - pad <= a[6])
+end
+
+# Sample a 1D entity (curve) at `n_samples` parametric points and test whether the
+# sample lies on the 2D entity (face) within `tol`. Two filters: (1) `getClosestPoint`
+# distance ≤ tol confirms the sample is on the face's underlying surface (an infinite
+# plane for a planar face — does NOT respect trim curves / holes); (2) batched
+# `isInside` in parametric uv-space confirms the sample is on the *trimmed* portion
+# of the face. The parametric form of `isInside` skips an internal world→parametric
+# reprojection, which is the slow part on large CPW-style faces.
+# Default samples only the 2 endpoints (fragmented geometry is expected for checking
+# connectivity, so only endpoints are needed).
+function _curve_lies_on_face(curve_tag::Integer, face_tag::Integer; tol, n_samples::Int=2)
+    tmin, tmax = gmsh.model.getParametrizationBounds(1, curve_tag)
+    isempty(tmin) && return false
+    params = collect(range(Float64(tmin[1]), Float64(tmax[1]); length=n_samples))
+    xyz = gmsh.model.getValue(1, curve_tag, params) # flat [x1,y1,z1,x2,y2,z2,...]
+    tol2 = Float64(tol)^2
+    for k = 1:n_samples
+        p = @view xyz[(3k - 2):(3k)]
+        closest, uv = gmsh.model.getClosestPoint(2, face_tag, p)
+        d2 = (closest[1] - p[1])^2 + (closest[2] - p[2])^2 + (closest[3] - p[3])^2
+        d2 > tol2 && return false
+        gmsh.model.isInside(2, face_tag, uv, true) > 0 || return false
+    end
+    return true
+end
+
+"""
+    check_port_connectivity(sm::SolidModel, port_names, metal_groups;
+        dim=2,
+        detect_non_boundary_contacts=false,
+        non_boundary_contact_tol=0.0) -> Dict{String, Symbol}
+
+Classify each lumped port in `port_names` by whether its two terminals are connected through entities in `metal_groups`.
+
+Ports are assumed to be rectangular, with exactly two opposite metal-touching sides.
+Invalid ports may be misclassified.
+
+Returns a `Dict` mapping each port name (as `String`) to one of:
+
+  - `:short` — at least two of the port's boundary entities touch metal, and every
+    metal-touching boundary lands on the same connected metal component. You can
+    trace a path from one terminal of the port to another through entities in
+    `metal_groups`, which would make a short circuit at DC.
+  - `:open` — the port's metal-touching boundaries land on two or more disconnected
+    metal components. There is no path through entities in `metal_groups` from one
+    terminal of the port to the other, which would make an open circuit at DC.
+  - `:floating` — fewer than two of the port's boundary entities touch metal. The
+    port has at most one terminal connected to metal; if used as a Palace lumped
+    port, this is generally a configuration error.
+  - `:missing` — the named port group does not exist in `sm` or is empty.
+
+Wave ports (2D exterior surface ports) are not handled specially; the `dim=2` path can still
+classify them algorithmically but the results are generally not electrically meaningful.
+
+# Arguments
+
+  - `sm::SolidModel`: a rendered solid model. Gmsh must be synchronized (the function
+    calls `SolidModels._synchronize!` defensively).
+  - `port_names::AbstractVector{<:Union{AbstractString, Symbol}}`: names of port
+    physical groups.
+  - `metal_groups::AbstractVector{<:Union{AbstractString, Symbol}}`: names of metal
+    physical groups. All listed groups are fed into a single "metal" connectivity
+    question.
+
+# Keyword arguments
+
+  - `dim=2`: dimension of port and metal groups. `3` is appropriate for volumetric lumped
+    ports in a 3D model; `2` would be used for surfaces.
+  - `detect_non_boundary_contacts=false`: If `true` and `dim == 2`, then `connected_components`
+    finds non-conformal contacts (1D edges in the interior of 2D surfaces, like the foot edge
+    of a "staple" air-bridge leg landing on a ground plane) and treats them as connections
+  - `non_boundary_contact_tol=0.0`: Tolerance in microns for determining whether a 1D edge
+    lies in a 2D entity
+
+# Algorithm
+
+ 1. Compute connected components of the metal groups once via
+    [`connected_components`](@ref).
+ 2. Build a reverse map `entity tag → component index`.
+ 3. For each port, find its boundary entities (via `gmsh.model.getBoundary`) at
+    dimension `dim - 1`, then look up adjacent entities at dimension `dim`
+    (via `gmsh.model.getAdjacencies`). Count both the number of port boundary
+    entities that touch metal and the number of distinct metal components reached.
+    A port with fewer than two metal-touching boundaries is `:floating`; otherwise
+    it is `:short` (one component) or `:open` (multiple).
+
+See also [`connected_components`](@ref).
+"""
+function check_port_connectivity(
+    sm::SolidModel,
+    port_names,
+    metal_groups;
+    dim::Integer=2,
+    detect_non_boundary_contacts=false,
+    non_boundary_contact_tol=0.0
+)
+    SolidModels._synchronize!(sm)
+
+    # Build connected-components tag → component-index map.
+    tag_to_comp = Dict{Int32, Int}()
+    if !isempty(metal_groups)
+        comps = connected_components(
+            sm,
+            metal_groups,
+            dim;
+            detect_non_boundary_contacts,
+            non_boundary_contact_tol
+        )
+        for (ci, comp_dimtags) in enumerate(comps)
+            for (_, tag) in comp_dimtags
+                tag_to_comp[tag] = ci
+            end
+        end
+    end
+
+    results = Dict{String, Symbol}()
+    for pn in port_names
+        pn_s = string(pn)
+        if !SolidModels.hasgroup(sm, pn_s, dim)
+            results[pn_s] = :missing
+            continue
+        end
+        port_tags = SolidModels.entitytags(sm[pn_s, dim])
+        if isempty(port_tags)
+            results[pn_s] = :missing
+            continue
+        end
+        # Boundary faces of the port volume(s).
+        port_dimtags = Tuple{Int32, Int32}[(Int32(dim), t) for t in port_tags]
+        # getBoundary(dimtags, combined, oriented, recursive)
+        boundary = gmsh.model.getBoundary(port_dimtags, false, false, false)
+        touched = Set{Int}()
+        n_touching_boundaries = 0
+        for (bd, bt) in boundary
+            # `bt` may be signed (Gmsh convention); use absolute value as the tag.
+            upward, _ = gmsh.model.getAdjacencies(bd, abs(bt))
+            comps_here = Set{Int}()
+            for neighbor in upward
+                # Skip the port's own volumes.
+                (neighbor in port_tags) && continue
+                ci = get(tag_to_comp, neighbor, 0)
+                ci == 0 && continue
+                push!(comps_here, ci)
+            end
+            if !isempty(comps_here)
+                n_touching_boundaries += 1
+                union!(touched, comps_here)
+            end
+        end
+        # A Palace lumped port needs two terminals on metal; a single metal-touching
+        # boundary is treated as :floating regardless of how many components it reaches.
+        results[pn_s] =
+            n_touching_boundaries < 2 ? :floating : length(touched) == 1 ? :short : :open
+    end
+    return results
 end
 
 """
