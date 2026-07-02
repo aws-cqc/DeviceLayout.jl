@@ -134,6 +134,95 @@
           rotated_direction(direction(pa3[3].seg, 50μm), tr)
 end
 
+@testitem "BSpline arclength cache" setup = [CommonTestSetup] begin
+    import QuadGK
+    ds(seg, t) = Paths.dsdt(t, seg.r)
+
+    b = Paths.BSpline(
+        [Point(1.0μm, 1.0μm), Point(1000.0μm, -20.0μm)],
+        100 * Point(1.0μm, 1.0μm) / sqrt(2),
+        100 * Point(0.6μm, -0.8μm)
+    )
+    L = pathlength(b)
+
+    # Forward map is exact (matches an independent quadgk over the full and partial range)
+    @test L ≈ QuadGK.quadgk(t -> ds(b, t), 0.0, 1.0)[1] rtol = 1e-9
+    @test Paths.t_to_arclength(b, 0.37) ≈ QuadGK.quadgk(t -> ds(b, t), 0.0, 0.37)[1] rtol =
+        1e-9
+
+    # Inverse round-trips to full precision across the whole range (not just at t=0.6)
+    for t in (1e-6, 0.01, 0.3, 0.5, 0.7, 0.99, 1 - 1e-6)
+        @test Paths.arclength_to_t(b, Paths.t_to_arclength(b, t)) ≈ t rtol = 1e-9
+    end
+
+    # Cache is built lazily on first arclength query, and excluded from == / hash
+    b_fresh = Paths.BSpline(copy(b.p), b.t0, b.t1)
+    @test isnothing(b_fresh.reparam)
+    pathlength(b_fresh)
+    @test !isnothing(b_fresh.reparam)
+    @test b_fresh == b
+    @test hash(b_fresh) == hash(b)
+
+    # Warm-cache results are bit-identical to the first (cold) evaluation
+    s_mid = L / 3
+    cold = (
+        pathlength(b),
+        Paths.t_to_arclength(b, 0.42),
+        Paths.arclength_to_t(b, s_mid),
+        b(s_mid),
+        direction(b, s_mid),
+        Paths.curvatureradius(b, s_mid)
+    )
+    warm = (
+        pathlength(b),
+        Paths.t_to_arclength(b, 0.42),
+        Paths.arclength_to_t(b, s_mid),
+        b(s_mid),
+        direction(b, s_mid),
+        Paths.curvatureradius(b, s_mid)
+    )
+    @test all(cold .== warm)
+
+    # Invalidation: rigid transforms preserve length; the cache is dropped and rebuilt
+    let bt = Paths.BSpline(copy(b.p), b.t0, b.t1)
+        pathlength(bt) # build cache
+        Paths.setp0!(bt, Point(0.0μm, 0.0μm)) # translation
+        @test isnothing(bt.reparam)
+        @test pathlength(bt) ≈ L rtol = 1e-9
+    end
+    let bt = Paths.BSpline(copy(b.p), b.t0, b.t1)
+        pathlength(bt)
+        Paths.change_handedness!(bt) # reflection
+        @test isnothing(bt.reparam)
+        @test pathlength(bt) ≈ L rtol = 1e-9
+    end
+    let bt = Paths.BSpline(copy(b.p), b.t0, b.t1)
+        pathlength(bt)
+        Paths.setα0!(bt, α0(bt) + 30°) # rotation
+        @test isnothing(bt.reparam)
+        @test pathlength(bt) ≈ L rtol = 1e-9
+    end
+
+    # Split children get independent, initially-empty caches
+    a1, a2 = Paths._split(b, 500μm)
+    @test isnothing(a1.reparam)
+    @test isnothing(a2.reparam)
+    @test pathlength(a1) + pathlength(a2) ≈ L rtol = 1e-9
+
+    # Strongly non-uniform ds/dt: exact forward map holds regardless of curvature
+    b_curvy = Paths.BSpline(
+        [Point(0.0μm, 0.0μm), Point(50.0μm, 100.0μm), Point(100.0μm, 0.0μm)],
+        Point(100.0μm, 100.0μm),
+        Point(100.0μm, -100.0μm)
+    )
+    @test Paths.t_to_arclength(b_curvy, 0.5) ≈
+          QuadGK.quadgk(t -> ds(b_curvy, t), 0.0, 0.5)[1] rtol = 1e-9
+    for t in (0.05, 0.25, 0.5, 0.75, 0.95)
+        @test Paths.arclength_to_t(b_curvy, Paths.t_to_arclength(b_curvy, t)) ≈ t rtol =
+            1e-9
+    end
+end
+
 @testitem "BSpline approximation" setup = [CommonTestSetup] begin
     pa = Path(Point(0.0, 0.0)nm, α0=90°)
     bspline!(
