@@ -954,45 +954,17 @@ function round_to_curvilinearpolygon(
     relative::Bool=(T <: Length) && (S <: Real),
     min_side_len=relative ? zero(T) : radius
 )::CurvilinearPolygon{T} where {T, S <: DeviceLayout.Coordinate}
-    # If radius is dimensional, non-relative rounding.
-    V = float(T)
-    # Tie break for Real, Real introduces a type instability for non-dimensional.
-    relative = ((T <: Length) && (S <: Real)) || (relative && T <: Real && S <: Real)
-
-    poly = points(pol)
-    len = length(poly)
-    new_points = Point{V}[]
-    new_curves = Paths.Turn{V}[]
-    new_curve_start_idx = Int[]
-
-    for i in eachindex(poly)
-        if !(i in corner_indices)
-            push!(new_points, poly[i])
-        else
-            p0 = poly[mod1(i - 1, len)]
-            p1 = poly[i]
-            p2 = poly[mod1(i + 1, len)]
-            radius_dim = relative ? radius * min(norm(p0 - p1), norm(p1 - p2)) : radius
-            seg_or_p1 = rounded_corner_segment(
-                p0,
-                p1,
-                p2,
-                radius_dim,
-                min_side_len=min_side_len,
-                min_angle=min_angle
-            )
-            if seg_or_p1 isa Paths.Turn
-                push!(new_points, Paths.p0(seg_or_p1))
-                push!(new_curves, seg_or_p1)
-                push!(new_curve_start_idx, length(new_points))
-                push!(new_points, Paths.p1(seg_or_p1))
-            else
-                push!(new_points, seg_or_p1)
-            end
-        end
-    end
-
-    return CurvilinearPolygon(new_points, new_curves, new_curve_start_idx)
+    # A curve-free CurvilinearPolygon has no line-arc corners, so this reduces to
+    # straight-straight rounding in the CurvilinearPolygon method below.
+    return round_to_curvilinearpolygon(
+        CurvilinearPolygon(points(pol)),
+        radius;
+        corner_indices,
+        line_arc_corner_indices,
+        min_angle,
+        relative,
+        min_side_len
+    )
 end
 
 function round_to_curvilinearpolygon(
