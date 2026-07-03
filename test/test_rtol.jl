@@ -197,4 +197,12 @@ end
     for sty in bspline_stys
         test_rtol_reduces(bspline_seg, sty)
     end
+
+    for offset_seg in
+        (Paths.offset(bspline_seg, 10μm), Paths.offset(bspline_seg, s -> 10μm + s / 100))
+        pts_atol = DeviceLayout.discretize_curve(offset_seg, 1nm)
+        pts_rtol = DeviceLayout.discretize_curve(offset_seg, 1nm; rtol=1e-4)
+        @test length(pts_rtol) > 0
+        @test length(pts_rtol) < 0.5 * length(pts_atol)
+    end
 end

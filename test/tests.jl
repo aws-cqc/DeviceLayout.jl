@@ -558,6 +558,10 @@ end
         @test ForwardDiff.derivative(segment(pa[2]), 5π / 2) ≈ Point(0.0, 1.0)
         @test DeviceLayout.Paths.curvature(segment(pa[2]), 0.0) ≈ Point(0.0, 0.2)
         @test DeviceLayout.Paths.curvature(segment(pa[2]), 5π / 2) ≈ Point(-0.2, 0.0)
+        grid = Paths.discretization(segment(pa[2]))
+        @test first(grid) == 0.0
+        @test last(grid) == pathlength(segment(pa[2]))
+        @test !(first(grid) isa Point)
 
         pa = Path(μm)
         @test_throws Unitful.DimensionError straight!(pa, 10.0, Paths.Trace(10))

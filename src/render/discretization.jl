@@ -20,6 +20,22 @@ function discretize_curve(s::Paths.BSpline, tolerance; rtol=nothing)
     return s.r.(discretization_grid(s, tolerance; rtol=rtol))
 end
 
+function discretize_curve(
+    s::Paths.ConstantOffset{T, <:Paths.BSpline{T}},
+    tolerance;
+    rtol=nothing
+) where {T}
+    return _offset_bspline_point.(Ref(s), discretization_grid(s, tolerance; rtol=rtol))
+end
+
+function discretize_curve(
+    s::Paths.GeneralOffset{T, <:Paths.BSpline{T}},
+    tolerance;
+    rtol=nothing
+) where {T}
+    return _offset_bspline_point.(Ref(s), discretization_grid(s, tolerance; rtol=rtol))
+end
+
 function discretization_grid(s::Paths.Segment, tolerance; rtol=nothing)
     l = pathlength(s)
     return discretization_grid(
@@ -36,13 +52,11 @@ end
 # length, not the offset curve's actual arclength. This underestimates t_scale for
 # outer offsets and overestimates for inner offsets, causing the chord-height tolerance
 # to be violated.
-# TODO: For varying base curvature, a single t_scale is an approximation. A fully
-# correct approach would incorporate local curve speed into the marching kernel.
+# TODO: For varying base curvature, a single t_scale is only an approximation.
+# A fully correct approach would incorporate local curve speed into the marching kernel.
 function discretization_grid(s::Paths.ConstantOffset, tolerance; rtol=nothing)
     l = pathlength(s)
-    # Use the maximum curve speed at the endpoints as t_scale. This is conservative:
-    # it may produce slightly more points than necessary, but never exceeds tolerance.
-    # (Exact for constant-curvature base curves like Turn.)
+    # Exact for constant-curvature base curves like Turn.
     κ_base_start = Paths.signed_curvature(s.seg, zero(l))
     κ_base_end = Paths.signed_curvature(s.seg, l)
     max_speed = max(abs(1 - s.offset * κ_base_start), abs(1 - s.offset * κ_base_end))
@@ -78,6 +92,95 @@ function discretization_grid(s::Paths.BSpline, tolerance; rtol=nothing)
         t_scale=l,
         rtol=rtol
     )
+end
+
+# Estimate offset-curve length from endpoint speeds to avoid integrating
+# Paths.arclength(::OffsetSegment{<:BSpline}) during discretization.
+function discretization_grid(
+    s::Paths.ConstantOffset{T, <:Paths.BSpline{T}},
+    tolerance;
+    rtol=nothing
+) where {T}
+    l = pathlength(s) # base curve length
+    κ0 = _bspline_signed_curvature(s.seg.r, 0.0)
+    κ1 = _bspline_signed_curvature(s.seg.r, 1.0)
+    max_speed = max(abs(1 - s.offset * κ0), abs(1 - s.offset * κ1))
+    return discretization_grid(
+        t -> _offset_bspline_curvature(s, t),
+        tolerance;
+        t_scale=l * max_speed,
+        rtol=rtol
+    )
+end
+
+function discretization_grid(
+    s::Paths.GeneralOffset{T, <:Paths.BSpline{T}},
+    tolerance;
+    rtol=nothing
+) where {T}
+    l = pathlength(s) # base curve length
+    κ0 = _bspline_signed_curvature(s.seg.r, 0.0)
+    κ1 = _bspline_signed_curvature(s.seg.r, 1.0)
+    # The offset' term is the normal-direction contribution absent for constant offsets.
+    speed0 = sqrt((1 - Paths.getoffset(s, zero(l)) * κ0)^2 + Paths.offset_derivative(s, zero(l))^2)
+    speed1 = sqrt((1 - Paths.getoffset(s, l) * κ1)^2 + Paths.offset_derivative(s, l)^2)
+    return discretization_grid(
+        t -> _offset_bspline_curvature(s, t),
+        tolerance;
+        t_scale=l * max(speed0, speed1),
+        rtol=rtol
+    )
+end
+
+function _bspline_signed_curvature(r, t)
+    g = Paths.Interpolations.gradient(r, t)[1]
+    h = Paths.Interpolations.hessian(r, t)[1]
+    return (g.x * h.y - g.y * h.x) / (g.x^2 + g.y^2)^(3 // 2)
+end
+
+function _offset_bspline_point(s::Paths.ConstantOffset, t)
+    g = Paths.Interpolations.gradient(s.seg.r, t)[1]
+    tangent = g / norm(g)
+    return s.seg.r(t) + s.offset * Point(-tangent.y, tangent.x)
+end
+
+function _offset_bspline_point(s::Paths.GeneralOffset, t)
+    g = Paths.Interpolations.gradient(s.seg.r, t)[1]
+    tangent = g / norm(g)
+    l = Paths.t_to_arclength(s.seg, t)
+    return s.seg.r(t) + Paths.getoffset(s, l) * Point(-tangent.y, tangent.x)
+end
+
+# Offset-BSpline curvature in base spline `t` space, avoiding an arclength-to-`t`
+# root-find at every discretization step.
+function _offset_bspline_curvature(s::Paths.ConstantOffset, t)
+    return _bspline_curvature(s.seg.r, t) /
+           abs(1 - s.offset * _bspline_signed_curvature(s.seg.r, t))
+end
+
+# Mirrors curvatureradius(::GeneralOffset, s), including its ignored offset*dκ/ds term.
+function _offset_bspline_curvature(s::Paths.GeneralOffset, t)
+    l = Paths.t_to_arclength(s.seg, t)
+    r = 1 / _bspline_signed_curvature(s.seg.r, t)
+    offset = Paths.getoffset(s, l)
+    doffset = Paths.offset_derivative(s, l)
+    d2offset = Paths.ForwardDiff.derivative(l_ -> Paths.offset_derivative(s, l_), l)
+
+    ds_dl = 1 / sqrt((1 - offset / r)^2 + doffset^2)
+    d2s_dl2 = -ds_dl^3 * doffset * (d2offset - (1 - offset / r) / r)
+
+    g = Paths.Interpolations.gradient(s.seg.r, t)[1]
+    base_tangent = g / norm(g)
+    base_normal = Point(-base_tangent.y, base_tangent.x)
+    # Same expression as Paths.tangent(s, l), using κ=1/r without arclength inversion.
+    off_tangent = base_tangent + doffset * base_normal - offset * (1 / r) * base_tangent
+    d2_seg =
+        (
+            (1 / r) * base_normal + d2offset * base_normal -
+            2 * (1 / r) * base_tangent * doffset -
+            ((1 / r) * base_normal) * ((1 / r) * offset)
+        ) * ds_dl^2 + off_tangent * d2s_dl2
+    return norm(d2_seg)
 end
 
 # Discretize using marching algorithm based on Hessian or curvature.
