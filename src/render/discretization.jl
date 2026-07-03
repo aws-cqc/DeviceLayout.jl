@@ -122,7 +122,9 @@ function discretization_grid(
     κ0 = _bspline_signed_curvature(s.seg.r, 0.0)
     κ1 = _bspline_signed_curvature(s.seg.r, 1.0)
     # The offset' term is the normal-direction contribution absent for constant offsets.
-    speed0 = sqrt((1 - Paths.getoffset(s, zero(l)) * κ0)^2 + Paths.offset_derivative(s, zero(l))^2)
+    speed0 = sqrt(
+        (1 - Paths.getoffset(s, zero(l)) * κ0)^2 + Paths.offset_derivative(s, zero(l))^2
+    )
     speed1 = sqrt((1 - Paths.getoffset(s, l) * κ1)^2 + Paths.offset_derivative(s, l)^2)
     return discretization_grid(
         t -> _offset_bspline_curvature(s, t),
