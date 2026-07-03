@@ -359,6 +359,18 @@ function arclength(b::BSpline{T}, t1::Real=1.0; t0::Real=0.0) where {T}
     return I
 end
 
+function discretization(
+    seg::BSpline{T};
+    atol=DeviceLayout.onenanometer(T),
+    rtol=nothing,
+    kwargs...
+) where {T}
+    return [
+        t_to_arclength(seg, t) for
+        t in DeviceLayout.discretization_grid(seg, atol; rtol=rtol)
+    ]
+end
+
 function dtds(t, r)
     if t < 0 || t > 1
         return 0.0

@@ -140,7 +140,11 @@ end
     render!(filler2, centered(Rectangle(1μm, 1μm)), SemanticMeta(:fill))
     hfunc = make_halo(1μm)
     origins_2 = autofill!(cs, filler2, grid_x2, grid_y2, hfunc)
-    @test length(origins_2) == 1226
+    # The count is 1226 or 1227 depending on a boundary tie-break: grid point (112μm, 0)
+    # lies on the outer rim of the turn's halo, which is a discretized curve. Whether
+    # that point lands exactly on a halo edge (counted as inside) or just off it (filled)
+    # depends on sub-nm vertex placement, so the fill count is not uniquely determined.
+    @test length(origins_2) in (1226, 1227)
 
     addref!(cs, cs3)
     h = halo(cs, 1μm)

@@ -755,8 +755,11 @@ end
 Generic fallback, approximating a [`Paths.Segment`](@ref) using many
 [`Polygons.LineSegment`](@ref) objects. Returns a vector of `LineSegment`s.
 """
-function line_segments(seg::Paths.Segment)
-    return Polygons.segmentize(seg.(discretization(seg)), false)
+function line_segments(seg::Paths.Segment{T}) where {T}
+    return Polygons.segmentize(
+        DeviceLayout.discretize_curve(seg, DeviceLayout.onenanometer(T)),
+        false
+    )
 end
 
 """
@@ -764,10 +767,13 @@ end
 
 Return a set of coordinates `s` sufficient to approximate `seg` with the points `seg.(s)`.
 """
-function discretization(seg::Paths.Segment; kwargs...)
-    len = pathlength(seg)
-    bnds = (zero(len), len)
-    return DeviceLayout.adapted_grid(t -> Paths.direction(seg, t), bnds)
+function discretization(
+    seg::Paths.Segment{T};
+    atol=DeviceLayout.onenanometer(T),
+    rtol=nothing,
+    kwargs...
+) where {T}
+    return DeviceLayout.discretization_grid(seg, atol; rtol=rtol) * pathlength(seg)
 end
 
 function DeviceLayout.map_metadata!(path::Path, map_meta, visited::Set{Any}=Set{Any}())
