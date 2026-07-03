@@ -48,7 +48,7 @@ const LayoutBSplineItp{T} = Interpolations.ScaledInterpolation{
 Cached arc-length reparameterization of a [`BSpline`](@ref).
 
 `ss[i]` is the exact arclength from `t = 0` to `t = ts[i]`, with `ts[1] == 0`,
-`ts[end] == 1`, and `total == ss[end] == pathlength`. Used to make `pathlength`,
+`ts[end] == 1`, and `ss[end] == pathlength`. Used to make `pathlength`,
 `t_to_arclength`, and `arclength_to_t` cheap without changing their values
 (within tolerance). The forward map stays exact, using an incremental integral
 seeded by the table, and the inverse is Newton's method on that same map.
@@ -59,7 +59,6 @@ and reset to `nothing` whenever `r` is rebuilt (see `_update_interpolation!`).
 struct BSplineReparam{T}
     ts::Vector{Float64}
     ss::Vector{T}
-    total::T
 end
 
 """
@@ -281,7 +280,14 @@ function convert(::Type{BSpline{T}}, b::BSpline{S}) where {T, S}
     return BSpline(p, t0, t1, r, p0, p1, b.α0, b.α1)
 end
 convert(::Type{Segment{T}}, x::BSpline) where {T} = convert(BSpline{T}, x)
-copy(b::BSpline) = BSpline(copy(b.p), b.t0, b.t1, b.r, b.p0, b.p1, b.α0, b.α1)
+# The copy shares `r`, so it can also share the warm arclength cache: `BSplineReparam`
+# is immutable and derived from `r` alone, and any later mutation of either spline goes
+# through `_update_interpolation!`, which rebuilds that spline's `r` and drops its cache.
+function copy(b::BSpline)
+    b2 = BSpline(copy(b.p), b.t0, b.t1, b.r, b.p0, b.p1, b.α0, b.α1)
+    b2.reparam = b.reparam
+    return b2
+end
 
 p0(b::BSpline) = b.p0
 p1(b::BSpline) = b.p1
@@ -322,7 +328,7 @@ function direction(
     return Dual{S}(d0, p_...) * up
 end
 
-pathlength(b::BSpline) = _get_reparam(b).total
+pathlength(b::BSpline) = _get_reparam(b).ss[end]
 
 function pathlength_nearest(seg::Paths.BSpline{T}, pt::Point) where {T}
     errfunc(s) = ustrip(norm(seg.r(s) - pt))
@@ -366,8 +372,8 @@ end
 # Base grid resolution for the arclength cache. Nodes = max(NMIN, NPERSPAN*spans + 1),
 # where `spans = length(p) - 1` is the number of knot intervals (where dsdt varies).
 # The forward map stays exact regardless of N (see `t_to_arclength`), so N only affects
-# the one-time build cost and the Newton seed quality; kept small to keep the first
-# arclength query on a near-straight spline close to a single old `pathlength` call.
+# the one-time build cost and the Newton seed quality; kept small so the build costs
+# little more than one adaptive quadgk over [0, 1] (what an uncached `pathlength` costs).
 const _REPARAM_NMIN = 9
 const _REPARAM_NPERSPAN = 4
 
@@ -382,19 +388,30 @@ function _build_reparam(b::BSpline{T}) where {T}
         (I, _) = quadgk(t -> dsdt(t, b.r), ts[i - 1], ts[i])
         ss[i] = ss[i - 1] + I
     end
-    return BSplineReparam{T}(ts, ss, ss[end])
+    return BSplineReparam{T}(ts, ss)
 end
 
-# Lazily build and cache the reparameterization. Benign under races: BSplineReparam is
-# immutable and deterministic, so a concurrent double-build just discards one identical copy.
+# Lazily build and cache the reparameterization. The `reparam` field is a plain
+# (unsynchronized) mutable-struct field, so concurrent first-touch or concurrent
+# mutation-while-querying is not supported — same as the pre-existing hazard for
+# mutating `p`/`t0`/`t1` while another task reads `r`. Returning the local (not
+# re-reading the field) keeps the return type concrete and avoids handing back a
+# `nothing` written by a concurrent `_update_interpolation!`.
 function _get_reparam(b::BSpline{T}) where {T}
-    isnothing(b.reparam) && (b.reparam = _build_reparam(b))
-    return b.reparam
+    rp = b.reparam
+    if isnothing(rp)
+        rp = _build_reparam(b)
+        b.reparam = rp
+    end
+    return rp
 end
 
 function arclength_to_t(b::BSpline{T}, s1) where {T}
+    # NaN falls through the endpoint guards below and would fail with an opaque
+    # BoundsError inside Interpolations; fail attributably at the call site instead.
+    isnan(s1) && throw(DomainError(s1, "cannot invert arclength: `s1` is NaN"))
     rp = _get_reparam(b)
-    L = rp.total
+    L = rp.ss[end]
     s1 <= zero(s1) && return 0.0
     s1 >= L && return 1.0
     # Seed with the linear inverse of the (ss, ts) table: locate the bracketing panel
@@ -420,11 +437,13 @@ end
 
 function t_to_arclength(b::BSpline{T}, t1::Real) where {T}
     rp = _get_reparam(b)
-    t1 > 1.0 && return rp.total
+    t1 >= 1.0 && return rp.ss[end]
     t1 <= 0.0 && return zero(T)
     # Exact: cumulative arclength to the nearest node below t1, plus the residual integral
-    # over a panel no wider than one grid step.
+    # over a panel no wider than one grid step. Node hits skip the residual quadgk, which
+    # costs its full 15-point rule even over a zero-width interval.
     i = clamp(searchsortedlast(rp.ts, t1), 1, length(rp.ts) - 1)
+    rp.ts[i] == t1 && return rp.ss[i]
     (I, _) = quadgk(t -> dsdt(t, b.r), rp.ts[i], t1)
     return rp.ss[i] + I
 end

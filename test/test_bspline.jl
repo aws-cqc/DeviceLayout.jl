@@ -165,7 +165,7 @@ end
 
     # Warm-cache results are bit-identical to the first (cold) evaluation
     s_mid = L / 3
-    cold = (
+    probe() = (
         pathlength(b),
         Paths.t_to_arclength(b, 0.42),
         Paths.arclength_to_t(b, s_mid),
@@ -173,15 +173,24 @@ end
         direction(b, s_mid),
         Paths.curvatureradius(b, s_mid)
     )
-    warm = (
-        pathlength(b),
-        Paths.t_to_arclength(b, 0.42),
-        Paths.arclength_to_t(b, s_mid),
-        b(s_mid),
-        direction(b, s_mid),
-        Paths.curvatureradius(b, s_mid)
-    )
+    cold = probe()
+    warm = probe()
     @test all(cold .== warm)
+
+    # Endpoint and node queries are exact table lookups
+    @test Paths.t_to_arclength(b, 1.0) === pathlength(b)
+    rp = Paths._get_reparam(b)
+    @test Paths.t_to_arclength(b, rp.ts[2]) === rp.ss[2]
+
+    # NaN arclength fails attributably rather than deep inside Interpolations
+    @test_throws DomainError Paths.arclength_to_t(b, NaN * μm)
+
+    # copy shares `r`, so it also shares the warm cache; mutation drops only its own
+    b_copy = copy(b)
+    @test b_copy.reparam === b.reparam
+    Paths.setp0!(b_copy, Point(0.0μm, 0.0μm))
+    @test isnothing(b_copy.reparam)
+    @test !isnothing(b.reparam)
 
     # Invalidation: rigid transforms preserve length; the cache is dropped and rebuilt
     let bt = Paths.BSpline(copy(b.p), b.t0, b.t1)
