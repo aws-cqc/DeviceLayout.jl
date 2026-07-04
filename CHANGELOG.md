@@ -21,13 +21,13 @@ The format of this changelog is based on
     curvature-based and tolerance-controlled via `atol`/`rtol`. The `max_recursions`,
     `max_change`, `rand_factor`, and `grid_step` render keywords no longer have any
     effect.
-  -  Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
   - Added a cached arc-length reparameterization to `Paths.BSpline`, making `pathlength`,
     `Paths.t_to_arclength`, and `Paths.arclength_to_t` much faster (~15x for a single
     `arclength_to_t` call). The forward map remains exact; `arclength_to_t` now uses a
     table-seeded Newton iteration (relative tolerance `1e-12`) in place of `Optim`-based
     minimization, so results may differ from previous versions within tolerance.
   - Fixed bug where exact floating point comparison in `autofill` could lead to a gridpoint on an interior edge being filled
+  - Added `recover_curves` and the curve-preserving Boolean variants `union2d_curved`, `difference2d_curved`, `intersect2d_curved`, and `xor2d_curved`, which recover original curves (arcs, splines) from a clipped result wherever their discretized footprint survived the operation intact, returning a `Vector{CurvilinearRegion}`
 
 ## 1.15.0 (2026-06-14)
 
@@ -45,7 +45,6 @@ coordinate system) with no `SolidModel` and no geometry kernel.
     numbers in `ExampleStarTransmon`/`ExampleStarIsland` geometry were extracted to
     parameters. `ExamplePDK` makes no API-stability guarantee, so these are not treated
     as breaking changes to DeviceLayout.jl.
-  - Added `recover_curves` and the curve-preserving Boolean variants `union2d_curved`, `difference2d_curved`, `intersect2d_curved`, and `xor2d_curved`, which recover original curves (arcs, splines) from a clipped result wherever their discretized footprint survived the operation intact, returning a `Vector{CurvilinearRegion}`
 
 ## 1.14.0 (2026-05-28)
 

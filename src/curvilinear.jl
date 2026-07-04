@@ -1131,7 +1131,7 @@ function round_to_curvilinearpolygon(
         end
     end
 
-   # Constructor will sort curves by start index
+    # Constructor will sort curves by start index
     return CurvilinearPolygon(new_points, new_curves, new_curve_start_idx)
 end
 
