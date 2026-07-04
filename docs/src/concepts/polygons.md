@@ -64,6 +64,10 @@ result = difference2d(a, b)  # ClippedPolygon
 
 # Curve-preserving variant recovers arcs where possible:
 regions = difference2d_curved(a, b)  # Vector{CurvilinearRegion}, arcs preserved
+
+# Single-argument self-union merges overlapping curved entities (for example the
+# nodes of a `Path`) into one region per disjoint piece:
+merged = union2d_curved(path)
 ```
 
 **Current limitations:** A curve is recovered only if its entire discretized run survives

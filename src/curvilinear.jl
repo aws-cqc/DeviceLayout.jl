@@ -164,6 +164,11 @@ function to_polygons(
 end
 
 function _reverse(e::CurvilinearPolygon)
+    # Reversing the point list sends old index j → N + 1 - j and flips each curve's
+    # traversal direction. A curve starting at old index i spans i → i + 1 (cyclic), so
+    # its reversed start is the old i + 1, at new index N - i (or N when i == N). csi_rev
+    # emits that as the negative index -(N - i) (-N for i == N), which the constructor
+    # normalizes by reversing the segment and flipping the index positive.
     csi_rev = (i, N) -> mod1(i + 1, N) - N - 1
     return CurvilinearPolygon(
         reverse(e.p),

@@ -67,8 +67,6 @@ import DeviceLayout:
     level,
     norm,
     render!,
-    round_to_curvilinearpolygon,
-    rounded_corner_segment,
     uniquename,
     isapprox_angle
 import DeviceLayout.Paths: trace, gap, offset, extent, pathlength, bspline_approximation

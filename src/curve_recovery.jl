@@ -117,6 +117,8 @@ function substitute_curves(clipped::ClippedPolygon{T}, runs; report=nothing) whe
             used[ri] && continue
             hit = match_run(snapped, pr.run)
             isnothing(hit) && continue
+            # Segments stored in a CurvilinearPolygon must support `reverse` — the
+            # constructor's negative-index normalization imposes the same requirement.
             seg = hit.reversed ? reverse(pr.curve) : pr.curve
             push!(matched, (hit.start, length(pr.run), seg))
             used[ri] = true
@@ -182,7 +184,7 @@ _as_entities(p::Union{GeometryStructure, GeometryReference}) =
 _as_entities(p::Pair{<:Union{GeometryStructure, GeometryReference}}) =
     _as_entities(flat_elements(p))
 function _as_entities(p::Paths.Node)
-    iszero(pathlength(p.seg)) && p.sty isa ContinuousStyle && return []
+    iszero(pathlength(p.seg)) && p.sty isa Paths.ContinuousStyle && return []
     return _as_entities(pathtopolys(p)) # Use `islinear` dispatch on segment and style
 end
 # A Rounded-styled straight Polygon recovers as its exact-arc CurvilinearPolygon, so

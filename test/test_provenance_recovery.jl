@@ -116,8 +116,9 @@ end
     @test length(curved.exterior.curves) == 2
     # curve_start_idx must be ascending after sorting.
     @test issorted(curved.exterior.curve_start_idx)
-    # to_polygons must not error or drop everything when walking the two curves.
-    @test length(DeviceLayout.to_polygons(curved.exterior).p) > 0
+    # to_polygons must yield more points than the 6 original vertices (the two curves
+    # each contribute discretized interior points), not a degenerate near-empty polygon.
+    @test length(DeviceLayout.to_polygons(curved.exterior).p) > 6
     @test count(t -> t[1] == :recovered, report) == 2
     @test count(t -> t[1] == :clipped, report) == 0
 end
@@ -202,6 +203,17 @@ end
     @test length(curved.exterior.curves) == 4 # original 4 curves
     @test length(curved.exterior.p) == 6 # original 6 points
     @test isempty(to_polygons(xor2d(out, pathtopolys(pa))))
+
+    # Zero-length continuous-style node (as left around attach!/launch!): skipped rather
+    # than discretized, so the rest of the path still recovers its curves.
+    pa = Path()
+    straight!(pa, 0μm, Paths.Trace(5μm))
+    turn!(pa, 90°, 50μm)
+    out = union2d_curved(pa)
+    @test length(out) == 1
+    curved = out[1]
+    @test length(curved.exterior.curves) == 2
+    @test isempty(to_polygons(xor2d(curved, pathtopolys(pa))))
 
     # Generic curves
     pa = Path()
@@ -567,4 +579,12 @@ end
     refl = DeviceLayout.transform(cp, Reflection(0.0°))
     @test issorted(refl.curve_start_idx)
     @test length(to_polygons(refl).p) == n_fwd
+
+    # A curve starting at index 1 exercises the other boundary of the csi_rev formula.
+    cap_b = Paths.Turn(180.0°, 5.0; p0=Point(0.0, 0.0), α0=-90.0°)  # (0,0) → (10,0)
+    cp1 = CurvilinearPolygon(copy(pts), [cap_b], [1])
+    n1 = length(to_polygons(cp1).p)
+    rev1 = _reverse(cp1)
+    @test issorted(rev1.curve_start_idx)
+    @test length(to_polygons(rev1).p) == n1
 end
