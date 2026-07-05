@@ -264,7 +264,9 @@ CurvilinearRegion(points::Vector{Point{T}}, curves, curve_start_idx) where {T} =
 function to_polygons(e::CurvilinearRegion; kwargs...)
     isempty(e.holes) && return [to_polygons(e.exterior; kwargs...)]
     return to_polygons(
-        union2d(vcat(to_polygons(e.exterior; kwargs...), _hole_polygon.(e.holes; kwargs...)))
+        union2d(
+            vcat(to_polygons(e.exterior; kwargs...), _hole_polygon.(e.holes; kwargs...))
+        )
     )
 end
 
