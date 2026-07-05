@@ -41,7 +41,8 @@ A [`CurvilinearPolygon`](@ref) is a polygon where some edges are replaced by cir
 `SimpleTrace`, `CPW`) and can also be constructed directly.
 
 A [`CurvilinearRegion`](@ref) pairs a `CurvilinearPolygon` exterior with zero or more
-`CurvilinearPolygon` holes.
+`CurvilinearPolygon` holes. Holes are normalized to clockwise winding on construction,
+matching the convention `ClippedPolygon` uses for hole contours.
 
 See [API Reference: Curvilinear geometry](@ref api-curvilinear).
 

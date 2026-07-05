@@ -219,12 +219,27 @@ points(e::CurvilinearPolygon) = e.p
 A curvilinear region made up of an exterior::CurvilinearPolygon{T} and optional interior
 holes made up of CurvilinearPolygon{T}. These holes cannot intersect each other or the
 exterior.
+
+Holes are normalized to clockwise (negative) winding on construction, opposite the
+counterclockwise exterior. This matches `ClippedPolygon` hole contours, so that `to_polygons`
+can reconstitute the region with `union2d` under Clipper's positive fill rule. See issue #241.
 """
 struct CurvilinearRegion{T} <: GeometryEntity{T}
     exterior::CurvilinearPolygon{T}
     holes::Vector{CurvilinearPolygon{T}}
     CurvilinearRegion{T}(ext::CurvilinearPolygon, holes=CurvilinearPolygon{T}[]) where {T} =
-        new(ext, holes)
+        new(ext, _to_hole_winding.(holes))
+end
+
+# Normalize a hole to clockwise (negative) winding, matching `ClippedPolygon` hole contours,
+# so `to_polygons` subtracts it via positive-fill `union2d`. For curve-bearing holes, winding
+# is read from the discretized loop because vertices alone can't determine it (a two-vertex
+# loop closed by two arcs has no vertex winding at all). Clipper-derived holes already arrive
+# clockwise, making this a no-op. Degenerate loops (< 3 discretized points) pass through.
+function _to_hole_winding(h::CurvilinearPolygon)
+    pg = isempty(h.curves) ? Polygon(h.p) : to_polygons(h)
+    length(points(pg)) < 3 && return h
+    return Polygons.orientation(pg) > 0 ? _reverse(h) : h
 end
 CurvilinearRegion(x) = CurvilinearRegion(CurvilinearPolygon(x))
 CurvilinearRegion(ext::CurvilinearPolygon{T}) where {T} = CurvilinearRegion{T}(ext)
@@ -239,18 +254,37 @@ CurvilinearRegion(points::Vector{Point{T}}, segments) where {T} =
 CurvilinearRegion(points::Vector{Point{T}}, curves, curve_start_idx) where {T} =
     CurvilinearRegion(CurvilinearPolygon(points, curves, curve_start_idx))
 
+# Holes carry clockwise winding (normalized in the constructor), opposite the exterior, so a
+# single `union2d` over [exterior, holes...] subtracts them under Clipper's positive fill rule.
+# The exterior and holes must share one input: positive fill is applied per input before the
+# union, which would drop a clockwise hole passed as a separate argument as a "hole in nothing".
+# Using `union2d` rather than `difference2d` keeps hole winding consistent with `ClippedPolygon`
+# and is robust to styles (e.g. composed `Rounded`) that round each loop independently and
+# preserve winding. See #241.
 function to_polygons(e::CurvilinearRegion; kwargs...)
     isempty(e.holes) && return [to_polygons(e.exterior; kwargs...)]
     return to_polygons(
-        difference2d(to_polygons(e.exterior; kwargs...), to_polygons.(e.holes; kwargs...))
+        union2d(vcat(to_polygons(e.exterior; kwargs...), _hole_polygon.(e.holes; kwargs...)))
     )
+end
+
+# Discretize a hole through its reversed (counterclockwise) traversal, then flip the point
+# list back to clockwise. The marching discretizer is direction-dependent, and holes store
+# their curves reversed to match the clockwise loop; the reversed walk restores each curve's
+# forward parameterization, so a hole produced by curve recovery re-discretizes to the exact
+# footprint its curves had when first clipped (recover → re-discretize is xor2d-empty
+# against the raw clip result).
+function _hole_polygon(h::CurvilinearPolygon; kwargs...)
+    return Polygon(reverse(points(to_polygons(_reverse(h); kwargs...))))
 end
 function to_polygons(e::CurvilinearRegion, sty::Polygons.Rounded; kwargs...)
     isempty(e.holes) && return [to_polygons(e.exterior, sty; kwargs...)]
     return to_polygons(
-        difference2d(
-            to_polygons(e.exterior, sty; kwargs...),
-            [to_polygons(h, sty; kwargs...) for h in e.holes]
+        union2d(
+            vcat(
+                to_polygons(e.exterior, sty; kwargs...),
+                [to_polygons(h, sty; kwargs...) for h in e.holes]
+            )
         )
     )
 end

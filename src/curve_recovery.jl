@@ -42,11 +42,13 @@ function _collect_provenance!(polys, runs, e::CurvilinearPolygon, ::Type{R}, ato
     return nothing
 end
 
-# CurvilinearRegion: exterior + holes, each a CurvilinearPolygon.
+# CurvilinearRegion: exterior + holes, each a CurvilinearPolygon. Holes are stored with
+# clockwise winding (constructor-normalized), which is what positive-fill clipping expects,
+# so they discretize as-is.
 function _collect_provenance!(polys, runs, e::CurvilinearRegion, ::Type{R}, atol) where {R}
     _collect_provenance!(polys, runs, e.exterior, R, atol)
     for h in e.holes
-        _collect_provenance!(polys, runs, _reverse(h), R, atol)
+        _collect_provenance!(polys, runs, h, R, atol)
     end
     return nothing
 end
@@ -154,9 +156,9 @@ function substitute_curves(clipped::ClippedPolygon{T}, runs; report=nothing) whe
     end
     function add_region(node)
         ext = build_cpoly(node)
-        # Holes must be CCW, but come out CW from Clipper
-        holes =
-            CurvilinearPolygon{T}[_reverse(build_cpoly(child)) for child in node.children]
+        # Clipper hole contours come out clockwise, already matching the constructor's
+        # hole-winding convention, so they are used as-is.
+        holes = CurvilinearPolygon{T}[build_cpoly(child) for child in node.children]
         push!(out, CurvilinearRegion{T}(ext, holes))
         for child in node.children
             for gc in child.children

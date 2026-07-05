@@ -29,6 +29,7 @@ The format of this changelog is based on
   - Fixed bug where exact floating point comparison in `autofill` could lead to a gridpoint on an interior edge being filled
   - Added `recover_curves` and the curve-preserving Boolean variants `union2d_curved`, `difference2d_curved`, `intersect2d_curved`, and `xor2d_curved`, which recover original curves (arcs, splines) from a clipped result wherever their discretized footprint survived the operation intact, returning a `Vector{CurvilinearRegion}`
   - Unified styled-entity expansion into curve-bearing geometry behind `Curvilinear.to_curvilinear`, shared by the `SolidModel` render path, the GDS `Rounded` rendering bridge, and curve recovery. `Rounded` on `ClippedPolygon`/`CurvilinearRegion`/`CurvilinearPolygon`, nestings with no-op styles (`MeshSized`, `WithDirection`), and per-contour `StyleDict`s now preserve their arcs through the `*_curved` variants. Fixes a `MethodError` when rendering `Rounded(MeshSized(...))` through curve recovery.
+  - Fixed composite rounding of a `ClippedPolygon` dropping its holes (#241). `CurvilinearRegion` now normalizes holes to clockwise winding on construction (matching `ClippedPolygon` hole contours), and `to_polygons` reconstitutes the region with a single positive-fill `union2d` instead of `difference2d`, so hole subtraction no longer depends on input winding.
 
 ## 1.15.0 (2026-06-14)
 
