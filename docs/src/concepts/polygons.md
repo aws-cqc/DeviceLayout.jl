@@ -70,12 +70,16 @@ regions = difference2d_curved(a, b)  # Vector{CurvilinearRegion}, arcs preserved
 merged = union2d_curved(path)
 ```
 
+Curve-bearing inputs are expanded to their exact arc geometry before clipping via the same
+converter the `SolidModel` render path uses, so `Rounded` applied to `Polygon`, `Rectangle`,
+`ClippedPolygon`, `CurvilinearRegion`, and `CurvilinearPolygon`, as well as nestings with
+no-op styles (`MeshSized`, `WithDirection`) and per-contour `StyleDict`s, all recover their
+arcs where the footprint survives.
+
 **Current limitations:** A curve is recovered only if its entire discretized run survives
 the boolean operation with exact integer equality. If the operation cuts through a curve
 (e.g., a straight edge crossing an arc's interior), that curve falls back to a polyline.
-Additionally, curves can only be recovered on CurvilinearRegion/CurvilinearPolygon,
-Path nodes, and `Rounded`-styled `Polygon`/`Rectangle` entities. `Rounded` applied to
-other entities, styled Curvilinear entities, and nested styles do not yet support curve recovery.
+Partial-curve recovery is not supported.
 
 ## Styles
 

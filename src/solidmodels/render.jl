@@ -69,26 +69,7 @@ function to_primitives(
     ent::StyledEntity{T, ClippedPolygon{T}, <:StyleDict};
     kwargs...
 ) where {T}
-    return to_curvilinear_regions(ent.ent, ent.sty; kwargs...)
-end
-
-function to_curvilinear_regions(ent::ClippedPolygon{T}, sty::StyleDict; kwargs...) where {T}
-    # Flatten the tree into a collection of CurvilinearRegion with style applied to subpolygons.
-    flat = CurvilinearRegion{T}[]
-    function add_region(node)
-        push!(
-            flat,
-            CurvilinearRegion{T}(
-                styled_loop(node, sty[node]; kwargs...),
-                styled_loop.(node.children, getindex.(Ref(sty), node.children); kwargs...)
-            )
-        )
-        for n ∈ node.children
-            add_region.(n.children) # Add all grand children -- positives
-        end
-    end
-    add_region.(ent.tree.children)
-    return flat
+    return to_curvilinear(ent.ent, ent.sty; kwargs...)
 end
 
 # GmshNative flattens clipped regions up front for the same reason as path nodes.
@@ -174,21 +155,13 @@ function to_primitives(
 end
 
 ######## Rounded polygons
-# Rounded polygons
+# Rounded polygons expand to their exact-arc CurvilinearPolygon through the shared converter.
 function to_primitives(
     ::SolidModel{OpenCascade},
     ent::StyledEntity{T, Polygon{T}, <:Rounded};
     kwargs...
 ) where {T}
-    return CurvilinearRegion(
-        round_to_curvilinearpolygon(
-            ent.ent,
-            radius(ent.sty),
-            min_side_len=ent.sty.min_side_len,
-            corner_indices=cornerindices(ent.ent, ent.sty),
-            min_angle=ent.sty.min_angle
-        )
-    )
+    return CurvilinearRegion(to_curvilinear(ent.ent, ent.sty; kwargs...))
 end
 
 # Convert a single style to a style dict
@@ -205,83 +178,7 @@ function to_primitives(
     ent::StyledEntity{T, CurvilinearRegion{T}, <:StyleDict};
     kwargs...
 ) where {T}
-    return CurvilinearRegion{T}(
-        styled_loop(ent.ent.exterior, ent.sty[1]; kwargs...),
-        styled_loop.(
-            ent.ent.holes,
-            getindex.(ent.sty, 1, 1:length(ent.ent.holes));
-            kwargs...
-        )
-    )
-end
-
-######## Styled Polygon and CurvilinearPolygon
-
-# Given a polygon and style, create a CurvilinearPolygon
-styled_loop(p::Polygon, ::Plain; kwargs...) = CurvilinearPolygon(points(p))
-styled_loop(::Polygon{T}, ::NoRender; kwargs...) where {T} = CurvilinearPolygon{T}([])
-function styled_loop(p::GeometryEntity, sty::OptionalStyle; kwargs...)
-    return styled_loop(
-        p,
-        get(kwargs, sty.flag, sty.default) ? sty.true_style : sty.false_style;
-        kwargs...
-    )
-end
-function styled_loop(p::GeometryEntity, sty::Rounded; kwargs...)
-    return round_to_curvilinearpolygon(
-        p,
-        radius(sty),
-        min_side_len=sty.min_side_len,
-        corner_indices=cornerindices(p, sty),
-        line_arc_corner_indices=line_arc_cornerindices(p, sty),
-        min_angle=sty.min_angle
-    )
-end
-styled_loop(n, sty; kwargs...) = styled_loop(Polygon(contour(n)), sty; kwargs...)
-
-styled_loop(l::CurvilinearPolygon, sty::Plain; kwargs...) = l
-styled_loop(::CurvilinearPolygon{T}, ::NoRender; kwargs...) where {T} =
-    CurvilinearPolygon{T}([])
-
-# Bridge for nested Rounded styles in the Cell rendering path.
-# Without this, the inner Rounded resolves to a plain Polygon (losing arc info),
-# so the outer Rounded can only do line-line rounding. By routing through styled_loop,
-# the inner Rounded produces a CurvilinearPolygon with exact fillet arcs, and the outer
-# Rounded can then apply line-arc rounding via to_polygons(CurvilinearPolygon, Rounded).
-function to_polygons(
-    ent::StyledEntity{T, U, V},
-    sty::Rounded{S};
-    kwargs...
-) where {S, T, U, V}
-    inner_roundable = to_roundable(ent.ent, ent.sty; kwargs...)
-    if inner_roundable isa Vector
-        return vcat(to_polygons.(inner_roundable, Ref(sty); kwargs...)...)
-    end
-    return to_polygons(sty(inner_roundable); kwargs...)
-end
-
-# To AbstractPolygon, CurvilinearPolygon, CurvilinearRegion, or vector of those
-to_roundable(ent::GeometryEntity, sty; kwargs...) = to_polygons(ent, sty; kwargs...)
-function to_roundable(ent::StyledEntity, sty; kwargs...)
-    return to_roundable(to_roundable(ent.ent, ent.sty), sty; kwargs...)
-end
-to_roundable(ents::AbstractVector, sty; kwargs...) =
-    vcat(to_roundable.(ents, Ref(sty); kwargs...)...)
-to_roundable(ent::AbstractPolygon, sty; kwargs...) =
-    styled_loop(convert(Polygon, ent), sty; kwargs...)
-to_roundable(ent::CurvilinearPolygon, sty; kwargs...) = styled_loop(ent, sty; kwargs...)
-to_roundable(ent::ClippedPolygon, sty; kwargs...) =
-    to_roundable(ent, StyleDict(sty); kwargs...)
-to_roundable(ent::CurvilinearRegion, sty; kwargs...) =
-    to_roundable(ent, StyleDict(sty); kwargs...)
-function to_roundable(ent::ClippedPolygon, sty::StyleDict; kwargs...)
-    return to_curvilinear_regions(ent, sty; kwargs...)
-end
-function to_roundable(ent::CurvilinearRegion{T}, sty::StyleDict; kwargs...) where {T}
-    return CurvilinearRegion{T}(
-        styled_loop(ent.exterior, sty[1]; kwargs...),
-        styled_loop.(ent.holes, getindex.(sty, 1, 1:length(ent.holes)); kwargs...)
-    )
+    return to_curvilinear(ent.ent, ent.sty; kwargs...)
 end
 
 ######## Ellipse

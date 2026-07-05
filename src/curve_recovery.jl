@@ -187,21 +187,11 @@ function _as_entities(p::Paths.Node)
     iszero(pathlength(p.seg)) && p.sty isa Paths.ContinuousStyle && return []
     return _as_entities(pathtopolys(p)) # Use `islinear` dispatch on segment and style
 end
-# A Rounded-styled straight Polygon recovers as its exact-arc CurvilinearPolygon, so
-# corners survive the clip. Mirrors to_primitives(::SolidModel, ::StyledEntity{Polygon,Rounded}).
-function _as_entities(
-    p::StyledEntity{T, <:Union{Polygon{T}, Polygons.Rectangle{T}}, <:Polygons.Rounded}
-) where {T}
-    return [
-        round_to_curvilinearpolygon(
-            p.ent,
-            radius(p.sty),
-            min_side_len=p.sty.min_side_len,
-            corner_indices=cornerindices(p.ent, p.sty),
-            min_angle=p.sty.min_angle
-        )
-    ]
-end
+# Styled entities expand through the shared `to_curvilinear` converter, which preserves arcs
+# (e.g. Rounded corners, nested styles, per-contour StyleDicts) so they survive the clip
+# wherever their discretized footprint is left intact. `to_curvilinear` returns a
+# CurvilinearPolygon/CurvilinearRegion or a Vector of those; `_as_entities` re-flattens.
+_as_entities(p::StyledEntity) = _as_entities(to_curvilinear(p.ent, p.sty))
 
 # Promoted coordinate type matching what clip's promote_type would pick.
 function _recover_coordtype(plus, minus)

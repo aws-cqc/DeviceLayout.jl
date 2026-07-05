@@ -32,8 +32,10 @@ import DeviceLayout:
     transform,
     perimeter,
     isapprox_angle
+import DeviceLayout: MeshSized, WithDirection, OptionalStyle, Plain, NoRender
 using DeviceLayout.Paths
-import DeviceLayout.Polygons: cornerindices
+import DeviceLayout.Polygons: cornerindices, StyleDict, Rounded
+import DeviceLayout.Polygons.Clipper: PolyNode, contour
 import Unitful: uconvert, °, Length
 
 using ..Points
@@ -46,7 +48,9 @@ export CurvilinearPolygon,
     line_arc_cornerindices,
     round_to_curvilinearpolygon,
     rounded_corner_segment,
-    rounded_corner_segment_line_arc
+    rounded_corner_segment_line_arc,
+    to_curvilinear,
+    styled_loop
 export recover_curves, difference2d_curved, intersect2d_curved, union2d_curved, xor2d_curved
 
 """
@@ -1152,33 +1156,17 @@ function rounded_corner_segment(
     min_side_len=radius,
     min_angle=1e-3
 ) where {T, S <: DeviceLayout.Coordinate}
-    V = float(T)
-    rad = convert(V, radius)
-
-    v1 = (p1 - p0) / norm(p1 - p0)
-    v2 = (p2 - p1) / norm(p2 - p1)
-    α1 = atan(v1.y, v1.x) # between -π and π
-    α2 = atan(v2.y, v2.x)
-
-    if min_side_len > norm(p1 - p0) || min_side_len > norm(p2 - p1)
-        return p1
-    elseif isapprox(rem2pi(α1 - α2, RoundNearest), 0, atol=min_angle)
-        return p1
-    end
-
-    dir = DeviceLayout.orientation(p0, p1, p2)
-    dα = α2 - α1
-    if sign(dα) != dir
-        dα = dα + dir * 2π
-    end
-
-    # p0_seg is the start of the arc, determined by the intersection
-    # of lines parallel to v1, v2
-    k =
-        inv([v1.x -v2.x; v1.y -v2.y]) *
-        [p2.x - p0.x + dir * rad * (v1.y - v2.y), p2.y - p0.y + dir * rad * (v2.x - v1.x)]
-    p0_seg = p0 + k[1] * v1
-    return Paths.Turn(uconvert(°, dα), rad, p0_seg, uconvert(°, α1))
+    geom = Polygons._rounded_corner_geometry(
+        p0,
+        p1,
+        p2,
+        radius;
+        atol=Polygons._round_atol(T, S),
+        min_side_len=min_side_len,
+        min_angle=min_angle
+    )
+    isnothing(geom) && return p1
+    return Paths.Turn(uconvert(°, geom.dα), geom.radius, geom.start, uconvert(°, geom.α0))
 end
 
 """
@@ -1343,6 +1331,103 @@ function rounded_corner_segment_line_arc(
     fillet = Paths.Turn(uconvert(°, dα), r; p0=start_pt, α0=uconvert(°, α0))
 
     return (; fillet, T_line, T_arc=T_arc_pt)
+end
+
+######## Styled entity → curvilinear geometry
+#
+# `to_curvilinear` expands a (possibly nested) styled entity into curve-bearing geometry —
+# a `CurvilinearPolygon`, a `CurvilinearRegion`, or a `Vector` of those — preserving arcs
+# instead of discretizing them. It is the single source of truth shared by the SolidModel
+# render path, the GDS `Rounded` bridge (`to_polygons(::StyledEntity, ::Rounded)`), and
+# curve recovery (`_as_entities`). `styled_loop` is the per-contour worker that applies one
+# resolved style to one loop; `to_curvilinear` drives the recursion over nesting and trees.
+
+# Given a loop (Polygon or CurvilinearPolygon) and one resolved style, produce a
+# CurvilinearPolygon. Rounded produces exact fillet arcs; Plain/NoRender are pass-through.
+styled_loop(p::Polygon, ::Plain; kwargs...) = CurvilinearPolygon(points(p))
+styled_loop(::Polygon{T}, ::NoRender; kwargs...) where {T} = CurvilinearPolygon(Point{T}[])
+function styled_loop(p::GeometryEntity, sty::OptionalStyle; kwargs...)
+    return styled_loop(
+        p,
+        get(kwargs, sty.flag, sty.default) ? sty.true_style : sty.false_style;
+        kwargs...
+    )
+end
+function styled_loop(p::GeometryEntity, sty::Rounded; kwargs...)
+    return round_to_curvilinearpolygon(
+        p,
+        radius(sty),
+        min_side_len=sty.min_side_len,
+        corner_indices=cornerindices(p, sty),
+        line_arc_corner_indices=line_arc_cornerindices(p, sty),
+        min_angle=sty.min_angle
+    )
+end
+# Styles that don't affect geometry (mesh sizing, direction annotation) leave the loop as-is.
+styled_loop(p::Polygon, ::Union{MeshSized, WithDirection}; kwargs...) =
+    CurvilinearPolygon(points(p))
+styled_loop(l::CurvilinearPolygon, ::Union{MeshSized, WithDirection}; kwargs...) = l
+# Clipper `PolyNode`s carry their loop in `contour`; convert then apply the style. Restricted
+# to `PolyNode` so unrelated types fail at dispatch instead of hitting a missing `contour`.
+styled_loop(n::PolyNode, sty; kwargs...) = styled_loop(Polygon(contour(n)), sty; kwargs...)
+
+styled_loop(l::CurvilinearPolygon, sty::Plain; kwargs...) = l
+styled_loop(::CurvilinearPolygon{T}, ::NoRender; kwargs...) where {T} =
+    CurvilinearPolygon(Point{T}[])
+
+# Expand a styled entity into curve-bearing geometry. Entry points accept a bare style
+# (single style applied to the whole entity) and dispatch by entity type below.
+# To AbstractPolygon, CurvilinearPolygon, CurvilinearRegion, or vector of those.
+to_curvilinear(ent::GeometryEntity, sty; kwargs...) = to_polygons(ent, sty; kwargs...)
+# Nested styles: expand the inner style first (inner-out), then apply the outer style to the
+# resulting curvilinear geometry so both rounding passes see exact arcs.
+function to_curvilinear(ent::StyledEntity, sty; kwargs...)
+    return to_curvilinear(to_curvilinear(ent.ent, ent.sty; kwargs...), sty; kwargs...)
+end
+to_curvilinear(ents::AbstractVector, sty; kwargs...) =
+    vcat(to_curvilinear.(ents, Ref(sty); kwargs...)...)
+to_curvilinear(ent::AbstractPolygon, sty; kwargs...) =
+    styled_loop(convert(Polygon, ent), sty; kwargs...)
+to_curvilinear(ent::CurvilinearPolygon, sty; kwargs...) = styled_loop(ent, sty; kwargs...)
+to_curvilinear(ent::ClippedPolygon, sty; kwargs...) =
+    to_curvilinear(ent, StyleDict(sty); kwargs...)
+to_curvilinear(ent::CurvilinearRegion, sty; kwargs...) =
+    to_curvilinear(ent, StyleDict(sty); kwargs...)
+function to_curvilinear(ent::ClippedPolygon{T}, sty::StyleDict; kwargs...) where {T}
+    # Flatten the tree into a collection of CurvilinearRegion with style applied per contour.
+    flat = CurvilinearRegion{T}[]
+    function add_region(node)
+        push!(
+            flat,
+            CurvilinearRegion{T}(
+                styled_loop(node, sty[node]; kwargs...),
+                styled_loop.(node.children, getindex.(Ref(sty), node.children); kwargs...)
+            )
+        )
+        for n in node.children
+            add_region.(n.children) # Add all grandchildren -- positives
+        end
+    end
+    add_region.(ent.tree.children)
+    return flat
+end
+function to_curvilinear(ent::CurvilinearRegion{T}, sty::StyleDict; kwargs...) where {T}
+    return CurvilinearRegion{T}(
+        styled_loop(ent.exterior, sty[1]; kwargs...),
+        styled_loop.(ent.holes, getindex.(sty, 1, 1:length(ent.holes)); kwargs...)
+    )
+end
+
+# Bridge for nested Rounded styles in the Cell/GDS rendering path. Without it, the inner
+# style resolves to a plain Polygon (losing arc info), so the outer Rounded could only do
+# line-line rounding. Routing the inner styles through `to_curvilinear` yields exact fillet
+# arcs, so the outer Rounded can apply line-arc rounding via to_polygons(_, ::Rounded).
+function to_polygons(ent::StyledEntity, sty::Rounded; kwargs...)
+    inner = to_curvilinear(ent.ent, ent.sty; kwargs...)
+    if inner isa AbstractVector
+        return vcat(to_polygons.(inner, Ref(sty); kwargs...)...)
+    end
+    return to_polygons(sty(inner); kwargs...)
 end
 
 include("curve_recovery.jl")

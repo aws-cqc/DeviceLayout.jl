@@ -588,3 +588,41 @@ end
     @test issorted(rev1.curve_start_idx)
     @test length(to_polygons(rev1).p) == n1
 end
+
+@testitem "Provenance — styled entity expansion (to_curvilinear)" setup = [CommonTestSetup] begin
+    using DeviceLayout: Rounded, StyleDict, MeshSized, WithDirection
+    using DeviceLayout: union2d, union2d_curved, xor2d, to_polygons
+    using DeviceLayout.Curvilinear: to_curvilinear, _as_entities
+
+    # A plus-shaped ClippedPolygon: two overlapping rectangles unioned. Rounding it produces
+    # 12 fillet arcs. Before the to_curvilinear unification, curve recovery reached only
+    # `Rounded` on a bare Polygon/Rectangle, so every case below either silently dropped its
+    # arcs (fell through to discretization) or threw a MethodError. All must now recover
+    # arcs, and the recovered geometry must match the exact curvilinear expansion.
+    r = centered(Rectangle(10.0μm, 10.0μm))
+    bar = centered(Rectangle(4.0μm, 20.0μm))
+    clip = union2d(r, bar)
+
+    # `Rounded` and `StyleDict{Rounded}` on a ClippedPolygon.
+    for sty in (Rounded(1μm), StyleDict(Rounded(1μm)))
+        out = union2d_curved(sty(clip))
+        @test sum(length(reg.exterior.curves) for reg in out) == 12
+        # Recovered arcs match the exact curvilinear expansion (not merely a polygon area).
+        ref = to_curvilinear(clip, StyleDict(Rounded(1μm)))
+        @test isempty(to_polygons(xor2d(out, ref)))
+    end
+
+    # Nested no-op styles must not block the inner Rounded. `Rounded(MeshSized(rect))`
+    # previously threw MethodError (styled_loop catch-all → contour(::Polygon)); the reverse
+    # nesting silently discretized. Both now recover the four corner fillets.
+    for ent in (Rounded(1μm)(MeshSized(1μm)(r)), MeshSized(1μm)(Rounded(1μm)(r)))
+        out = union2d_curved(ent)
+        @test sum(length(reg.exterior.curves) for reg in out) == 4
+        @test isempty(to_polygons(xor2d(out, _as_entities(Rounded(1μm)(r)))))
+    end
+
+    # WithDirection is also a no-op for geometry: it passes through to the inner Rounded.
+    out = union2d_curved(WithDirection(45°)(Rounded(1μm)(r)))
+    @test sum(length(reg.exterior.curves) for reg in out) == 4
+    @test isempty(to_polygons(xor2d(out, _as_entities(Rounded(1μm)(r)))))
+end
