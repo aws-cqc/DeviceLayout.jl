@@ -1402,7 +1402,7 @@ function gridpoints_in_polygon(
             x_right_minidx = searchsortedfirst(grid_x, x) # Can be nx + 1 if x > last(grid_x)
             # If the grid point lies on the edge, it's in the polygon
             x_right_minidx <= nx &&
-                x == grid_x[x_right_minidx] &&
+                isapprox(x, grid_x[x_right_minidx]) &&
                 (in_poly[x_right_minidx, iy] = true)
             # Record edge crossing in difference array (O(1) instead of O(grid_x))
             s = sign(last(edge).y - first(edge).y)

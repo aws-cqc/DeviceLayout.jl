@@ -27,6 +27,7 @@ The format of this changelog is based on
     `arclength_to_t` call). The forward map remains exact; `arclength_to_t` now uses a
     table-seeded Newton iteration (relative tolerance `1e-12`) in place of `Optim`-based
     minimization, so results may differ from previous versions within tolerance.
+  - Fixed bug where exact floating point comparison in `autofill` could lead to a gridpoint on an interior edge being filled
 
 ## 1.15.0 (2026-06-14)
 
