@@ -1400,10 +1400,17 @@ function gridpoints_in_polygon(
                 (last(edge).x - first(edge).x) * (y - first(edge).y) /
                 (last(edge).y - first(edge).y)
             x_right_minidx = searchsortedfirst(grid_x, x) # Can be nx + 1 if x > last(grid_x)
-            # If the grid point lies on the edge, it's in the polygon
+            # If a grid point lies on the edge, it's in the polygon. The computed
+            # crossing x may round to either side of an on-edge grid point, so we
+            # check both grid points bracketing the insertion point: grid_x[k-1] < x
+            # <= grid_x[k]. Checking only grid_x[k] would miss points where x rounds
+            # just above the grid point.
             x_right_minidx <= nx &&
-                x == grid_x[x_right_minidx] &&
+                isapprox(x, grid_x[x_right_minidx]) &&
                 (in_poly[x_right_minidx, iy] = true)
+            x_right_minidx > 1 &&
+                isapprox(x, grid_x[x_right_minidx - 1]) &&
+                (in_poly[x_right_minidx - 1, iy] = true)
             # Record edge crossing in difference array (O(1) instead of O(grid_x))
             s = sign(last(edge).y - first(edge).y)
             delta[1] += s

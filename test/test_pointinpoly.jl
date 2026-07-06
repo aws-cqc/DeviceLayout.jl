@@ -88,6 +88,16 @@
     in_poly = gridpoints_in_polygon(poly, dx, dy)
     @test count((!).(in_poly)) == 14
     @test all(in_poly .== gridpoints_in_polygon(poly, dx, dy))
+
+    # On-edge grid point with floating-point round-off in the edge crossing.
+    # The slanted edge (0, 0)->(0.2μm, 0.4μm) has slope 1/2 and passes exactly
+    # through the grid point (0.1μm, 0.2μm). The crossing x = 0.2*(0.2/0.4) is
+    # evaluated as 0.10000000000000002, just above 0.1μm, so `searchsortedfirst`
+    # returns the next grid point. The on-edge point must still be counted as
+    # inside, which requires checking both grid points bracketing the crossing.
+    tri =
+        Polygon(Point(0.0, 0.0)μm, Point(0.2, 0.4)μm, Point(0.6, 0.4)μm, Point(0.6, 0.0)μm)
+    @test Polygons.gridpoints_in_polygon([tri], [0.1]μm, [0.2]μm)[1, 1]
 end
 
 @testitem "Autofill" setup = [CommonTestSetup] begin
