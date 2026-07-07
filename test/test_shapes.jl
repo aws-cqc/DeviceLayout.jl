@@ -474,6 +474,13 @@ end
     coarse = to_polygons(cp; atol=2.0nm)
     fine = to_polygons(cp; atol=0.1nm)
     @test length(points(coarse)) < length(points(fine))
+
+    # Rounding through CurvilinearPolygon doesn't over-refine tight corners
+    @test length(
+        to_polygons(
+            Curvilinear.round_to_curvilinearpolygon(Rectangle(1.0μm, 1.0μm), 0.1μm)
+        ).p
+    ) < 60
 end
 
 @testitem "CurvilinearRegion holes (#241)" setup = [CommonTestSetup] begin
