@@ -762,17 +762,25 @@ end
     # Antenna signature: two vertices far apart on the ring (gap > 5) but spatially < 0.5µm,
     # both sitting on long (> 0.5µm) edges — i.e. two boundary strands that should have met.
     function has_pinch(poly)
-        q = [(Float64(ustrip(μm, DeviceLayout.getx(z))),
-              Float64(ustrip(μm, DeviceLayout.gety(z)))) for z in points(poly)]
+        q = [
+            (
+                Float64(ustrip(μm, DeviceLayout.getx(z))),
+                Float64(ustrip(μm, DeviceLayout.gety(z)))
+            ) for z in points(poly)
+        ]
         m = length(q)
-        for i in 1:m, j in (i + 5):m
+        for i = 1:m, j = (i + 5):m
             (i <= 2 && j >= m - 1) && continue
             d = hypot(q[i][1] - q[j][1], q[i][2] - q[j][2])
             (0.001 < d < 0.5) || continue
-            ei = max(hypot(q[mod1(i + 1, m)][1] - q[i][1], q[mod1(i + 1, m)][2] - q[i][2]),
-                     hypot(q[i][1] - q[mod1(i - 1, m)][1], q[i][2] - q[mod1(i - 1, m)][2]))
-            ej = max(hypot(q[mod1(j + 1, m)][1] - q[j][1], q[mod1(j + 1, m)][2] - q[j][2]),
-                     hypot(q[j][1] - q[mod1(j - 1, m)][1], q[j][2] - q[mod1(j - 1, m)][2]))
+            ei = max(
+                hypot(q[mod1(i + 1, m)][1] - q[i][1], q[mod1(i + 1, m)][2] - q[i][2]),
+                hypot(q[i][1] - q[mod1(i - 1, m)][1], q[i][2] - q[mod1(i - 1, m)][2])
+            )
+            ej = max(
+                hypot(q[mod1(j + 1, m)][1] - q[j][1], q[mod1(j + 1, m)][2] - q[j][2]),
+                hypot(q[j][1] - q[mod1(j - 1, m)][1], q[j][2] - q[mod1(j - 1, m)][2])
+            )
             (ei > 0.5 && ej > 0.5) && return true
         end
         return false

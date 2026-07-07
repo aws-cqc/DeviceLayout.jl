@@ -137,7 +137,9 @@ function to_polygons(
     # one step short of its endpoint and leaving a sub-µm near-pinch. Sorting locally (without
     # mutating `e`) makes the walk robust to any curve ordering, including deserialized polygons
     # that predate constructor-side normalization.
-    order = issorted(e.curve_start_idx) ? eachindex(e.curve_start_idx) : sortperm(e.curve_start_idx)
+    order =
+        issorted(e.curve_start_idx) ? eachindex(e.curve_start_idx) :
+        sortperm(e.curve_start_idx)
 
     for idx in order
         csi = e.curve_start_idx[idx]

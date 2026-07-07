@@ -32,7 +32,9 @@ function _collect_provenance!(polys, runs, e::CurvilinearPolygon, ::Type{R}, ato
     # so the Clipper polygon and these provenance runs share the same point ordering. See the
     # note there: an out-of-order (e.g. wrap-seam-first) curve list otherwise emits the wrong
     # `ec.p[i:csi]` spans and a sub-µm near-pinch.
-    order = issorted(ec.curve_start_idx) ? eachindex(ec.curve_start_idx) : sortperm(ec.curve_start_idx)
+    order =
+        issorted(ec.curve_start_idx) ? eachindex(ec.curve_start_idx) :
+        sortperm(ec.curve_start_idx)
     for idx in order
         csi = ec.curve_start_idx[idx]
         c = ec.curves[idx]
@@ -62,29 +64,57 @@ end
 # proxy for "this discretized polygon CONTAINS curve geometry we are about to lose". Used only to
 # warn on the silent-discretization path below; not exact, just enough to flag a likely loss.
 function _count_arclike_runs(pts; short_nm=6000.0, min_run=4, resid_nm=2.0)
-    n = length(pts); n < min_run + 1 && return 0
-    xy = [(Float64(DeviceLayout.ustrip(getx(p))) / 1000, Float64(DeviceLayout.ustrip(gety(p))) / 1000) for p in pts]  # → ~nm scale-agnostic
+    n = length(pts)
+    n < min_run + 1 && return 0
+    xy = [
+        (
+            Float64(DeviceLayout.ustrip(getx(p))) / 1000,
+            Float64(DeviceLayout.ustrip(gety(p))) / 1000
+        ) for p in pts
+    ]  # → ~nm scale-agnostic
     # edge lengths in the same units as xy
-    el = [hypot(xy[mod1(i + 1, n)][1] - xy[i][1], xy[mod1(i + 1, n)][2] - xy[i][2]) for i in 1:n]
+    el = [
+        hypot(xy[mod1(i + 1, n)][1] - xy[i][1], xy[mod1(i + 1, n)][2] - xy[i][2]) for
+        i = 1:n
+    ]
     short = short_nm / 1000
-    cnt = 0; i = 1
+    cnt = 0
+    i = 1
     while i <= n
-        if !(0 < el[i] < short); i += 1; continue; end
-        j = i; while j < n && 0 < el[mod1(j + 1, n)] < short; j += 1; end
+        if !(0 < el[i] < short)
+            i += 1
+            continue
+        end
+        j = i
+        while j < n && 0 < el[mod1(j + 1, n)] < short
+            j += 1
+        end
         rl = j - i + 1
         if rl >= min_run
-            vx = [xy[mod1(i + k, n)][1] for k in 0:rl]; vy = [xy[mod1(i + k, n)][2] for k in 0:rl]
-            m = length(vx); sx = sum(vx); sy = sum(vy)
-            sxx = sum(vx .^ 2); syy = sum(vy .^ 2); sxy = sum(vx .* vy)
-            sxxx = sum(vx .^ 3); syyy = sum(vy .^ 3); sxyy = sum(vx .* vy .^ 2); sxxy = sum(vx .^ 2 .* vy)
-            A = m * sxx - sx^2; B = m * sxy - sx * sy; Cc = m * syy - sy^2
-            D = 0.5 * (m * sxxx + m * sxyy - sx * sxx - sx * syy); E = 0.5 * (m * syyy + m * sxxy - sy * syy - sy * sxx)
+            vx = [xy[mod1(i + k, n)][1] for k = 0:rl]
+            vy = [xy[mod1(i + k, n)][2] for k = 0:rl]
+            m = length(vx)
+            sx = sum(vx)
+            sy = sum(vy)
+            sxx = sum(vx .^ 2)
+            syy = sum(vy .^ 2)
+            sxy = sum(vx .* vy)
+            sxxx = sum(vx .^ 3)
+            syyy = sum(vy .^ 3)
+            sxyy = sum(vx .* vy .^ 2)
+            sxxy = sum(vx .^ 2 .* vy)
+            A = m * sxx - sx^2
+            B = m * sxy - sx * sy
+            Cc = m * syy - sy^2
+            D = 0.5 * (m * sxxx + m * sxyy - sx * sxx - sx * syy)
+            E = 0.5 * (m * syyy + m * sxxy - sy * syy - sy * sxx)
             den = A * Cc - B^2
             if abs(den) > 1e-12
-                cx = (D * Cc - B * E) / den; cy = (A * E - B * D) / den
+                cx = (D * Cc - B * E) / den
+                cy = (A * E - B * D) / den
                 r = sqrt(max(0.0, (sxx + syy - 2cx * sx - 2cy * sy) / m + cx^2 + cy^2))
                 if 1e-3 < r < 1e5
-                    mr = maximum(abs(hypot(vx[k] - cx, vy[k] - cy) - r) for k in 1:m)
+                    mr = maximum(abs(hypot(vx[k] - cx, vy[k] - cy) - r) for k = 1:m)
                     mr < resid_nm / 1000 && (cnt += 1)
                 end
             end
@@ -118,11 +148,20 @@ function _collect_provenance!(polys, runs, e, ::Type{R}, atol) where {R}
     end
     if warn_on_curve_loss[] && arclike > 0
         key = string(nameof(typeof(e)))
-        e isa StyledEntity && (key = "Styled{" * string(nameof(typeof(e.ent))) * "," * string(nameof(typeof(e.sty))) * "}")
+        e isa StyledEntity && (
+            key =
+                "Styled{" *
+                string(nameof(typeof(e.ent))) *
+                "," *
+                string(nameof(typeof(e.sty))) *
+                "}"
+        )
         first_seen = !haskey(_curve_loss_log, key)
         _curve_loss_log[key] = get(_curve_loss_log, key, 0) + arclike
-        first_seen && @warn "recover_curves: discretizing a curve-bearing entity with no provenance — its arcs are LOST. " *
-                            "Add an _as_entities method for this (type, style) to recover them." entity_type=key arclike_runs=arclike
+        first_seen &&
+            @warn "recover_curves: discretizing a curve-bearing entity with no provenance — its arcs are LOST. " *
+                  "Add an _as_entities method for this (type, style) to recover them." entity_type =
+                key arclike_runs = arclike
     end
     return nothing
 end
@@ -163,12 +202,17 @@ end
 # boolean operation (e.g. a Turn arc bisected by another polygon's edge), the run survives
 # as multiple disjoint contiguous sub-blocks. Each sub-block becomes a sub-curve via the
 # original segment's `Paths.split` interface.
-function match_run_partial(contour::AbstractVector{P}, run::AbstractVector{P};
-                            min_len::Int = 3) where {P}
+function match_run_partial(
+    contour::AbstractVector{P},
+    run::AbstractVector{P};
+    min_len::Int=3
+) where {P}
     n = length(contour)
     m = length(run)
-    (m == 0 || n == 0) && return NamedTuple{(:contour_start, :run_lo, :run_hi, :reversed),
-                                              Tuple{Int,Int,Int,Bool}}[]
+    (m == 0 || n == 0) && return NamedTuple{
+        (:contour_start, :run_lo, :run_hi, :reversed),
+        Tuple{Int, Int, Int, Bool}
+    }[]
     # Build a position lookup: for each run point value, what indices in run have that value?
     # Run is short (typically 50-200 points for an arc), contour can be longer; this trades a
     # bit of memory for fast search.
@@ -182,8 +226,10 @@ function match_run_partial(contour::AbstractVector{P}, run::AbstractVector{P};
         push!(get!(rev_pos, v, Int[]), i)
     end
 
-    matches = NamedTuple{(:contour_start, :run_lo, :run_hi, :reversed),
-                         Tuple{Int,Int,Int,Bool}}[]
+    matches = NamedTuple{
+        (:contour_start, :run_lo, :run_hi, :reversed),
+        Tuple{Int, Int, Int, Bool}
+    }[]
 
     # Try to extend a contiguous run-match starting at contour position s, run position r0,
     # in the given orientation. Returns the longest extension length k such that
@@ -220,7 +266,10 @@ function match_run_partial(contour::AbstractVector{P}, run::AbstractVector{P};
             if best_k >= min_len
                 run_lo = orient ? (m + 1 - (best_r0 + best_k - 1)) : best_r0
                 run_hi = orient ? (m + 1 - best_r0) : (best_r0 + best_k - 1)
-                push!(matches, (contour_start=s, run_lo=run_lo, run_hi=run_hi, reversed=orient))
+                push!(
+                    matches,
+                    (contour_start=s, run_lo=run_lo, run_hi=run_hi, reversed=orient)
+                )
                 s += best_k                # skip the matched block; no overlap
             else
                 s += 1
@@ -241,12 +290,13 @@ function match_run_partial(contour::AbstractVector{P}, run::AbstractVector{P};
             klen = kt.run_hi - kt.run_lo + 1
             # Check cyclic overlap of [t.contour_start, t.contour_start+len-1]
             # with [kt.contour_start, kt.contour_start+klen-1].
-            for i = 0:(len-1)
+            for i = 0:(len - 1)
                 pos = mod1(t.contour_start + i, n)
                 # Is pos inside kt's span?
-                for j = 0:(klen-1)
+                for j = 0:(klen - 1)
                     if mod1(kt.contour_start + j, n) == pos
-                        overlap = true; break
+                        overlap = true
+                        break
                     end
                 end
                 overlap && break
@@ -426,14 +476,10 @@ end
 # this file, but `_as_entities` only runs at boolean time (all modules loaded), so the qualified
 # name resolves at call time. Returns a Vector{CurvilinearRegion}; `_as_entities(::AbstractArray)`
 # flattens it, and `_collect_provenance!(::CurvilinearRegion)` records each contour's curve runs.
-function _as_entities(
-    p::StyledEntity{T, ClippedPolygon{T}, <:Polygons.StyleDict}
-) where {T}
+function _as_entities(p::StyledEntity{T, ClippedPolygon{T}, <:Polygons.StyleDict}) where {T}
     return DeviceLayout.SolidModels.to_curvilinear_regions(p.ent, p.sty)
 end
-function _as_entities(
-    p::StyledEntity{T, ClippedPolygon{T}, <:Polygons.Rounded}
-) where {T}
+function _as_entities(p::StyledEntity{T, ClippedPolygon{T}, <:Polygons.Rounded}) where {T}
     return DeviceLayout.SolidModels.to_curvilinear_regions(p.ent, Polygons.StyleDict(p.sty))
 end
 # A geometrically-transparent style (e.g. MeshSized — a mesh-density hint applied via
