@@ -674,6 +674,14 @@ end
         MeshSized(1μm)(ell)
     )
 
+    # StyleDict doesn't warn for curve loss
+    empty!(_curve_loss_warned)
+    @test_logs min_level = Logging.Warn union2d_curved(
+        StyleDict(Rounded(1μm))(union2d(ell))
+    )
+    @test Curvilinear._carries_curves(StyleDict(Rounded(1μm))(union2d(ell)))
+    @test !Curvilinear._carries_curves(StyleDict(DeviceLayout.Plain())(union2d(ell)))
+
     # Curve-free inputs discretize losslessly: never warn.
     empty!(_curve_loss_warned)
     @test_logs min_level = Logging.Warn union2d_curved(centered(Rectangle(4μm, 4μm)))

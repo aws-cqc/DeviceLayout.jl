@@ -1487,16 +1487,19 @@ _carries_curves(e::CurvilinearRegion) =
     _carries_curves(e.exterior) || any(_carries_curves, e.holes)
 _carries_curves(n::Paths.Node) = islinear(n.seg, n.sty) isa Val{false}
 _carries_curves(e::StyledEntity{T, U, <:Rounded}) where {T, U} = true
-_carries_curves(e::StyledEntity{T, U, <:StyleDict}) where {T, U} =
-    any(isa.(e.sty.styles, Rounded))
-_carries_curves(e::StyledEntity) = _carries_curves(e.ent)
+function _carries_curves(e::StyledEntity{T, U, <:StyleDict}) where {T, U}
+    return e.sty.default isa Rounded ||
+           any(x -> x isa Rounded, values(e.sty.styles)) ||
+           _carries_curves(e.ent)
+end
+_carries_curves(e::StyledEntity{T, U}) where {T, U} = _carries_curves(e.ent)
 
 # Entities without a curve-preserving method are discretized.
 # Warn once per entity type so the loss is observable.
 const _curve_loss_warned = Set{Symbol}()
 function _maybe_warn_curve_loss(e)
     _carries_curves(e) || return nothing
-    key = Symbol("$typeof(e)")
+    key = Symbol("$(typeof(e))")
     key in _curve_loss_warned && return nothing
     push!(_curve_loss_warned, key)
     @warn "recover_curves: entities of type $(typeof(e)) have no curve-recovery method " *
