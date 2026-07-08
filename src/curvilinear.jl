@@ -1487,7 +1487,8 @@ _carries_curves(e::CurvilinearRegion) =
     _carries_curves(e.exterior) || any(_carries_curves, e.holes)
 _carries_curves(n::Paths.Node) = islinear(n.seg, n.sty) isa Val{false}
 _carries_curves(e::StyledEntity{T, U, <:Rounded}) where {T, U} = true
-_carries_curves(e::StyledEntity{T, U, <:StyleDict}) where {T, U} = any(isa.(e.sty.styles, Rounded))
+_carries_curves(e::StyledEntity{T, U, <:StyleDict}) where {T, U} =
+    any(isa.(e.sty.styles, Rounded))
 _carries_curves(e::StyledEntity) = _carries_curves(e.ent)
 
 # Entities without a curve-preserving method are discretized.
