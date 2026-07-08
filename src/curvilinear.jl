@@ -1425,6 +1425,20 @@ to_curvilinear(ents::AbstractVector, sty; kwargs...) =
 to_curvilinear(ent::AbstractPolygon, sty; kwargs...) =
     styled_loop(convert(Polygon, ent), sty; kwargs...)
 to_curvilinear(ent::CurvilinearPolygon, sty; kwargs...) = styled_loop(ent, sty; kwargs...)
+# Path nodes expand through `pathtopolys`, which preserves curves; geometry-transparent
+# styles pass through. Without this method a `MeshSized` path node falls to the generic
+# `to_polygons` fallback and silently discretizes its arcs. Zero-length continuous-style
+# nodes (as left around `attach!`/`launch!`) expand to nothing, matching `_as_entities`.
+function to_curvilinear(
+    n::Paths.Node{T},
+    ::Union{MeshSized, WithDirection};
+    kwargs...
+) where {T}
+    iszero(pathlength(n.seg)) &&
+        n.sty isa Paths.ContinuousStyle &&
+        return CurvilinearPolygon{T}[]
+    return pathtopolys(n; kwargs...)
+end
 to_curvilinear(ent::ClippedPolygon, sty; kwargs...) =
     to_curvilinear(ent, StyleDict(sty); kwargs...)
 to_curvilinear(ent::CurvilinearRegion, sty; kwargs...) =

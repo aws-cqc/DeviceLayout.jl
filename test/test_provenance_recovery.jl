@@ -625,4 +625,52 @@ end
     out = union2d_curved(WithDirection(45°)(Rounded(1μm)(r)))
     @test sum(length(reg.exterior.curves) for reg in out) == 4
     @test isempty(to_polygons(xor2d(out, _as_entities(Rounded(1μm)(r)))))
+
+    # Geometry-transparent styles on a Path node (e.g. meshsized_entity on a path element)
+    # previously fell to the generic to_polygons fallback and silently discretized the arcs.
+    pa = Path()
+    turn!(pa, 90°, 50μm, Paths.Trace(5μm))
+    for node in (MeshSized(1μm)(pa[1]), WithDirection(45°)(pa[1]))
+        node_out = union2d_curved(node)
+        @test length(node_out) == 1
+        @test length(node_out[1].exterior.curves) == 2
+        @test isempty(to_polygons(xor2d(node_out, pathtopolys(pa))))
+    end
+    # A zero-length continuous-style node under a style wrapper expands to nothing,
+    # matching the bare-node behavior in _as_entities.
+    pa0 = Path()
+    straight!(pa0, 0μm, Paths.Trace(5μm))
+    @test isempty(_as_entities(MeshSized(1μm)(pa0[1])))
+end
+
+@testitem "Provenance — warn once on silent curve loss" setup = [CommonTestSetup] begin
+    using DeviceLayout: Ellipse, Rectangle, union2d_curved, MeshSized
+    using DeviceLayout.Curvilinear: _curve_loss_warned
+    # An Ellipse carries curves but has no curve-recovery method: it is discretized with
+    # no provenance, so the loss must be warned (once per entity type, not per entity).
+    empty!(_curve_loss_warned)
+    ell = Ellipse(Point(0.0μm, 0.0μm), (10.0μm, 5.0μm), 0.0°)
+    @test_logs (:warn, r"no curve-recovery method") min_level = Logging.Warn union2d_curved([
+        ell,
+        centered(Rectangle(4μm, 4μm))
+    ])
+    # Second Ellipse: already warned, and the entity still discretizes and clips normally.
+    out = @test_logs min_level = Logging.Warn union2d_curved(ell)
+    @test length(out) == 1
+    @test isempty(out[1].exterior.curves)
+
+    # The styled path also warns when the innermost entity carries curves and the style
+    # expansion falls back to plain polygons (no to_curvilinear method for the pair).
+    empty!(_curve_loss_warned)
+    @test_logs (:warn, r"no curve-recovery method") min_level = Logging.Warn union2d_curved(
+        MeshSized(1μm)(ell)
+    )
+
+    # Curve-free inputs discretize losslessly: never warn.
+    empty!(_curve_loss_warned)
+    @test_logs min_level = Logging.Warn union2d_curved(centered(Rectangle(4μm, 4μm)))
+    @test_logs min_level = Logging.Warn union2d_curved(
+        MeshSized(1μm)(centered(Rectangle(4μm, 4μm)))
+    )
+    @test isempty(_curve_loss_warned)
 end

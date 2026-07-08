@@ -53,8 +53,37 @@ function _collect_provenance!(polys, runs, e::CurvilinearRegion, ::Type{R}, atol
     return nothing
 end
 
+# Whether discretizing this entity to plain polygons loses curve geometry. Plain polygon
+# types and linear path nodes are exactly representable as polygons; other entity types
+# are assumed to carry curves unless they declare otherwise, so that unrecognized
+# curve-bearing entities still trigger the loss warning below.
+_carries_curves(e) = true
+_carries_curves(::AbstractPolygon) = false
+_carries_curves(e::CurvilinearPolygon) = !isempty(e.curves)
+_carries_curves(e::CurvilinearRegion) =
+    _carries_curves(e.exterior) || any(_carries_curves, e.holes)
+_carries_curves(n::Paths.Node) = islinear(n.seg, n.sty) isa Val{false}
+_carries_curves(e::StyledEntity{T, U, <:Rounded}) where {T, U} = true
+_carries_curves(e::StyledEntity) = _carries_curves(e.ent)
+
+# Entities without a curve-recovery method are discretized with no provenance, so any
+# curves they carry are silently unrecoverable. Warn once per entity type so the loss
+# is observable.
+const _curve_loss_warned = Set{Symbol}()
+function _maybe_warn_curve_loss(e)
+    _carries_curves(e) || return nothing
+    key = nameof(typeof(e))
+    key in _curve_loss_warned && return nothing
+    push!(_curve_loss_warned, key)
+    @warn "recover_curves: entities of type $(typeof(e)) have no curve-recovery method " *
+          "and are discretized via to_polygons — any curves they carry will not be " *
+          "recovered. (This warning is shown once per entity type.)"
+    return nothing
+end
+
 # Any other entity: no curves to recover; discretize to polygons.
 function _collect_provenance!(polys, runs, e, ::Type{R}, atol) where {R}
+    _maybe_warn_curve_loss(e)
     # Convert to polygons and append. to_polygons returns a polygon or array.
     poly_result = DeviceLayout.to_polygons(e)
     if poly_result isa Polygon
@@ -193,7 +222,18 @@ end
 # (e.g. Rounded corners, nested styles, per-contour StyleDicts) so they survive the clip
 # wherever their discretized footprint is left intact. `to_curvilinear` returns a
 # CurvilinearPolygon/CurvilinearRegion or a Vector of those; `_as_entities` re-flattens.
-_as_entities(p::StyledEntity) = _as_entities(to_curvilinear(p.ent, p.sty))
+# A (type, style) combination `to_curvilinear` doesn't handle falls back to `to_polygons`
+# and produces plain polygons; if the innermost entity carried curves, that discretization
+# is a silent curve loss, so warn on it here — by the time the plain polygons reach
+# `_collect_provenance!`, their origin is no longer visible.
+function _as_entities(p::StyledEntity)
+    expanded = to_curvilinear(p.ent, p.sty)
+    discretized =
+        expanded isa AbstractPolygon ||
+        (expanded isa AbstractVector && any(x -> x isa AbstractPolygon, expanded))
+    discretized && _maybe_warn_curve_loss(p)
+    return _as_entities(expanded)
+end
 
 # Promoted coordinate type matching what clip's promote_type would pick.
 function _recover_coordtype(plus, minus)
