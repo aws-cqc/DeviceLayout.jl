@@ -1375,7 +1375,7 @@ end
 # a `CurvilinearPolygon`, a `CurvilinearRegion`, or a `Vector` of those — preserving arcs
 # instead of discretizing them. It is the single source of truth shared by the SolidModel
 # render path, the GDS `Rounded` bridge (`to_polygons(::StyledEntity, ::Rounded)`), and
-# curve recovery (`_as_entities`). `styled_loop` is the per-contour worker that applies one
+# curve recovery (`_normalize_curved_clip_arg`). `styled_loop` is the per-contour worker that applies one
 # resolved style to one loop; `to_curvilinear` drives the recursion over nesting and trees.
 
 # Given a loop (Polygon or CurvilinearPolygon) and one resolved style, produce a
@@ -1436,7 +1436,7 @@ to_curvilinear(ent::CurvilinearPolygon, sty; kwargs...) = styled_loop(ent, sty; 
 # Path nodes expand through `pathtopolys`, which preserves curves; geometry-transparent
 # styles pass through. Without this method a `MeshSized` path node falls to the generic
 # `to_polygons` fallback and silently discretizes its arcs. Zero-length continuous-style
-# nodes (as left around `attach!`/`launch!`) expand to nothing, matching `_as_entities`.
+# nodes (as left around `attach!`/`launch!`) expand to nothing, matching `_normalize_curved_clip_arg`.
 function to_curvilinear(
     n::Paths.Node{T},
     ::Union{MeshSized, WithDirection};

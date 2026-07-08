@@ -180,27 +180,28 @@ end
 
 # Normalize a clip operand into a flat Vector of entities, preserving curve-bearing
 # entities intact (unlike _normalize_clip_arg, which discretizes via to_polygons).
-_as_entities(p::DeviceLayout.GeometryEntity) = [p]
-_as_entities(p::AbstractArray) = collect(Iterators.flatten(_as_entities.(p)))
-_as_entities(p::Union{GeometryStructure, GeometryReference}) =
-    _as_entities(flat_elements(p))
-_as_entities(p::Pair{<:Union{GeometryStructure, GeometryReference}}) =
-    _as_entities(flat_elements(p))
-function _as_entities(p::Paths.Node)
+_normalize_curved_clip_arg(p::DeviceLayout.GeometryEntity) = [p]
+_normalize_curved_clip_arg(p::AbstractArray) =
+    collect(Iterators.flatten(_normalize_curved_clip_arg.(p)))
+_normalize_curved_clip_arg(p::Union{GeometryStructure, GeometryReference}) =
+    _normalize_curved_clip_arg(flat_elements(p))
+_normalize_curved_clip_arg(p::Pair{<:Union{GeometryStructure, GeometryReference}}) =
+    _normalize_curved_clip_arg(flat_elements(p))
+function _normalize_curved_clip_arg(p::Paths.Node)
     iszero(pathlength(p.seg)) && p.sty isa Paths.ContinuousStyle && return []
-    return _as_entities(pathtopolys(p)) # Use `islinear` dispatch on segment and style
+    return _normalize_curved_clip_arg(pathtopolys(p)) # Use `islinear` dispatch on segment and style
 end
 # Styled entities expand through the shared `to_curvilinear` converter, which preserves arcs
 # (e.g. Rounded corners, nested styles, per-contour StyleDicts) so they survive the clip
 # wherever their discretized footprint is left intact. `to_curvilinear` returns a
-# CurvilinearPolygon/CurvilinearRegion or a Vector of those; `_as_entities` re-flattens.
+# CurvilinearPolygon/CurvilinearRegion or a Vector of those; `_normalize_curved_clip_arg` re-flattens.
 # A (type, style) combination `to_curvilinear` doesn't handle falls back to `to_polygons`
 # and produces plain polygons; if the innermost entity carried curves, that discretization
 # is a silent curve loss, so warn on it here — by the time the plain polygons reach
 # `_collect_provenance!`, their origin is no longer visible.
-function _as_entities(p::StyledEntity)
+function _normalize_curved_clip_arg(p::StyledEntity)
     expanded = to_curvilinear(p.ent, p.sty)
-    return _as_entities(expanded)
+    return _normalize_curved_clip_arg(expanded)
 end
 
 # Promoted coordinate type matching what clip's promote_type would pick.
@@ -262,8 +263,8 @@ See also [`difference2d`](@ref), [`union2d`](@ref), [`intersect2d`](@ref), [`xor
 """
 function recover_curves(op, plus, minus; report=nothing)
     R = _recover_coordtype(plus, minus)
-    pp, runs_p = discretize_with_provenance(_as_entities(plus), R)
-    pm, runs_m = discretize_with_provenance(_as_entities(minus), R)
+    pp, runs_p = discretize_with_provenance(_normalize_curved_clip_arg(plus), R)
+    pm, runs_m = discretize_with_provenance(_normalize_curved_clip_arg(minus), R)
     # Annotate the result so a wrong `op` (not one of difference2d/union2d/intersect2d/
     # xor2d) fails here with a clear TypeError rather than deep inside substitute_curves.
     clipped = op(pp, pm)::ClippedPolygon

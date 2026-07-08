@@ -1,4 +1,4 @@
-@testitem "Provenance — preserved vertices survive Clipper" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — preserved vertices survive Clipper" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, Polygon, union2d
     snap(p) = DeviceLayout.Polygons.clipperize(p)
 
@@ -31,7 +31,7 @@
     @test length(circ_con) == N
 end
 
-@testitem "Provenance — discretize_with_provenance captures arc runs" setup =
+@testitem "Curve recovery — discretize_with_provenance captures arc runs" setup =
     [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, Paths, Polygon
     using DeviceLayout.Curvilinear: discretize_with_provenance
@@ -51,7 +51,7 @@ end
     @test length(runs[1].run) ≥ 3
 end
 
-@testitem "Provenance — match_run cyclic + bidirectional" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — match_run cyclic + bidirectional" setup = [CommonTestSetup] begin
     using DeviceLayout: Point
     M = DeviceLayout.Curvilinear   # match_run is internal (not exported)
     ip(x) = Point{Int64}(x, 0)
@@ -62,7 +62,7 @@ end
     @test M.match_run(contour, ip.([2, 4, 3])) === nothing                   # no contiguous match
 end
 
-@testitem "Provenance — substitute_curves recovers one arc" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — substitute_curves recovers one arc" setup = [CommonTestSetup] begin
     using DeviceLayout:
         Point, CurvilinearPolygon, CurvilinearRegion, Paths, union2d, Polygon
     using DeviceLayout.Curvilinear: discretize_with_provenance, substitute_curves
@@ -87,7 +87,7 @@ end
     @test count(t -> t[1] == :clipped, report) == 0
 end
 
-@testitem "Provenance — substitute_curves recovers two arcs in order" setup =
+@testitem "Curve recovery — substitute_curves recovers two arcs in order" setup =
     [CommonTestSetup] begin
     using DeviceLayout:
         Point, CurvilinearPolygon, CurvilinearRegion, Paths, union2d, Polygon
@@ -123,7 +123,7 @@ end
     @test count(t -> t[1] == :clipped, report) == 0
 end
 
-@testitem "Provenance — recover_curves end to end" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — recover_curves end to end" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout: recover_curves, union2d, union2d_curved, difference2d_curved
     pts = Point{Float64}[(0, 0), (10, 0), (0, 10)]
@@ -148,7 +148,7 @@ end
     @test count(t -> t[1] == :recovered, report) == 1
 end
 
-@testitem "Provenance — interface methods" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — interface methods" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout: recover_curves, union2d, union2d_curved, difference2d_curved
     pts = Point{Float64}[(0, 0), (10, 0), (0, 10)]
@@ -179,7 +179,7 @@ end
     @test isempty(to_polygons(xor2d(multi_cp, union2d_curved(multi_cp))))
 end
 
-@testitem "Provenance — Path round trips" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — Path round trips" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout: recover_curves, union2d, union2d_curved, difference2d_curved
     # Trace
@@ -233,7 +233,7 @@ end
     @test isempty(to_polygons(xor2d(curved, pathtopolys(pa))))
 end
 
-@testitem "Provenance — Rounded polygon round trips" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — Rounded polygon round trips" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout: recover_curves, union2d, union2d_curved, difference2d_curved
     r = centered(Rectangle(10.0μm, 10.0μm))
@@ -242,21 +242,27 @@ end
     curved = out[1]
     @test length(curved.exterior.curves) == 4
     @test length(curved.exterior.p) == 8
-    @test isempty(to_polygons(xor2d(curved, Curvilinear._as_entities(rr))))
+    @test isempty(to_polygons(xor2d(curved, Curvilinear._normalize_curved_clip_arg(rr))))
     r2 = centered(Rectangle(100μm, 2μm))
     out = union2d_curved(rr, r2)
     curved = out[1]
     @test length(curved.exterior.curves) == 4
     @test length(curved.exterior.p) == 16
-    @test isempty(to_polygons(xor2d(curved, [r2, Curvilinear._as_entities(rr)])))
+    @test isempty(
+        to_polygons(xor2d(curved, [r2, Curvilinear._normalize_curved_clip_arg(rr)]))
+    )
     out = difference2d_curved(rr, r2)
     @test length(out) == 2
     @test length(out[1].exterior.curves) == 2
     @test length(out[2].exterior.curves) == 2
-    @test isempty(to_polygons(xor2d(out, difference2d(Curvilinear._as_entities(rr), r2))))
+    @test isempty(
+        to_polygons(
+            xor2d(out, difference2d(Curvilinear._normalize_curved_clip_arg(rr), r2))
+        )
+    )
 end
 
-@testitem "Provenance — single untouched arc, varied radius" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — single untouched arc, varied radius" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout: recover_curves, union2d, to_polygons
     # An arc-bearing region unioned with a DISJOINT square recovers its arc intact
@@ -287,7 +293,7 @@ end
     end
 end
 
-@testitem "Provenance — seam-rotation (union with self)" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — seam-rotation (union with self)" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout: recover_curves, union2d
     # A rectangle with one rounded corner unioned with a copy of itself. Clipper
@@ -313,7 +319,7 @@ end
     @test isempty(to_polygons(xor2d(region, out)))
 end
 
-@testitem "Provenance — reversed winding (arc on a hole)" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — reversed winding (arc on a hole)" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout.Curvilinear: recover_curves, difference2d, discretize_with_provenance
     # Differencing a curved region out of a solid square puts the arc on the
@@ -373,7 +379,7 @@ end
     @test isempty(to_polygons(xor2d(curved_gc, difference2d(outer, out))))
 end
 
-@testitem "Provenance — arcs on exterior and a hole" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — arcs on exterior and a hole" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout: recover_curves, difference2d
     # A region with an arc on its exterior, differenced by a curved region that
@@ -406,7 +412,7 @@ end
     @test isempty(to_polygons(xor2d(difference2d(plus, minus), out)))
 end
 
-@testitem "Provenance — annulus / collision probe" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — annulus / collision probe" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout.Curvilinear: recover_curves, union2d, discretize_with_provenance
     # Two arcs of different radii in one geometry. Each must map to its own curve.
@@ -437,7 +443,7 @@ end
     @test runs[1].run != runs[2].run
 end
 
-@testitem "Provenance — straight edge cuts an arc (clipped, not recovered)" setup =
+@testitem "Curve recovery — straight edge cuts an arc (clipped, not recovered)" setup =
     [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout: recover_curves, difference2d
@@ -465,7 +471,7 @@ end
     @test sum(length(r.exterior.curves) for r in out) == 0  # polyline fallback
 end
 
-@testitem "Provenance — full circle across the seam" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — full circle across the seam" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout: recover_curves, union2d, to_polygons
     # A closed-loop circle built from two half-circle Turns (a single 360° Turn is
@@ -494,7 +500,7 @@ end
     @test isempty(to_polygons(xor2d(region, curved)))
 end
 
-@testitem "Provenance — BSpline segment (type-agnostic)" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — BSpline segment (type-agnostic)" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout: recover_curves, union2d
     # A BSpline-bearing region unioned with a disjoint square. The recovery
@@ -519,7 +525,8 @@ end
     @test isempty(to_polygons(xor2d(region, curved)))
 end
 
-@testitem "Provenance — clipped curve not spuriously recovered" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — clipped curve not spuriously recovered" setup =
+    [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, CurvilinearRegion, Paths, Polygon
     using DeviceLayout: recover_curves, difference2d
     # Safety property: a destroyed arc must NEVER emit a (wrong) curve. Uses the same
@@ -546,7 +553,7 @@ end
     @test all(isempty(r.exterior.curves) for r in out)
 end
 
-@testitem "Provenance — curve_start_idx sorted invariant" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — curve_start_idx sorted invariant" setup = [CommonTestSetup] begin
     using DeviceLayout: Point, CurvilinearPolygon, Paths, to_polygons, Reflection, °
     using DeviceLayout.Curvilinear: _reverse
     # to_polygons walks curves with a running cursor and slices p[i:csi], which requires
@@ -589,10 +596,11 @@ end
     @test length(to_polygons(rev1).p) == n1
 end
 
-@testitem "Provenance — styled entity expansion (to_curvilinear)" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — styled entity expansion (to_curvilinear)" setup =
+    [CommonTestSetup] begin
     using DeviceLayout: Rounded, StyleDict, MeshSized, WithDirection
     using DeviceLayout: union2d, union2d_curved, xor2d, to_polygons
-    using DeviceLayout.Curvilinear: to_curvilinear, _as_entities
+    using DeviceLayout.Curvilinear: to_curvilinear, _normalize_curved_clip_arg
 
     # A plus-shaped ClippedPolygon: two overlapping rectangles unioned. Rounding it produces
     # 12 fillet arcs. Before the to_curvilinear unification, curve recovery reached only
@@ -618,13 +626,13 @@ end
     for ent in (Rounded(1μm)(MeshSized(1μm)(r)), MeshSized(1μm)(Rounded(1μm)(r)))
         out = union2d_curved(ent)
         @test sum(length(reg.exterior.curves) for reg in out) == 4
-        @test isempty(to_polygons(xor2d(out, _as_entities(Rounded(1μm)(r)))))
+        @test isempty(to_polygons(xor2d(out, _normalize_curved_clip_arg(Rounded(1μm)(r)))))
     end
 
     # WithDirection is also a no-op for geometry: it passes through to the inner Rounded.
     out = union2d_curved(WithDirection(45°)(Rounded(1μm)(r)))
     @test sum(length(reg.exterior.curves) for reg in out) == 4
-    @test isempty(to_polygons(xor2d(out, _as_entities(Rounded(1μm)(r)))))
+    @test isempty(to_polygons(xor2d(out, _normalize_curved_clip_arg(Rounded(1μm)(r)))))
 
     # Geometry-transparent styles on a Path node (e.g. meshsized_entity on a path element)
     # previously fell to the generic to_polygons fallback and silently discretized the arcs.
@@ -637,13 +645,13 @@ end
         @test isempty(to_polygons(xor2d(node_out, pathtopolys(pa))))
     end
     # A zero-length continuous-style node under a style wrapper expands to nothing,
-    # matching the bare-node behavior in _as_entities.
+    # matching the bare-node behavior in _normalize_curved_clip_arg.
     pa0 = Path()
     straight!(pa0, 0μm, Paths.Trace(5μm))
-    @test isempty(_as_entities(MeshSized(1μm)(pa0[1])))
+    @test isempty(_normalize_curved_clip_arg(MeshSized(1μm)(pa0[1])))
 end
 
-@testitem "Provenance — warn once on silent curve loss" setup = [CommonTestSetup] begin
+@testitem "Curve recovery — warn once on silent curve loss" setup = [CommonTestSetup] begin
     using DeviceLayout: Ellipse, Rectangle, union2d_curved, MeshSized
     using DeviceLayout.Curvilinear: _curve_loss_warned
     # An Ellipse carries curves but has no curve-recovery method: it is discretized with
