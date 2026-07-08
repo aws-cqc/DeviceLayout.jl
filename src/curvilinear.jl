@@ -1414,7 +1414,15 @@ styled_loop(::CurvilinearPolygon{T}, ::NoRender; kwargs...) where {T} =
 # Expand a styled entity into curve-bearing geometry. Entry points accept a bare style
 # (single style applied to the whole entity) and dispatch by entity type below.
 # To AbstractPolygon, CurvilinearPolygon, CurvilinearRegion, or vector of those.
-to_curvilinear(ent::GeometryEntity, sty; kwargs...) = to_polygons(ent, sty; kwargs...)
+# If this produces an AbstractPolygon and the styled entity should be curve-bearing, warn for curve loss.
+function to_curvilinear(ent::GeometryEntity, sty; kwargs...)
+    expanded = to_polygons(ent, sty; kwargs...)
+    discretized =
+        expanded isa AbstractPolygon ||
+        (expanded isa AbstractVector && any(x -> x isa AbstractPolygon, expanded))
+    discretized && _maybe_warn_curve_loss(sty(ent))
+    return expanded
+end
 # Nested styles: expand the inner style first (inner-out), then apply the outer style to the
 # resulting curvilinear geometry so both rounding passes see exact arcs.
 function to_curvilinear(ent::StyledEntity, sty; kwargs...)
@@ -1466,6 +1474,34 @@ function to_curvilinear(ent::CurvilinearRegion{T}, sty::StyleDict; kwargs...) wh
         styled_loop(ent.exterior, sty[1]; kwargs...),
         styled_loop.(ent.holes, getindex.(sty, 1, 1:length(ent.holes)); kwargs...)
     )
+end
+
+# Whether discretizing this entity to plain polygons loses curve geometry. Plain polygon
+# types and linear path nodes are exactly representable as polygons; other entity types
+# are assumed to carry curves unless they declare otherwise, so that unrecognized
+# curve-bearing entities still trigger the loss warning below.
+_carries_curves(e) = true
+_carries_curves(::AbstractPolygon) = false
+_carries_curves(e::CurvilinearPolygon) = !isempty(e.curves)
+_carries_curves(e::CurvilinearRegion) =
+    _carries_curves(e.exterior) || any(_carries_curves, e.holes)
+_carries_curves(n::Paths.Node) = islinear(n.seg, n.sty) isa Val{false}
+_carries_curves(e::StyledEntity{T, U, <:Rounded}) where {T, U} = true
+_carries_curves(e::StyledEntity{T, U, <:StyleDict}) where {T, U} = any(isa.(e.sty.styles, Rounded))
+_carries_curves(e::StyledEntity) = _carries_curves(e.ent)
+
+# Entities without a curve-preserving method are discretized.
+# Warn once per entity type so the loss is observable.
+const _curve_loss_warned = Set{Symbol}()
+function _maybe_warn_curve_loss(e)
+    _carries_curves(e) || return nothing
+    key = Symbol("$typeof(e)")
+    key in _curve_loss_warned && return nothing
+    push!(_curve_loss_warned, key)
+    @warn "recover_curves: entities of type $(typeof(e)) have no curve-recovery method " *
+          "and are discretized via to_polygons — any curves they carry will not be " *
+          "recovered. (This warning is shown once per entity type.)"
+    return nothing
 end
 
 # Bridge for nested Rounded styles in the Cell/GDS rendering path. Without it, the inner

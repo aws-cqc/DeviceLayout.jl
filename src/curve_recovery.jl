@@ -53,34 +53,6 @@ function _collect_provenance!(polys, runs, e::CurvilinearRegion, ::Type{R}, atol
     return nothing
 end
 
-# Whether discretizing this entity to plain polygons loses curve geometry. Plain polygon
-# types and linear path nodes are exactly representable as polygons; other entity types
-# are assumed to carry curves unless they declare otherwise, so that unrecognized
-# curve-bearing entities still trigger the loss warning below.
-_carries_curves(e) = true
-_carries_curves(::AbstractPolygon) = false
-_carries_curves(e::CurvilinearPolygon) = !isempty(e.curves)
-_carries_curves(e::CurvilinearRegion) =
-    _carries_curves(e.exterior) || any(_carries_curves, e.holes)
-_carries_curves(n::Paths.Node) = islinear(n.seg, n.sty) isa Val{false}
-_carries_curves(e::StyledEntity{T, U, <:Rounded}) where {T, U} = true
-_carries_curves(e::StyledEntity) = _carries_curves(e.ent)
-
-# Entities without a curve-recovery method are discretized with no provenance, so any
-# curves they carry are silently unrecoverable. Warn once per entity type so the loss
-# is observable.
-const _curve_loss_warned = Set{Symbol}()
-function _maybe_warn_curve_loss(e)
-    _carries_curves(e) || return nothing
-    key = nameof(typeof(e))
-    key in _curve_loss_warned && return nothing
-    push!(_curve_loss_warned, key)
-    @warn "recover_curves: entities of type $(typeof(e)) have no curve-recovery method " *
-          "and are discretized via to_polygons — any curves they carry will not be " *
-          "recovered. (This warning is shown once per entity type.)"
-    return nothing
-end
-
 # Any other entity: no curves to recover; discretize to polygons.
 function _collect_provenance!(polys, runs, e, ::Type{R}, atol) where {R}
     _maybe_warn_curve_loss(e)
@@ -228,10 +200,6 @@ end
 # `_collect_provenance!`, their origin is no longer visible.
 function _as_entities(p::StyledEntity)
     expanded = to_curvilinear(p.ent, p.sty)
-    discretized =
-        expanded isa AbstractPolygon ||
-        (expanded isa AbstractVector && any(x -> x isa AbstractPolygon, expanded))
-    discretized && _maybe_warn_curve_loss(p)
     return _as_entities(expanded)
 end
 
@@ -287,10 +255,6 @@ vector result.
 sequence of integer-grid vertices produced by `discretize_curve`) survives the boolean
 operation with exact integer equality. If the operation cuts through a curve, that curve is
 reported `:clipped` and falls back to a polyline. Partial-curve recovery is not supported.
-
-Additionally, curves can only be recovered on CurvilinearRegion/CurvilinearPolygon,
-Path nodes, and `Rounded`-styled `Polygon`/`Rectangle` entities. `Rounded` applied to
-other entities, styled Curvilinear entities, and nested styles do not yet support curve recovery.
 
 See also [`difference2d`](@ref), [`union2d`](@ref), [`intersect2d`](@ref), [`xor2d`](@ref),
 [`difference2d_curved`](@ref), [`union2d_curved`](@ref), [`intersect2d_curved`](@ref),
