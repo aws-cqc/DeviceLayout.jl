@@ -1685,3 +1685,23 @@
         @test "small2" ∈ names2
     end
 end
+
+@testitem "Full turns render in SolidModel (#252)" setup = [CommonTestSetup] begin
+    # A 360° turn previously reached OpenCASCADE as a collapsed 2-point polygon and
+    # produced a silent zero-area surface; it now renders as two half-annulus surfaces.
+    for (sty, nsurf, expected) in [
+        (Paths.Trace(10.0μm), 2, 2π * 100 * 10),
+        (Paths.CPW(10.0μm, 6.0μm), 4, 2 * 2π * 100 * 6)
+    ]
+        cs = CoordinateSystem("ring", nm)
+        pa = Path(Point(0.0μm, 0.0μm))
+        turn!(pa, 360°, 100.0μm, sty)
+        place!(cs, pa, SemanticMeta(:ring))
+        sm = SolidModel("ring"; overwrite=true)
+        render!(sm, cs, zmap=(_) -> 0.0μm)
+        tags = SolidModels.entitytags(sm["ring", 2])
+        area = sum(SolidModels.gmsh.model.occ.getMass(2, t) for t in tags; init=0.0)
+        @test length(tags) == nsurf
+        @test area ≈ expected rtol = 1e-6
+    end
+end

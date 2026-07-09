@@ -606,6 +606,46 @@ const BaseContinuousSegment{T} = Union{Paths.Straight{T}, Paths.Turn{T}, Paths.B
 pathtopolys(f::BaseContinuousSegment{T}, s::Paths.CompoundStyle; kwargs...) where {T} =
     _compound_style_grid_render(f, s; kwargs...)
 
+# A Turn sweeping a full multiple of 360° has coincident endpoints, which the
+# degenerate-point checks and the CurvilinearPolygon constructor's duplicate-point
+# elimination would otherwise silently collapse to empty geometry (issue #252).
+# Detection uses endpoint coincidence (robust to floating-point angle storage) at the
+# constructor's deduplication tolerance; the sweep threshold keeps the recursion in
+# `_split_full_turn` finite (halves of a split full turn sweep at most 180° and small
+# radii cannot re-fire the check).
+_is_full_turn(seg::Paths.Segment) = false
+function _is_full_turn(seg::Paths.Turn{T}) where {T}
+    return abs(seg.α) > 270° &&
+           isapprox(Paths.p0(seg), Paths.p1(seg); atol=1e-3 * DeviceLayout.onenanometer(T))
+end
+
+# Full turns render as two half-turn polygons (per surface). A single polygon whose
+# boundary is a closed loop is not representable (constructor dedup), and the
+# zero-width-slit "keyhole" alternative is rejected by the OpenCASCADE kernel
+# ("Curve loop is not closed") even though GDS accepts it — so the split must
+# produce separate polygons.
+function _split_full_turn(seg::Paths.Turn{T}, sty::Paths.Style; kwargs...) where {T}
+    seg1, seg2, sty1, sty2 = split(seg, sty, pathlength(seg) / 2)
+    return vcat(
+        vcat(pathtopolys(Paths.Node(seg1, sty1); kwargs...)),
+        vcat(pathtopolys(Paths.Node(seg2, sty2); kwargs...))
+    )
+end
+
+# Closed segments other than full turns (e.g. a closed BSpline) cannot be represented
+# as a single curvilinear polygon either; fail loudly instead of letting the
+# constructor silently delete the coincident endpoints and their curves.
+function _assert_open_segment(seg::Paths.Segment{T}) where {T}
+    if isapprox(Paths.p0(seg), Paths.p1(seg); atol=1e-3 * DeviceLayout.onenanometer(T))
+        throw(
+            ArgumentError(
+                "cannot represent closed segment $seg as a single curvilinear polygon; " *
+                "split it (e.g. with `Paths.split`) so each piece has distinct endpoints"
+            )
+        )
+    end
+end
+
 # Traces generate one surface
 # SimpleTrace can use constant offset
 function pathtopolys(
@@ -613,11 +653,17 @@ function pathtopolys(
     sty::Paths.SimpleTrace;
     kwargs...
 ) where {T}
+    _is_full_turn(seg) && return _split_full_turn(seg, sty; kwargs...)
     pts = corner_points(seg, sty, true)
-    # Check if the points are degenerate
+    # Check if the points are degenerate (inner edge clipped to the curve origin when
+    # radius ≤ extent). Coincident segment endpoints also make these checks fire — for
+    # the wrong reason — so closed segments fail loudly here instead of silently losing
+    # a curve (issue #252; full turns are split above and never reach this point).
     if isapprox(pts[1], pts[2])
+        _assert_open_segment(seg)
         return CurvilinearPolygon(pts[2:end], [Paths.offset(seg, Paths.extent(sty))], [-2])
     elseif isapprox(pts[3], pts[4])
+        _assert_open_segment(seg)
         return CurvilinearPolygon(pts[1:3], [Paths.offset(seg, -Paths.extent(sty))], [1])
     end
     return CurvilinearPolygon(
@@ -637,6 +683,7 @@ function pathtopolys(seg::Paths.BSpline{T}, sty::Paths.SimpleTrace; kwargs...) w
 end
 
 function pathtopolys(seg::BaseContinuousSegment{T}, sty::Paths.Trace; kwargs...) where {T}
+    _is_full_turn(seg) && return _split_full_turn(seg, sty; kwargs...)
     pts = corner_points(seg, sty, false)
     return CurvilinearPolygon(
         pts,
@@ -654,7 +701,11 @@ function pathtopolys(
     sty::Paths.SimpleCPW;
     kwargs...
 ) where {T}
+    _is_full_turn(seg) && return _split_full_turn(seg, sty; kwargs...)
     pts = corner_points(seg, sty, true)
+    # As for SimpleTrace above: the degenerate-point checks below are for the
+    # radius ≤ extent clip, not for closed segments (issue #252).
+    (isapprox(pts[1], pts[2]) || isapprox(pts[7], pts[8])) && _assert_open_segment(seg)
     return [
         isapprox(pts[1], pts[2]) ?
         CurvilinearPolygon(pts[2:4], [Paths.offset(seg, -Paths.trace(sty) / 2)], [-2]) :
@@ -696,6 +747,7 @@ function pathtopolys(seg::Paths.BSpline{T}, sty::Paths.SimpleCPW; kwargs...) whe
 end
 
 function pathtopolys(seg::BaseContinuousSegment{T}, sty::Paths.CPW; kwargs...) where {T}
+    _is_full_turn(seg) && return _split_full_turn(seg, sty; kwargs...)
     pts = corner_points(seg, sty, false)
     return [
         CurvilinearPolygon(
@@ -720,6 +772,7 @@ end
 # Strands generate 2*num polygons (plus and minus side for each strand).
 # Each strand is a trace-like shape at a computed offset from center.
 function pathtopolys(seg::BaseContinuousSegment{T}, sty::Paths.Strands; kwargs...) where {T}
+    _is_full_turn(seg) && return _split_full_turn(seg, sty; kwargs...)
     polys = Union{CurvilinearPolygon{T}, Polygon{T}}[]
     for i = 0:(Paths.num(sty) - 1)
         # Offset to center of strand i, plus half-width for edges

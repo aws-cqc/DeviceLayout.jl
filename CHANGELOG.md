@@ -26,6 +26,13 @@ The format of this changelog is based on
     angular step instead of marching with the general curvature-controlled kernel,
     making turn discretization faster and avoiding over-refinement in some cases. Rendered point counts and positions change slightly for every `Turn` within the same `atol`/`rtol` tolerances. Degenerate turns (zero sweep, zero radius, `|offset| == r`) now discretize to exactly two points, and
     offset turns with `|offset| > r` keep exact endpoints.
+  - Fixed turns sweeping a full multiple of 360° rendering as degenerate polygons in GDS
+    and as silent zero-area surfaces in SolidModel (issue #252): full turns are now split
+    into two half turns during path polygonization, so a 360° turn renders as two
+    half-annulus polygons per surface. In curve-recovery/provenance terms this means a
+    full turn is represented by two 180° curves rather than one 360° curve. Closed
+    segments reaching the degenerate corner-point checks now throw an `ArgumentError`
+    instead of silently dropping a curve.
   - Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
   - Added `SolidModels.check_port_connectivity`, using `SolidModels.connected_components` to report ports as `:open`, `:short`, `:floating`, or `:missing`
   - Added `detect_non_boundary_contacts=false` keyword argument to `SolidModels.connected_components`; when `true`, 1d edges embedded in the interior of 2D surfaces (like the feet of staple air bridges) will be treated as connecting
