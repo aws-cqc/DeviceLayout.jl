@@ -7,6 +7,8 @@ The format of this changelog is based on
 ## Unreleased
 
   - `ExamplePDK.ChipTemplates.example_launcher` now styles its simulated-only `PORT` rectangle with `WithDirection`, and the `DemoQPU17` solidmodel example extracts port and junction directions with `ExamplePDK.port_directions` instead of computing them by hand (removing the `lumped_direction` keyword from its config-building functions)
+  - Corner-membership checks in `round_to_curvilinearpolygon` use `Set`/`Dict`
+    lookups again, restoring O(n) rounding for polygons with many corners.
   - Converting a path segment/style combination that has no polygon conversion now
     throws a clear `ArgumentError` instead of warning and then failing with a
     `MethodError`.

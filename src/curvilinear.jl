@@ -1077,9 +1077,19 @@ function round_to_curvilinearpolygon(
         line_arc_cornerindices(pol)
     end
 
+    # Per-vertex membership checks below run once per polygon point; Vector `in` and
+    # `findfirst` made the loop O(n²) in the corner count. Set/Dict restore O(n).
+    # The reverse iteration keeps findfirst's first-match semantics for the curve lookup.
+    la_set = Set(la_indices)
+    corner_set = Set(corner_indices)
+    curve_index_at_vertex = Dict{Int, Int}()
+    for (k, v) in Iterators.reverse(collect(pairs(pol.curve_start_idx)))
+        curve_index_at_vertex[v] = k
+    end
+
     for i in eachindex(poly)
         edge = edge_type_at_vertex(pol, i)
-        is_line_arc = i in la_indices
+        is_line_arc = i in la_set
 
         if is_line_arc
             # A line-arc corner has a straight edge on one side and an arc on the other.
@@ -1111,7 +1121,7 @@ function round_to_curvilinearpolygon(
                 # the arc is trimmed depends on orientation: a line→arc corner (outgoing)
                 # cuts the arc's START, an arc→line corner cuts its END.
                 arc_start_vtx = arc_is_outgoing ? i : mod1(i - 1, len)
-                curve_k = findfirst(isequal(arc_start_vtx), pol.curve_start_idx)
+                curve_k = get(curve_index_at_vertex, arc_start_vtx, nothing)
                 if !isnothing(curve_k)
                     if arc_is_outgoing
                         trim_start_pts[curve_k] = result.T_arc
@@ -1122,7 +1132,7 @@ function round_to_curvilinearpolygon(
             else
                 push!(new_points, poly[i])
             end
-        elseif !(i in corner_indices)
+        elseif !(i in corner_set)
             push!(new_points, poly[i])
         else
             p0 = poly[mod1(i - 1, len)]
