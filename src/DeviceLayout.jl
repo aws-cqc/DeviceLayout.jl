@@ -371,6 +371,7 @@ export Rectangles, Rectangle, height, isproper, width
 include("polygons.jl")
 import .Polygons:
     Polygon,
+    AbstractEllipse,
     Ellipse,
     LineSegment,
     Circle,
@@ -402,6 +403,7 @@ import .Polygons:
     xor2d_layerwise
 export Polygons,
     Polygon,
+    AbstractEllipse,
     Ellipse,
     LineSegment,
     Circle,

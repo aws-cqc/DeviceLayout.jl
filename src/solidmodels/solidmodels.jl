@@ -40,6 +40,7 @@ import DeviceLayout:
     CurvilinearRegion,
     GeometryEntity,
     GeometryEntityStyle,
+    AbstractEllipse,
     Ellipse,
     LineSegment,
     Meta,

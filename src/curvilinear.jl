@@ -130,6 +130,21 @@ function CurvilinearPolygon(points::Vector{Point{T}}) where {T}
     return CurvilinearPolygon{T}(points, Paths.Segment[], Int[])
 end
 CurvilinearPolygon(p::Polygon{T}) where {T} = CurvilinearPolygon(points(p))
+# A circle as four 90° CCW arcs meeting at the axis-aligned extreme points. Four arcs
+# rather than one or two: a single 360° curve collapses in the duplicate-endpoint dedup
+# above (its lone vertex pairs with itself under `circshift`), and 180° arcs hit the OCC
+# semicircle split path plus the collinear-endpoint guard in `add_circle_arc`. Quarter
+# arcs keep every curve strictly shorter than π on every consumer path.
+function CurvilinearPolygon(c::Circle{T}) where {T}
+    p = [
+        c.center + Point(c.r, zero(c.r)),
+        c.center + Point(zero(c.r), c.r),
+        c.center - Point(c.r, zero(c.r)),
+        c.center - Point(zero(c.r), c.r)
+    ]
+    curves = [Paths.Turn(90.0°, c.r; p0=p[i], α0=i * 90.0°) for i = 1:4]
+    return CurvilinearPolygon{T}(p, curves, [1, 2, 3, 4])
+end
 
 ### Conversion methods
 function to_polygons(
@@ -1483,6 +1498,10 @@ to_curvilinear(ents::AbstractVector, sty; kwargs...) =
 to_curvilinear(ent::AbstractPolygon, sty; kwargs...) =
     styled_loop(convert(Polygon, ent), sty; kwargs...)
 to_curvilinear(ent::CurvilinearPolygon, sty; kwargs...) = styled_loop(ent, sty; kwargs...)
+# A Circle is exactly representable as four arcs, so styled circles keep their curves
+# (and participate in curve recovery) instead of falling to the discretizing fallback.
+to_curvilinear(ent::Circle, sty; kwargs...) =
+    to_curvilinear(CurvilinearPolygon(ent), sty; kwargs...)
 # Path nodes expand through `pathtopolys`, which preserves curves; geometry-transparent
 # styles pass through. Without this method a `MeshSized` path node falls to the generic
 # `to_polygons` fallback and silently discretizes its arcs. Zero-length continuous-style

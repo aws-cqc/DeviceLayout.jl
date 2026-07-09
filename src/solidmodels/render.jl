@@ -81,7 +81,13 @@ to_primitives(
     kwargs...
 ) where {T} = to_polygons(ent.ent, ent.sty; kwargs...)
 
-function to_primitives(::SolidModel, ent::Ellipse; rounded=nothing, Δθ=nothing, kwargs...)
+function to_primitives(
+    ::SolidModel,
+    ent::AbstractEllipse;
+    rounded=nothing,
+    Δθ=nothing,
+    kwargs...
+)
     if !isnothing(rounded)
         Base.depwarn(
             "The `rounded` keyword for Ellipse is deprecated. Use `Δθ=nothing` (default) to keep as ellipse primitive, or `Δθ=some_angle` to discretize to polygon. For the same discretization as `rounded=false` with `Δθ` not specified, use `Δθ=360°/8`",
@@ -98,7 +104,7 @@ function to_primitives(::SolidModel, ent::Ellipse; rounded=nothing, Δθ=nothing
 end
 function to_primitives(
     ::SolidModel{GmshNative},
-    ent::Ellipse;
+    ent::AbstractEllipse;
     rounded=nothing,
     Δθ=nothing,
     kwargs...
@@ -183,7 +189,7 @@ end
 
 ######## Ellipse
 function _add_to_current_solidmodel!(
-    e::Ellipse{T},
+    e::AbstractEllipse{T},
     m::Meta,
     k;
     zmap=(_) -> zero(T),
@@ -662,14 +668,14 @@ end
 
 # Ellipse — sample its perimeter at h-spacing (Ramanujan perimeter estimate for
 # the sample count; the parametric point evaluation is exact).
-function _sample_meshsize!(e::Ellipse, h::Float64, α::Float64, z::Float64)
-    a = ustrip(STP_UNIT, e.radii[1])
-    b = ustrip(STP_UNIT, e.radii[2])
+function _sample_meshsize!(e::AbstractEllipse, h::Float64, α::Float64, z::Float64)
+    a = ustrip(STP_UNIT, r1(e))
+    b = ustrip(STP_UNIT, r2(e))
     perim = pi * (3 * (a + b) - sqrt((3a + b) * (a + 3b)))
     Ns = max(8, ceil(Int, perim / h))
-    cx = ustrip(STP_UNIT, e.center.x)
-    cy = ustrip(STP_UNIT, e.center.y)
-    θ = ustrip(uconvert(°, e.angle)) * (π / 180)
+    cx = ustrip(STP_UNIT, center(e).x)
+    cy = ustrip(STP_UNIT, center(e).y)
+    θ = ustrip(uconvert(°, angle(e))) * (π / 180)
     cs = cos(θ)
     sn = sin(θ)
     for i = 0:(Ns - 1)

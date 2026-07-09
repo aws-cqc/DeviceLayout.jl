@@ -19,6 +19,7 @@ import DeviceLayout:
     AbstractGeometry,
     AbstractPolygon,
     Coordinate,
+    CurvilinearPolygon,
     GeometryEntity,
     GeometryEntityStyle,
     GeometryReference,
@@ -65,7 +66,7 @@ import IntervalTrees: IntervalTree, IntervalValue
 import IntervalSets.(..)
 import IntervalSets.endpoints
 
-export Polygon, ClippedPolygon, Ellipse, Circle, LineSegment
+export Polygon, ClippedPolygon, AbstractEllipse, Ellipse, Circle, LineSegment
 export circle,
     circle_polygon,
     clip,
@@ -139,7 +140,17 @@ isapprox(p1::Polygon, p2::Polygon; kwargs...) = isapprox(p1.p, p2.p; kwargs...)
 copy(p::Polygon) = Polygon(copy(p.p))
 
 """
-    struct Ellipse{T} <: GeometryEntity{T}
+    abstract type AbstractEllipse{T} <: GeometryEntity{T}
+
+Elliptical entities. Subtypes implement the accessors `center`, `r1` (major axis
+radius), `r2` (minor axis radius) and `angle` (major axis angle, CCW from the positive
+x-axis), through which the shared methods (`to_polygons`, `perimeter`, rendering, ...)
+are defined.
+"""
+abstract type AbstractEllipse{T} <: GeometryEntity{T} end
+
+"""
+    struct Ellipse{T} <: AbstractEllipse{T}
         center::Point{T}
         radii::NTuple{2, T}
         angle::typeof(1.0°)
@@ -151,7 +162,7 @@ copy(p::Polygon) = Polygon(copy(p.p))
 Represent an ellipse with a centroid, radii and major axis angle. The major axis radius is
 stored first within `radii`, and the axis angle is defined CCW from the positive x-axis.
 """
-struct Ellipse{T} <: GeometryEntity{T}
+struct Ellipse{T} <: AbstractEllipse{T}
     center::Point{T}
     radii::NTuple{2, T}
     angle::typeof(1.0°)
@@ -168,31 +179,65 @@ Ellipse(center::Point; r::Coordinate) = Ellipse(center, (r, r), 0.0°)
 copy(e::Ellipse) = Ellipse(e.center, e.radii, e.angle)
 
 """
+    struct Circle{T} <: AbstractEllipse{T}
+        center::Point{T}
+        r::T
+    end
     Circle(center::Point, r::Coordinate)
     Circle(r::Coordinate)
 
-Construct an Ellipse with major and minor radii equal to `r` at `center` (or origin if not provided).
+Represent a circle with radius `r` at `center` (or the origin if not provided).
+
+Transformations that preserve angles (rotations, translations, reflections, uniform
+scaling) return a `Circle`; a general `Transformation` may return an `Ellipse`.
 """
-Circle(center::Point{T}, r::T) where {T} = Ellipse(center, (r, r), 0.0°)
+struct Circle{T} <: AbstractEllipse{T}
+    center::Point{T}
+    r::T
+end
 Circle(r::T) where {T <: Coordinate} = Circle(zero(Point{T}), r)
 function Circle(center::Point{S}, r::T) where {S, T}
     V = float(promote_type(S, T))
     return Circle(convert(Point{V}, center), convert(V, r))
 end
 
+copy(c::Circle) = Circle(c.center, c.r)
+
 center(e::Ellipse) = e.center
 r1(e::Ellipse) = e.radii[1]
 r2(e::Ellipse) = e.radii[2]
 angle(e::Ellipse) = e.angle
+
+center(c::Circle) = c.center
+r1(c::Circle) = c.r
+r2(c::Circle) = c.r
+angle(::Circle) = 0.0°
+
+"""
+    radius(c::Circle)
+
+The radius of the circle.
+"""
+radius(c::Circle) = c.r
+
+lowerleft(c::Circle) = c.center - Point(c.r, c.r)
+upperright(c::Circle) = c.center + Point(c.r, c.r)
 
 convert(::Type{GeometryEntity{T}}, e::Ellipse) where {T} = convert(Ellipse{T}, e)
 convert(::Type{GeometryEntity{T}}, e::Ellipse{T}) where {T} = e
 function convert(::Type{Ellipse{T}}, e::Ellipse{S}) where {T, S}
     return Ellipse{T}(convert(Point{T}, e.center), convert(NTuple{2, T}, e.radii), e.angle)
 end
+convert(::Type{GeometryEntity{T}}, c::Circle) where {T} = convert(Circle{T}, c)
+convert(::Type{GeometryEntity{T}}, c::Circle{T}) where {T} = c
+function convert(::Type{Circle{T}}, c::Circle{S}) where {T, S}
+    return Circle{T}(convert(Point{T}, c.center), convert(T, c.r))
+end
+convert(::Type{Ellipse{T}}, c::Circle) where {T} =
+    Ellipse{T}(convert(Point{T}, c.center), (convert(T, c.r), convert(T, c.r)), 0.0°)
 
 """
-    ellipse_curvature(e::Ellipse, θ)
+    ellipse_curvature(e::AbstractEllipse, θ)
 
 Compute the curvature of an ellipse at parameter θ.
 For an ellipse with semi-major axis `a` and semi-minor axis `b`,
@@ -200,11 +245,11 @@ the curvature is κ(φ) = ab / (a²sin²φ + b²cos²φ)^(3/2)
 where φ is the angle measured from the major axis of the ellipse.
 
 Since θ in the ellipse parameterization is measured from the global x-axis,
-we need φ = θ - e.angle to get the angle relative to the ellipse's major axis.
+we need φ = θ - angle(e) to get the angle relative to the ellipse's major axis.
 """
-function ellipse_curvature(e::Ellipse, θ)
-    a, b = e.radii[1], e.radii[2]  # a is major axis, b is minor axis
-    φ = θ - e.angle  # Convert from global angle θ to ellipse-relative angle φ
+function ellipse_curvature(e::AbstractEllipse, θ)
+    a, b = r1(e), r2(e)  # a is major axis, b is minor axis
+    φ = θ - angle(e)  # Convert from global angle θ to ellipse-relative angle φ
     return (a * b) / (a^2 * sin(φ)^2 + b^2 * cos(φ)^2)^1.5
 end
 
@@ -219,8 +264,8 @@ function _ellipse_p(θ, θ1, a, b)
 end
 
 function to_polygons(
-    e::Ellipse;
-    atol=DeviceLayout.onenanometer(eltype(e.center)),
+    e::AbstractEllipse;
+    atol=DeviceLayout.onenanometer(eltype(center(e))),
     Δθ=nothing,
     rtol=nothing,
     kwargs...
@@ -233,11 +278,19 @@ function to_polygons(
             Base.Fix1(ellipse_curvature, e),
             atol,
             (0.0, 2π);
-            t_scale=e.radii[1],
+            t_scale=r1(e),
             rtol=rtol
         )[1:(end - 1)])
     end
-    return Polygon([e.center + _ellipse_p(θ, e.angle, e.radii[1], e.radii[2]) for θ in θs])
+    return Polygon([center(e) + _ellipse_p(θ, angle(e), r1(e), r2(e)) for θ in θs])
+end
+
+function to_polygons(c::Circle{T}; Δθ=nothing, atol=DeviceLayout.onenanometer(T), rtol=nothing, kwargs...) where {T}
+    !isnothing(Δθ) && return circle_polygon(c.r, Δθ) + c.center
+    if !isnothing(rtol)
+        atol = max(atol, rtol * abs(radius(c)))
+    end
+    return Polygon(DeviceLayout.circular_arc(2pi, radius(c), atol; center=center(c))[1:end-1])
 end
 
 DeviceLayout.magnify(e::Ellipse, mag) = Ellipse(mag .* e.center, mag .* e.radii, e.angle)
@@ -281,25 +334,40 @@ function transform(e::Ellipse{T}, f::ScaledIsometry) where {T}
     end
 end
 
-function transform(e::Ellipse, f::Transformation)
+# Angle-preserving transformations keep a Circle a Circle.
+DeviceLayout.magnify(c::Circle, mag) = Circle(mag .* c.center, mag * c.r)
+DeviceLayout.rotate(c::Circle, rot) = Circle(Rotation(rot)(c.center), c.r)
+DeviceLayout.reflect_across_xaxis(c::Circle) = Circle(Reflection(0)(c.center), c.r)
+DeviceLayout.translate(c::Circle{T}, tra::Point{T}) where {T} =
+    Circle(Translation(tra)(c.center), c.r)
+DeviceLayout.reflect_across_line(c::Circle, dir; through_pt=nothing) =
+    Circle(Reflection(dir; through_pt=through_pt)(c.center), c.r)
+DeviceLayout.reflect_across_line(c::Circle, p0, p1) =
+    Circle(Reflection(p0, p1)(c.center), c.r)
+
+function transform(c::Circle{T}, f::ScaledIsometry) where {T}
+    return Circle(f(c.center), mag(f) * c.r)
+end
+
+function transform(e::AbstractEllipse, f::Transformation)
     preserves_angles(f) && return transform(e, ScaledIsometry(f))
 
     # Assemble the origin, major and minor end points, apply transforms to them.
-    a, b = e.radii
-    p1 = e.center + Rotation(e.angle)(Point(a, zero(a)))
-    p2 = e.center + Rotation(e.angle + 90°)(Point(b, zero(b)))
-    center, p1, p2 = f.([e.center, p1, p2])
+    a, b = r1(e), r2(e)
+    p1 = center(e) + Rotation(angle(e))(Point(a, zero(a)))
+    p2 = center(e) + Rotation(angle(e) + 90°)(Point(b, zero(b)))
+    center_, p1, p2 = f.([center(e), p1, p2])
 
     # center -> p1 and center -> p2 are no longer orthogonal (angles aren't preserved).
-    new_major = p1 - center
-    new_minor = p2 - center
+    new_major = p1 - center_
+    new_minor = p2 - center_
     M = ustrip([new_major.x new_minor.x; new_major.y new_minor.y])
     cov = M * M'
     vals, vecs = eigen(cov) # real valued
 
     @assert vals[2] >= vals[1]
     θ = ((atand(vecs[2, 2], vecs[1, 2]) + 180) % 180)°
-    return Ellipse(center, (sqrt(vals[2]), sqrt(vals[1])) .* oneunit(a), θ)
+    return Ellipse(center_, (sqrt(vals[2]), sqrt(vals[1])) .* oneunit(a), θ)
 end
 
 """
@@ -549,16 +617,19 @@ function perimeter(p::ClippedPolygon{T}) where {T}
 end
 
 """
-    perimeter(poly::Ellipse)
+    perimeter(poly::AbstractEllipse)
 
-Approximate (Euclidean) perimeter of an `Ellipse` using Ramanujan's approximation formula
+Approximate (Euclidean) perimeter of an ellipse using Ramanujan's approximation formula
 https://arxiv.org/pdf/math/0506384.pdf
+
+Exact for a `Circle` (`2πr`).
 """
-function perimeter(e::Ellipse)
-    a = maximum(e.radii)
-    b = minimum(e.radii)
+function perimeter(e::AbstractEllipse)
+    a = r1(e)
+    b = r2(e)
     return π * ((a + b) + 3 * (a - b)^2 / (10 * (a + b) + sqrt(a^2 + 14 * a * b + b^2)))
 end
+perimeter(c::Circle) = 2π * c.r
 
 function signed_area(p::Polygon) # Can be negative
     return sum(

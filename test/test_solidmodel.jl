@@ -1705,3 +1705,22 @@ end
         @test area ≈ expected rtol = 1e-6
     end
 end
+
+@testitem "Circle renders like an equal-radii Ellipse (#251)" setup = [CommonTestSetup] begin
+    # Circle is kept as an ellipse primitive by to_primitives and must produce the
+    # same OpenCASCADE surface as the equal-radii Ellipse it replaced.
+    function render_one(ent)
+        cs = CoordinateSystem("circ", nm)
+        place!(cs, ent, SemanticMeta(:disk))
+        sm = SolidModel("circ"; overwrite=true)
+        render!(sm, cs, zmap=(_) -> 0.0μm)
+        tags = SolidModels.entitytags(sm["disk", 2])
+        return sum(SolidModels.gmsh.model.occ.getMass(2, t) for t in tags; init=0.0),
+        length(tags)
+    end
+    a_circ, n_circ = render_one(Circle(Point(1.0μm, 2.0μm), 3.0μm))
+    a_ell, n_ell = render_one(Ellipse(Point(1.0μm, 2.0μm), (3.0μm, 3.0μm), 0.0°))
+    @test n_circ == n_ell == 1
+    @test a_circ ≈ a_ell rtol = 1e-12
+    @test a_circ ≈ π * 3.0^2 rtol = 1e-9
+end

@@ -687,13 +687,86 @@ end
     # circle is deprecated
     @test_logs (:warn, r"deprecated") circle(10.0)
 
-    # Issue #228
-    @test Circle(Point(1µm, 1µm), 1.0µm) isa Ellipse  # was MethodError
-    @test Circle(Point(1.0µm, 1µm), 1µm) isa Ellipse
-    @test Circle(Point(1µm, 1µm), 1nm) isa Ellipse
-    @test Circle(Point(1µm, 1µm), 1.0nm) isa Ellipse
+    # Issue #228 (mixed-unit/type constructors; `isa Circle` since issue #251 —
+    # Circle used to construct an equal-radii Ellipse)
+    @test Circle(Point(1µm, 1µm), 1.0µm) isa Circle  # was MethodError
+    @test Circle(Point(1.0µm, 1µm), 1µm) isa Circle
+    @test Circle(Point(1µm, 1µm), 1nm) isa Circle
+    @test Circle(Point(1µm, 1µm), 1.0nm) isa Circle
+    @test Circle(Point(1µm, 1µm), 1.0µm) isa AbstractEllipse
+    @test !(Circle(Point(1µm, 1µm), 1.0µm) isa Ellipse)
     @test Ellipse(Point(1µm, 1µm); r=1.0µm) isa Ellipse
     @test Ellipse(Point(1µm, 1µm); r=1nm) isa Ellipse
+end
+
+@testitem "Circle type" setup = [CommonTestSetup] begin
+    import DeviceLayout:
+        transform,
+        magnify,
+        rotate,
+        translate,
+        reflect_across_xaxis,
+        reflect_across_line,
+        lowerleft,
+        upperright
+    c = Circle(Point(1.0μm, 2.0μm), 3.0μm)
+    e = Ellipse(Point(1.0μm, 2.0μm), (3.0μm, 3.0μm), 0.0°)
+
+    @testset "Accessors and conversion" begin
+        @test Polygons.center(c) == Point(1.0μm, 2.0μm)
+        @test Polygons.r1(c) == Polygons.r2(c) == Polygons.radius(c) == 3.0μm
+        @test Polygons.angle(c) == 0.0°
+        @test convert(Ellipse{typeof(1.0μm)}, c) == e
+        cnm = convert(Circle{typeof(1.0nm)}, c)
+        @test cnm isa Circle && Polygons.radius(cnm) == 3000.0nm
+        @test copy(c) == c
+    end
+
+    @testset "Angle-preserving transformations preserve Circle" begin
+        for tc in (
+            rotate(c, 30°),
+            translate(c, Point(1.0μm, 0.0μm)),
+            magnify(c, 2),
+            reflect_across_xaxis(c),
+            reflect_across_line(c, 45°),
+            reflect_across_line(c, Point(0.0μm, 0.0μm), Point(1.0μm, 1.0μm)),
+            Rotation(45°)(c),
+            (Translation(Point(1.0μm, 1.0μm)) ∘ Rotation(90°))(c)
+        )
+            @test tc isa Circle
+        end
+        @test Rotation(90°)(c).center ≈ Point(-2.0μm, 1.0μm)
+        @test magnify(c, 2).r == 6.0μm
+        # Non-angle-preserving transformations widen to Ellipse
+        shear = Transformations.LinearMap(Transformations.@SMatrix [2 0; 0 1])
+        @test shear(c) isa Ellipse
+        @test shear(c).center == shear(e).center
+        @test shear(c).radii == shear(e).radii
+        @test shear(c).angle == shear(e).angle
+    end
+
+    @testset "Fast paths match the generic path" begin
+        @test lowerleft(c) == Point(-2.0μm, -1.0μm)
+        @test upperright(c) == Point(4.0μm, 5.0μm)
+        @test bounds(c) == Rectangle(Point(-2.0μm, -1.0μm), Point(4.0μm, 5.0μm))
+        @test Polygons.perimeter(c) == 2π * 3.0μm
+        # Discretized geometry is equivalent to a Circle within tolerance
+        # without excessive sampling
+        pts = points(to_polygons(c))
+        midpts = (pts .+ circshift(pts, 1))/2
+        @test maximum(abs.(radius(c) .- norm.(midpts .- center(c)))) < 1nm
+        @test all(isapprox.(abs.(radius(c) .- norm.(midpts .- center(c))), 1nm, rtol=0.15))
+        # relax tolerance
+        pts_10nm = points(to_polygons(c; atol=10nm))
+        midpts_10nm = (pts_10nm .+ circshift(pts_10nm, 1))/2
+        @test maximum(abs.(radius(c) .- norm.(midpts_10nm .- center(c)))) < 10nm
+        @test all(isapprox.(abs.(radius(c) .- norm.(midpts_10nm .- center(c))), 10nm, rtol=0.15))
+        # rtol
+        pts_30nm = points(to_polygons(c; rtol=1e-2))
+        midpts_30nm = (pts_30nm .+ circshift(pts_30nm, 1))/2
+        @test maximum(abs.(radius(c) .- norm.(midpts_30nm .- center(c)))) < 30nm
+        @test all(isapprox.(abs.(radius(c) .- norm.(midpts_30nm .- center(c))), 30nm, rtol=0.15))
+    end
 end
 
 @testitem "circular_arc equal angles" setup = [CommonTestSetup] begin

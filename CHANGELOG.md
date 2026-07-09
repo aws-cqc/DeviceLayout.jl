@@ -33,6 +33,15 @@ The format of this changelog is based on
     full turn is represented by two 180° curves rather than one 360° curve. Closed
     segments reaching the degenerate corner-point checks now throw an `ArgumentError`
     instead of silently dropping a curve.
+  - `Circle` is now its own type `Circle{T} <: AbstractEllipse{T}` (with
+    `center` and `r` fields) instead of a constructor alias for an equal-radii `Ellipse`. Rendered
+    geometry is unchanged within tolerance, and angle-preserving transformations now return a `Circle`.
+    Code relying on `Circle(...) isa Ellipse` or on `.radii`/`.angle` direct field access of `Circle`
+    results **will no longer work** and should use the new `AbstractEllipse` supertype and the `center`/`r1`/`r2`/`angle`/`radius` accessors.
+  - `Circle` participates in curve recovery: it is represented exactly as four 90° arcs
+    (via a new `CurvilinearPolygon(::Circle)` constructor), so `union2d_curved` and the
+    other curve-preserving boolean operations recover circular arcs instead of warning
+    and discretizing.
   - Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
   - Added `SolidModels.check_port_connectivity`, using `SolidModels.connected_components` to report ports as `:open`, `:short`, `:floating`, or `:missing`
   - Added `detect_non_boundary_contacts=false` keyword argument to `SolidModels.connected_components`; when `true`, 1d edges embedded in the interior of 2D surfaces (like the feet of staple air bridges) will be treated as connecting

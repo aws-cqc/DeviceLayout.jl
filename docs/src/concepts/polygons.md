@@ -75,7 +75,9 @@ Curve-bearing inputs are expanded to their exact arc geometry before clipping vi
 converter the `SolidModel` render path uses, so `Rounded` applied to `Polygon`, `Rectangle`,
 `ClippedPolygon`, `CurvilinearRegion`, and `CurvilinearPolygon`, as well as nestings with
 no-op styles (`MeshSized`, `WithDirection`) and per-contour `StyleDict`s — including on
-`Path` nodes — all recover their arcs where the footprint survives.
+`Path` nodes — all recover their arcs where the footprint survives. A `Circle` is
+represented exactly as four 90° arcs, so circles participate in curve recovery too (an
+`Ellipse` with unequal radii is not representable as arcs and still discretizes).
 
 **Current limitations:** A curve is recovered only if its entire discretized run survives
 the boolean operation with exact integer equality. If the operation cuts through a curve

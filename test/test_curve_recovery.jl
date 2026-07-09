@@ -690,3 +690,53 @@ end
     )
     @test isempty(_curve_loss_warned)
 end
+
+@testitem "Curve recovery — Circle four-arc representation (#251)" setup = [CommonTestSetup] begin
+    using DeviceLayout: union2d_curved, difference2d_curved, union2d, xor2d
+    using DeviceLayout: Rounded, MeshSized
+    using DeviceLayout.Curvilinear:
+        CurvilinearPolygon, to_curvilinear, _normalize_curved_clip_arg, _curve_loss_warned
+
+    c = Circle(Point(1.0μm, 2.0μm), 3.0μm)
+
+    # Exact four-arc form: quarter turns meeting at the axis-aligned extreme points.
+    cp = CurvilinearPolygon(c)
+    @test cp.curve_start_idx == [1, 2, 3, 4]
+    @test all(t -> t isa Paths.Turn && t.α == 90.0° && t.r == 3.0μm, cp.curves)
+    # Every discretized point lies on the circle to within the default 1 nm tolerance.
+    @test all(points(to_polygons(cp))) do pt
+        return abs(norm(pt - Point(1.0μm, 2.0μm)) - 3.0μm) < 2nm
+    end
+    # Unitless coordinates work too.
+    @test length(CurvilinearPolygon(Circle(1.0)).curves) == 4
+
+    # Self-union recovers all four arcs exactly, with no curve-loss warning (a Circle has
+    # a curve-recovery method; its Ellipse equivalent warns and discretizes).
+    empty!(_curve_loss_warned)
+    report = []
+    out = @test_logs min_level = Logging.Warn union2d_curved([c]; report)
+    @test length(out) == 1
+    @test length(out[1].exterior.curves) == 4
+    @test all(r -> r[1] == :recovered, report)
+    @test isempty(to_polygons(xor2d(out, cp)))
+
+    # A clip cutting through two arcs: the untouched arcs recover, the cut ones fall
+    # back to polylines and are reported :clipped.
+    knife = Rectangle(Point(2.0μm, -2.0μm), Point(5.0μm, 6.0μm))
+    report = []
+    cut = difference2d_curved(c, knife; report)
+    @test length(cut) == 1
+    @test length(cut[1].exterior.curves) == 2
+    @test count(r -> r[1] == :recovered, report) == 2
+    @test count(r -> r[1] == :clipped, report) == 2
+    @test isempty(to_polygons(xor2d(cut, difference2d(cp, knife))))
+
+    # Geometry-transparent and no-op styles preserve the arcs: MeshSized passes through,
+    # and Rounded is a no-op on a circle (no straight-straight or line-arc corners).
+    empty!(_curve_loss_warned)
+    for ent in (MeshSized(1μm)(c), Rounded(1μm)(c))
+        styled_out = @test_logs min_level = Logging.Warn union2d_curved(ent)
+        @test length(styled_out[1].exterior.curves) == 4
+        @test isempty(to_polygons(xor2d(styled_out, cp)))
+    end
+end
