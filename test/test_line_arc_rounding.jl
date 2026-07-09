@@ -674,3 +674,45 @@ end
     @test short_rounded isa CurvilinearPolygon
     @test any(p -> isapprox(p, Point(1.0μm, 0.0μm)), points(short_rounded))
 end
+
+@testitem "Nested rounding degenerate cases (#249)" setup = [CommonTestSetup] begin
+    first_poly(x) = x isa AbstractVector ? only(x) : x
+    a(p) = DeviceLayout.Polygons.area(p)
+
+    r = Rectangle(1.0, 1.0)
+    rr = Rounded(0.1)(r)
+
+    # 1. Exact equal radius (issue #249 repro): must not throw, and must be a no-op.
+    p_eq = to_polygons(Rounded(0.1)(rr))
+    # Reference: single rounding through the same curvilinear discretization path.
+    cp = Curvilinear.to_curvilinear(r, Rounded(0.1))
+    p_ref = to_polygons(cp)
+    @test p_eq ≈ p_ref
+    # 2. Slightly larger/smaller radius (worked before the fix; lock in behavior).
+    p_hi = to_polygons(Rounded(0.1 + 1e-9)(rr))
+    p_lo = to_polygons(Rounded(0.1 - 1e-9)(rr))
+    p_half = to_polygons(Rounded(0.05)(rr))
+    @test p_eq ≈ p_hi
+    @test p_eq ≈ p_lo
+    @test p_eq ≈ p_half
+    # 3. Reference: Pure-polygon path
+    p_rr = to_polygons(rr)
+    @test a(p_eq) ≈ a(p_rr) rtol = 1e-9 # fillets come down to same `circular_arc` call
+
+    # 4. Two arcs meeting directly (r = half the side; fillets consume entire sides):
+    #    arc-arc junctions are not line-arc corners and must pass through unrounded.
+    p_circ = to_polygons(Rounded(0.5)(Rounded(0.5)(r)))
+    p_circ_ref = to_polygons(Curvilinear.to_curvilinear(r, Rounded(0.5)))
+    @test a(p_circ) ≈ a(p_circ_ref) rtol = 1e-9   # second rounding is a no-op
+    @test a(p_circ) ≈ π * 0.5^2 rtol = 5e-3       # and the shape is a (discretized) circle
+
+    # 5. SolidModel-side producer sees the same degenerate input; the resulting
+    #    CurvilinearPolygon must keep valid curve/vertex bookkeeping (no spurious fillets).
+    cp2 = Curvilinear.styled_loop(cp, Rounded(0.1))
+    @test length(cp2.curves) == 4
+    n = length(cp2.p)
+    for (k, csi) in enumerate(cp2.curve_start_idx)
+        @test isapprox(Paths.p0(cp2.curves[k]), cp2.p[csi]; atol=1e-9)
+        @test isapprox(Paths.p1(cp2.curves[k]), cp2.p[mod1(csi + 1, n)]; atol=1e-9)
+    end
+end
