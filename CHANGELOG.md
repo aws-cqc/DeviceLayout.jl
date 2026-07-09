@@ -21,6 +21,11 @@ The format of this changelog is based on
     the style grid is in the original segment's arclength frame, which offset
     resolution does not preserve, so the result would place style transitions in the
     wrong locations.
+  - Added a fast path for constant-curvature discretization: `Turn` and
+    constant-offset `Turn` segments are sampled uniformly at the tolerance-derived
+    angular step instead of marching with the general curvature-controlled kernel,
+    making turn discretization faster and avoiding over-refinment in some cases. Rendered point counts and positions change slightly for every `Turn` within the same `atol`/`rtol` tolerances. Degenerate turns (zero sweep, zero radius, `|offset| == r`) now discretize to exactly two points, and
+    offset turns with `|offset| > r` keep exact endpoints.
   - Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
   - Added `SolidModels.check_port_connectivity`, using `SolidModels.connected_components` to report ports as `:open`, `:short`, `:floating`, or `:missing`
   - Added `detect_non_boundary_contacts=false` keyword argument to `SolidModels.connected_components`; when `true`, 1d edges embedded in the interior of 2D surfaces (like the feet of staple air bridges) will be treated as connecting
