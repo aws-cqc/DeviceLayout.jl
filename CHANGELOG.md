@@ -7,6 +7,11 @@ The format of this changelog is based on
 ## Unreleased
 
   - `ExamplePDK.ChipTemplates.example_launcher` now styles its simulated-only `PORT` rectangle with `WithDirection`, and the `DemoQPU17` solidmodel example extracts port and junction directions with `ExamplePDK.port_directions` instead of computing them by hand (removing the `lumped_direction` keyword from its config-building functions)
+  - All dimensionless relative rounding is now absolute-by-default: applying
+    `Rounded(::Real)` to a dimensionless polygon or `CurvilinearPolygon` treats the
+    radius as an absolute length (pass `relative=true` to
+    `round_to_curvilinearpolygon` for length-relative fillets). This behavior shipped
+    with the render unification and is now pinned by a regression test.
   - Corner-membership checks in `round_to_curvilinearpolygon` use `Set`/`Dict`
     lookups again, restoring O(n) rounding for polygons with many corners.
   - Converting a path segment/style combination that has no polygon conversion now
