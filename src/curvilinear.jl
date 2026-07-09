@@ -365,14 +365,19 @@ pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderDiscrete; kwargs...) where
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.SimpleNoRender; kwargs...) where {T} =
     Polygon{T}[]
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRender; kwargs...) where {T} = Polygon{T}[]
-function pathtopolys(
+# DecoratedStyles: strip the decoration and delegate to the underlying style.
+# Attachments are handled by render!(Cell, Path), not here. (The per-wrapper methods
+# below exist for dispatch specificity; they share this body.)
+function _pathtopolys_ignoring_attachments(seg, sty; kwargs...)
+    @warn "Ignoring attachments on path segment $seg with style $sty when converting to polygons. Did you write `render!.(cell, path, ...)` instead of `render!(cell, path, ...)`?"
+    return pathtopolys(seg, Paths.undecorated(sty); kwargs...)
+end
+
+pathtopolys(
     f::Paths.OffsetSegment{T},
     sty::Paths.AbstractDecoratedStyle;
     kwargs...
-) where {T}
-    @warn "Ignoring attachments on path segment $f with style $sty when converting to polygons. Did you write `render!.(cell, path, ...)` instead of `render!(cell, path, ...)`?"
-    return pathtopolys(f, Paths.undecorated(sty); kwargs...)
-end
+) where {T} = _pathtopolys_ignoring_attachments(f, sty; kwargs...)
 
 # NoRender and friends — effectively the same as above but without the warning
 pathtopolys(seg::Paths.Segment{T}, s::Paths.NoRenderContinuous; kwargs...) where {T} =
@@ -390,19 +395,10 @@ function pathtopolys(p::Paths.Path{T}; kwargs...) where {T}
     return reduce(vcat, vcat.(pathtopolys.(nodes; kwargs...)))
 end
 
-function pathtopolys(seg::Paths.Segment{T}, sty::Paths.PeriodicStyle; kwargs...) where {T}
-    subsegs, substys = Paths.resolve_periodic(seg, sty)
-    return reduce(
-        vcat,
-        (
-            vcat(pathtopolys(Paths.Node(se, st); kwargs...)) for
-            (se, st) in zip(subsegs, substys)
-        ),
-        init=GeometryEntity{T}[]
-    )
-end
-function pathtopolys(
-    seg::Paths.CompoundSegment{T},
+# The two PeriodicStyle methods below exist for dispatch specificity (CompoundSegment
+# has its own generic-Style method); they share this body.
+function _pathtopolys_periodic(
+    seg::Paths.Segment{T},
     sty::Paths.PeriodicStyle;
     kwargs...
 ) where {T}
@@ -416,6 +412,10 @@ function pathtopolys(
         init=GeometryEntity{T}[]
     )
 end
+pathtopolys(seg::Paths.Segment{T}, sty::Paths.PeriodicStyle; kwargs...) where {T} =
+    _pathtopolys_periodic(seg, sty; kwargs...)
+pathtopolys(seg::Paths.CompoundSegment{T}, sty::Paths.PeriodicStyle; kwargs...) where {T} =
+    _pathtopolys_periodic(seg, sty; kwargs...)
 
 function _compound_segment_slice(f::Paths.Segment{T}, start, stop) where {T}
     len = pathlength(f)
@@ -488,14 +488,11 @@ end
 pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.Style; kwargs...) where {T} =
     _compound_pin_render(f, s, (se, sty) -> pathtopolys(se, sty; kwargs...))
 # Wrapper segments route here; concrete-style methods only accept BaseContinuousSegment.
-function pathtopolys(
+pathtopolys(
     f::Paths.CompoundSegment{T},
     sty::Paths.AbstractDecoratedStyle;
     kwargs...
-) where {T}
-    @warn "Ignoring attachments on path segment $f with style $sty when converting to polygons. Did you write `render!.(cell, path, ...)` instead of `render!(cell, path, ...)`?"
-    return pathtopolys(f, Paths.undecorated(sty); kwargs...)
-end
+) where {T} = _pathtopolys_ignoring_attachments(f, sty; kwargs...)
 pathtopolys(::Paths.CompoundSegment{T}, ::Paths.NoRender; kwargs...) where {T} =
     Polygon{T}[]
 pathtopolys(::Paths.CompoundSegment{T}, ::Paths.NoRenderContinuous; kwargs...) where {T} =
@@ -823,16 +820,8 @@ to_polygons(
     kwargs...
 ) where {T} = to_polygons(Paths.resolve_offset(seg), sty; kwargs...)
 
-# DecoratedStyles: strip the decoration and delegate to the underlying style.
-# Attachments are handled by render!(Cell, Path), not here.
-function pathtopolys(
-    seg::Paths.Segment{T},
-    sty::Paths.AbstractDecoratedStyle;
-    kwargs...
-) where {T}
-    @warn "Ignoring attachments on path segment $seg with style $sty when converting to polygons. Did you write `render!.(cell, path, ...)` instead of `render!(cell, path, ...)`?"
-    return pathtopolys(seg, Paths.undecorated(sty); kwargs...)
-end
+pathtopolys(seg::Paths.Segment{T}, sty::Paths.AbstractDecoratedStyle; kwargs...) where {T} =
+    _pathtopolys_ignoring_attachments(seg, sty; kwargs...)
 
 # Segment-level calls bypass the Node linearity gate, so straight linear cases need explicit
 # polygon-producing methods. Dispatch on Paths.Straight keeps these methods below the wrapper
