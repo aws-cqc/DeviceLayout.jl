@@ -347,6 +347,15 @@ pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.Style; kwargs...) where {T} =
     _pathtopolys_resolved_offset(f, s; kwargs...)
 pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.PeriodicStyle; kwargs...) where {T} =
     _pathtopolys_resolved_offset(f, s; kwargs...)
+# CompoundStyle grids are expressed in the original segment's arclength frame, which
+# offset resolution does not preserve — style transitions would land in the wrong
+# places. Fail loudly rather than render subtly wrong geometry.
+pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.CompoundStyle; kwargs...) where {T} = throw(
+    ArgumentError(
+        "cannot render offset segment $f with a CompoundStyle: the style grid is in " *
+        "the original segment's arclength frame, which offset resolution does not preserve"
+    )
+)
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderContinuous; kwargs...) where {T} =
     Polygon{T}[]
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderDiscrete; kwargs...) where {T} =
