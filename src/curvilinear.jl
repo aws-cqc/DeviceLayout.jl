@@ -321,8 +321,10 @@ This is particularly helpful if a Path is being used within the construction of 
 rather than as part of the SchematicGraph.
 """
 function pathtopolys(f::Paths.Segment{T}, s::Paths.Style; kwargs...) where {T}
-    @warn "Discretizing path segment ($f, $s) for CurvilinearRegion construction"
-    return to_polygons(f, pathlength(f), s; kwargs...)
+    # All supported segment/style combinations have specific methods; landing here means
+    # nothing can render this pair (the old fallback warned and then called a since-removed
+    # three-argument to_polygons method, producing a confusing MethodError).
+    throw(ArgumentError("no method converting path segment $f with style $s to polygons"))
 end
 pathtopolys(f::Paths.Corner{T}, s::Paths.SimpleTraceCorner; kwargs...) where {T} =
     to_polygons(f, s; kwargs...)

@@ -1267,4 +1267,10 @@ end
         gensym()
     )
     @test_throws ArgumentError pathtopolys(off, csty)
+
+    # A segment/style pair with no conversion method errors clearly instead of
+    # warning and then throwing a MethodError (the old fallback called a removed
+    # three-argument to_polygons)
+    corner_seg = Paths.Corner{typeof(1.0μm)}(90°)
+    @test_throws ArgumentError pathtopolys(corner_seg, Paths.Trace(1.0μm))
 end

@@ -7,6 +7,9 @@ The format of this changelog is based on
 ## Unreleased
 
   - `ExamplePDK.ChipTemplates.example_launcher` now styles its simulated-only `PORT` rectangle with `WithDirection`, and the `DemoQPU17` solidmodel example extracts port and junction directions with `ExamplePDK.port_directions` instead of computing them by hand (removing the `lumped_direction` keyword from its config-building functions)
+  - Converting a path segment/style combination that has no polygon conversion now
+    throws a clear `ArgumentError` instead of warning and then failing with a
+    `MethodError`.
   - Rendering an offset segment with a `CompoundStyle` now throws an `ArgumentError`:
     the style grid is in the original segment's arclength frame, which offset
     resolution does not preserve, so the result would place style transitions in the
