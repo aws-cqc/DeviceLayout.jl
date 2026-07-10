@@ -21,13 +21,15 @@ The format of this changelog is based on
     curvature-based and tolerance-controlled via `atol`/`rtol`. The `max_recursions`,
     `max_change`, `rand_factor`, and `grid_step` render keywords no longer have any
     effect.
-  -  Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
   - Added a cached arc-length reparameterization to `Paths.BSpline`, making `pathlength`,
     `Paths.t_to_arclength`, and `Paths.arclength_to_t` much faster (~15x for a single
     `arclength_to_t` call). The forward map remains exact; `arclength_to_t` now uses a
     table-seeded Newton iteration (relative tolerance `1e-12`) in place of `Optim`-based
     minimization, so results may differ from previous versions within tolerance.
   - Fixed bug where exact floating point comparison in `autofill` could lead to a gridpoint on an interior edge being filled
+  - Added `recover_curves` and the curve-preserving Boolean variants `union2d_curved`, `difference2d_curved`, `intersect2d_curved`, and `xor2d_curved`, which recover original curves (arcs, splines) from a clipped result wherever their discretized footprint survived the operation intact, returning a `Vector{CurvilinearRegion}`
+  - Unified styled-entity expansion into curve-bearing geometry behind `Curvilinear.to_curvilinear`, shared by the `SolidModel` render path, the GDS `Rounded` rendering bridge, and curve recovery. `Rounded` on `ClippedPolygon`/`CurvilinearRegion`/`CurvilinearPolygon`, nestings with no-op styles (`MeshSized`, `WithDirection`), and per-contour `StyleDict`s now preserve their arcs through the `*_curved` variants. Fixes a `MethodError` when rendering `Rounded(MeshSized(...))` through curve recovery.
+  - Fixed composite rounding of a `ClippedPolygon` dropping its holes (#241). `CurvilinearRegion` now normalizes holes to clockwise winding on construction (matching `ClippedPolygon` hole contours), and `to_polygons` reconstitutes the region with a single positive-fill `union2d` instead of `difference2d`, so hole subtraction no longer depends on input winding.
 
 ## 1.15.0 (2026-06-14)
 

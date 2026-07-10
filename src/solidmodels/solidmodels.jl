@@ -88,7 +88,9 @@ import DeviceLayout.Curvilinear:
     islinear,
     round_to_curvilinearpolygon,
     rounded_corner_segment,
-    rounded_corner_segment_line_arc
+    rounded_corner_segment_line_arc,
+    to_curvilinear,
+    styled_loop
 import Unitful: μm, mm, ustrip, °, uconvert, Length
 import FileIO: File
 

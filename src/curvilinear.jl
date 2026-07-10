@@ -11,6 +11,8 @@ import DeviceLayout:
     AbstractPolygon,
     GeometryEntity,
     GeometryEntityStyle,
+    GeometryStructure,
+    GeometryReference,
     Paths,
     Reflection,
     Rotation,
@@ -20,6 +22,7 @@ import DeviceLayout:
     Translation
 import DeviceLayout:
     _compound_pin_render,
+    flat_elements,
     to_polygons,
     points,
     rotation,
@@ -29,8 +32,10 @@ import DeviceLayout:
     transform,
     perimeter,
     isapprox_angle
+import DeviceLayout: MeshSized, WithDirection, OptionalStyle, Plain, NoRender
 using DeviceLayout.Paths
-import DeviceLayout.Polygons: cornerindices
+import DeviceLayout.Polygons: cornerindices, StyleDict, Rounded
+import DeviceLayout.Polygons.Clipper: PolyNode, contour
 import Unitful: uconvert, °, Length
 
 using ..Points
@@ -43,7 +48,10 @@ export CurvilinearPolygon,
     line_arc_cornerindices,
     round_to_curvilinearpolygon,
     rounded_corner_segment,
-    rounded_corner_segment_line_arc
+    rounded_corner_segment_line_arc,
+    to_curvilinear,
+    styled_loop
+export recover_curves, difference2d_curved, intersect2d_curved, union2d_curved, xor2d_curved
 
 """
     struct CurvilinearPolygon{T} <: GeometryEntity{T}
@@ -102,6 +110,16 @@ struct CurvilinearPolygon{T} <: GeometryEntity{T}
         for (curve_idx, start_idx) in enumerate(csi)
             csi[curve_idx] = start_idx - count(dup_idx .< start_idx)
         end
+        # Consumers (`to_polygons`, `_collect_provenance!`) walk curves with a running
+        # cursor and slice `p[i:csi]`, which requires `csi` ascending. Producers such as
+        # `_reverse` and reflective `transform` can emit unsorted indices when a curve
+        # wraps around to the last vertex, so sort curves and indices jointly here to
+        # restore the invariant for every producer.
+        if length(csi) > 1
+            perm = sortperm(csi)
+            c = c[perm]
+            csi = csi[perm]
+        end
         return new{T}(p, c, csi)
     end
 end
@@ -149,6 +167,20 @@ function to_polygons(
     return Polygon{T}(p)
 end
 
+function _reverse(e::CurvilinearPolygon)
+    # Reversing the point list sends old index j → N + 1 - j and flips each curve's
+    # traversal direction. A curve starting at old index i spans i → i + 1 (cyclic), so
+    # its reversed start is the old i + 1, at new index N - i (or N when i == N). csi_rev
+    # emits that as the negative index -(N - i) (-N for i == N), which the constructor
+    # normalizes by reversing the segment and flipping the index positive.
+    csi_rev = (i, N) -> mod1(i + 1, N) - N - 1
+    return CurvilinearPolygon(
+        reverse(e.p),
+        reverse(e.curves),
+        reverse(csi_rev.(e.curve_start_idx, length(e.p)))
+    )
+end
+
 function transform(e::CurvilinearPolygon, f::Transformation)
     # If the transformation is a reflection, have to fix the winding.
     # curve_start_idx are shifted forward 1, reversed, then negated.
@@ -187,12 +219,27 @@ points(e::CurvilinearPolygon) = e.p
 A curvilinear region made up of an exterior::CurvilinearPolygon{T} and optional interior
 holes made up of CurvilinearPolygon{T}. These holes cannot intersect each other or the
 exterior.
+
+Holes are normalized to clockwise (negative) winding on construction, opposite the
+counterclockwise exterior. This matches `ClippedPolygon` hole contours, so that `to_polygons`
+can reconstitute the region with `union2d` under Clipper's positive fill rule. See issue #241.
 """
 struct CurvilinearRegion{T} <: GeometryEntity{T}
     exterior::CurvilinearPolygon{T}
     holes::Vector{CurvilinearPolygon{T}}
     CurvilinearRegion{T}(ext::CurvilinearPolygon, holes=CurvilinearPolygon{T}[]) where {T} =
-        new(ext, holes)
+        new(ext, _to_hole_winding.(holes))
+end
+
+# Normalize a hole to clockwise (negative) winding, matching `ClippedPolygon` hole contours,
+# so `to_polygons` subtracts it via positive-fill `union2d`. For curve-bearing holes, winding
+# is read from the discretized loop because vertices alone can't determine it (a two-vertex
+# loop closed by two arcs has no vertex winding at all). Clipper-derived holes already arrive
+# clockwise, making this a no-op. Degenerate loops (< 3 discretized points) pass through.
+function _to_hole_winding(h::CurvilinearPolygon)
+    pg = isempty(h.curves) ? Polygon(h.p) : to_polygons(h)
+    length(points(pg)) < 3 && return h
+    return Polygons.orientation(pg) > 0 ? _reverse(h) : h
 end
 CurvilinearRegion(x) = CurvilinearRegion(CurvilinearPolygon(x))
 CurvilinearRegion(ext::CurvilinearPolygon{T}) where {T} = CurvilinearRegion{T}(ext)
@@ -207,18 +254,39 @@ CurvilinearRegion(points::Vector{Point{T}}, segments) where {T} =
 CurvilinearRegion(points::Vector{Point{T}}, curves, curve_start_idx) where {T} =
     CurvilinearRegion(CurvilinearPolygon(points, curves, curve_start_idx))
 
+# Holes carry clockwise winding (normalized in the constructor), opposite the exterior, so a
+# single `union2d` over [exterior, holes...] subtracts them under Clipper's positive fill rule.
+# The exterior and holes must share one input: positive fill is applied per input before the
+# union, which would drop a clockwise hole passed as a separate argument as a "hole in nothing".
+# Using `union2d` rather than `difference2d` keeps hole winding consistent with `ClippedPolygon`
+# and is robust to styles (e.g. composed `Rounded`) that round each loop independently and
+# preserve winding. See #241.
 function to_polygons(e::CurvilinearRegion; kwargs...)
     isempty(e.holes) && return [to_polygons(e.exterior; kwargs...)]
     return to_polygons(
-        difference2d(to_polygons(e.exterior; kwargs...), to_polygons.(e.holes; kwargs...))
+        union2d(
+            vcat(to_polygons(e.exterior; kwargs...), _hole_polygon.(e.holes; kwargs...))
+        )
     )
+end
+
+# Discretize a hole through its reversed (counterclockwise) traversal, then flip the point
+# list back to clockwise. The marching discretizer is direction-dependent, and holes store
+# their curves reversed to match the clockwise loop; the reversed walk restores each curve's
+# forward parameterization, so a hole produced by curve recovery re-discretizes to the exact
+# footprint its curves had when first clipped (recover → re-discretize is xor2d-empty
+# against the raw clip result).
+function _hole_polygon(h::CurvilinearPolygon; kwargs...)
+    return Polygon(reverse(points(to_polygons(_reverse(h); kwargs...))))
 end
 function to_polygons(e::CurvilinearRegion, sty::Polygons.Rounded; kwargs...)
     isempty(e.holes) && return [to_polygons(e.exterior, sty; kwargs...)]
     return to_polygons(
-        difference2d(
-            to_polygons(e.exterior, sty; kwargs...),
-            [to_polygons(h, sty; kwargs...) for h in e.holes]
+        union2d(
+            vcat(
+                to_polygons(e.exterior, sty; kwargs...),
+                [to_polygons(h, sty; kwargs...) for h in e.holes]
+            )
         )
     )
 end
@@ -1108,13 +1176,7 @@ function round_to_curvilinearpolygon(
         end
     end
 
-    # Sort curves by start index so to_polygons can iterate in vertex order
-    if length(new_curve_start_idx) > 1
-        perm = sortperm(new_curve_start_idx)
-        new_curves = new_curves[perm]
-        new_curve_start_idx = new_curve_start_idx[perm]
-    end
-
+    # Constructor will sort curves by start index
     return CurvilinearPolygon(new_points, new_curves, new_curve_start_idx)
 end
 
@@ -1130,33 +1192,17 @@ function rounded_corner_segment(
     min_side_len=radius,
     min_angle=1e-3
 ) where {T, S <: DeviceLayout.Coordinate}
-    V = float(T)
-    rad = convert(V, radius)
-
-    v1 = (p1 - p0) / norm(p1 - p0)
-    v2 = (p2 - p1) / norm(p2 - p1)
-    α1 = atan(v1.y, v1.x) # between -π and π
-    α2 = atan(v2.y, v2.x)
-
-    if min_side_len > norm(p1 - p0) || min_side_len > norm(p2 - p1)
-        return p1
-    elseif isapprox(rem2pi(α1 - α2, RoundNearest), 0, atol=min_angle)
-        return p1
-    end
-
-    dir = DeviceLayout.orientation(p0, p1, p2)
-    dα = α2 - α1
-    if sign(dα) != dir
-        dα = dα + dir * 2π
-    end
-
-    # p0_seg is the start of the arc, determined by the intersection
-    # of lines parallel to v1, v2
-    k =
-        inv([v1.x -v2.x; v1.y -v2.y]) *
-        [p2.x - p0.x + dir * rad * (v1.y - v2.y), p2.y - p0.y + dir * rad * (v2.x - v1.x)]
-    p0_seg = p0 + k[1] * v1
-    return Paths.Turn(uconvert(°, dα), rad, p0_seg, uconvert(°, α1))
+    geom = Polygons._rounded_corner_geometry(
+        p0,
+        p1,
+        p2,
+        radius;
+        atol=Polygons._round_atol(T, S),
+        min_side_len=min_side_len,
+        min_angle=min_angle
+    )
+    isnothing(geom) && return p1
+    return Paths.Turn(uconvert(°, geom.dα), geom.radius, geom.start, uconvert(°, geom.α0))
 end
 
 """
@@ -1322,5 +1368,158 @@ function rounded_corner_segment_line_arc(
 
     return (; fillet, T_line, T_arc=T_arc_pt)
 end
+
+######## Styled entity → curvilinear geometry
+#
+# `to_curvilinear` expands a (possibly nested) styled entity into curve-bearing geometry —
+# a `CurvilinearPolygon`, a `CurvilinearRegion`, or a `Vector` of those — preserving arcs
+# instead of discretizing them. It is the single source of truth shared by the SolidModel
+# render path, the GDS `Rounded` bridge (`to_polygons(::StyledEntity, ::Rounded)`), and
+# curve recovery (`_normalize_curved_clip_arg`). `styled_loop` is the per-contour worker that applies one
+# resolved style to one loop; `to_curvilinear` drives the recursion over nesting and trees.
+
+# Given a loop (Polygon or CurvilinearPolygon) and one resolved style, produce a
+# CurvilinearPolygon. Rounded produces exact fillet arcs; Plain/NoRender are pass-through.
+styled_loop(p::Polygon, ::Plain; kwargs...) = CurvilinearPolygon(points(p))
+styled_loop(::Polygon{T}, ::NoRender; kwargs...) where {T} = CurvilinearPolygon(Point{T}[])
+function styled_loop(p::GeometryEntity, sty::OptionalStyle; kwargs...)
+    return styled_loop(
+        p,
+        get(kwargs, sty.flag, sty.default) ? sty.true_style : sty.false_style;
+        kwargs...
+    )
+end
+function styled_loop(p::GeometryEntity, sty::Rounded; kwargs...)
+    return round_to_curvilinearpolygon(
+        p,
+        radius(sty),
+        min_side_len=sty.min_side_len,
+        corner_indices=cornerindices(p, sty),
+        line_arc_corner_indices=line_arc_cornerindices(p, sty),
+        min_angle=sty.min_angle
+    )
+end
+# Styles that don't affect geometry (mesh sizing, direction annotation) leave the loop as-is.
+styled_loop(p::Polygon, ::Union{MeshSized, WithDirection}; kwargs...) =
+    CurvilinearPolygon(points(p))
+styled_loop(l::CurvilinearPolygon, ::Union{MeshSized, WithDirection}; kwargs...) = l
+# Clipper `PolyNode`s carry their loop in `contour`; convert then apply the style. Restricted
+# to `PolyNode` so unrelated types fail at dispatch instead of hitting a missing `contour`.
+styled_loop(n::PolyNode, sty; kwargs...) = styled_loop(Polygon(contour(n)), sty; kwargs...)
+
+styled_loop(l::CurvilinearPolygon, sty::Plain; kwargs...) = l
+styled_loop(::CurvilinearPolygon{T}, ::NoRender; kwargs...) where {T} =
+    CurvilinearPolygon(Point{T}[])
+
+# Expand a styled entity into curve-bearing geometry. Entry points accept a bare style
+# (single style applied to the whole entity) and dispatch by entity type below.
+# To AbstractPolygon, CurvilinearPolygon, CurvilinearRegion, or vector of those.
+# If this produces an AbstractPolygon and the styled entity should be curve-bearing, warn for curve loss.
+function to_curvilinear(ent::GeometryEntity, sty; kwargs...)
+    expanded = to_polygons(ent, sty; kwargs...)
+    discretized =
+        expanded isa AbstractPolygon ||
+        (expanded isa AbstractVector && any(x -> x isa AbstractPolygon, expanded))
+    discretized && _maybe_warn_curve_loss(sty(ent))
+    return expanded
+end
+# Nested styles: expand the inner style first (inner-out), then apply the outer style to the
+# resulting curvilinear geometry so both rounding passes see exact arcs.
+function to_curvilinear(ent::StyledEntity, sty; kwargs...)
+    return to_curvilinear(to_curvilinear(ent.ent, ent.sty; kwargs...), sty; kwargs...)
+end
+to_curvilinear(ents::AbstractVector, sty; kwargs...) =
+    vcat(to_curvilinear.(ents, Ref(sty); kwargs...)...)
+to_curvilinear(ent::AbstractPolygon, sty; kwargs...) =
+    styled_loop(convert(Polygon, ent), sty; kwargs...)
+to_curvilinear(ent::CurvilinearPolygon, sty; kwargs...) = styled_loop(ent, sty; kwargs...)
+# Path nodes expand through `pathtopolys`, which preserves curves; geometry-transparent
+# styles pass through. Without this method a `MeshSized` path node falls to the generic
+# `to_polygons` fallback and silently discretizes its arcs. Zero-length continuous-style
+# nodes (as left around `attach!`/`launch!`) expand to nothing, matching `_normalize_curved_clip_arg`.
+function to_curvilinear(
+    n::Paths.Node{T},
+    ::Union{MeshSized, WithDirection};
+    kwargs...
+) where {T}
+    iszero(pathlength(n.seg)) &&
+        n.sty isa Paths.ContinuousStyle &&
+        return CurvilinearPolygon{T}[]
+    return pathtopolys(n; kwargs...)
+end
+to_curvilinear(ent::ClippedPolygon, sty; kwargs...) =
+    to_curvilinear(ent, StyleDict(sty); kwargs...)
+to_curvilinear(ent::CurvilinearRegion, sty; kwargs...) =
+    to_curvilinear(ent, StyleDict(sty); kwargs...)
+function to_curvilinear(ent::ClippedPolygon{T}, sty::StyleDict; kwargs...) where {T}
+    # Flatten the tree into a collection of CurvilinearRegion with style applied per contour.
+    flat = CurvilinearRegion{T}[]
+    function add_region(node)
+        push!(
+            flat,
+            CurvilinearRegion{T}(
+                styled_loop(node, sty[node]; kwargs...),
+                styled_loop.(node.children, getindex.(Ref(sty), node.children); kwargs...)
+            )
+        )
+        for n in node.children
+            add_region.(n.children) # Add all grandchildren -- positives
+        end
+    end
+    add_region.(ent.tree.children)
+    return flat
+end
+function to_curvilinear(ent::CurvilinearRegion{T}, sty::StyleDict; kwargs...) where {T}
+    return CurvilinearRegion{T}(
+        styled_loop(ent.exterior, sty[1]; kwargs...),
+        styled_loop.(ent.holes, getindex.(sty, 1, 1:length(ent.holes)); kwargs...)
+    )
+end
+
+# Whether discretizing this entity to plain polygons loses curve geometry. Plain polygon
+# types and linear path nodes are exactly representable as polygons; other entity types
+# are assumed to carry curves unless they declare otherwise, so that unrecognized
+# curve-bearing entities still trigger the loss warning below.
+_carries_curves(e) = true
+_carries_curves(::AbstractPolygon) = false
+_carries_curves(e::CurvilinearPolygon) = !isempty(e.curves)
+_carries_curves(e::CurvilinearRegion) =
+    _carries_curves(e.exterior) || any(_carries_curves, e.holes)
+_carries_curves(n::Paths.Node) = islinear(n.seg, n.sty) isa Val{false}
+_carries_curves(e::StyledEntity{T, U, <:Rounded}) where {T, U} = true
+function _carries_curves(e::StyledEntity{T, U, <:StyleDict}) where {T, U}
+    return e.sty.default isa Rounded ||
+           any(x -> x isa Rounded, values(e.sty.styles)) ||
+           _carries_curves(e.ent)
+end
+_carries_curves(e::StyledEntity{T, U}) where {T, U} = _carries_curves(e.ent)
+
+# Entities without a curve-preserving method are discretized.
+# Warn once per entity type so the loss is observable.
+const _curve_loss_warned = Set{Symbol}()
+function _maybe_warn_curve_loss(e)
+    _carries_curves(e) || return nothing
+    key = Symbol("$(typeof(e))")
+    key in _curve_loss_warned && return nothing
+    push!(_curve_loss_warned, key)
+    @warn "recover_curves: entities of type $(typeof(e)) have no curve-recovery method " *
+          "and are discretized via to_polygons — any curves they carry will not be " *
+          "recovered. (This warning is shown once per entity type.)"
+    return nothing
+end
+
+# Bridge for nested Rounded styles in the Cell/GDS rendering path. Without it, the inner
+# style resolves to a plain Polygon (losing arc info), so the outer Rounded could only do
+# line-line rounding. Routing the inner styles through `to_curvilinear` yields exact fillet
+# arcs, so the outer Rounded can apply line-arc rounding via to_polygons(_, ::Rounded).
+function to_polygons(ent::StyledEntity, sty::Rounded; kwargs...)
+    inner = to_curvilinear(ent.ent, ent.sty; kwargs...)
+    if inner isa AbstractVector
+        return vcat(to_polygons.(inner, Ref(sty); kwargs...)...)
+    end
+    return to_polygons(sty(inner); kwargs...)
+end
+
+include("curve_recovery.jl")
 
 end # module

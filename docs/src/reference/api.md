@@ -195,6 +195,11 @@
     CurvilinearRegion
     Curvilinear.edge_type_at_vertex
     Curvilinear.line_arc_cornerindices
+    difference2d_curved
+    intersect2d_curved
+    recover_curves
+    union2d_curved
+    xor2d_curved
 ```
 
 ### [Shapes](@id api-shapes)

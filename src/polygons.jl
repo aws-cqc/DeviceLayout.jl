@@ -862,6 +862,54 @@ function _round_poly(
     return new_pol
 end
 
+function _rounded_corner_geometry(
+    p0::Point{T},
+    p1::Point{T},
+    p2::Point{T},
+    radius::S;
+    atol=_round_atol(T, S),
+    min_side_len=radius,
+    min_angle=1e-3
+) where {T, S <: Coordinate}
+    V = float(T)
+    rad = convert(V, radius)
+
+    v1 = (p1 - p0) / norm(p1 - p0)
+    v2 = (p2 - p1) / norm(p2 - p1)
+    α1 = atan(v1.y, v1.x)
+    α2 = atan(v2.y, v2.x)
+
+    l1 = min_side_len - norm(p1 - p0)
+    l2 = min_side_len - norm(p2 - p1)
+    if (l1 > zero(l1) && !isapprox(l1, zero(l1), atol=atol)) ||
+       (l2 > zero(l2) && !isapprox(l2, zero(l2), atol=atol))
+        return nothing
+    elseif isapprox(rem2pi(α1 - α2, RoundNearest), 0, atol=min_angle)
+        return nothing
+    end
+
+    dir = orientation(p0, p1, p2)
+    k =
+        inv([v1.x -v2.x; v1.y -v2.y]) *
+        [p2.x - p0.x + dir * rad * (v1.y - v2.y), p2.y - p0.y + dir * rad * (v2.x - v1.x)]
+    p0_seg = p0 + k[1] * v1
+    pcircle = p0_seg + dir * rad * [-v1.y, v1.x]
+
+    dα = α2 - α1
+    if sign(dα) != dir
+        dα = dα + dir * 2π
+    end
+
+    return (;
+        radius=rad,
+        start=p0_seg,
+        center=pcircle,
+        α0=α1,
+        dα=dα,
+        arc_angles=[α1 - dir * π / 2, α2 - dir * π / 2]
+    )
+end
+
 """
     rounded_corner(p0::Point{T}, p1::Point{T}, p2::Point{T}, radius::S;
         atol, min_side_len, min_angle)
@@ -886,36 +934,17 @@ function rounded_corner(
     min_side_len=radius,
     min_angle=1e-3
 ) where {T, S <: Coordinate}
-    V = float(T)
-    rad = convert(V, radius)
-
-    v1 = (p1 - p0) / norm(p1 - p0)
-    v2 = (p2 - p1) / norm(p2 - p1)
-    α1 = atan(v1.y, v1.x)
-    α2 = atan(v2.y, v2.x)
-
-    l1 = min_side_len - norm(p1 - p0)
-    l2 = min_side_len - norm(p2 - p1)
-    if (l1 > zero(l1) && !isapprox(l1, zero(l1), atol=atol)) ||
-       (l2 > zero(l2) && !isapprox(l2, zero(l2), atol=atol)) # checks that the side lengths against min_side_len
-        return [p1]
-    elseif isapprox(rem2pi(α1 - α2, RoundNearest), 0, atol=min_angle) # checks if the points are collinear, within tolerance
-        return [p1]
-    end
-
-    dir = orientation(p0, p1, p2) # checks the direction of the corner
-    # pcircle is the origin of the rounding circle, determined by the intersection
-    # of lines parallel to v1, v2 and offset by a distance rad
-    k =
-        inv([v1.x -v2.x; v1.y -v2.y]) *
-        [p2.x - p0.x + dir * rad * (v1.y - v2.y), p2.y - p0.y + dir * rad * (v2.x - v1.x)]
-    pcircle = p0 + k[1] * v1 + dir * rad * [-v1.y, v1.x]
-    return DeviceLayout.circular_arc(
-        [α1 - dir * π / 2, α2 - dir * π / 2],
-        rad,
-        atol,
-        center=pcircle
+    geom = _rounded_corner_geometry(
+        p0,
+        p1,
+        p2,
+        radius;
+        atol=atol,
+        min_side_len=min_side_len,
+        min_angle=min_angle
     )
+    isnothing(geom) && return [p1]
+    return DeviceLayout.circular_arc(geom.arc_angles, geom.radius, atol, center=geom.center)
 end
 
 """

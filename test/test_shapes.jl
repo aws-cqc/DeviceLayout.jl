@@ -476,6 +476,51 @@ end
     @test length(points(coarse)) < length(points(fine))
 end
 
+@testitem "CurvilinearRegion holes (#241)" setup = [CommonTestSetup] begin
+    total_area(x) = sum(abs(Polygons.area(p)) for p in to_polygons(x); init=0.0μm^2)
+
+    # A ClippedPolygon with a hole: holes come back clockwise (Clipper-native).
+    cp = difference2d(centered(Rectangle(100μm, 100μm)), centered(Rectangle(40μm, 40μm)))
+    @test isapprox(total_area(cp), (100^2 - 40^2)μm^2; rtol=1e-9)
+
+    # Composing two Rounded styles routes the clockwise hole through a CurvilinearRegion.
+    # Rounding each loop independently preserves winding, so the hole must still subtract.
+    single = to_polygons(Rounded(5μm)(cp))
+    composed = to_polygons(Rounded(5μm)(Rounded(5μm)(cp)))
+    a_single = sum(abs(Polygons.area(p)) for p in single)
+    a_composed = sum(abs(Polygons.area(p)) for p in composed)
+    @test isapprox(a_composed, a_single; rtol=1e-6) # was ≈100² (hole dropped) before #241
+
+    # Constructor normalizes hole winding to clockwise regardless of input orientation,
+    # and to_polygons subtracts it. Exterior square, square hole built counterclockwise.
+    ext = CurvilinearPolygon(points(convert(Polygon, centered(Rectangle(100μm, 100μm)))))
+    hole_ccw = CurvilinearPolygon(points(convert(Polygon, centered(Rectangle(40μm, 40μm)))))
+    @test Polygons.orientation(to_polygons(hole_ccw)) == 1 # counterclockwise as built
+    cr = CurvilinearRegion(ext, [hole_ccw])
+    @test Polygons.orientation(to_polygons(cr.holes[1])) == -1 # normalized to clockwise
+    @test isapprox(total_area(cr), (100^2 - 40^2)μm^2; rtol=1e-9)
+
+    # A curved (counterclockwise) hole: half-disk pair forming a circle of radius 15μm.
+    # Its winding is invisible from the two vertices alone — normalization must read it
+    # from the discretized loop.
+    h1 = Point(15.0μm, 0.0μm)
+    h2 = Point(-15.0μm, 0.0μm)
+    circ_hole = CurvilinearPolygon(
+        [h1, h2],
+        [Paths.Turn(π, 15.0μm, p0=h1, α0=π / 2), Paths.Turn(π, 15.0μm, p0=h2, α0=-π / 2)],
+        [1, 2]
+    )
+    @test Polygons.orientation(to_polygons(circ_hole)) == 1 # counterclockwise as built
+    cr_curved = CurvilinearRegion(ext, [circ_hole])
+    @test Polygons.orientation(to_polygons(cr_curved.holes[1])) == -1 # normalized
+    @test isapprox(total_area(cr_curved), (100^2)μm^2 - π * (15μm)^2; rtol=1e-3)
+
+    # Curves on normalized holes survive curve recovery (holes discretize as stored).
+    rec = union2d_curved(cr_curved)
+    @test sum(sum(length(h.curves) for h in r.holes; init=0) for r in rec) == 2
+    @test isempty(to_polygons(xor2d(rec, cr_curved)))
+end
+
 @testitem "Ellipses" setup = [CommonTestSetup] begin
     import LinearAlgebra: norm
     e = Ellipse(2 .* Point(2.0μm, 1.0μm), (2.0μm, 1.0μm), 0°)
