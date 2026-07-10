@@ -38,7 +38,7 @@ end
 
 function discretize_curve(s::Paths.Turn, tolerance; rtol=nothing)
     if !isnothing(rtol)
-        tolerance = max(tolerance, rtol * s.r)
+        tolerance = max(tolerance, rtol * abs(s.r))
     end
     θ_0 = s.α0 - sign(s.α) * 90.0°
     ps = circular_arc(θ_0 + s.α, s.r, tolerance; θ_0=θ_0, center=Paths.curvaturecenter(s))

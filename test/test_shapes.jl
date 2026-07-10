@@ -984,4 +984,17 @@ end
         rad = circular_arc(convert(Float64, 90.0°), 5.0μm, 1.0nm)
         @test deg == rad
     end
+
+    @testset "Negative radius semantics" begin
+        # Offset with negative radius is flipped; turn with negative radius is just turn in other direction
+        # Make sure resolution accounts for the difference
+        # In practice shouldn't come up since `pathtopolys` clips off negative-radius part;
+        # user has to explicity create and style OffsetSegment (DL internals)
+        t = Paths.Turn(90.0°, 5.0μm)
+        off = Paths.ConstantOffset(t, 8.0μm)
+        # Runs without error, endpoints consistent, rtol triggers correctly
+        poly = to_polygons(pathtopolys(Paths.Node(off, Paths.Trace(0.1μm))))
+        poly_rtol = to_polygons(pathtopolys(Paths.Node(off, Paths.Trace(0.1μm))), rtol=0.1)
+        @test length(points(poly)) > length(points(poly_rtol))
+    end
 end
