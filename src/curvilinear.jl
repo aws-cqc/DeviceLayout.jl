@@ -322,8 +322,7 @@ rather than as part of the SchematicGraph.
 """
 function pathtopolys(f::Paths.Segment{T}, s::Paths.Style; kwargs...) where {T}
     # All supported segment/style combinations have specific methods; landing here means
-    # nothing can render this pair (the old fallback warned and then called a since-removed
-    # three-argument to_polygons method, producing a confusing MethodError).
+    # nothing can render this pair
     throw(ArgumentError("no method converting path segment $f with style $s to polygons"))
 end
 pathtopolys(f::Paths.Corner{T}, s::Paths.SimpleTraceCorner; kwargs...) where {T} =
@@ -1066,13 +1065,11 @@ function round_to_curvilinearpolygon(
         line_arc_cornerindices(pol)
     end
 
-    # Per-vertex membership checks below run once per polygon point; Vector `in` and
-    # `findfirst` made the loop O(n²) in the corner count. Set/Dict restore O(n).
-    # The reverse iteration keeps findfirst's first-match semantics for the curve lookup.
+    # Per-vertex membership checks below run once per polygon point; use Set/Dict to keep this O(n).
     la_set = Set(la_indices)
     corner_set = Set(corner_indices)
     curve_index_at_vertex = Dict{Int, Int}()
-    for (k, v) in Iterators.reverse(collect(pairs(pol.curve_start_idx)))
+    for (k, v) in pairs(pol.curve_start_idx)
         curve_index_at_vertex[v] = k
     end
 
