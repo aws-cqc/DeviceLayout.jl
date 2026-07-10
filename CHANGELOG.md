@@ -24,7 +24,7 @@ The format of this changelog is based on
   - Added a fast path for constant-curvature discretization: `Turn` and
     constant-offset `Turn` segments are sampled uniformly at the tolerance-derived
     angular step instead of marching with the general curvature-controlled kernel,
-    making turn discretization faster and avoiding over-refinment in some cases. Rendered point counts and positions change slightly for every `Turn` within the same `atol`/`rtol` tolerances. Degenerate turns (zero sweep, zero radius, `|offset| == r`) now discretize to exactly two points, and
+    making turn discretization faster and avoiding over-refinement in some cases. Rendered point counts and positions change slightly for every `Turn` within the same `atol`/`rtol` tolerances. Degenerate turns (zero sweep, zero radius, `|offset| == r`) now discretize to exactly two points, and
     offset turns with `|offset| > r` keep exact endpoints.
   - Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
   - Added `SolidModels.check_port_connectivity`, using `SolidModels.connected_components` to report ports as `:open`, `:short`, `:floating`, or `:missing`
