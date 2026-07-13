@@ -106,7 +106,7 @@ function discretization_grid(
     κ1 = _bspline_signed_curvature(s.seg.r, 1.0)
     max_speed = max(abs(1 - s.offset * κ0), abs(1 - s.offset * κ1))
     return discretization_grid(
-        t -> _offset_bspline_curvature(s, t),
+        t -> _offset_bspline_curvature(s, t; clamp_radius_ratio=0.1),
         tolerance;
         t_scale=l * max_speed,
         rtol=rtol
@@ -127,7 +127,7 @@ function discretization_grid(
     )
     speed1 = sqrt((1 - Paths.getoffset(s, l) * κ1)^2 + Paths.offset_derivative(s, l)^2)
     return discretization_grid(
-        t -> _offset_bspline_curvature(s, t),
+        t -> _offset_bspline_curvature(s, t; clamp_radius_ratio=0.1),
         tolerance;
         t_scale=l * max(speed0, speed1),
         rtol=rtol
@@ -155,20 +155,26 @@ end
 
 # Offset-BSpline curvature in base spline `t` space, avoiding an arclength-to-`t`
 # root-find at every discretization step.
-function _offset_bspline_curvature(s::Paths.ConstantOffset, t)
-    return _bspline_curvature(s.seg.r, t) /
-           abs(1 - s.offset * _bspline_signed_curvature(s.seg.r, t))
+function _offset_bspline_curvature(s::Paths.ConstantOffset, t; clamp_radius_ratio=0.0)
+    # Near offset-curve cusps (|1 − offset·κ_base| → 0) the true offset curvature
+    # diverges; clamp the denominator so the kernel doesn't chase sub-tolerance
+    # bowtie loops. Identical to the true κ_off wherever |1 − offset·κ_base| > ε.
+    # ε bounds the chord deviation as a multiple of rate of change of base radius
+    # at ~ε·|dR/ds|·tol (dimensionless |dR/ds| ≈ O(1) for smooth splines).
+    κ = _bspline_signed_curvature(s.seg.r, t)
+    return abs(κ) / max(abs(1 - s.offset * κ), clamp_radius_ratio)
 end
 
 # Mirrors curvatureradius(::GeneralOffset, s), including its ignored offset*dκ/ds term.
-function _offset_bspline_curvature(s::Paths.GeneralOffset, t)
+function _offset_bspline_curvature(s::Paths.GeneralOffset, t; clamp_radius_ratio=0.0)
     l = Paths.t_to_arclength(s.seg, t)
     r = 1 / _bspline_signed_curvature(s.seg.r, t)
     offset = Paths.getoffset(s, l)
     doffset = Paths.offset_derivative(s, l)
     d2offset = Paths.ForwardDiff.derivative(l_ -> Paths.offset_derivative(s, l_), l)
 
-    ds_dl = 1 / sqrt((1 - offset / r)^2 + doffset^2)
+    # Same denominator clamp as for ConstantOffset
+    ds_dl = 1 / max(sqrt((1 - offset / r)^2 + doffset^2), clamp_radius_ratio)
     d2s_dl2 = -ds_dl^3 * doffset * (d2offset - (1 - offset / r) / r)
 
     g = Paths.Interpolations.gradient(s.seg.r, t)[1]
@@ -190,8 +196,7 @@ end
 # Known limitation: the curvature guard below is t_scale-dependent, so it over-refines
 # short, tight arcs (a 30°/2μm fillet gets ~101 points vs ~10 from circular_arc).
 # A correct fix must be t_scale-independent while still sampling the middle of
-# variable-curvature curves whose endpoints have cc≈0. That touches the broader
-# path-rendering pipeline, so it is deferred from the rounding unification.
+# variable-curvature curves whose endpoints have cc≈0.
 function discretization_grid(
     ddf,
     tolerance,
