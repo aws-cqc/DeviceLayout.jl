@@ -202,6 +202,14 @@ end
         # If multiple WithDirection layers exist, outer wins (expected behavior, not a contract)
         double = WithDirection(0°)(WithDirection(90°)(rect))
         @test extract_direction(double) == 0°
+        # Mesh sizing tolerates WithDirection in the style stack, in either nesting
+        # order (the launcher PORT rectangle uses the first form; see issue #246)
+        import DeviceLayout.SolidModels: meshsize
+        launcher_like = only_simulated(WithDirection(meshsized_entity(rect, 0.5μm)))
+        @test meshsize(launcher_like) == 0.5 # WithDirection over MeshSized
+        @test extract_direction(launcher_like) == 0°
+        @test meshsize(wd_outer) == 0.5 # WithDirection over MeshSized(OptionalStyle)
+        @test meshsize(opt2) == 0.5     # OptionalStyle(MeshSized) over WithDirection
         ## _direction_config
         @test _direction_config(0°) == "+X"
         @test _direction_config(90°) == "+Y"

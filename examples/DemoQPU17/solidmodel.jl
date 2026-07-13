@@ -108,8 +108,11 @@ Modelled on `SingleTransmon.configfile`, adapted for the QPU17 physical-group la
     SingleTransmon values, split into two junctions for a SQUID —
     override per-junction by editing the returned dict if needed.
   - `port_R = 50`: termination impedance for 50 Ω ports.
-  - `lumped_direction = "+Y"`: lumped element orientation. (Lumped port directions are computed from the schematic.)
   - `mesh_file`: path to the `.msh2` written by `mesh_family`.
+
+Port and lumped-element `"Direction"`s are extracted from the `WithDirection`-styled
+entities placed by the components (launcher `PORT` squares, junction `LUMPED_ELEMENT`
+rectangles) using `ExamplePDK.port_directions`.
 """
 function driven_configfile(
     sm::SolidModel,
@@ -127,13 +130,12 @@ function driven_configfile(
     lumped_L=14.860e-9 * 2,
     lumped_C=5.5e-15 / 2,
     port_R=50,
-    lumped_direction="+Y",
     mesh_file=joinpath(@__DIR__, "qpu17.msh2")
 )
     attributes = SolidModels.attributes(sm)
     config = base_config(sm, schematic;
         mesh_file, amr, n_ports, n_lumped_elements,
-        lumped_L, lumped_C, port_R, lumped_direction)
+        lumped_L, lumped_C, port_R)
 
     # Build LumpedPort entries: driven 50Ω ports first (one excited), then LC junctions.
     lumped_ports = config["Boundaries"]["LumpedPort"]
@@ -164,9 +166,10 @@ end
     eigenmode_configfile(sm::SolidModel, schematic; kwargs...) -> Dict
 
 Assemble a Palace **eigenmode** configuration for the QPU17 model. Port and lumped-element
-directions are read from each component's placement in `schematic` (unlike [`configfile`](@ref),
-which uses a single fixed direction for the driven sweep), and `exterior_boundary` is treated
-as PEC here rather than absorbing.
+directions are extracted from the `WithDirection`-styled entities placed by the components
+and their placements in `schematic` (via `ExamplePDK.port_directions`, as in
+[`driven_configfile`](@ref)), and `exterior_boundary` is treated as PEC here rather than
+absorbing.
 
 # Keyword arguments
 
@@ -182,7 +185,6 @@ as PEC here rather than absorbing.
     SingleTransmon values, split into two junctions for a SQUID —
     override per-junction by editing the returned dict if needed.
   - `port_R = 50`: termination impedance for 50 Ω ports.
-  - `lumped_direction = "+Y"`: lumped element orientation. (Lumped port directions are computed from the schematic.)
 """
 function eigenmode_configfile(
     sm::SolidModel,
@@ -197,11 +199,10 @@ function eigenmode_configfile(
     lumped_L=14.860e-9 * 2,
     lumped_C=5.5e-15 / 2,
     port_R=50,
-    lumped_direction="+Y",
 )
     config = base_config(sm, schematic;
         mesh_file, amr, n_ports, n_lumped_elements,
-        lumped_L, lumped_C, port_R, lumped_direction)
+        lumped_L, lumped_C, port_R)
     config["Problem"]["Type"] = "Eigenmode"
 
     config["Solver"] = Dict(
@@ -227,23 +228,24 @@ function base_config(sm, schematic;
     lumped_L=14.860e-9 * 2,
     lumped_C=5.5e-15 / 2,
     port_R=50,
-    lumped_direction="+Y",
 )
     attributes = SolidModels.attributes(sm)
+    # Directions are extracted from `WithDirection`-styled entities (launcher PORT
+    # squares, junction LUMPED_ELEMENT rectangles) after transformation by each
+    # component's placement in the schematic. This requires the layers to have been
+    # indexed, which happens during `render!(sm, schematic, target)` because the
+    # target's `indexed_layers` include `:port` and `:lumped_element`.
+    port_dirs = ExamplePDK.port_directions(schematic, layer(PORT))
+    lumped_dirs = ExamplePDK.port_directions(schematic, layer(LUMPED_ELEMENT))
     lumped_ports = Dict[]
     for i = 1:n_ports
-        node = schematic.index_dict[:port][i]
-        dirs = Dict(0.0° => "+X", 90.0° => "+Y",
-            180.0° => "-X", 270.0° => "-Y")
-        dir = dirs[rem(
-            rotation(transformation(schematic, node)), 360°, RoundDown)]
         push!(
             lumped_ports,
             Dict(
                 "Index" => i,
                 "Attributes" => [attributes["port_$i"]],
                 "R" => port_R,
-                "Direction" => dir
+                "Direction" => port_dirs[i]
             )
         )
     end
@@ -255,7 +257,7 @@ function base_config(sm, schematic;
                 "Attributes" => [attributes["lumped_element_$j"]],
                 "L" => lumped_L + j*0.05e-9, # Stagger to avoid degeneracy
                 "C" => lumped_C,
-                "Direction" => lumped_direction
+                "Direction" => lumped_dirs[j]
             )
         )
     end

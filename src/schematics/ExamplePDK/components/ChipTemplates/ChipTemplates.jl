@@ -95,6 +95,10 @@ Returns a `Path` named `"launcher_\$role_\$target"`, where `role` and `target` a
 elements of `port_spec`. Hooks are given by [`hooks(::Path)`](@ref). Uses default parameters
 for `launch!` with rounding turned off.
 
+The simulated-only `PORT` rectangle carries a [`WithDirection`](@ref) style (default `0°`,
+along the launch direction) so that its orientation after placement can be retrieved with
+`ExamplePDK.port_directions` to configure simulations.
+
 This method exists for use in demonstrations. The launcher design is not optimized
 for microwave properties.
 """
@@ -107,7 +111,9 @@ function example_launcher(port_spec)
     gap0 = path[1].sty.gap # Launcher pad gap
     render!(
         port_cs,
-        only_simulated(meshsized_entity(centered(Rectangle(gap0, gap0)), gap0 / 2)),
+        only_simulated(
+            WithDirection(meshsized_entity(centered(Rectangle(gap0, gap0)), gap0 / 2))
+        ),
         PORT
     )
     attach!(path, sref(port_cs), path[1].sty.gap / 2, i=1)
