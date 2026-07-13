@@ -159,9 +159,10 @@ function _offset_bspline_curvature(s::Paths.ConstantOffset, t; clamp_radius_rati
     # Near offset-curve cusps (|1 − offset·κ_base| → 0) the true offset curvature
     # diverges; clamp the denominator so the kernel doesn't chase sub-tolerance
     # bowtie loops. Identical to the true κ_off wherever |1 − offset·κ_base| > ε.
-    # ε bounds the chord deviation as a multiple of rate of change of base radius
+    # ε bounds the chord deviation as a multiple of derivative of base radius w.r.t. arclength
     # at ~ε·|dR/ds|·tol (dimensionless |dR/ds| ≈ O(1) for smooth splines).
     κ = _bspline_signed_curvature(s.seg.r, t)
+    isapprox(s.offset * κ, 1.0, atol=1e-3) && _warn_cusp(s.offset, s.seg.r(t))
     return abs(κ) / max(abs(1 - s.offset * κ), clamp_radius_ratio)
 end
 
@@ -174,7 +175,9 @@ function _offset_bspline_curvature(s::Paths.GeneralOffset, t; clamp_radius_ratio
     d2offset = Paths.ForwardDiff.derivative(l_ -> Paths.offset_derivative(s, l_), l)
 
     # Same denominator clamp as for ConstantOffset
-    ds_dl = 1 / max(sqrt((1 - offset / r)^2 + doffset^2), clamp_radius_ratio)
+    denom = sqrt((1 - offset / r)^2 + doffset^2)
+    isapprox(denom, 0.0, atol=1e-3) && _warn_cusp(offset, s.seg.r(t))
+    ds_dl = 1 / max(denom, clamp_radius_ratio)
     d2s_dl2 = -ds_dl^3 * doffset * (d2offset - (1 - offset / r) / r)
 
     g = Paths.Interpolations.gradient(s.seg.r, t)[1]
@@ -189,6 +192,15 @@ function _offset_bspline_curvature(s::Paths.GeneralOffset, t; clamp_radius_ratio
             ((1 / r) * base_normal) * ((1 / r) * offset)
         ) * ds_dl^2 + off_tangent * d2s_dl2
     return norm(d2_seg)
+end
+
+function _warn_cusp(offset, base_pt)
+    @warn """
+       Offset curve has a cusp where the offset $(offset) approaches the curvature radius
+       of the base curve, near the base curve point $(base_pt).
+       Check that your geometry is correct—cusps and related self-intersections are usually unwanted.
+       Some operations may not handle cusps or self-intersecting curves as expected.
+       """
 end
 
 # Discretize using marching algorithm based on Hessian or curvature.
