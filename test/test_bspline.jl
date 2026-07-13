@@ -232,6 +232,38 @@ end
     end
 end
 
+@testitem "BSpline offset cusps" setup = [CommonTestSetup] begin
+    pa = Path()
+    # Maximum base curvature radius ~338um
+    # No cusp with trace width < 2*radius
+    bspline!(
+        pa,
+        [Point(500.0μm, 500.0μm)],
+        90°,
+        Paths.Trace(600.0μm);
+        endpoints_speed=800.0μm,
+        auto_curvature=true
+    )
+    cp = Curvilinear.pathtopolys(pa[1])
+    pts_no_cusp = DeviceLayout.discretize_curve(cp.curves[2], 1.0nm) # inner curve
+    # Cusp
+    pa = Path()
+    bspline!(
+        pa,
+        [Point(500.0μm, 500.0μm)],
+        90°,
+        Paths.Trace(680.0μm);
+        endpoints_speed=800.0μm,
+        auto_curvature=true
+    )
+    cp = Curvilinear.pathtopolys(pa[1])
+    pts_cusp = DeviceLayout.discretize_curve(cp.curves[2], 1.0nm)
+    # Number of points is not excessive
+    @test length(pts_cusp) < 1.25 * length(pts_no_cusp)
+    # Discretization is still ~ within tolerance
+    @test all(is_sliver.(xor2d(to_polygons(cp), to_polygons(cp, atol=0.1nm)), atol=2.0nm))
+end
+
 @testitem "BSpline approximation" setup = [CommonTestSetup] begin
     pa = Path(Point(0.0, 0.0)nm, α0=90°)
     bspline!(
