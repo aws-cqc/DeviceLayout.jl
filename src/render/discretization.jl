@@ -40,8 +40,14 @@ function discretize_curve(s::Paths.Turn, tolerance; rtol=nothing)
     if !isnothing(rtol)
         tolerance = max(tolerance, rtol * abs(s.r))
     end
-    θ_0 = s.α0 - sign(s.α) * 90.0°
-    ps = circular_arc(θ_0 + s.α, s.r, tolerance; θ_0=θ_0, center=Paths.curvaturecenter(s))
+    θ_0 = s.α0 - sign(s.r) * sign(s.α) * 90.0°
+    ps = circular_arc(
+        θ_0 + sign(s.r) * s.α,
+        abs(s.r),
+        tolerance;
+        θ_0=θ_0,
+        center=Paths.curvaturecenter(s)
+    )
     length(ps) < 2 && return [p0(s), p1(s)]
     # Avoid floating point disagreement about endpoints compared to evaluating s(x)
     ps[1] = p0(s)

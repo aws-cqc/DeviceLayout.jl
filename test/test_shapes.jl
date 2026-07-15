@@ -997,4 +997,19 @@ end
         poly_rtol = to_polygons(pathtopolys(Paths.Node(off, Paths.Trace(0.1μm))), rtol=0.1)
         @test length(points(poly)) > length(points(poly_rtol))
     end
+
+    @testset "Negative-radius Turn matches Turn(t)" begin
+        # Turn(α, -r) is the same curve as Turn(-α, r); the fast path must not
+        # mirror the arc (regression: interior samples up to ~2|r| off-curve).
+        for (α, r) in ((90.0°, -5.0μm), (-90.0°, -5.0μm), (270.0°, -5.0μm))
+            t = Paths.Turn(α, r; p0=Point(0.0μm, 0.0μm), α0=10.0°)
+            ps = discretize_curve(t, 1.0nm)
+            L = pathlength(t)
+            truth = t.(range(zero(L), L, length=length(ps)))
+            @test maximum(norm.(ps .- truth)) < 1.0nm
+            @test ps[1] == Paths.p0(t)
+            @test ps[end] == Paths.p1(t)
+            @test ps == discretize_curve(Paths.Turn(-α, -r; p0=t.p0, α0=t.α0), 1.0nm)
+        end
+    end
 end
