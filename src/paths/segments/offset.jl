@@ -175,7 +175,14 @@ offset(seg::GeneralOffset, s) = offset(seg.seg, t -> s(t) + seg.offset(t))
 # Define outer constructors for Turn and Straight from
 Straight(x::ConstantOffset{T, Straight{T}}) where {T} = Straight{T}(x.seg.l, p0(x), α0(x))
 function Turn(x::ConstantOffset{T, Turn{T}}) where {T}
-    return Turn(x.seg.α, x.seg.r - sign(x.seg.α) * x.offset, p0(x), x.seg.α0)
+    seg = x.seg
+    r_eff = seg.r - sign(seg.α) * x.offset
+    # Negative radius means "turn the other way" to Turn, but "flip 180 degrees" to offset Turn
+    if r_eff < zero(r_eff) # Shouldn't happen in normal usage but guard anyway
+        return Turn(seg.α, -r_eff; p0=p0(x), α0=seg.α0 + 180.0°)
+    else
+        return Turn(seg.α, r_eff; p0=p0(x), α0=seg.α0)
+    end
 end
 
 # Resolving an offset changes pathlength, so length-carrying styles (compound, taper) must be

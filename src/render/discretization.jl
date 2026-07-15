@@ -36,6 +36,37 @@ function discretize_curve(
     return _offset_bspline_point.(Ref(s), discretization_grid(s, tolerance; rtol=rtol))
 end
 
+function discretize_curve(s::Paths.Turn, tolerance; rtol=nothing)
+    if !isnothing(rtol)
+        tolerance = max(tolerance, rtol * abs(s.r))
+    end
+    θ_0 = s.α0 - sign(s.r) * sign(s.α) * 90.0°
+    ps = circular_arc(
+        θ_0 + sign(s.r) * s.α,
+        abs(s.r),
+        tolerance;
+        θ_0=θ_0,
+        center=Paths.curvaturecenter(s)
+    )
+    length(ps) < 2 && return [p0(s), p1(s)]
+    # Avoid floating point disagreement about endpoints compared to evaluating s(x)
+    ps[1] = p0(s)
+    ps[end] = p1(s)
+    return ps
+end
+
+function discretize_curve(
+    s::Paths.ConstantOffset{T, Paths.Turn{T}},
+    tolerance;
+    rtol=nothing
+) where {T}
+    ps = discretize_curve(Paths.resolve_offset(s), tolerance; rtol)
+    # Avoid floating point disagreement about endpoints compared to evaluating s(x)
+    ps[1] = p0(s)
+    ps[end] = p1(s)
+    return ps
+end
+
 function discretization_grid(s::Paths.Segment, tolerance; rtol=nothing)
     l = pathlength(s)
     return discretization_grid(
@@ -72,10 +103,10 @@ end
 # True curvature κ(t) = |r'×r''|/|r'|³ for a 2D BSpline interpolation r.
 # Returns a scalar with units 1/length, matching the marching kernel's
 # `cc` contract.
+# Bypasses arclength-to-t conversion we'd get using `Paths.curvatureradius`/`Paths.signed_curvature`
+# Doesn't use pre-allocated G, H as with `Paths._curvature!` -- only minor speedup in some cases anyway
 function _bspline_curvature(r, t)
-    g = Paths.Interpolations.gradient(r, t)[1]
-    h = Paths.Interpolations.hessian(r, t)[1]
-    return abs(g.x * h.y - g.y * h.x) / (g.x^2 + g.y^2)^(3 // 2)
+    return abs(_bspline_signed_curvature(r, t))
 end
 
 function discretization_grid(s::Paths.BSpline, tolerance; rtol=nothing)
@@ -156,8 +187,8 @@ end
 # Offset-BSpline curvature in base spline `t` space, avoiding an arclength-to-`t`
 # root-find at every discretization step.
 function _offset_bspline_curvature(s::Paths.ConstantOffset, t)
-    return _bspline_curvature(s.seg.r, t) /
-           abs(1 - s.offset * _bspline_signed_curvature(s.seg.r, t))
+    κ = _bspline_signed_curvature(s.seg.r, t)
+    return abs(κ) / abs(1 - s.offset * κ)
 end
 
 # Mirrors curvatureradius(::GeneralOffset, s), including its ignored offset*dκ/ds term.

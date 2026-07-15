@@ -474,6 +474,13 @@ end
     coarse = to_polygons(cp; atol=2.0nm)
     fine = to_polygons(cp; atol=0.1nm)
     @test length(points(coarse)) < length(points(fine))
+
+    # Rounding through CurvilinearPolygon doesn't over-refine tight corners
+    @test length(
+        to_polygons(
+            Curvilinear.round_to_curvilinearpolygon(Rectangle(1.0μm, 1.0μm), 0.1μm)
+        ).p
+    ) < 60
 end
 
 @testitem "CurvilinearRegion holes (#241)" setup = [CommonTestSetup] begin
@@ -931,4 +938,78 @@ end
     @test all(c -> isapprox(c.r, 0.05), r_default.curves)
     @test all(c -> isapprox(c.r, 0.5), r_rel.curves)
     @test points(r_default) != points(r_rel)
+end
+
+@testitem "Constant-curvature discretization endpoints (#250)" setup = [CommonTestSetup] begin
+    import DeviceLayout: discretize_curve
+
+    # Offset turns with |offset| > r resolve to a flipped (negative-radius) arc;
+    # endpoints must come from the original offset segment, not the resolved turn's
+    # call operator (regression: the end point was off by exactly 2|r′|).
+    t_ccw = Paths.Turn(90.0°, 5.0μm; p0=Point(0.0μm, 0.0μm), α0=0.0°)
+    t_cw = Paths.Turn(-90.0°, 5.0μm; p0=Point(0.0μm, 0.0μm), α0=0.0°)
+    t_big = Paths.Turn(90.0°, 10.0μm; p0=Point(0.0μm, 0.0μm), α0=0.0°)
+
+    @testset "Endpoint exactness for |offset| > r (all quadrants)" begin
+        for seg in (
+            Paths.ConstantOffset(t_ccw, 8.0μm),   # resolved r′ = −3 μm (inner, flipped)
+            Paths.ConstantOffset(t_cw, -8.0μm),   # mirror
+            Paths.ConstantOffset(t_ccw, -8.0μm),  # outer side, r′ = +13 μm
+            Paths.ConstantOffset(t_cw, 8.0μm),
+            Paths.ConstantOffset(t_big, 15.0μm)
+        )
+            ps = discretize_curve(seg, 1.0nm)
+            @test ps[1] == Paths.p0(seg)
+            @test ps[end] == Paths.p1(seg)
+        end
+        ps = discretize_curve(Paths.ConstantOffset(t_ccw, 8.0μm), 1.0nm)
+        @test isapprox(ps[end], Point(-3.0μm, 5.0μm); atol=1.0nm)
+    end
+
+    @testset "Degenerate turns produce two finite points" begin
+        for seg in (
+            Paths.Turn(0.0°, 5.0μm; p0=Point(0.0μm, 0.0μm), α0=0.0°),
+            Paths.Turn(90.0°, 0.0μm; p0=Point(0.0μm, 0.0μm), α0=0.0°),
+            Paths.ConstantOffset(t_ccw, 5.0μm),   # offset == r → zero effective radius
+            Paths.ConstantOffset(t_cw, -5.0μm)
+        )
+            ps = discretize_curve(seg, 1.0nm)
+            @test length(ps) == 2
+            @test all(p -> isfinite(getx(p)) && isfinite(gety(p)), ps)
+        end
+    end
+
+    @testset "Degree-Quantity θ matches Float64 radians in circular_arc" begin
+        deg = circular_arc(90.0°, 5.0μm, 1.0nm)
+        rad = circular_arc(convert(Float64, 90.0°), 5.0μm, 1.0nm)
+        @test deg == rad
+    end
+
+    @testset "Negative radius semantics" begin
+        # Offset with negative radius is flipped; turn with negative radius is just turn in other direction
+        # Make sure resolution accounts for the difference
+        # In practice shouldn't come up since `pathtopolys` clips off negative-radius part;
+        # user has to explicity create and style OffsetSegment (DL internals)
+        t = Paths.Turn(90.0°, 5.0μm)
+        off = Paths.ConstantOffset(t, 8.0μm)
+        # Runs without error, endpoints consistent, rtol triggers correctly
+        poly = to_polygons(pathtopolys(Paths.Node(off, Paths.Trace(0.1μm))))
+        poly_rtol = to_polygons(pathtopolys(Paths.Node(off, Paths.Trace(0.1μm))), rtol=0.1)
+        @test length(points(poly)) > length(points(poly_rtol))
+    end
+
+    @testset "Negative-radius Turn matches Turn(t)" begin
+        # Turn(α, -r) is the same curve as Turn(-α, r); the fast path must not
+        # mirror the arc (regression: interior samples up to ~2|r| off-curve).
+        for (α, r) in ((90.0°, -5.0μm), (-90.0°, -5.0μm), (270.0°, -5.0μm))
+            t = Paths.Turn(α, r; p0=Point(0.0μm, 0.0μm), α0=10.0°)
+            ps = discretize_curve(t, 1.0nm)
+            L = pathlength(t)
+            truth = t.(range(zero(L), L, length=length(ps)))
+            @test maximum(norm.(ps .- truth)) < 1.0nm
+            @test ps[1] == Paths.p0(t)
+            @test ps[end] == Paths.p1(t)
+            @test ps == discretize_curve(Paths.Turn(-α, -r; p0=t.p0, α0=t.α0), 1.0nm)
+        end
+    end
 end

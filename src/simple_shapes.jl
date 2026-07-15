@@ -57,11 +57,21 @@ Discretizes a circular arc from `θ_0` to `θ_1` with a maximum angular step `d�
 
 If `θ_1 > θ_0`, the arc is drawn counterclockwise.
 """
-function circular_arc(θ_0, θ_1, dθ_max, r, center)
+function circular_arc(θ_0::Float64, θ_1::Float64, dθ_max::Float64, r, center)
     iszero(r) && return [center]
     θs = range(θ_0, stop=θ_1, length=1 + Int(ceil(abs(θ_1 - θ_0) / dθ_max)))
-    return Translation(center).(Point.(r * cos.(θs), r * sin.(θs)))
+    return map(θs) do θ
+        s, c = sincos(θ)
+        return Point(r * c, r * s) + center
+    end
 end
+circular_arc(θ_0, θ_1, dθ_max, r, center) = circular_arc(
+    convert(Float64, θ_0),
+    convert(Float64, θ_1),
+    convert(Float64, dθ_max),
+    r,
+    center
+)
 
 # modifying circular_arc so that it draws the shorter arc from θ1 to θ2, which may be clockwise. Inputting θ as a
 # vector [θ1, θ2] because I think that's less likely to get accidentally used in a way that intends to call the
