@@ -83,7 +83,7 @@ Use suffixes rather than prefixes to indicate dimension: `feature_width` rather 
   - For **rectangular features**, use `_x_length` and `_y_length`
   - For **linear features**, use `_length` (primary/extensible dimension) and `_width` (cross-sectional thickness along length)
   - For **circular features**, use `_radius`
-  - For **CPW-like features**, use `_trace` and `_gap` or (especially if you’re actually drawing it as a Path) `feature_style = Paths.CPW(trace, gap)`
+  - For **CPW-like features**, use `_trace` and `_gap` or (especially if you’re actually drawing it as a Path) `feature_style = Paths.CPW(trace, gap)` (but see the [note on YAML serialization](@ref yaml-composite-params))
 
 In more detail:
 
@@ -95,7 +95,7 @@ In more detail:
   - `_offset`: Linear displacement from a reference position (e.g., centered or aligned)
     
       + `Align.above(feature_polygon, reference; offset=feature_offset))`
-      + If offsetting in both dimensions, use a `Point`
+      + If offsetting in both dimensions, use a `Point` (but see the [note on YAML serialization](@ref yaml-composite-params))
   - `_bias`: Distance to grow a positive shape from each edge (e.g., for `offset(feature_polygon, feature_bias)`)
   - `_pitch`: Center-center distance of repeated features (e.g. bridges on a CPW)
   - `_gap`: Edge-edge width of negative space between two features (e.g., width of non-metallized region between edges of metal features)
@@ -142,6 +142,7 @@ In more detail:
 
   - If you have a large number of parameters to pass through to a subcomponent, or want to maintain
     flexibility over parameters that are not usually important, use a `templates` NamedTuple parameter
+    (component instances are composite parameters; see the [note on YAML serialization](@ref yaml-composite-params))
     
       + For each subcomponent, the `templates` NamedTuple contains an instance of the subcomponent type
         (with the subcomponent name as the key) that provides defaults
@@ -252,7 +253,7 @@ Precedence under templates-aliasing is `template defaults < ParameterSet overlay
           * **Grids**: Matrix with [Row, Column] starting with [1, 1] in the upper left (maps to Julia matrix literal)
           * **Pairs** (input/output, start/end): `input_` and `output_` or similar descriptors even if it’s arbitrary which is which; `_0_` and `_1_` if they correspond to `p0` and `p1` as in the start and end points of a Path; tuple otherwise
             
-              - For two or three things that aren’t input/output pairs, you can use an array/tuple or `_1_, _2_, _3_`, but don’t use the latter if you have multiple numbered collections with unrelated counts
+              - For two or three things that aren’t input/output pairs, you can use an array/tuple or `_1_, _2_, _3_`, but don’t use the latter if you have multiple numbered collections with unrelated counts (prefer an array over a tuple where YAML round-trip matters; see the [note on YAML serialization](@ref yaml-composite-params))
 
 ## Parameterization
 
@@ -324,7 +325,7 @@ Some specific guidelines:
 
   - Geometries should not have any “magic numbers” (literal numeric lengths that appear in geometry code)—these should be made into parameters with descriptive names
   - Don’t be shy about adding parameters, but don’t prematurely create additional control knobs you’re not sure you’ll need—once you can describe your desired geometries without magic numbers, stop
-  - Bridges/crossovers/other "decorations": Make a `MyDecoration` component type and use an instance as a parameter, with components across the device with the same decoration using the same instance
+  - Bridges/crossovers/other "decorations": Make a `MyDecoration` component type and use an instance as a parameter, with components across the device with the same decoration using the same instance (but see the [note on YAML serialization](@ref yaml-composite-params))
     
       + Ensures fabrication requirements are consistently met and updated across the device, and also reduces redundant rendering/memory usage
       + The decoration Component doesn’t have to go in a schematic—it can be attached to a path like any coordinate system
@@ -345,12 +346,22 @@ Some specific guidelines:
       + Rounding: While rounding in DeviceLayout can be either relative (unitless) or absolute (unitful), a given component is likely designed for only one or the other. In that case, use a `::Float64` or a length annotation
   - A parameter should be the appropriate Julia or DeviceLayout.jl type for the kind of thing it is; it is not required to be a single real value, even when it is subject to tuning or optimization
     
-      + For a `Path`-based feature, use `feature_style=Paths.CPW(trace, gap)` rather than `feature_trace` and `feature_gap`
-    
+      + For a `Path`-based feature, use `feature_style=Paths.CPW(trace, gap)` rather than `feature_trace` and `feature_gap` (but see the [note on YAML serialization](@ref yaml-composite-params) below)
+
       + Optimization should use transformed parameters anyway
-        
+
           * Example: In the [single transmon optimization example](../examples/singletransmon.md), we optimize over `x` with `cap_length = (1 / x[1]^2) * 620μm` and `total_length=(1 / x[2]) * 5000μm`, so that frequencies are approximately linear in `x` and both elements are around 1
           * Example: When optimizing `feature1_feature2_offset::Point` with a scale of 1μm, optimize over `x` with `feature1_feature2_offset = Point(x[1], x[2]) * 1μm`
+
+### [Composite parameters and YAML serialization](@id yaml-composite-params)
+
+Several recommendations in this guide use composite parameter types because they best capture design intent in code: `feature_style=Paths.CPW(trace, gap)` for `Path`-based features, a `Point` for two-dimensional offsets, and component instances for decorations and templates. Those recommendations stand for parameters that live in Julia code.
+
+However, [`ParameterSet`](@ref SchematicDrivenLayout.ParameterSet)-based workflows — using [`create_component(::MyComponent, ::ParameterSet, ::String)`](@ref SchematicDrivenLayout.create_component(::Type{T}, ::DeviceLayout.SchematicDrivenLayout.ParameterSet, ::String) where {T <: DeviceLayout.SchematicDrivenLayout.AbstractComponent}) or [`save_parameter_set`](@ref SchematicDrivenLayout.save_parameter_set) as described in the [ParameterSet tutorial](../tutorials/parameter_set.md) — support only scalar `Unitful.Quantity` leaves (and `Vector`s of them) in addition to plain YAML values. Composite types are deliberately not supported: standard YAML has no representation for them, so they do not survive a round trip. A `Point` value throws an error when saving, while a `Tuple`, a `Paths.Style` like `Paths.CPW`, or a component instance is written as its display string and loads back as a plain `String`.
+
+If a parameter needs to be loaded from or saved to a YAML `ParameterSet` — for example, because it is tuned from a design-data file — expose scalar (or vector) `Quantity` leaves for it and construct the composite value in code: store `feature_trace` and `feature_gap` in the `ParameterSet` and build `Paths.CPW(trace, gap)` where the component is constructed, or store `feature_offset_x` and `feature_offset_y` (or a two-element vector) rather than a `Point`.
+
+One exception compatible with YAML input is the use of component-valued parameters as templates for subcomponents — see the [Templates-Aliasing section of the ParameterSet tutorial](../tutorials/parameter_set.md#Templates-Aliasing-for-Composite-Subcomponents) for the full pattern. However, [`extract_parameter_set`](@ref SchematicDrivenLayout.extract_parameter_set) still does not support component-valued parameters.
 
 ## Component documentation
 
