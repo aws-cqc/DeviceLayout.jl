@@ -8,7 +8,8 @@
         coordinatetype,
         onenanometer,
         ClippedPolygon,
-        difference2d
+        difference2d,
+        Paths
     using DeviceLayout.Polygons: Rounded
     using DeviceLayout.Curvilinear: CurvilinearPolygon, CurvilinearRegion
     using DeviceLayout.SolidModels:
@@ -124,6 +125,137 @@
         cs = CoordinateSystem("dummy", nm)
         place!(cs, Rectangle(Point(0.0μm, 0.0μm), Point(1.0μm, 1.0μm)), :l1)
         @test_throws ErrorException render_conformal!(sm_native, cs)
+        gmsh.finalize()
+    end
+
+    @testset "add_conformal_loop! with Paths.Turn (short arc)" begin
+        # Direct exercise of _add_conformal_curve!(Paths.Turn) — a 90° arc.
+        sm = SolidModel("turn_short"; overwrite=true)
+        k = kernel(sm)
+        ctx = ConformalRenderContext()
+        import SpatialIndexing
+        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+
+        R = 100.0μm
+        pp = [
+            Point(0.0μm, 0.0μm),
+            Point(R, 0.0μm),
+            Point(0.0μm, R)
+        ]
+        turn = Paths.Turn(90°, R, α0=90°, p0=pp[2])
+        cp = CurvilinearPolygon(pp, [turn], [2])
+        loop = add_conformal_loop!(ctx, cp, k, 0.0μm; points_tree)
+        @test loop isa Integer
+        gmsh.finalize()
+    end
+
+    @testset "add_conformal_loop! with Paths.Turn (large arc)" begin
+        # Turn with |α| >= 180° triggers the multi-segment arc path.
+        sm = SolidModel("turn_large"; overwrite=true)
+        k = kernel(sm)
+        ctx = ConformalRenderContext()
+        import SpatialIndexing
+        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+
+        R = 50.0μm
+        pp = [
+            Point(0.0μm, 0.0μm),
+            Point(R, 0.0μm),
+            Point(-R, 0.0μm)
+        ]
+        turn = Paths.Turn(180°, R, α0=90°, p0=pp[2])
+        cp = CurvilinearPolygon(pp, [turn], [2])
+        loop = add_conformal_loop!(ctx, cp, k, 0.0μm; points_tree)
+        @test loop isa Integer
+        gmsh.finalize()
+    end
+
+    @testset "add_conformal_loop! with Paths.BSpline" begin
+        # Exercise _add_conformal_curve!(Paths.BSpline).
+        sm = SolidModel("bspline"; overwrite=true)
+        k = kernel(sm)
+        ctx = ConformalRenderContext()
+        import SpatialIndexing
+        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+
+        pp = [
+            Point(0.0μm, 0.0μm),
+            Point(100.0μm, 0.0μm),
+            Point(100.0μm, 100.0μm),
+            Point(0.0μm, 100.0μm)
+        ]
+        spline_pts = [pp[2], Point(150.0μm, 50.0μm), pp[3]]
+        t0 = Point(1.0μm, 0.0μm)
+        t1 = Point(-1.0μm, 0.0μm)
+        seg = Paths.BSpline(spline_pts, t0, t1)
+        cp = CurvilinearPolygon(pp, [seg], [2])
+        loop = add_conformal_loop!(ctx, cp, k, 0.0μm; points_tree)
+        @test loop isa Integer
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal! with CurvilinearRegion (rounded rect)" begin
+        # A Rounded(Rectangle) renders to a CurvilinearRegion — this exercises
+        # _add_conformal!(CurvilinearRegion) and CurvilinearRegion's
+        # exterior+holes assembly path.
+        cs = CoordinateSystem("rounded", nm)
+        rect = Rectangle(Point(0.0μm, 0.0μm), Point(50.0μm, 30.0μm))
+        place!(cs, Rounded(5.0μm)(rect), :l1)
+
+        sm = SolidModel("cvr"; overwrite=true)
+        render_conformal!(sm, cs)
+        @test hasgroup(sm, "l1", 2)
+        # A rounded rectangle should produce a single surface with curved edges.
+        @test length(gmsh.model.occ.getEntities(2)) >= 1
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal! with ClippedPolygon (holes)" begin
+        # Exercise CurvilinearRegion's `holes` path via a ClippedPolygon.
+        cs = CoordinateSystem("holed", nm)
+        outer = Rectangle(Point(0.0μm, 0.0μm), Point(100.0μm, 100.0μm))
+        inner = Rectangle(Point(30.0μm, 30.0μm), Point(70.0μm, 70.0μm))
+        clipped = difference2d(outer, inner)
+        place!(cs, clipped, :l1)
+
+        sm = SolidModel("holed"; overwrite=true)
+        render_conformal!(sm, cs)
+        @test hasgroup(sm, "l1", 2)
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal! preserves shared vertex identity" begin
+        # Two adjacent rectangles → the shared edge should resolve to a single
+        # OCC edge tag. If dedup works, the total edge count is < 8 (would be
+        # 8 if the shared edge duplicated).
+        cs = CoordinateSystem("shared", nm)
+        place!(cs, Rectangle(Point(0.0μm, 0.0μm), Point(10.0μm, 10.0μm)), :l1)
+        place!(cs, Rectangle(Point(10.0μm, 0.0μm), Point(20.0μm, 10.0μm)), :l1)
+
+        ctx = ConformalRenderContext()
+        sm = SolidModel("shared"; overwrite=true)
+        render_conformal!(sm, cs; context=ctx)
+        # Each rect contributes 4 edges; a duplicated shared edge would give 8.
+        # With dedup, the shared edge is 1, so total = 7.
+        @test length(gmsh.model.occ.getEntities(1)) == 7
+        # The cache should have registered at least one hit for the shared edge.
+        @test ctx.stats[:hits] >= 1
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal! zmap positions surfaces at nonzero z" begin
+        # Exercise the zmap kwarg on render_conformal!.
+        cs = CoordinateSystem("zmap", nm)
+        place!(cs, Rectangle(Point(0.0μm, 0.0μm), Point(10.0μm, 10.0μm)), :l1)
+
+        sm = SolidModel("zmap"; overwrite=true)
+        z_target = 5.0μm
+        render_conformal!(sm, cs; zmap=(_) -> z_target)
+        @test hasgroup(sm, "l1", 2)
+        # Bounding-box z should reflect the zmap.
+        _, _, zmin, _, _, zmax = gmsh.model.occ.getBoundingBox(2, gmsh.model.occ.getEntities(2)[1][2])
+        @test isapprox(zmin, ustrip(SolidModels.STP_UNIT, z_target); atol=1e-6)
+        @test isapprox(zmax, ustrip(SolidModels.STP_UNIT, z_target); atol=1e-6)
         gmsh.finalize()
     end
 end
