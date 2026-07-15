@@ -326,9 +326,10 @@ _add_conformal!(
     kwargs...
 )
 
-# CurvilinearRegion: single add_plane_surface call with hole loops (PATCH 1).
-# Stock DL creates outer surface, then per-hole surface, then k.cut() each hole.
-# The multi-loop form is one OCC call and preserves shared points naturally.
+# CurvilinearRegion: single add_plane_surface call with hole loops. Stock
+# render! creates the outer surface, then a surface per hole, then k.cut()s
+# each hole. The multi-loop form is one OCC call and preserves shared points
+# naturally, which is what we need for conformal rendering.
 function _add_conformal!(
     ctx::ConformalRenderContext,
     surf::CurvilinearRegion{T},
@@ -404,9 +405,6 @@ _add_conformal!(ctx::ConformalRenderContext, els::AbstractVector, m::Meta, k; kw
 
 # ─── Curve loop assembly ─────────────────────────────────────────────────────
 
-# PATCH 3 without the (disabled) short-edge batching from DTP. The batching was
-# gated off in production (`SHORT_EDGE_BATCH_THRESHOLD=0.0`); reproducing it
-# here would be dead code.
 """
     add_conformal_loop!(ctx::ConformalRenderContext, cl::CurvilinearPolygon,
         k::OpenCascade, z; points_tree=nothing, atol=onenanometer(...))
@@ -495,7 +493,8 @@ end
 
 # ─── Curve dispatch (arcs, BSplines, offsets) ────────────────────────────────
 
-# PATCH 4a: exact circular arc, cached, with strict-tolerance center.
+# Circular arc: exact, cached by (endpoints, center) with strict-tolerance
+# center dedup so a Turn traversed from both sides collapses to one OCC entity.
 function _add_conformal_curve!(
     ctx::ConformalRenderContext,
     endpoints,
@@ -549,8 +548,9 @@ function _add_conformal_curve!(
     end
 end
 
-# PATCH 4b: exact interpolating BSpline, cached, with strict-tolerance
-# intermediate control points.
+# Interpolating BSpline: exact, cached by control-net; strict tolerance on
+# intermediate control points so a spline traversed from both sides collapses
+# to one OCC entity.
 function _add_conformal_curve!(
     ctx::ConformalRenderContext,
     endpoints,
@@ -582,10 +582,10 @@ function _add_conformal_curve!(
     return _cached_add_spline!(k, ctx, pts, tangents)
 end
 
-# PATCH 4c: offset segments — constant offset of a Turn is still a circular
-# arc (exact); general offset (BSpline or variable) is approximated by a
-# BSpline chain with join points at the RELAXED tolerance to unify sub-splines
-# produced from opposite traversal directions.
+# Offset segment: a constant offset of a Turn is still a circular arc (exact);
+# general offset (variable, or offset of a BSpline) is approximated by a
+# BSpline chain with join points at the RELAXED tolerance so sub-splines
+# produced from opposite traversal directions unify.
 function _add_conformal_curve!(
     ctx::ConformalRenderContext,
     endpoints,
