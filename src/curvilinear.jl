@@ -321,8 +321,9 @@ This is particularly helpful if a Path is being used within the construction of 
 rather than as part of the SchematicGraph.
 """
 function pathtopolys(f::Paths.Segment{T}, s::Paths.Style; kwargs...) where {T}
-    @warn "Discretizing path segment ($f, $s) for CurvilinearRegion construction"
-    return to_polygons(f, pathlength(f), s; kwargs...)
+    # All supported segment/style combinations have specific methods; landing here means
+    # nothing can render this pair
+    throw(ArgumentError("no method converting path segment $f with style $s to polygons"))
 end
 pathtopolys(f::Paths.Corner{T}, s::Paths.SimpleTraceCorner; kwargs...) where {T} =
     to_polygons(f, s; kwargs...)
@@ -347,6 +348,15 @@ pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.Style; kwargs...) where {T} =
     _pathtopolys_resolved_offset(f, s; kwargs...)
 pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.PeriodicStyle; kwargs...) where {T} =
     _pathtopolys_resolved_offset(f, s; kwargs...)
+# CompoundStyle grids are expressed in the original segment's arclength frame, which
+# offset resolution does not preserve — style transitions would land in the wrong
+# places. Fail loudly rather than render subtly wrong geometry.
+pathtopolys(f::Paths.OffsetSegment{T}, s::Paths.CompoundStyle; kwargs...) where {T} = throw(
+    ArgumentError(
+        "cannot render offset segment $f with a CompoundStyle: the style grid is in " *
+        "the original segment's arclength frame, which offset resolution does not preserve"
+    )
+)
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderContinuous; kwargs...) where {T} =
     Polygon{T}[]
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderDiscrete; kwargs...) where {T} =
@@ -354,14 +364,19 @@ pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRenderDiscrete; kwargs...) where
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.SimpleNoRender; kwargs...) where {T} =
     Polygon{T}[]
 pathtopolys(::Paths.OffsetSegment{T}, ::Paths.NoRender; kwargs...) where {T} = Polygon{T}[]
-function pathtopolys(
+# DecoratedStyles: strip the decoration and delegate to the underlying style.
+# Attachments are handled by render!(Cell, Path), not here. (The per-wrapper methods
+# below exist for dispatch specificity; they share this body.)
+function _pathtopolys_ignoring_attachments(seg, sty; kwargs...)
+    @warn "Ignoring attachments on path segment $seg with style $sty when converting to polygons. Did you write `render!.(cell, path, ...)` instead of `render!(cell, path, ...)`?"
+    return pathtopolys(seg, Paths.undecorated(sty); kwargs...)
+end
+
+pathtopolys(
     f::Paths.OffsetSegment{T},
     sty::Paths.AbstractDecoratedStyle;
     kwargs...
-) where {T}
-    @warn "Ignoring attachments on path segment $f with style $sty when converting to polygons. Did you write `render!.(cell, path, ...)` instead of `render!(cell, path, ...)`?"
-    return pathtopolys(f, Paths.undecorated(sty); kwargs...)
-end
+) where {T} = _pathtopolys_ignoring_attachments(f, sty; kwargs...)
 
 # NoRender and friends — effectively the same as above but without the warning
 pathtopolys(seg::Paths.Segment{T}, s::Paths.NoRenderContinuous; kwargs...) where {T} =
@@ -379,19 +394,10 @@ function pathtopolys(p::Paths.Path{T}; kwargs...) where {T}
     return reduce(vcat, vcat.(pathtopolys.(nodes; kwargs...)))
 end
 
-function pathtopolys(seg::Paths.Segment{T}, sty::Paths.PeriodicStyle; kwargs...) where {T}
-    subsegs, substys = Paths.resolve_periodic(seg, sty)
-    return reduce(
-        vcat,
-        (
-            vcat(pathtopolys(Paths.Node(se, st); kwargs...)) for
-            (se, st) in zip(subsegs, substys)
-        ),
-        init=GeometryEntity{T}[]
-    )
-end
-function pathtopolys(
-    seg::Paths.CompoundSegment{T},
+# The two PeriodicStyle methods below exist for dispatch specificity (CompoundSegment
+# has its own generic-Style method); they share this body.
+function _pathtopolys_periodic(
+    seg::Paths.Segment{T},
     sty::Paths.PeriodicStyle;
     kwargs...
 ) where {T}
@@ -405,6 +411,10 @@ function pathtopolys(
         init=GeometryEntity{T}[]
     )
 end
+pathtopolys(seg::Paths.Segment{T}, sty::Paths.PeriodicStyle; kwargs...) where {T} =
+    _pathtopolys_periodic(seg, sty; kwargs...)
+pathtopolys(seg::Paths.CompoundSegment{T}, sty::Paths.PeriodicStyle; kwargs...) where {T} =
+    _pathtopolys_periodic(seg, sty; kwargs...)
 
 function _compound_segment_slice(f::Paths.Segment{T}, start, stop) where {T}
     len = pathlength(f)
@@ -477,14 +487,11 @@ end
 pathtopolys(f::Paths.CompoundSegment{T}, s::Paths.Style; kwargs...) where {T} =
     _compound_pin_render(f, s, (se, sty) -> pathtopolys(se, sty; kwargs...))
 # Wrapper segments route here; concrete-style methods only accept BaseContinuousSegment.
-function pathtopolys(
+pathtopolys(
     f::Paths.CompoundSegment{T},
     sty::Paths.AbstractDecoratedStyle;
     kwargs...
-) where {T}
-    @warn "Ignoring attachments on path segment $f with style $sty when converting to polygons. Did you write `render!.(cell, path, ...)` instead of `render!(cell, path, ...)`?"
-    return pathtopolys(f, Paths.undecorated(sty); kwargs...)
-end
+) where {T} = _pathtopolys_ignoring_attachments(f, sty; kwargs...)
 pathtopolys(::Paths.CompoundSegment{T}, ::Paths.NoRender; kwargs...) where {T} =
     Polygon{T}[]
 pathtopolys(::Paths.CompoundSegment{T}, ::Paths.NoRenderContinuous; kwargs...) where {T} =
@@ -812,16 +819,8 @@ to_polygons(
     kwargs...
 ) where {T} = to_polygons(Paths.resolve_offset(seg), sty; kwargs...)
 
-# DecoratedStyles: strip the decoration and delegate to the underlying style.
-# Attachments are handled by render!(Cell, Path), not here.
-function pathtopolys(
-    seg::Paths.Segment{T},
-    sty::Paths.AbstractDecoratedStyle;
-    kwargs...
-) where {T}
-    @warn "Ignoring attachments on path segment $seg with style $sty when converting to polygons. Did you write `render!.(cell, path, ...)` instead of `render!(cell, path, ...)`?"
-    return pathtopolys(seg, Paths.undecorated(sty); kwargs...)
-end
+pathtopolys(seg::Paths.Segment{T}, sty::Paths.AbstractDecoratedStyle; kwargs...) where {T} =
+    _pathtopolys_ignoring_attachments(seg, sty; kwargs...)
 
 # Segment-level calls bypass the Node linearity gate, so straight linear cases need explicit
 # polygon-producing methods. Dispatch on Paths.Straight keeps these methods below the wrapper
@@ -1066,9 +1065,17 @@ function round_to_curvilinearpolygon(
         line_arc_cornerindices(pol)
     end
 
+    # Per-vertex membership checks below run once per polygon point; use Set/Dict to keep this O(n).
+    la_set = Set(la_indices)
+    corner_set = Set(corner_indices)
+    curve_index_at_vertex = Dict{Int, Int}()
+    for (k, v) in pairs(pol.curve_start_idx)
+        curve_index_at_vertex[v] = k
+    end
+
     for i in eachindex(poly)
         edge = edge_type_at_vertex(pol, i)
-        is_line_arc = i in la_indices
+        is_line_arc = i in la_set
 
         if is_line_arc
             # A line-arc corner has a straight edge on one side and an arc on the other.
@@ -1100,7 +1107,7 @@ function round_to_curvilinearpolygon(
                 # the arc is trimmed depends on orientation: a line→arc corner (outgoing)
                 # cuts the arc's START, an arc→line corner cuts its END.
                 arc_start_vtx = arc_is_outgoing ? i : mod1(i - 1, len)
-                curve_k = findfirst(isequal(arc_start_vtx), pol.curve_start_idx)
+                curve_k = get(curve_index_at_vertex, arc_start_vtx, nothing)
                 if !isnothing(curve_k)
                     if arc_is_outgoing
                         trim_start_pts[curve_k] = result.T_arc
@@ -1111,7 +1118,7 @@ function round_to_curvilinearpolygon(
             else
                 push!(new_points, poly[i])
             end
-        elseif !(i in corner_indices)
+        elseif !(i in corner_set)
             push!(new_points, poly[i])
         else
             p0 = poly[mod1(i - 1, len)]

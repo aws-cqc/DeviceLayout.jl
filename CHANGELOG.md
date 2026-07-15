@@ -7,6 +7,20 @@ The format of this changelog is based on
 ## Unreleased
 
   - `ExamplePDK.ChipTemplates.example_launcher` now styles its simulated-only `PORT` rectangle with `WithDirection`, and the `DemoQPU17` solidmodel example extracts port and junction directions with `ExamplePDK.port_directions` instead of computing them by hand (removing the `lumped_direction` keyword from its config-building functions)
+  - All dimensionless relative rounding is now absolute-by-default: applying
+    `Rounded(::Real)` to a dimensionless polygon or `CurvilinearPolygon` treats the
+    radius as an absolute length (pass `relative=true` to
+    `round_to_curvilinearpolygon` for length-relative fillets). This behavior shipped
+    with the render unification and is now pinned by a regression test.
+  - Corner-membership checks in `round_to_curvilinearpolygon` use `Set`/`Dict`
+    lookups again, restoring O(n) rounding for polygons with many corners.
+  - Converting a path segment/style combination that has no polygon conversion now
+    throws a clear `ArgumentError` instead of warning and then failing with a
+    `MethodError`.
+  - Rendering an offset segment with a `CompoundStyle` now throws an `ArgumentError`:
+    the style grid is in the original segment's arclength frame, which offset
+    resolution does not preserve, so the result would place style transitions in the
+    wrong locations.
   - Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
   - Added `SolidModels.check_port_connectivity`, using `SolidModels.connected_components` to report ports as `:open`, `:short`, `:floating`, or `:missing`
   - Added `detect_non_boundary_contacts=false` keyword argument to `SolidModels.connected_components`; when `true`, 1d edges embedded in the interior of 2D surfaces (like the feet of staple air bridges) will be treated as connecting

@@ -1254,3 +1254,23 @@ end
     @test res_poly ≈ res_rect + Point(5mm, 0mm)
     @test isempty(to_polygons(xor2d(res_clipped_poly, [res_rect, res_poly])))
 end
+
+@testitem "Unrenderable segment/style combinations fail loudly (#247)" setup =
+    [CommonTestSetup] begin
+    # Offset segment + CompoundStyle: the style grid is in the original segment's
+    # arclength frame, which offset resolution does not preserve
+    seg = Paths.Straight(20.0μm, p0=Point(0.0μm, 0.0μm), α0=0°)
+    off = Paths.offset(seg, 1.0μm)
+    csty = Paths.CompoundStyle(
+        Paths.Style[Paths.Trace(1.0μm), Paths.Trace(2.0μm)],
+        [0.0μm, 10.0μm, 20.0μm],
+        gensym()
+    )
+    @test_throws ArgumentError pathtopolys(off, csty)
+
+    # A segment/style pair with no conversion method errors clearly instead of
+    # warning and then throwing a MethodError (the old fallback called a removed
+    # three-argument to_polygons)
+    corner_seg = Paths.Corner{typeof(1.0μm)}(90°)
+    @test_throws ArgumentError pathtopolys(corner_seg, Paths.Trace(1.0μm))
+end

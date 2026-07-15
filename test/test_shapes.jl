@@ -915,3 +915,20 @@ end
         end
     end
 end
+
+@testitem "Dimensionless rounding is absolute-by-default (#247)" setup = [CommonTestSetup] begin
+    # Behavior shipped with the render unification: Rounded(::Real) on dimensionless
+    # geometry uses the radius as an absolute length. This pins it so a silent return
+    # to the length-relative interpretation fails.
+    cp = CurvilinearPolygon(Point.([0.0, 10.0, 10.0, 0.0], [0.0, 0.0, 10.0, 10.0]))
+    r_default = Curvilinear.round_to_curvilinearpolygon(cp, 0.05)
+    r_abs = Curvilinear.round_to_curvilinearpolygon(cp, 0.05; relative=false)
+    r_rel = Curvilinear.round_to_curvilinearpolygon(cp, 0.05; relative=true)
+
+    @test points(r_default) == points(r_abs)
+    # Absolute: every fillet arc has radius 0.05. The relative interpretation would
+    # give 0.05 * min(side) = 0.5.
+    @test all(c -> isapprox(c.r, 0.05), r_default.curves)
+    @test all(c -> isapprox(c.r, 0.5), r_rel.curves)
+    @test points(r_default) != points(r_rel)
+end
