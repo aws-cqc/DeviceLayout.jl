@@ -251,4 +251,58 @@
         @test isapprox(zmax, ustrip(SolidModels.STP_UNIT, z_target); atol=1e-6)
         gmsh.finalize()
     end
+
+    @testset "prefer-curve invariant: arc then line on shared endpoints" begin
+        # After an arc on endpoints (a, b), a line request on the same endpoints
+        # must reuse the arc tag (up to sign), not create a duplicate straight
+        # edge — otherwise a shared boundary between an arc-side and a
+        # line-side face is non-conformal.
+        sm = SolidModel("prefer_curve_arc_line"; overwrite=true)
+        k = kernel(sm)
+        ctx = ConformalRenderContext()
+        import SpatialIndexing
+        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+
+        R = 100.0μm
+        pp = [Point(0.0μm, 0.0μm), Point(R, 0.0μm), Point(0.0μm, R)]
+        turn = Paths.Turn(90°, R, α0=90°, p0=pp[2])
+        cp_arc = CurvilinearPolygon(pp, [turn], [2])
+        add_conformal_loop!(ctx, cp_arc, k, 0.0μm; points_tree)
+
+        # Straight-edge polygon that shares the (pp[2], pp[3]) endpoints. It
+        # would ordinarily be a chord, but the cache should return the arc tag.
+        hits_before = ctx.stats[:hits]
+        line_cp = CurvilinearPolygon(pp)  # no curve — pure line loop
+        add_conformal_loop!(ctx, line_cp, k, 0.0μm; points_tree)
+        @test ctx.stats[:hits] > hits_before  # arc was reused for a line request
+        gmsh.finalize()
+    end
+
+    @testset "prefer-curve invariant: spline then line on shared endpoints" begin
+        sm = SolidModel("prefer_curve_spline_line"; overwrite=true)
+        k = kernel(sm)
+        ctx = ConformalRenderContext()
+        import SpatialIndexing
+        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+
+        pp = [
+            Point(0.0μm, 0.0μm),
+            Point(100.0μm, 0.0μm),
+            Point(100.0μm, 100.0μm),
+            Point(0.0μm, 100.0μm)
+        ]
+        spline_pts = [pp[2], Point(150.0μm, 50.0μm), pp[3]]
+        seg = Paths.BSpline(spline_pts, Point(1.0μm, 0.0μm), Point(-1.0μm, 0.0μm))
+        cp_spline = CurvilinearPolygon(pp, [seg], [2])
+        add_conformal_loop!(ctx, cp_spline, k, 0.0μm; points_tree)
+
+        hits_before = ctx.stats[:hits]
+        line_cp = CurvilinearPolygon(pp)  # straight (pp[2], pp[3])
+        add_conformal_loop!(ctx, line_cp, k, 0.0μm; points_tree)
+        # If the spline registered itself in endpoint_curve_index, the later
+        # line request hits — otherwise a duplicate straight edge is created
+        # and the shared boundary is non-conformal.
+        @test ctx.stats[:hits] > hits_before
+        gmsh.finalize()
+    end
 end

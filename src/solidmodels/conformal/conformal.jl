@@ -265,14 +265,18 @@ function _cached_add_arc!(
     return tag
 end
 
-# Add an interpolating BSpline. Deduped by exact control-net; also unified with
-# its reversal.
+# Add an interpolating BSpline. Deduped by exact control-net; unified with its
+# reversal; and participates in the prefer-curve invariant via
+# `endpoint_curve_index` — a later request for a line (or arc) on the same
+# endpoints will reuse this spline instead of creating a duplicate edge.
 function _cached_add_spline!(
     k,
     ctx::ConformalRenderContext,
     pts::Vector{<:Integer},
     tangents
 )
+    p1, p2 = pts[1], pts[end]
+    lo, hi = minmax(p1, p2)
     key = (:bspline, pts...)
     existing = get(ctx.curve_cache, key, nothing)
     if existing !== nothing
@@ -285,10 +289,19 @@ function _cached_add_spline!(
         ctx.stats[:hits] += 1
         return -existing_r
     end
+    # Any curve already on these endpoints → reuse. Handles a spline requested
+    # after an arc (or the reverse) on the same shared boundary.
+    existing_curve = get(ctx.endpoint_curve_index, (lo, hi), nothing)
+    if existing_curve !== nothing
+        ctx.stats[:hits] += 1
+        return p1 < p2 ? existing_curve : -existing_curve
+    end
     ctx.stats[:misses] += 1
     ctx.stats[:splines] += 1
     tag = k.addSpline(pts, -1, tangents)
+    signed_tag = p1 < p2 ? tag : -tag
     ctx.curve_cache[key] = tag
+    ctx.endpoint_curve_index[(lo, hi)] = signed_tag
     return tag
 end
 
