@@ -137,11 +137,7 @@
         points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
 
         R = 100.0μm
-        pp = [
-            Point(0.0μm, 0.0μm),
-            Point(R, 0.0μm),
-            Point(0.0μm, R)
-        ]
+        pp = [Point(0.0μm, 0.0μm), Point(R, 0.0μm), Point(0.0μm, R)]
         turn = Paths.Turn(90°, R, α0=90°, p0=pp[2])
         cp = CurvilinearPolygon(pp, [turn], [2])
         loop = add_conformal_loop!(ctx, cp, k, 0.0μm; points_tree)
@@ -158,11 +154,7 @@
         points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
 
         R = 50.0μm
-        pp = [
-            Point(0.0μm, 0.0μm),
-            Point(R, 0.0μm),
-            Point(-R, 0.0μm)
-        ]
+        pp = [Point(0.0μm, 0.0μm), Point(R, 0.0μm), Point(-R, 0.0μm)]
         turn = Paths.Turn(180°, R, α0=90°, p0=pp[2])
         cp = CurvilinearPolygon(pp, [turn], [2])
         loop = add_conformal_loop!(ctx, cp, k, 0.0μm; points_tree)
@@ -253,7 +245,8 @@
         render_conformal!(sm, cs; zmap=(_) -> z_target)
         @test hasgroup(sm, "l1", 2)
         # Bounding-box z should reflect the zmap.
-        _, _, zmin, _, _, zmax = gmsh.model.occ.getBoundingBox(2, gmsh.model.occ.getEntities(2)[1][2])
+        _, _, zmin, _, _, zmax =
+            gmsh.model.occ.getBoundingBox(2, gmsh.model.occ.getEntities(2)[1][2])
         @test isapprox(zmin, ustrip(SolidModels.STP_UNIT, z_target); atol=1e-6)
         @test isapprox(zmax, ustrip(SolidModels.STP_UNIT, z_target); atol=1e-6)
         gmsh.finalize()
