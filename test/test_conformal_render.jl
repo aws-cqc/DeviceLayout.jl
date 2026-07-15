@@ -100,6 +100,25 @@
         gmsh.finalize()
     end
 
+    @testset "render_conformal! fragment_backstop kwarg" begin
+        cs = CoordinateSystem("bs", nm)
+        place!(cs, Rectangle(Point(0.0μm, 0.0μm), Point(10.0μm, 10.0μm)), :l1)
+        place!(cs, Rectangle(Point(10.0μm, 0.0μm), Point(20.0μm, 10.0μm)), :l1)
+
+        # Default: no backstop
+        sm1 = SolidModel("bs_default"; overwrite=true)
+        render_conformal!(sm1, cs)
+        @test hasgroup(sm1, "l1", 2)
+
+        # With backstop: same result (backstop runs as no-op when the cache
+        # already produced conformal geometry).
+        sm2 = SolidModel("bs_on"; overwrite=true)
+        render_conformal!(sm2, cs; fragment_backstop=true)
+        @test hasgroup(sm2, "l1", 2)
+
+        gmsh.finalize()
+    end
+
     @testset "render_conformal! rejects GmshNative kernel" begin
         sm_native = SolidModel("native", SolidModels.GmshNative(); overwrite=true)
         cs = CoordinateSystem("dummy", nm)

@@ -46,6 +46,29 @@ geometry). If your postrender operations create new overlapping entities, use
   - **Per-render cache**: the cache lives on a `ConformalRenderContext` struct
     passed through calls. There is no global mutable state; nested/parallel
     renders are safe.
+
+# Preconditions
+
+For the cache to produce correct geometry:
+
+ 1. **Shared endpoints ⟹ shared curve geometry.** If two faces share a boundary,
+    the CurvilinearPolygon points on both sides must resolve to the same OCC
+    point tags AND the curves spanning those tags must be the same geometric
+    curve. Callers can meet this by having both faces reference the same
+    `Paths.Segment` object (the "coordinated recovery" pattern from
+    `union2d_curved` where both operands are matched against the same
+    boolean-recovery ProvenanceRun), or by an upstream mutual-noding pass.
+ 2. **No distinct co-endpoint edges.** The prefer-curve rule fuses curve
+    requests on shared endpoints into a single OCC tag. If your geometry
+    genuinely has two distinct edges spanning the same two points (say, a
+    figure-8 pinch or a self-crossing offset curve), the cache will wrongly
+    merge them.
+ 3. **Relaxed vertex merge is safe iff features > 500× the merge tolerance.**
+    The default 2 nm merge is 500× smaller than a 1 µm minimum feature. If
+    you have features ~10× smaller, use `ConformalRenderContext(; vertex_merge_atol=…)` to tighten.
+
+When any of these are uncertain, `render_conformal!(..., fragment_backstop=true)`
+runs the stock 3-pass `_fragment_and_map!` after postrender as a safety net.
 """
 module ConformalRender
 
@@ -62,6 +85,7 @@ using ..SolidModels:
     _add_curve!,
     _get_or_add_point!,
     _postrender!,
+    _fragment_and_map!,
     _get_or_add_points!,
     _stp_float,
     _collect_mesh_control_points!,
@@ -360,11 +384,10 @@ function _add_conformal!(
 end
 
 # Broadcast dispatcher — top-level entry from render_conformal!'s metadata loop.
+# `render_conformal!` guards `kernel(sm) isa OpenCascade` at entry so we don't
+# need a per-primitive GmshNative rejection method here.
 _add_conformal!(ctx::ConformalRenderContext, els::AbstractVector, m::Meta, k; kwargs...) =
     [_add_conformal!(ctx, el, m, k; kwargs...) for el in els]
-
-_add_conformal!(ctx::ConformalRenderContext, el, m::Meta, k::GmshNative; kwargs...) =
-    error("ConformalRender is only implemented for OpenCascade kernel; got GmshNative")
 
 # ─── Curve loop assembly ─────────────────────────────────────────────────────
 
@@ -622,14 +645,23 @@ _add_conformal_curve!(
         context=ConformalRenderContext(),
         map_meta=layer, postrender_ops=[], retained_physical_groups=[],
         zmap=(_)->zero(T), gmsh_options=..., skip_postrender=false,
-        auto_union=false, skip_unused_layers=false, kwargs...)
+        auto_union=false, skip_unused_layers=false,
+        fragment_backstop=false, kwargs...)
 
 Render `cs` into `sm` using the ConformalRender strategy. Same semantics as
-[`render!`](@ref) but without the post-render `_fragment_and_map!` pass.
+[`render!`](@ref) but without the post-render `_fragment_and_map!` pass by
+default.
 
 The `context::ConformalRenderContext` holds the edge/curve cache and merge
 tolerances; pass an explicit context if you need custom tolerances or want to
 inspect cache statistics after the render.
+
+`fragment_backstop=true` runs the stock 3-pass `_fragment_and_map!` sequence
+after postrender operations. Faces already resolved to a single OCC entity
+by the cache pass through as no-ops, so this is safe to combine with
+cache-resolved regions. Enable when the input geometry may not fully meet
+the "shared endpoints ⟹ shared curve" precondition, or when `postrender_ops`
+introduce overlapping entities that need reconciliation.
 
 Not supported on `GmshNative` kernel.
 """
@@ -645,6 +677,7 @@ function render_conformal!(
     skip_postrender::Bool=false,
     auto_union::Bool=false,
     skip_unused_layers::Bool=false,
+    fragment_backstop::Bool=false,
     kwargs...
 ) where {T}
     kernel(sm) isa OpenCascade || error(
@@ -716,11 +749,19 @@ function render_conformal!(
     _postrender!(sm, postrender_ops)
     _synchronize!(sm)
 
-    # Key difference vs render!: NO _fragment_and_map! pass. The conformal cache
-    # already deduplicates shared edges during render, and _fragment_and_map!
-    # would touch OCC entities the cache assumes are stable. If your
-    # postrender_ops introduce overlapping entities that need reconciliation,
-    # use render! instead.
+    # By default, no `_fragment_and_map!` pass: the conformal cache already
+    # deduplicates shared edges during render. But if the input geometry
+    # doesn't fully meet the cache's preconditions (see "Failure modes for the
+    # 'prefer curve' invariant" in the module docstring), or if `postrender_ops`
+    # introduce overlapping entities that need reconciliation, users can opt
+    # into the stock 3-pass fragment as a safety net via `fragment_backstop=true`.
+    # Faces already resolved to a single OCC entity by the cache pass through
+    # fragment as no-ops, so this is compatible with cache-resolved regions.
+    if fragment_backstop
+        _fragment_and_map!(sm, [0, 1])
+        _fragment_and_map!(sm, [1, 2])
+        _fragment_and_map!(sm, [2, 3])
+    end
 
     gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
 
