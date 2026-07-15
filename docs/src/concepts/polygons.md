@@ -125,6 +125,30 @@ This works for both the Cell and SolidModel rendering paths. The inner `Rounded`
 a `CurvilinearPolygon` with exact fillet arcs, and the outer `Rounded` applies line-arc
 rounding at the transitions.
 
+#### Circles and rings
+
+`RelativeRounded(0.5)` on a square places all four fillet arc centers at the square's
+center, so the result is an exact circle built from four 90° arcs:
+
+```julia
+mycircle(r) = RelativeRounded(0.5)(centered(Rectangle(2r, 2r)))
+```
+
+An idiomatic ring (annulus) is then the same rounding applied to the difference of
+two such squares, which is exact for both the Cell and SolidModel rendering paths:
+
+```julia
+myring(r_outer, r_inner) = RelativeRounded(0.5)(
+    difference2d(
+        centered(Rectangle(2r_outer, 2r_outer)),
+        centered(Rectangle(2r_inner, 2r_inner))
+    )
+)
+```
+
+(A ring can also be drawn as a `Path` with a full 360° turn, which renders as two
+half-annulus polygons.)
+
 #### Selecting line-arc corners
 
 [`Curvilinear.line_arc_cornerindices`](@ref) identifies vertices where a straight edge meets a curve.

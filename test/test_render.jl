@@ -1274,3 +1274,98 @@ end
     corner_seg = Paths.Corner{typeof(1.0μm)}(90°)
     @test_throws ArgumentError pathtopolys(corner_seg, Paths.Trace(1.0μm))
 end
+
+@testitem "Full turns render non-degenerate (#252)" setup = [CommonTestSetup] begin
+    # Turns sweeping an exact multiple of 360° have coincident endpoints; they are
+    # split into two half turns at pathtopolys so neither the degenerate-point checks
+    # nor the CurvilinearPolygon constructor dedup can silently collapse them.
+    annulus_area(r, w) = 2π * r * w
+    function ring_polys(α, sty; r=100μm)
+        pa = Path(0μm, 0μm)
+        turn!(pa, α, r, sty)
+        return reduce(vcat, vcat.(to_polygons.(pathtopolys(pa))))
+    end
+    total_area(polys) = sum(Polygons.area.(polys))
+
+    @testset "Trace/CPW/Strands full turns" begin
+        polys = ring_polys(360°, Paths.Trace(10μm))
+        @test length(polys) == 2
+        @test all(pp -> length(points(pp)) >= 3, polys)
+        @test total_area(polys) ≈ annulus_area(100μm, 10μm) rtol = 1e-4
+
+        # Docs example direction (concepts/paths.md ring)
+        polys = ring_polys(-360°, Paths.CPW(10μm, 6μm))
+        @test length(polys) == 4
+        @test total_area(polys) ≈ 2 * annulus_area(100μm, 6μm) rtol = 1e-4
+
+        # SimpleTrace/SimpleCPW take the clipped corner-point branch
+        polys = ring_polys(360°, Paths.SimpleTrace(10μm))
+        @test total_area(polys) ≈ annulus_area(100μm, 10μm) rtol = 1e-4
+        polys = ring_polys(360°, Paths.SimpleCPW(10μm, 6μm))
+        @test total_area(polys) ≈ 2 * annulus_area(100μm, 6μm) rtol = 1e-4
+
+        # Strands: two strands, two sides, two halves
+        polys = ring_polys(360°, Paths.Strands(2μm, 2μm, 2μm, 2))
+        @test length(polys) == 8
+        @test all(pp -> length(points(pp)) >= 3, polys)
+    end
+
+    @testset "Exact multiples and radians input" begin
+        # 720° recurses into four half turns
+        polys = ring_polys(720°, Paths.Trace(10μm))
+        @test length(polys) == 4
+        @test total_area(polys) ≈ 2 * annulus_area(100μm, 10μm) rtol = 1e-4
+
+        # Radian (plain-number) input must be caught too: detection is by endpoint
+        # coincidence, not by exact angle arithmetic
+        polys = ring_polys(2π, Paths.Trace(10μm))
+        @test length(polys) == 2
+        @test total_area(polys) ≈ annulus_area(100μm, 10μm) rtol = 1e-4
+    end
+
+    @testset "Non-multiples unchanged" begin
+        # Over-full but non-multiple turns render as a single (self-overlapping) polygon
+        for α in (370°, 450°, 540°)
+            polys = ring_polys(α, Paths.Trace(10μm))
+            @test length(polys) == 1
+            @test length(points(only(polys))) > 3
+        end
+        polys = ring_polys(359.9°, Paths.Trace(10μm))
+        @test length(polys) == 1
+        @test total_area(polys) ≈ (359.9 / 360) * annulus_area(100μm, 10μm) rtol = 1e-4
+    end
+
+    @testset "Booleans and rendering see the ring" begin
+        pa = Path(0μm, 0μm)
+        turn!(pa, 360°, 100μm, Paths.Trace(10μm))
+        u = union2d(pathtopolys(pa))
+        upolys = to_polygons(u)
+        @test !isempty(upolys)
+        @test total_area(upolys) ≈ annulus_area(100μm, 10μm) rtol = 1e-4
+
+        c = Cell("ring", nm)
+        render!(c, pa, GDSMeta(0))
+        @test all(pp -> length(points(pp)) >= 3, elements(c))
+        @test total_area(elements(c)) ≈ annulus_area(100μm, 10μm) rtol = 1e-4
+    end
+
+    @testset "Pinched inner edge still uses the degenerate branch" begin
+        # radius ≤ extent: inner edge clips to the curve origin (pie slice), no error
+        cp = pathtopolys(
+            Paths.Turn(90°, 10.0μm; p0=Point(0.0μm, 0.0μm)),
+            Paths.SimpleTrace(30.0μm)
+        )
+        @test cp isa CurvilinearPolygon
+        @test length(points(cp)) == 3
+    end
+
+    @testset "Closed segments fail loudly" begin
+        # The degenerate-point branches are guarded against closed segments (coincident
+        # endpoints), which would otherwise silently lose the inner offset curve. Full
+        # turns never reach the guard (split above), so exercise the backstop directly.
+        closed = Paths.Turn(360°, 100.0μm; p0=Point(0.0μm, 0.0μm))
+        @test_throws ArgumentError DeviceLayout.Curvilinear._assert_open_segment(closed)
+        open_seg = Paths.Turn(90°, 100.0μm; p0=Point(0.0μm, 0.0μm))
+        @test DeviceLayout.Curvilinear._assert_open_segment(open_seg) === nothing
+    end
+end
