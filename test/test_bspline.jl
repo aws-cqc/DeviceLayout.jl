@@ -300,6 +300,20 @@ end
         )
     )
 
+    ## Fast-varying offset: tangential speed reverses sign but |offset′| is large,
+    ## so the reversal is smooth sideways motion, not a cusp — no warning.
+    pa = Path()
+    bspline!(
+        pa,
+        [Point(500.0μm, 500.0μm)],
+        90°,
+        Paths.Trace(x -> 600.0μm + 0.5 * x);
+        endpoints_speed=800.0μm,
+        auto_curvature=true
+    )
+    cp = Curvilinear.pathtopolys(pa[1])
+    @test_logs min_level = Logging.Warn DeviceLayout.discretize_curve(cp.curves[2], 1.0nm)
+
     ## Large ratio between base and offset radius without cusps
     pa = Path()
     bspline!(

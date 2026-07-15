@@ -6,7 +6,7 @@ The format of this changelog is based on
 
 ## Unreleased
 
-  - Added a warning when cusps are detected when rendering 
+  - Added a guard against over-refining near cusps due to diverging curvature of offset curves of B-splines, and added a warning when cusps are detected during curve discretization
   - Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
   - Added `SolidModels.check_port_connectivity`, using `SolidModels.connected_components` to report ports as `:open`, `:short`, `:floating`, or `:missing`
   - Added `detect_non_boundary_contacts=false` keyword argument to `SolidModels.connected_components`; when `true`, 1d edges embedded in the interior of 2D surfaces (like the feet of staple air bridges) will be treated as connecting
