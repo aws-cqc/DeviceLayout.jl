@@ -606,24 +606,16 @@ const BaseContinuousSegment{T} = Union{Paths.Straight{T}, Paths.Turn{T}, Paths.B
 pathtopolys(f::BaseContinuousSegment{T}, s::Paths.CompoundStyle; kwargs...) where {T} =
     _compound_style_grid_render(f, s; kwargs...)
 
-# A Turn sweeping a full multiple of 360° has coincident endpoints, which the
-# degenerate-point checks and the CurvilinearPolygon constructor's duplicate-point
-# elimination would otherwise silently collapse to empty geometry (issue #252).
-# Detection uses endpoint coincidence (robust to floating-point angle storage) at the
-# constructor's deduplication tolerance; the sweep threshold keeps the recursion in
-# `_split_full_turn` finite (halves of a split full turn sweep at most 180° and small
-# radii cannot re-fire the check).
+# A Turn sweeping a full multiple of 360° has coincident endpoints, which CurvilinearPolygon
+# and the `pathtopolys` degenerate-point clipping logic would not handle correctly (issue #252)
 _is_full_turn(seg::Paths.Segment) = false
 function _is_full_turn(seg::Paths.Turn{T}) where {T}
+    # Check endpoint coincidence with same tolerance as CurvilinearPolygon constructor deduplication
     return abs(seg.α) > 270° &&
            isapprox(Paths.p0(seg), Paths.p1(seg); atol=1e-3 * DeviceLayout.onenanometer(T))
 end
 
-# Full turns render as two half-turn polygons (per surface). A single polygon whose
-# boundary is a closed loop is not representable (constructor dedup), and the
-# zero-width-slit "keyhole" alternative is rejected by the OpenCASCADE kernel
-# ("Curve loop is not closed") even though GDS accepts it — so the split must
-# produce separate polygons.
+# Full turns split into two nodes (avoid closed-loop segments and OCC-unfriendly keyhole geometry)
 function _split_full_turn(seg::Paths.Turn{T}, sty::Paths.Style; kwargs...) where {T}
     seg1, seg2, sty1, sty2 = split(seg, sty, pathlength(seg) / 2)
     return vcat(
@@ -632,9 +624,7 @@ function _split_full_turn(seg::Paths.Turn{T}, sty::Paths.Style; kwargs...) where
     )
 end
 
-# Closed segments other than full turns (e.g. a closed BSpline) cannot be represented
-# as a single curvilinear polygon either; fail loudly instead of letting the
-# constructor silently delete the coincident endpoints and their curves.
+# Closed segments other than full turns (e.g. a closed BSpline) are not split but fail loudly
 function _assert_open_segment(seg::Paths.Segment{T}) where {T}
     if isapprox(Paths.p0(seg), Paths.p1(seg); atol=1e-3 * DeviceLayout.onenanometer(T))
         throw(
@@ -657,8 +647,7 @@ function pathtopolys(
     pts = corner_points(seg, sty, true)
     # Check if the points are degenerate (inner edge clipped to the curve origin when
     # radius ≤ extent). Coincident segment endpoints also make these checks fire — for
-    # the wrong reason — so closed segments fail loudly here instead of silently losing
-    # a curve (issue #252; full turns are split above and never reach this point).
+    # the wrong reason — so closed segments that are not split above fail loudly.
     if isapprox(pts[1], pts[2])
         _assert_open_segment(seg)
         return CurvilinearPolygon(pts[2:end], [Paths.offset(seg, Paths.extent(sty))], [-2])
@@ -704,7 +693,7 @@ function pathtopolys(
     _is_full_turn(seg) && return _split_full_turn(seg, sty; kwargs...)
     pts = corner_points(seg, sty, true)
     # As for SimpleTrace above: the degenerate-point checks below are for the
-    # radius ≤ extent clip, not for closed segments (issue #252).
+    # radius ≤ extent clip, not for closed segments.
     (isapprox(pts[1], pts[2]) || isapprox(pts[7], pts[8])) && _assert_open_segment(seg)
     return [
         isapprox(pts[1], pts[2]) ?
