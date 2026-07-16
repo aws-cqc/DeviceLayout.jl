@@ -15,7 +15,7 @@ Here's a type hierarchy with the most important types for geometry representatio
 ```
 AbstractGeometry{S<:Coordinate}
     ├── GeometryEntity (basic "shapes")
-    │   ├── Polygon, Rectangle, Text, Ellipse...
+    │   ├── Polygon, Rectangle, Text, Ellipse, Circle...
     │   ├── ClippedPolygon (result of polygon [clipping](./polygons.md#Clipping) — `union2d`, etc.)
     │   ├── Paths.Node (one segment+style pair in a Path)
     │   └── StyledEntity (entity + rounding or other rendering customization)

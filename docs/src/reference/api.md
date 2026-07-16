@@ -205,6 +205,7 @@
 ### [Shapes](@id api-shapes)
 
 ```@docs
+    AbstractEllipse
     Circle
     Ellipse
 ```

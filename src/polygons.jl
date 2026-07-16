@@ -19,7 +19,6 @@ import DeviceLayout:
     AbstractGeometry,
     AbstractPolygon,
     Coordinate,
-    CurvilinearPolygon,
     GeometryEntity,
     GeometryEntityStyle,
     GeometryReference,
@@ -637,7 +636,6 @@ function perimeter(e::AbstractEllipse)
     b = r2(e)
     return π * ((a + b) + 3 * (a - b)^2 / (10 * (a + b) + sqrt(a^2 + 14 * a * b + b^2)))
 end
-perimeter(c::Circle) = 2π * c.r
 
 function signed_area(p::Polygon) # Can be negative
     return sum(
