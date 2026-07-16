@@ -285,12 +285,20 @@ function to_polygons(
     return Polygon([center(e) + _ellipse_p(θ, angle(e), r1(e), r2(e)) for θ in θs])
 end
 
-function to_polygons(c::Circle{T}; Δθ=nothing, atol=DeviceLayout.onenanometer(T), rtol=nothing, kwargs...) where {T}
+function to_polygons(
+    c::Circle{T};
+    Δθ=nothing,
+    atol=DeviceLayout.onenanometer(T),
+    rtol=nothing,
+    kwargs...
+) where {T}
     !isnothing(Δθ) && return circle_polygon(c.r, Δθ) + c.center
     if !isnothing(rtol)
         atol = max(atol, rtol * abs(radius(c)))
     end
-    return Polygon(DeviceLayout.circular_arc(2pi, radius(c), atol; center=center(c))[1:end-1])
+    return Polygon(
+        DeviceLayout.circular_arc(2pi, radius(c), atol; center=center(c))[1:(end - 1)]
+    )
 end
 
 DeviceLayout.magnify(e::Ellipse, mag) = Ellipse(mag .* e.center, mag .* e.radii, e.angle)

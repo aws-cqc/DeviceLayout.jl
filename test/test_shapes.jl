@@ -753,19 +753,23 @@ end
         # Discretized geometry is equivalent to a Circle within tolerance
         # without excessive sampling
         pts = points(to_polygons(c))
-        midpts = (pts .+ circshift(pts, 1))/2
+        midpts = (pts .+ circshift(pts, 1)) / 2
         @test maximum(abs.(radius(c) .- norm.(midpts .- center(c)))) < 1nm
         @test all(isapprox.(abs.(radius(c) .- norm.(midpts .- center(c))), 1nm, rtol=0.15))
         # relax tolerance
         pts_10nm = points(to_polygons(c; atol=10nm))
-        midpts_10nm = (pts_10nm .+ circshift(pts_10nm, 1))/2
+        midpts_10nm = (pts_10nm .+ circshift(pts_10nm, 1)) / 2
         @test maximum(abs.(radius(c) .- norm.(midpts_10nm .- center(c)))) < 10nm
-        @test all(isapprox.(abs.(radius(c) .- norm.(midpts_10nm .- center(c))), 10nm, rtol=0.15))
+        @test all(
+            isapprox.(abs.(radius(c) .- norm.(midpts_10nm .- center(c))), 10nm, rtol=0.15)
+        )
         # rtol
         pts_30nm = points(to_polygons(c; rtol=1e-2))
-        midpts_30nm = (pts_30nm .+ circshift(pts_30nm, 1))/2
+        midpts_30nm = (pts_30nm .+ circshift(pts_30nm, 1)) / 2
         @test maximum(abs.(radius(c) .- norm.(midpts_30nm .- center(c)))) < 30nm
-        @test all(isapprox.(abs.(radius(c) .- norm.(midpts_30nm .- center(c))), 30nm, rtol=0.15))
+        @test all(
+            isapprox.(abs.(radius(c) .- norm.(midpts_30nm .- center(c))), 30nm, rtol=0.15)
+        )
     end
 end
 
