@@ -172,6 +172,10 @@ copy(e::Ellipse) = Ellipse(e.center, e.radii, e.angle)
     Circle(r::Coordinate)
 
 Construct an Ellipse with major and minor radii equal to `r` at `center` (or origin if not provided).
+
+The result satisfies [`iscircle`](@ref Polygons.iscircle), so it discretizes with the constant-curvature
+fast path and participates in curve recovery (see [`recover_curves`](@ref)) as an exact
+four-arc representation.
 """
 Circle(center::Point{T}, r::T) where {T} = Ellipse(center, (r, r), 0.0°)
 Circle(r::T) where {T <: Coordinate} = Circle(zero(Point{T}), r)
@@ -179,6 +183,20 @@ function Circle(center::Point{S}, r::T) where {S, T}
     V = float(promote_type(S, T))
     return Circle(convert(Point{V}, center), convert(V, r))
 end
+
+"""
+    iscircle(e::Ellipse)
+
+Whether `e` is a circle, meaning its radii are exactly (bitwise) equal.
+
+Exact equality is guaranteed for ellipses constructed with `Circle` and is preserved by
+angle-preserving transformations (translation, rotation, reflection, uniform scaling),
+which apply identical operations to both radii. An ellipse whose radii were computed
+independently and merely agree approximately is not treated as a circle: circles take
+exact representations (four 90° arcs in curve recovery) and fast paths, which are only
+valid when the radii are exactly equal.
+"""
+iscircle(e::Ellipse) = e.radii[1] == e.radii[2]
 
 center(e::Ellipse) = e.center
 r1(e::Ellipse) = e.radii[1]
@@ -228,6 +246,15 @@ function to_polygons(
     if !isnothing(Δθ) # Use Δθ-based discretization
         θs = ((0.0°):Δθ:(360° - Δθ))
     else # Use tolerance-based discretization
+        if iscircle(e) # Constant curvature: sample uniformly at the sagitta-bounded step
+            r = e.radii[1]
+            if !isnothing(rtol)
+                atol = max(atol, rtol * abs(r))
+            end
+            return Polygon(
+                DeviceLayout.circular_arc(2pi, r, atol; center=e.center)[1:(end - 1)]
+            )
+        end
         # t_scale is used to approximately convert "t" (θ) to arclength, use the larger radius to be safe
         θs = (DeviceLayout.discretization_grid(
             Base.Fix1(ellipse_curvature, e),
@@ -496,6 +523,12 @@ end
 
 DeviceLayout.lowerleft(x::Polygon) = lowerleft(x.p)
 DeviceLayout.upperright(x::Polygon) = upperright(x.p)
+
+# A circle's bounding box is center ± r with no discretization needed.
+DeviceLayout.lowerleft(e::Ellipse) =
+    iscircle(e) ? e.center - Point(e.radii[1], e.radii[1]) : lowerleft(to_polygons(e))
+DeviceLayout.upperright(e::Ellipse) =
+    iscircle(e) ? e.center + Point(e.radii[1], e.radii[1]) : upperright(to_polygons(e))
 DeviceLayout.footprint(x::Polygon) = x
 
 # ClippedPolygon footprint = outer contour if there's only one

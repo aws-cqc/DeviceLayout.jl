@@ -34,7 +34,7 @@ import DeviceLayout:
     isapprox_angle
 import DeviceLayout: MeshSized, WithDirection, OptionalStyle, Plain, NoRender
 using DeviceLayout.Paths
-import DeviceLayout.Polygons: cornerindices, StyleDict, Rounded
+import DeviceLayout.Polygons: cornerindices, iscircle, StyleDict, Rounded
 import DeviceLayout.Polygons.Clipper: PolyNode, contour
 import Unitful: uconvert, °, Length
 
@@ -130,6 +130,27 @@ function CurvilinearPolygon(points::Vector{Point{T}}) where {T}
     return CurvilinearPolygon{T}(points, Paths.Segment[], Int[])
 end
 CurvilinearPolygon(p::Polygon{T}) where {T} = CurvilinearPolygon(points(p))
+# A circle as four 90° CCW arcs meeting at the axis-aligned extreme points. Four arcs
+# rather than one or two: a single 360° curve collapses in the duplicate-endpoint dedup
+# above (its lone vertex pairs with itself under `circshift`), and 180° arcs hit the OCC
+# semicircle split path plus the collinear-endpoint guard in `add_circle_arc`.
+function CurvilinearPolygon(e::Ellipse{T}) where {T}
+    iscircle(e) || throw(
+        ArgumentError(
+            "an Ellipse with unequal radii is not exactly representable as arcs; " *
+            "only circles (see `iscircle`) convert to CurvilinearPolygon"
+        )
+    )
+    r = e.radii[1]
+    p = [
+        e.center + Point(r, zero(r)),
+        e.center + Point(zero(r), r),
+        e.center - Point(r, zero(r)),
+        e.center - Point(zero(r), r)
+    ]
+    curves = [Paths.Turn(90.0°, r; p0=p[i], α0=i * 90.0°) for i = 1:4]
+    return CurvilinearPolygon{T}(p, curves, [1, 2, 3, 4])
+end
 
 ### Conversion methods
 function to_polygons(
@@ -1465,7 +1486,9 @@ styled_loop(::CurvilinearPolygon{T}, ::NoRender; kwargs...) where {T} =
 # (single style applied to the whole entity) and dispatch by entity type below.
 # To AbstractPolygon, CurvilinearPolygon, CurvilinearRegion, or vector of those.
 # If this produces an AbstractPolygon and the styled entity should be curve-bearing, warn for curve loss.
-function to_curvilinear(ent::GeometryEntity, sty; kwargs...)
+to_curvilinear(ent::GeometryEntity, sty; kwargs...) =
+    _to_curvilinear_discretize(ent, sty; kwargs...)
+function _to_curvilinear_discretize(ent, sty; kwargs...)
     expanded = to_polygons(ent, sty; kwargs...)
     discretized =
         expanded isa AbstractPolygon ||
@@ -1473,6 +1496,12 @@ function to_curvilinear(ent::GeometryEntity, sty; kwargs...)
     discretized && _maybe_warn_curve_loss(sty(ent))
     return expanded
 end
+# A circle is exactly representable as four arcs, so styled circles keep their curves
+# (and participate in curve recovery) instead of falling to the discretizing fallback.
+# Unequal-radii ellipses are not representable as arcs and discretize as before.
+to_curvilinear(ent::Ellipse, sty; kwargs...) =
+    iscircle(ent) ? to_curvilinear(CurvilinearPolygon(ent), sty; kwargs...) :
+    _to_curvilinear_discretize(ent, sty; kwargs...)
 # Nested styles: expand the inner style first (inner-out), then apply the outer style to the
 # resulting curvilinear geometry so both rounding passes see exact arcs.
 function to_curvilinear(ent::StyledEntity, sty; kwargs...)

@@ -33,6 +33,16 @@ The format of this changelog is based on
     full turn is represented by two 180° curves rather than one 360° curve. Closed
     segments reaching the degenerate corner-point checks now throw an `ArgumentError`
     instead of silently dropping a curve.
+  - Circles participate in curve recovery (issue #251): an `Ellipse` with exactly equal
+    radii (e.g. constructed via `Circle`) is represented exactly as four 90° arcs, so
+    `union2d_curved` and the other curve-preserving boolean operations recover circular
+    arcs instead of warning and discretizing. The new `iscircle` predicate documents the
+    exactness contract: equality is guaranteed for `Circle(...)` results and preserved by
+    angle-preserving transformations.
+  - Circle discretization now uses uniform sampling at the tolerance-derived angular step
+    (`circular_arc`) instead of the general curvature-controlled kernel, and circles take
+    a fast bounding-box path with no discretization. Rendered point counts and positions
+    for circles change slightly within the same `atol`/`rtol` tolerances.
   - Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
   - Added `SolidModels.check_port_connectivity`, using `SolidModels.connected_components` to report ports as `:open`, `:short`, `:floating`, or `:missing`
   - Added `detect_non_boundary_contacts=false` keyword argument to `SolidModels.connected_components`; when `true`, 1d edges embedded in the interior of 2D surfaces (like the feet of staple air bridges) will be treated as connecting
