@@ -75,17 +75,20 @@ Curve-bearing inputs are expanded to their exact arc geometry before clipping vi
 converter the `SolidModel` render path uses, so `Rounded` applied to `Polygon`, `Rectangle`,
 `ClippedPolygon`, `CurvilinearRegion`, and `CurvilinearPolygon`, as well as nestings with
 no-op styles (`MeshSized`, `WithDirection`) and per-contour `StyleDict`s — including on
-`Path` nodes — all recover their arcs where the footprint survives.
+`Path` nodes — all recover their arcs where the footprint survives. A circle (an `Ellipse`
+with exactly equal radii, e.g. from `Circle`) is represented exactly as
+four 90° arcs, so circles participate in curve recovery too (an ellipse with unequal radii
+is not representable as arcs and still discretizes).
 
 **Current limitations:** A curve is recovered only if its entire discretized run survives
 the boolean operation with exact integer equality. If the operation cuts through a curve
 (e.g., a straight edge crossing an arc's interior), that curve falls back to a polyline.
 Partial-curve recovery is not supported.
 
-An input entity with no curve-recovery method (for example an `Ellipse`, or a style
-combination not listed above) is discretized via `to_polygons` with no provenance, so any
-curves it carries cannot be recovered; a warning is logged once per entity type when this
-happens.
+An input entity with no curve-recovery method (for example an `Ellipse` with unequal
+radii, or a style combination not listed above) is discretized via `to_polygons` with no
+provenance, so any curves it carries cannot be recovered; a warning is logged once per
+entity type when this happens.
 
 ## Styles
 

@@ -207,6 +207,7 @@
 ```@docs
     Circle
     Ellipse
+    Polygons.iscircle
 ```
 
 See [Shapes](./shapes.md).

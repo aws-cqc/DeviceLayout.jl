@@ -696,6 +696,64 @@ end
     @test Ellipse(Point(1µm, 1µm); r=1nm) isa Ellipse
 end
 
+@testitem "Circles (#251)" setup = [CommonTestSetup] begin
+    import DeviceLayout:
+        magnify,
+        rotate,
+        translate,
+        reflect_across_xaxis,
+        reflect_across_line,
+        lowerleft,
+        upperright
+    import DeviceLayout.Polygons: iscircle
+    c = Circle(Point(1.0μm, 2.0μm), 3.0μm)
+    @test iscircle(c)
+    @test !iscircle(Ellipse(Point(0.0μm, 0.0μm), (2.0μm, 1.0μm), 0.0°))
+
+    @testset "Angle-preserving transformations preserve iscircle exactly" begin
+        for tc in (
+            rotate(c, 30°),
+            translate(c, Point(1.0μm, 0.0μm)),
+            magnify(c, 2),
+            reflect_across_xaxis(c),
+            reflect_across_line(c, 45°),
+            reflect_across_line(c, Point(0.0μm, 0.0μm), Point(1.0μm, 1.0μm)),
+            Rotation(45°)(c),
+            (Translation(Point(1.0μm, 1.0μm)) ∘ Rotation(90°))(c)
+        )
+            @test iscircle(tc)
+        end
+        @test magnify(c, 2).radii == (6.0μm, 6.0μm)
+        # Non-angle-preserving transformations produce a genuine ellipse
+        shear = Transformations.LinearMap(Transformations.@SMatrix [2 0; 0 1])
+        @test !iscircle(shear(c))
+    end
+
+    @testset "Fast bounds" begin
+        @test lowerleft(c) == Point(-2.0μm, -1.0μm)
+        @test upperright(c) == Point(4.0μm, 5.0μm)
+        @test bounds(c) == Rectangle(Point(-2.0μm, -1.0μm), Point(4.0μm, 5.0μm))
+        # Unequal radii fall back to the discretizing path
+        e = Ellipse(Point(0.0μm, 0.0μm), (2.0μm, 1.0μm), 0.0°)
+        @test lowerleft(e) == lowerleft(to_polygons(e))
+        @test upperright(e) == upperright(to_polygons(e))
+    end
+
+    @testset "Discretization within tolerance without excessive sampling" begin
+        for (kwargs, tol) in (
+            ((;), 1nm), # default atol
+            ((; atol=10nm), 10nm),
+            ((; rtol=1e-2), 30nm) # rtol * r = 30nm dominates the 1nm default atol
+        )
+            pts = points(to_polygons(c; kwargs...))
+            midpts = (pts .+ circshift(pts, 1)) / 2
+            sagittas = abs.(3.0μm .- norm.(midpts .- Point(1.0μm, 2.0μm)))
+            @test maximum(sagittas) < tol
+            @test all(isapprox.(sagittas, tol, rtol=0.15))
+        end
+    end
+end
+
 @testitem "circular_arc equal angles" setup = [CommonTestSetup] begin
     # When θ1 = θ2, circular_arc should return a single point, not nothing.
     θ = convert(Float64, π)

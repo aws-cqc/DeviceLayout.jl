@@ -181,6 +181,9 @@ end
 # Normalize a clip operand into a flat Vector of entities, preserving curve-bearing
 # entities intact (unlike _normalize_clip_arg, which discretizes via to_polygons).
 _normalize_curved_clip_arg(p::DeviceLayout.GeometryEntity) = [p]
+# Circles convert to their exact four-arc form so their curves are recoverable;
+# unequal-radii ellipses have no exact arc form and discretize (with a loss warning).
+_normalize_curved_clip_arg(p::Ellipse) = iscircle(p) ? [CurvilinearPolygon(p)] : [p]
 _normalize_curved_clip_arg(p::AbstractArray) =
     collect(Iterators.flatten(_normalize_curved_clip_arg.(p)))
 _normalize_curved_clip_arg(p::Union{GeometryStructure, GeometryReference}) =
@@ -232,8 +235,9 @@ corresponding clipping operation: a `GeometryEntity` or array of `GeometryEntity
 
 Curve-bearing entities have their curves tracked through discretization and recovered in
 the result: `CurvilinearPolygon`, `CurvilinearRegion`, `Path` nodes (e.g. `Turn`/`BSpline`
-segments rendered with a `Style`), and `Rounded`-styled `Polygon`/`Rectangle`. All other
-entities are discretized via `to_polygons`.
+segments rendered with a `Style`), equal-radii `Ellipse`s (represented exactly as four 90°
+arcs), and `Rounded`-styled `Polygon`/`Rectangle`. All other entities are discretized via
+`to_polygons`.
 
 ## Keyword arguments
 
