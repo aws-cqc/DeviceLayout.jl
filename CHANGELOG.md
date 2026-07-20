@@ -6,67 +6,60 @@ The format of this changelog is based on
 
 ## Unreleased
 
-  - `ExamplePDK.ChipTemplates.example_launcher` now styles its simulated-only `PORT` rectangle with `WithDirection`, and the `DemoQPU17` solidmodel example extracts port and junction directions with `ExamplePDK.port_directions` instead of computing them by hand (removing the `lumped_direction` keyword from its config-building functions)
-  - All dimensionless relative rounding is now absolute-by-default: applying
-    `Rounded(::Real)` to a dimensionless polygon or `CurvilinearPolygon` treats the
-    radius as an absolute length (pass `relative=true` to
-    `round_to_curvilinearpolygon` for length-relative fillets). This behavior shipped
-    with the render unification and is now pinned by a regression test.
-  - Corner-membership checks in `round_to_curvilinearpolygon` use `Set`/`Dict`
-    lookups again, restoring O(n) rounding for polygons with many corners.
-  - Converting a path segment/style combination that has no polygon conversion now
-    throws a clear `ArgumentError` instead of warning and then failing with a
-    `MethodError`.
-  - Rendering an offset segment with a `CompoundStyle` now throws an `ArgumentError`:
-    the style grid is in the original segment's arclength frame, which offset
-    resolution does not preserve, so the result would place style transitions in the
-    wrong locations.
-  - Added a fast path for constant-curvature discretization: `Turn` and
-    constant-offset `Turn` segments are sampled uniformly at the tolerance-derived
-    angular step instead of marching with the general curvature-controlled kernel,
-    making turn discretization faster and avoiding over-refinement in some cases. Rendered point counts and positions change slightly for every `Turn` within the same `atol`/`rtol` tolerances. Degenerate turns (zero sweep, zero radius, `|offset| == r`) now discretize to exactly two points, and
-    offset turns with `|offset| > r` keep exact endpoints.
-  - Fixed turns sweeping a full multiple of 360° rendering as degenerate polygons in GDS
-    and as silent zero-area surfaces in SolidModel (issue #252): full turns are now split
-    into two half turns during path polygonization, so a 360° turn renders as two
-    half-annulus polygons per surface. In curve-recovery/provenance terms this means a
-    full turn is represented by two 180° curves rather than one 360° curve. Closed
-    segments reaching the degenerate corner-point checks now throw an `ArgumentError`
-    instead of silently dropping a curve.
-  - Circles participate in curve recovery (issue #251): an `Ellipse` with exactly equal
-    radii (e.g. constructed via `Circle`) is represented exactly as four 90° arcs, so
-    `union2d_curved` and the other curve-preserving boolean operations recover circular
-    arcs instead of warning and discretizing. The new `iscircle` predicate documents the
-    exactness contract: equality is guaranteed for `Circle(...)` results and preserved by
-    angle-preserving transformations.
-  - Circle discretization now uses uniform sampling at the tolerance-derived angular step
-    (`circular_arc`) instead of the general curvature-controlled kernel, and circles take
-    a fast bounding-box path with no discretization. Rendered point counts and positions
-    for circles change slightly within the same `atol`/`rtol` tolerances.
-  - Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration.
-  - Added `SolidModels.check_port_connectivity`, using `SolidModels.connected_components` to report ports as `:open`, `:short`, `:floating`, or `:missing`
-  - Added `detect_non_boundary_contacts=false` keyword argument to `SolidModels.connected_components`; when `true`, 1d edges embedded in the interior of 2D surfaces (like the feet of staple air bridges) will be treated as connecting
-  - Added `examples/DemoQPU17/solidmodel.jl` demonstrating large-scale SolidModel construction and configuration, including a check for open charge lines and shorted flux lines with the new functionality above
-  - Routed GDS path rendering through the shared `pathtopolys`/`CurvilinearPolygon`
-    pipeline used for path polygonization, aligning GDS and SolidModel corner-rounding
-    and curve discretization behavior. Relative line-arc rounding in GDS now matches
-    the SolidModel path.
-  - Fixed render tolerance propagation through compound offset resolution, path-level
-    `pathtopolys`, GmshNative curve flattening, and known curved `Trace`/`CPW`/`Strands`
-    style renderers.
+## 1.16.0 (2026-07-20)
+
+In addition to new features and bug fixes, this release substantially refactors
+rendering of curvilinear entities. Rendered point counts and positions will change,
+but the resulting geometry is generally at least as faithful to tolerance.
+
+### Rendering
+
+  - GDS curvilinear rendering (`Turn`, `Trace`, `CPW`, `Strands`, offset segments, corner
+    rounding, etc.) is now routed through the same `pathtopolys`/`CurvilinearPolygon`
+    pipeline as `SolidModel` rendering, so both backends resolve curves and round
+    corners identically.
   - Removed `DeviceLayout.adapted_grid`; all curve discretization is now
     curvature-based and tolerance-controlled via `atol`/`rtol`. The `max_recursions`,
     `max_change`, `rand_factor`, and `grid_step` render keywords no longer have any
     effect.
+  - `Turn` and constant-offset `Turn` segments are sampled uniformly instead of marching with the
+    general curvature-controlled kernel, making turn discretization faster and avoiding
+    over-refinement in some cases. Degenerate turns (zero sweep, zero radius,
+    `|offset| == r`) now discretize to exactly two points, and offset turns with
+    `|offset| > r` keep exact endpoints.
+  - Discretization of a circle (equal-radii `Ellipse`) now uses uniform sampling at the
+    tolerance-derived angular step (`circular_arc`) instead of the general
+    curvature-controlled kernel, and circles take a fast bounding-box path with no
+    discretization.
   - Added a cached arc-length reparameterization to `Paths.BSpline`, making `pathlength`,
     `Paths.t_to_arclength`, and `Paths.arclength_to_t` much faster (~15x for a single
-    `arclength_to_t` call). The forward map remains exact; `arclength_to_t` now uses a
+    `arclength_to_t` call). The forward map still uses QuadGK integration; `arclength_to_t` now uses a
     table-seeded Newton iteration (relative tolerance `1e-12`) in place of `Optim`-based
     minimization, so results may differ from previous versions within tolerance.
+  - A path node with a 360-degree `Turn` is now split into two half turns during rendering.
+
+### Added
+
+  - Added `recover_curves` and the curve-preserving Boolean variants `union2d_curved`,
+    `difference2d_curved`, `intersect2d_curved`, and `xor2d_curved`, which recover
+    original curves (arcs, splines) from a clipped result wherever their discretized
+    footprint survived the operation intact, returning a `Vector{CurvilinearRegion}`.
+  - Added `WithDirection <: GeometryEntityStyle` to annotate geometry entities with a direction (CCW from +x in local frame). The direction transforms with the entity under rotations and reflections, allowing extraction of the final global direction for use in simulation configuration. `ExamplePDK.ChipTemplates.example_launcher` now styles its simulated-only `PORT` rectangle with `WithDirection`, and the `DemoQPU17` solidmodel example extracts port and junction directions with `ExamplePDK.port_directions` instead of computing them by hand (removing the `lumped_direction` keyword from its config-building functions).
+  - Added `SolidModels.check_port_connectivity`, using `SolidModels.connected_components` to report ports as `:open`, `:short`, `:floating`, or `:missing`
+  - Added `detect_non_boundary_contacts=false` keyword argument to `SolidModels.connected_components`; when `true`, 1d edges embedded in the interior of 2D surfaces (like the feet of staple air bridges) will be treated as connecting
+  - Added `examples/DemoQPU17/solidmodel.jl` demonstrating large-scale SolidModel construction and configuration, including a check for open charge lines and shorted flux lines with the new functionality above
+  - Parsing and serializing a `ParameterSet` to/from YAML now supports arrays of `Unitful` quantities (e.g. `[0μm, 25μm, 50μm]`), matching scalar handling
+
+### Fixed
+
+  - `Rounded` applied to a dimensionless polygon or `CurvilinearPolygon` now treats a
+    real-valued radius as an absolute length by default (pass `relative=true` to
+    `round_to_curvilinearpolygon` for length-relative fillets).
+  - Rendering an offset segment with a `CompoundStyle` now throws an `ArgumentError`.
+  - Fixed composite rounding of a `ClippedPolygon` dropping its holes (#241). Internally, `CurvilinearRegion` now normalizes holes to clockwise winding on construction (matching `ClippedPolygon` hole contours), and `to_polygons` reconstitutes the region with a single positive-fill `union2d` instead of `difference2d`, so hole subtraction no longer depends on input winding.
   - Fixed bug where exact floating point comparison in `autofill` could lead to a gridpoint on an interior edge being filled
-  - Added `recover_curves` and the curve-preserving Boolean variants `union2d_curved`, `difference2d_curved`, `intersect2d_curved`, and `xor2d_curved`, which recover original curves (arcs, splines) from a clipped result wherever their discretized footprint survived the operation intact, returning a `Vector{CurvilinearRegion}`
-  - Unified styled-entity expansion into curve-bearing geometry behind `Curvilinear.to_curvilinear`, shared by the `SolidModel` render path, the GDS `Rounded` rendering bridge, and curve recovery. `Rounded` on `ClippedPolygon`/`CurvilinearRegion`/`CurvilinearPolygon`, nestings with no-op styles (`MeshSized`, `WithDirection`), and per-contour `StyleDict`s now preserve their arcs through the `*_curved` variants. Fixes a `MethodError` when rendering `Rounded(MeshSized(...))` through curve recovery.
-  - Fixed composite rounding of a `ClippedPolygon` dropping its holes (#241). `CurvilinearRegion` now normalizes holes to clockwise winding on construction (matching `ClippedPolygon` hole contours), and `to_polygons` reconstitutes the region with a single positive-fill `union2d` instead of `difference2d`, so hole subtraction no longer depends on input winding.
+  - Fixed `RelativeRounded`'s element-type fallback to use the preferred coordinate type instead of bare `Unitful.μm`, avoiding unit-promotion errors when selecting a rounding point (`p0`) without an explicit coordinate type
+  - Fixed a nested-rounding parity check in line-arc corner rounding that caused an error for repeated rounding with identical radius
 
 ## 1.15.0 (2026-06-14)
 
