@@ -942,11 +942,12 @@ function cornerindices(p::CurvilinearPolygon, r::Polygons.Rounded)
     if isempty(p0(r))
         selected = ss
     else
-        # Match p0 against all roundable vertices (straight-straight + line-arc) jointly,
-        # so a p0 point targeting a line-arc corner doesn't accidentally claim a
-        # straight-straight corner for inverse_selection.
+        # Match p0 against all roundable vertices (straight-straight + line-arc + arc-arc)
+        # jointly, so a p0 point targeting a line-arc or arc-arc corner doesn't accidentally
+        # claim a straight-straight corner for inverse_selection.
         la = line_arc_cornerindices(p)
-        all_roundable = vcat(ss, la)
+        aa = arc_arc_cornerindices(p)
+        all_roundable = vcat(ss, la, aa)
         roundable_pts = p.p[all_roundable]
         matched = Polygons.cornerindices(roundable_pts, p0(r); tol=r.selection_tolerance)
         matched_orig = isempty(matched) ? Int[] : all_roundable[matched]
@@ -983,10 +984,12 @@ function line_arc_cornerindices(p::CurvilinearPolygon, sty::Polygons.Rounded)
         selected = all_la
     else
         # Match each p0 point to the closest roundable vertex across ALL corner types
-        # (straight-straight and line-arc). Only select line-arc corners where the
-        # line-arc vertex is genuinely the closest match for that p0 point.
+        # (straight-straight, line-arc, and arc-arc). Only select line-arc corners where the
+        # line-arc vertex is genuinely the closest match for that p0 point. The candidate set
+        # must include arc-arc vertices too, so a p0 sitting on an arc-arc corner isn't
+        # mis-snapped here — keeping this selector consistent with arc_arc_cornerindices.
         straight = cornerindices(p)
-        all_roundable = vcat(straight, all_la)
+        all_roundable = vcat(straight, all_la, arc_arc_cornerindices(p))
         roundable_pts = p.p[all_roundable]
         matched =
             Polygons.cornerindices(roundable_pts, p0(sty); tol=sty.selection_tolerance)
@@ -994,6 +997,49 @@ function line_arc_cornerindices(p::CurvilinearPolygon, sty::Polygons.Rounded)
         selected = filter(i -> i in all_la, matched_orig)
     end
     return sty.inverse_selection ? setdiff(all_la, selected) : selected
+end
+
+"""
+    arc_arc_cornerindices(p::CurvilinearPolygon)
+
+Return indices of vertices where both edges are curves (arc-arc corners). These are the
+vertices where two `Paths.Turn` arcs meet and can be fillet-rounded against each other.
+"""
+arc_arc_cornerindices(::AbstractPolygon) = Int[]
+arc_arc_cornerindices(::AbstractPolygon, ::Polygons.Rounded) = Int[]
+
+function arc_arc_cornerindices(p::CurvilinearPolygon)
+    indices = Int[]
+    n = length(p.p)
+    for i = 1:n
+        edge = edge_type_at_vertex(p, i)
+        is_arc_arc = (edge.incoming != :straight) && (edge.outgoing != :straight)
+        if is_arc_arc
+            push!(indices, i)
+        end
+    end
+    return indices
+end
+function arc_arc_cornerindices(p::CurvilinearPolygon, sty::Polygons.Rounded)
+    all_aa = arc_arc_cornerindices(p)
+    isempty(all_aa) && return Int[]
+    if isempty(p0(sty))
+        selected = all_aa
+    else
+        # Match each p0 point to the closest roundable vertex across all corner types
+        # (straight-straight, line-arc, and arc-arc). Only select arc-arc corners where the
+        # arc-arc vertex is genuinely the closest match for that p0 point — otherwise a p0
+        # placed on a nearby line-arc/straight corner could be mis-snapped to an arc-arc one.
+        straight = cornerindices(p)
+        all_la = line_arc_cornerindices(p)
+        all_roundable = vcat(straight, all_la, all_aa)
+        roundable_pts = p.p[all_roundable]
+        matched =
+            Polygons.cornerindices(roundable_pts, p0(sty); tol=sty.selection_tolerance)
+        matched_orig = isempty(matched) ? Int[] : all_roundable[matched]
+        selected = filter(i -> i in all_aa, matched_orig)
+    end
+    return sty.inverse_selection ? setdiff(all_aa, selected) : selected
 end
 
 """
