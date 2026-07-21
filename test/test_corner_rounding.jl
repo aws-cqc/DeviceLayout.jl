@@ -716,3 +716,190 @@ end
         @test isapprox(Paths.p1(cp2.curves[k]), cp2.p[mod1(csi + 1, n)]; atol=1e-9)
     end
 end
+
+@testitem "Arc-arc rounding" setup = [CommonTestSetup] begin
+    using LinearAlgebra
+    using Unitful: NoUnits
+    using DeviceLayout.Curvilinear:
+        edge_type_at_vertex,
+        arc_arc_cornerindices,
+        line_arc_cornerindices,
+        rounded_corner_segment_arc_arc
+
+    # Build a Turn from p_start to p_end with a given signed sweep. Circle geometry:
+    # R = |chord| / (2 sin(β/2)); start heading = chord angle − β/2.
+    function arc_between(p_start, p_end, sweep)
+        chord = p_end - p_start
+        R = norm(chord) / (2 * sin(abs(sweep) / 2))
+        return Paths.Turn(sweep, R; p0=p_start, α0=atan(chord.y, chord.x) - sweep / 2)
+    end
+
+    fillet_r = 0.8μm
+
+    # Bulged triangle, concave legs (both legs curve inward toward the interior)
+    bl = Point(0.0μm, 0.0μm)
+    br = Point(10.0μm, 0.0μm)
+    ap = Point(5.0μm, 9.0μm)
+    tri_concave = CurvilinearPolygon(
+        [bl, br, ap],
+        [arc_between(br, ap, -55°), arc_between(ap, bl, -55°)],
+        [2, 3]
+    )
+    @test arc_arc_cornerindices(tri_concave) == [3]        # apex is the arc-arc corner
+    check_arc_arc_fillets(tri_concave, fillet_r)
+
+    # Bulged triangle, one convex leg + one concave leg (mixed tangency at the apex)
+    tri_mixed = CurvilinearPolygon(
+        [bl, br, ap],
+        [arc_between(br, ap, 55°), arc_between(ap, bl, -55°)],
+        [2, 3]
+    )
+    @test arc_arc_cornerindices(tri_mixed) == [3]
+    check_arc_arc_fillets(tri_mixed, fillet_r)
+
+    # Closed two-arc spiral / crescent: big CW arc + smaller CCW arc closing back at the start
+    # (inner sweep fixed by the chord relation). Both vertices are arc-arc; no straight edge.
+    O = Point(0.0μm, 0.0μm)
+    R_big = 8.0μm
+    r_small = 6.5μm
+    outer = Paths.Turn(-270°, R_big; p0=O, α0=90°)
+    endo = Paths.p1(outer)
+    L = norm(O - endo)
+    β = 2π - 2 * asin(ustrip(NoUnits, L / (2 * r_small)))  # major arc that spans the chord
+    chord_ang = atan((O - endo).y, (O - endo).x)
+    inner = Paths.Turn(β * u"rad", r_small; p0=endo, α0=(chord_ang - β / 2) * u"rad")
+    @test isapprox(Paths.p1(inner), O, atol=1.0nm)         # inner arc closes the loop at O
+    crescent = CurvilinearPolygon([O, endo], [outer, inner], [1, 2])
+    @test sort(arc_arc_cornerindices(crescent)) == [1, 2]
+    check_arc_arc_fillets(crescent, fillet_r)
+
+    # Fillet radius exceeds both arc radii (r > R) and the chosen fillet is internally tangent
+    # to the small arc — the fillet circle contains it, so the tangent point flips to O − R·u.
+    # check_arc_arc_fillets asserts each contact is on its arc circle and exactly `fillet_r`
+    # from the fillet center, which fails if the internal-tangency sign is wrong.
+    rgt_in = Paths.Turn(300°, 0.3μm; p0=O, α0=0°)          # R = 0.3μm < fillet_r = 0.8μm
+    rgt_out = Paths.Turn(-300°, 0.5μm; p0=Paths.p1(rgt_in), α0=Paths.α1(rgt_in) + 60°)
+    r_gt_R = CurvilinearPolygon([O, Paths.p1(rgt_in)], [rgt_in, rgt_out], [1, 2])
+    @test !isempty(arc_arc_cornerindices(r_gt_R))
+    check_arc_arc_fillets(r_gt_R, fillet_r)
+
+    # Multi-corner via differencing: a clover subtracted from a rectangle becomes a star-shaped
+    # hole whose four arc-arc cusps are rounded. Confirms differencing is lossless for an uncut
+    # interior shape and that arc-arc rounding works on a hole boundary. (−45°: gentle concave
+    # bulge; a deeper sweep would overshoot the cusps and self-intersect.)
+    hw = 5.0μm
+    cusps = [Point(hw, 0.0μm), Point(0.0μm, hw), Point(-hw, 0.0μm), Point(0.0μm, -hw)]
+    clover = CurvilinearPolygon(
+        cusps,
+        Paths.Segment[arc_between(cusps[i], cusps[mod1(i + 1, 4)], -45°) for i = 1:4],
+        [1, 2, 3, 4]
+    )
+    @test sort(arc_arc_cornerindices(clover)) == [1, 2, 3, 4]  # input has 4 arc-arc corners
+
+    square = Rectangle(Point(-10.0μm, -10.0μm), Point(10.0μm, 10.0μm))
+    diffed = difference2d_curved(square, clover)
+    @test length(diffed) == 1
+    region = only(diffed)
+    @test length(region.holes) == 1
+    star_hole = only(region.holes)
+    @test length(star_hole.curves) == 4                       # all four clover arcs recovered
+    @test sort(arc_arc_cornerindices(star_hole)) == [1, 2, 3, 4]
+    check_arc_arc_fillets(star_hole, fillet_r)
+
+    # Rounding the hole yields 4 fillet arcs + 4 trimmed originals = 8 curves.
+    rounded_hole = Curvilinear.round_to_curvilinearpolygon(star_hole, fillet_r)
+    @test length(rounded_hole.curves) == 8
+    @test count(c -> isapprox(abs(c.r), fillet_r, atol=1.0nm), rounded_hole.curves) == 4
+    # Every curve starts/ends exactly at its polygon vertices — directly verifies the trim
+    # (each arc shortened to the fillet's tangent point, no gaps), not just the curve count.
+    n_rh = length(rounded_hole.p)
+    for (k, csi) in enumerate(rounded_hole.curve_start_idx)
+        @test isapprox(Paths.p0(rounded_hole.curves[k]), rounded_hole.p[csi]; atol=1.0nm)
+        @test isapprox(
+            Paths.p1(rounded_hole.curves[k]),
+            rounded_hole.p[mod1(csi + 1, n_rh)];
+            atol=1.0nm
+        )
+    end
+    @test !isempty(to_polygons(region, Rounded(fillet_r)))
+
+    # Union of overlapping circles: the crossing boundaries clip every arc touching an
+    # intersection, so no arc-arc corner survives and rounding adds no fillet there. Documents
+    # a known limitation, not desired behavior.
+    # TODO: with partial (sub-run) curve recovery, the cut arcs would recover as trimmed Turns
+    # and the petal cusps become arc-arc corners — both assertions below would then flip
+    # (non-empty; count 0 → 4). See curve_recovery.jl `match_run` (currently all-or-nothing).
+    overlapping = [
+        Circle(c, 4.0μm) for c in (
+            Point(0.0μm, 0.0μm),
+            Point(5.0μm, 0.0μm),
+            Point(0.0μm, 5.0μm),
+            Point(5.0μm, 5.0μm)
+        )
+    ]
+    blob = only(union2d_curved(overlapping, []))
+    @test isempty(arc_arc_cornerindices(blob.exterior))
+    rounded_blob = Curvilinear.round_to_curvilinearpolygon(blob.exterior, fillet_r)
+    @test count(c -> isapprox(abs(c.r), fillet_r, atol=1.0nm), rounded_blob.curves) == 0
+    @test_nowarn to_polygons(blob, Rounded(fillet_r))
+
+    # Selection: a p0 point rounds only the nearest arc-arc corner; inverse_selection the rest.
+    sel = arc_arc_cornerindices(clover, Rounded(fillet_r; p0=[cusps[1]]))
+    @test sel == [1]
+    inv = arc_arc_cornerindices(
+        clover,
+        Rounded(fillet_r; p0=[cusps[1]], inverse_selection=true)
+    )
+    @test sort(inv) == [2, 3, 4]
+
+    # Degenerate: tangent-continuous (G1) arcs need no fillet → nothing.
+    a_smooth = Paths.Turn(90°, 2.0μm; p0=O, α0=0°)
+    b_smooth = Paths.Turn(90°, 2.0μm; p0=Paths.p1(a_smooth), α0=Paths.α1(a_smooth))
+    @test rounded_corner_segment_arc_arc(a_smooth, b_smooth, 0.3μm) === nothing
+
+    # Degenerate: radius too large for the short arcs → nothing; a sane radius still rounds.
+    a_kink = Paths.Turn(90°, 2.0μm; p0=O, α0=0°)
+    b_kink = Paths.Turn(-90°, 2.0μm; p0=Paths.p1(a_kink), α0=Paths.α1(a_kink) + 40°)
+    @test rounded_corner_segment_arc_arc(a_kink, b_kink, 50.0μm) === nothing
+    @test !isnothing(rounded_corner_segment_arc_arc(a_kink, b_kink, 0.3μm))
+
+    # Rendering the rounded shapes must not error.
+    @test_nowarn render!(
+        Cell("arc_arc_rounded", nm),
+        let
+            cs = CoordinateSystem("aa", nm)
+            for pgon in (
+                to_polygons(region, Rounded(fillet_r)) isa AbstractVector ?
+                to_polygons(region, Rounded(fillet_r)) :
+                [to_polygons(region, Rounded(fillet_r))]
+            )
+                place!(cs, pgon, GDSMeta())
+            end
+            cs
+        end
+    )
+
+    # Non-Turn curves are out of scope: the arc-arc/line-arc solvers are Turn-only, so a
+    # polygon carrying a BSpline must be classified conservatively and pass through unrounded
+    # rather than MethodError. (BSpline <: Paths.Segment, so it can live in a CurvilinearPolygon.)
+    bs = Paths.BSpline(
+        [Point(0.0μm, 0.0μm), Point(3.0μm, 2.0μm), Point(6.0μm, 0.0μm)],
+        Point(1.0μm, 1.0μm),
+        Point(1.0μm, -1.0μm)
+    )
+    bs_end = Paths.p1(bs)
+    bs_arc = Paths.Turn(120°, 3.0μm; p0=bs_end, α0=Paths.α1(bs) + 30°)
+    # vertices: bspline on edge 1→2, Turn on edge 2→3, straight closing edge 3→1.
+    bs_cp = CurvilinearPolygon(
+        [Point(0.0μm, 0.0μm), bs_end, Paths.p1(bs_arc)],
+        Paths.Segment[bs, bs_arc],
+        [1, 2]
+    )
+    # The bspline-Turn corner (vtx 2) is not arc-arc; the bspline-straight corner (vtx 1) is
+    # not line-arc. Only the genuine Turn-straight corner (vtx 3) is line-arc.
+    @test isempty(arc_arc_cornerindices(bs_cp))
+    @test line_arc_cornerindices(bs_cp) == [3]
+    # Rounding must not throw — the bspline passes through untouched.
+    @test_nowarn Curvilinear.round_to_curvilinearpolygon(bs_cp, 0.3μm)
+    @test_nowarn to_polygons(bs_cp, Rounded(0.3μm))
+end
