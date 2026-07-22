@@ -46,9 +46,11 @@ export CurvilinearPolygon,
     CurvilinearRegion,
     pathtopolys,
     line_arc_cornerindices,
+    arc_arc_cornerindices,
     round_to_curvilinearpolygon,
     rounded_corner_segment,
     rounded_corner_segment_line_arc,
+    rounded_corner_segment_arc_arc,
     to_curvilinear,
     styled_loop
 export recover_curves, difference2d_curved, intersect2d_curved, union2d_curved, xor2d_curved
@@ -1108,6 +1110,7 @@ function to_polygons(
         Polygons.radius(sty);
         corner_indices=cornerindices(ent, sty),
         line_arc_corner_indices=line_arc_cornerindices(ent, sty),
+        arc_arc_corner_indices=arc_arc_cornerindices(ent, sty),
         min_angle=sty.min_angle,
         min_side_len=sty.min_side_len
     )
@@ -1252,8 +1255,8 @@ function round_to_curvilinearpolygon(
                 arc_out = edge.outgoing
                 radius_dim =
                     relative ?
-                    radius *
-                    min(Paths.pathlength(arc_in), Paths.pathlength(arc_out)) : radius
+                    radius * min(Paths.pathlength(arc_in), Paths.pathlength(arc_out)) :
+                    radius
                 result = rounded_corner_segment_arc_arc(
                     arc_in,
                     arc_out,
@@ -1680,6 +1683,7 @@ function styled_loop(p::GeometryEntity, sty::Rounded; kwargs...)
         min_side_len=sty.min_side_len,
         corner_indices=cornerindices(p, sty),
         line_arc_corner_indices=line_arc_cornerindices(p, sty),
+        arc_arc_corner_indices=arc_arc_cornerindices(p, sty),
         min_angle=sty.min_angle
     )
 end
