@@ -1126,17 +1126,19 @@ function round_to_curvilinearpolygon(
     radius::S;
     corner_indices=eachindex(points(pol)),
     line_arc_corner_indices=nothing,
+    arc_arc_corner_indices=nothing,
     min_angle=1e-3,
     relative::Bool=(T <: Length) && (S <: Real),
     min_side_len=relative ? zero(T) : radius
 )::CurvilinearPolygon{T} where {T, S <: DeviceLayout.Coordinate}
-    # A curve-free CurvilinearPolygon has no line-arc corners, so this reduces to
+    # A curve-free CurvilinearPolygon has no line-arc or arc-arc corners, so this reduces to
     # straight-straight rounding in the CurvilinearPolygon method below.
     return round_to_curvilinearpolygon(
         CurvilinearPolygon(points(pol)),
         radius;
         corner_indices,
         line_arc_corner_indices,
+        arc_arc_corner_indices,
         min_angle,
         relative,
         min_side_len
@@ -1148,6 +1150,7 @@ function round_to_curvilinearpolygon(
     radius::S;
     corner_indices=eachindex(points(pol)),
     line_arc_corner_indices=nothing,
+    arc_arc_corner_indices=nothing,
     min_angle=1e-3,
     relative::Bool=(T <: Length) && (S <: Real),
     min_side_len=relative ? zero(T) : radius
@@ -1174,8 +1177,16 @@ function round_to_curvilinearpolygon(
         line_arc_cornerindices(pol)
     end
 
+    # Determine which arc-arc corners to round
+    aa_indices = if !isnothing(arc_arc_corner_indices)
+        arc_arc_corner_indices
+    else
+        arc_arc_cornerindices(pol)
+    end
+
     # Per-vertex membership checks below run once per polygon point; use Set/Dict to keep this O(n).
     la_set = Set(la_indices)
+    aa_set = Set(aa_indices)
     corner_set = Set(corner_indices)
     curve_index_at_vertex = Dict{Int, Int}()
     for (k, v) in pairs(pol.curve_start_idx)
@@ -1226,6 +1237,40 @@ function round_to_curvilinearpolygon(
                 end
             else
                 push!(new_points, poly[i])
+            end
+        elseif i in aa_set
+            # An arc-arc corner has an arc on both sides. Fillet against both, then trim each:
+            # the incoming arc (edge i-1→i) at its end, the outgoing arc (edge i→i+1) at its start.
+            in_curve_k = get(curve_index_at_vertex, mod1(i - 1, len), nothing)
+            out_curve_k = get(curve_index_at_vertex, i, nothing)
+            # Skip an arc meeting itself (single closed arc), where both edges are one curve,
+            # "corner between an arc and itself" is ill-defined.
+            if in_curve_k == out_curve_k
+                push!(new_points, poly[i])
+            else
+                arc_in = edge.incoming
+                arc_out = edge.outgoing
+                radius_dim =
+                    relative ?
+                    radius *
+                    min(Paths.pathlength(arc_in), Paths.pathlength(arc_out)) : radius
+                result = rounded_corner_segment_arc_arc(
+                    arc_in,
+                    arc_out,
+                    radius_dim;
+                    min_side_len=min_side_len,
+                    min_angle=min_angle
+                )
+                if !isnothing(result)
+                    push!(new_points, Paths.p0(result.fillet))
+                    push!(new_curves, result.fillet)
+                    push!(new_curve_start_idx, length(new_points))
+                    push!(new_points, Paths.p1(result.fillet))
+                    !isnothing(in_curve_k) && (trim_end_pts[in_curve_k] = result.T_in)
+                    !isnothing(out_curve_k) && (trim_start_pts[out_curve_k] = result.T_out)
+                else
+                    push!(new_points, poly[i])
+                end
             end
         elseif !(i in corner_set)
             push!(new_points, poly[i])
