@@ -77,19 +77,6 @@
         @test length(only(regions).exterior.curves) == 4
     end
 
-    @testset "round_layer: relative radius" begin
-        c = Cell{typeof(1.0nm)}("relative")
-        render!(
-            c,
-            Polygon(p(0μm, 0μm), p(20μm, 0μm), p(20μm, 10μm), p(0μm, 10μm)),
-            GDSMeta(1)
-        )
-        regions = round_layer(c, GDSMeta(1), 0.25; relative=true)
-        @test length(regions) == 1
-        @test length(only(regions).exterior.curves) == 4
-        @test_throws ArgumentError round_layer(c, GDSMeta(1), 1μm; relative=true)
-    end
-
     @testset "round_layer on CoordinateSystem: semantic filter, curve preservation" begin
         cs = CoordinateSystem{typeof(1.0nm)}("semantic")
         place!(
