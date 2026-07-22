@@ -574,6 +574,10 @@ export Curvilinear,
     intersect2d_curved,
     xor2d_curved
 
+# After curvilinear.jl (rounding produces CurvilinearRegion) and cells.jl/render
+include("postrender.jl")
+export round_layer, round_layer!
+
 include("simple_shapes.jl")
 import .SimpleShapes:
     circular_arc,

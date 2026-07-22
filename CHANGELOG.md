@@ -55,6 +55,12 @@ The format of this changelog is based on
   - Loops removed by styling (`NoRender`, including via `OptionalStyle`/`optional_entity` or a
     `StyleDict` entry, nested inside `Rounded`) expand to no polygons instead of zero-point
     `Polygon`s, which reached `Cell`s and could not be written to GDS. (#269)
+  - `round_layer` and `round_layer!` apply corner rounding to the rendered geometry of a
+    layer as a post-render pass. The layer's elements (including those inside references)
+    are flattened and unioned before rounding, so corners are rounded correctly where
+    separately-drawn shapes meet, and holes are preserved. Rounding is symbolic
+    (`CurvilinearRegion` with true arcs); for `CoordinateSystem` input, curves already
+    present in the layer survive the union exactly.
 
 ## 1.16.0 (2026-07-20)
 
