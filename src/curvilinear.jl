@@ -1486,6 +1486,128 @@ function rounded_corner_segment_line_arc(
     return (; fillet, T_line, T_arc=T_arc_pt)
 end
 
+"""
+    rounded_corner_segment_arc_arc(arc_in, arc_out, radius; min_side_len, min_angle)
+
+Compute a fillet arc at the corner where two circular arcs meet, returning a `Paths.Turn`
+segment (the symbolic fillet kept un-discretized). Used by `round_to_curvilinearpolygon`
+for arc-arc corners.
+
+  - `arc_in`: `Paths.Turn` arriving at the shared corner (its `p1` is the corner)
+  - `arc_out`: `Paths.Turn` leaving the shared corner (its `p0` is the corner)
+  - `radius`: fillet radius
+
+Returns `(; fillet::Paths.Turn, T_in::Point, T_out::Point)` or `nothing`, where `T_in`/`T_out`
+are the tangent points on the incoming/outgoing arcs (used by the caller to trim both arcs).
+"""
+function rounded_corner_segment_arc_arc(
+    arc_in::Paths.Turn{T},
+    arc_out::Paths.Turn{T},
+    radius::S;
+    min_side_len=radius,
+    min_angle=1e-3
+) where {T, S <: DeviceLayout.Coordinate}
+    V = float(T)
+    r = convert(V, radius)
+    atol = DeviceLayout.Polygons._round_atol(T, S)
+
+    R_in = abs(arc_in.r) # arc.r is signed by handedness; tangency needs the geometric radius
+    R_out = abs(arc_out.r)
+    O_in = Paths.curvaturecenter(arc_in)
+    O_out = Paths.curvaturecenter(arc_out)
+    p_corner = Paths.p1(arc_in) # == Paths.p0(arc_out)
+
+    # Already-smooth (G1) guard: matching or anti-parallel headings at the corner need no fillet.
+    α_in = Paths.direction(arc_in, Paths.pathlength(arc_in))
+    α_out = Paths.direction(arc_out, zero(Paths.pathlength(arc_out)))
+    if isapprox_angle(α_in, α_out; atol=min_angle) ||
+       isapprox_angle(α_in, α_out + π; atol=min_angle)
+        return nothing
+    end
+    # min_side_len: accepted for parity with the line-arc solver, unused (no straight stub here).
+
+    # Tangent point on circle (O, R) toward fillet center C_f; on line O→C_f, distance R from O.
+    function tangent_point(O, R, C_f)
+        d = C_f - O
+        nd = norm(d)
+        nd < atol && return nothing
+        return O + R * (d / nd)
+    end
+
+    # In-sweep test: pathlength_nearest clamps out-of-sweep points, so arc(nearest(Tp)) == Tp iff in.
+    function on_arc(arc, Tp)
+        t = Paths.pathlength_nearest(arc, Tp)
+        return isapprox(arc(t), Tp; atol=atol)
+    end
+
+    # Intersect circle(O_in, D_in) with circle(O_out, D_out) (radical-line form). a = offset
+    # along the center line to the chord foot; disc (length²) < 0 → no hit, ≈0 → tangent.
+    function solve_cc(D_in, D_out)
+        pts = Point{V}[]
+        d = norm(O_out - O_in)
+        d < atol && return pts # concentric
+        e = (O_out - O_in) / d
+        n = Point(-e.y, e.x)
+        a = (D_in^2 - D_out^2 + d^2) / (2 * d)
+        disc = D_in^2 - a^2
+        disc < -atol^2 && return pts
+        P_mid = O_in + a * e
+        if disc <= atol^2
+            push!(pts, P_mid)
+        else
+            h = sqrt(disc)
+            push!(pts, P_mid + h * n)
+            push!(pts, P_mid - h * n)
+        end
+        return pts
+    end
+
+    # Four tangency combinations: each arc tangent externally (R + r) or internally (|R - r|);
+    # an S-curve fillet hugs one arc outside, the other inside. Internal dropped when |R-r|≈0.
+    candidate_centers = Point{V}[]
+    D_ins = abs(R_in - r) > atol ? (R_in + r, abs(R_in - r)) : (R_in + r,)
+    D_outs = abs(R_out - r) > atol ? (R_out + r, abs(R_out - r)) : (R_out + r,)
+    for D_in in D_ins, D_out in D_outs
+        append!(candidate_centers, solve_cc(D_in, D_out))
+    end
+
+    # Keep in-sweep candidates; pick the center nearest the corner.
+    best = nothing
+    best_dist = zero(V)
+    for C_f in candidate_centers
+        T_in = tangent_point(O_in, R_in, C_f)
+        isnothing(T_in) && continue
+        T_out = tangent_point(O_out, R_out, C_f)
+        isnothing(T_out) && continue
+        (on_arc(arc_in, T_in) && on_arc(arc_out, T_out)) || continue
+        d = norm(C_f - p_corner)
+        if isnothing(best) || d < best_dist
+            best = (C_f, T_in, T_out)
+            best_dist = d
+        end
+    end
+    isnothing(best) && return nothing
+    C_f, T_in, T_out = best
+
+    # Fillet runs T_in → T_out; sweep = signed angle between the radius directions.
+    norm_start = norm(T_in - C_f)
+    norm_end = norm(T_out - C_f)
+    (norm_start < atol || norm_end < atol) && return nothing
+    d_start = (T_in - C_f) / norm_start
+    d_end = (T_out - C_f) / norm_end
+    cross_val = d_start.x * d_end.y - d_start.y * d_end.x
+    dot_val = d_start.x * d_end.x + d_start.y * d_end.y
+    dα = atan(cross_val, dot_val)
+
+    abs(dα) < min_angle && return nothing # tiny sweep → sub-nm sagitta GMSH rejects
+
+    angle_start = atan(d_start.y, d_start.x)
+    α0 = angle_start + sign(dα) * π / 2 # heading = radius direction rotated into travel
+
+    fillet = Paths.Turn(uconvert(°, dα), r; p0=T_in, α0=uconvert(°, α0))
+    return (; fillet, T_in, T_out)
+end
+
 ######## Styled entity → curvilinear geometry
 #
 # `to_curvilinear` expands a (possibly nested) styled entity into curve-bearing geometry —
