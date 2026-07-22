@@ -6,7 +6,7 @@
 
 """
     round_layer(geom::Union{Cell,CoordinateSystem}, layer::DeviceLayout.Meta, radius;
-        relative=false, min_side_len=nothing, min_angle=1e-3)
+        min_side_len=nothing, min_angle=1e-3)
 
 Return the geometry of `geom` in `layer` as a `Vector{CurvilinearRegion}` with corners
 rounded to `radius`.
@@ -31,11 +31,8 @@ carried over.
 
 # Keyword arguments
 
-  - `relative`: if `true`, `radius` must be a dimensionless number, and the radius of
-    curvature at each vertex is `radius * min(l₁, l₂)` where `l₁` and `l₂` are the lengths
-    of the two adjacent sides (see [`Polygons.Rounded`](@ref)).
   - `min_side_len`: the minimum side length adjacent to a corner for that corner to be
-    rounded. Defaults to `radius` (or to zero if `relative=true`).
+    rounded. Defaults to `radius`.
   - `min_angle`: corners where adjacent sides are collinear within this tolerance (in
     radians) are not rounded.
 """
@@ -43,24 +40,17 @@ function round_layer(
     geom::Union{Cell, CoordinateSystem},
     layer::Meta,
     radius::Coordinate;
-    relative::Bool=false,
-    min_side_len=nothing,
+    min_side_len=radius,
     min_angle::Real=1e-3
 )
-    sty = _round_layer_style(
-        float(coordinatetype(geom)),
-        radius,
-        relative,
-        min_side_len,
-        min_angle
-    )
+    sty = Rounded(radius; min_side_len, min_angle)
     return _rounded_regions(geom, layer, sty)
 end
 
 """
     round_layer!(geom::Union{Cell,CoordinateSystem}, layer::DeviceLayout.Meta, radius;
         target_layer::DeviceLayout.Meta, remap_originals=nothing,
-        relative=false, min_side_len=nothing, min_angle=1e-3, kwargs...)
+        min_side_len=nothing, min_angle=1e-3, kwargs...)
 
 Round the corners of the geometry of `geom` in `layer` to `radius`, rendering the result
 into `geom` itself with metadata `target_layer`.
@@ -90,21 +80,11 @@ function round_layer!(
     radius::Coordinate;
     target_layer::Meta,
     remap_originals::Union{Meta, Nothing}=nothing,
-    relative::Bool=false,
     min_side_len=nothing,
     min_angle::Real=1e-3,
     kwargs...
 )
-    if geom isa Cell
-        target_layer isa GDSMeta ||
-            throw(ArgumentError("`target_layer` must be a `GDSMeta` for a `Cell` target."))
-        isnothing(remap_originals) ||
-            remap_originals isa GDSMeta ||
-            throw(
-                ArgumentError("`remap_originals` must be a `GDSMeta` for a `Cell` target.")
-            )
-    end
-    regions = round_layer(geom, layer, radius; relative, min_side_len, min_angle)
+    regions = round_layer(geom, layer, radius; min_side_len, min_angle)
 
     # Stage rendering so conversion or discretization failures leave `geom` unchanged.
     staged = _round_layer_staging(geom)
@@ -135,35 +115,6 @@ end
 _round_layer_staging(::Cell{S}) where {S} = Cell{S}("round_layer_staging")
 _round_layer_staging(::CoordinateSystem{S}) where {S} =
     CoordinateSystem{S}("round_layer_staging")
-
-# Build the `Rounded` style carrying all rounding parameters, with the style's coordinate
-# type pinned to the (float) coordinate type of the input geometry. `RelativeRounded` is
-# not used here because it guesses its coordinate type from preferred units, which fails
-# for unitless geometry.
-function _round_layer_style(
-    ::Type{V},
-    radius,
-    relative::Bool,
-    min_side_len,
-    min_angle
-) where {V}
-    if relative
-        radius isa Real || throw(
-            ArgumentError(
-                "`relative=true` requires a dimensionless `radius` (a fraction of the shorter adjacent side length), got $radius."
-            )
-        )
-        msl = isnothing(min_side_len) ? zero(V) : min_side_len
-        return Rounded{V}(;
-            rel_r=Float64(radius),
-            min_side_len=msl,
-            min_angle=Float64(min_angle)
-        )
-    end
-    r = convert(V, radius)
-    msl = isnothing(min_side_len) ? r : min_side_len
-    return Rounded{V}(; abs_r=r, min_side_len=msl, min_angle=Float64(min_angle))
-end
 
 function _rounded_regions(cell::Cell{S}, layer, sty) where {S}
     V = float(S)
