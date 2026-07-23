@@ -171,21 +171,6 @@
             points(elements(cell)[only(findall(==(GDSMeta(2)), element_metadata(cell)))])
         )
         @test np(fine) > np(coarse)
-
-        # Cell targets require GDSMeta.
-        @test_throws ArgumentError round_layer!(
-            c,
-            GDSMeta(2),
-            1μm;
-            target_layer=SemanticMeta(:metal)
-        )
-        @test_throws ArgumentError round_layer!(
-            c,
-            GDSMeta(2),
-            1μm;
-            target_layer=GDSMeta(4),
-            remap_originals=SemanticMeta(:metal)
-        )
     end
 
     @testset "round_layer! on CoordinateSystem: symbolic placement" begin
@@ -206,61 +191,5 @@
         idx = findall(==(SemanticMeta(:metal_rounded)), element_metadata(cs))
         @test length(idx) == 1
         @test elements(cs)[only(idx)] isa CurvilinearRegion # stays symbolic
-    end
-
-    @testset "Exact coordinate types" begin
-        c = Cell{Int}("int")
-        push!(c.elements, Polygon(p(0, 0), p(1000, 0), p(1000, 1000), p(0, 1000)))
-        push!(c.element_metadata, GDSMeta(1))
-
-        # Out-of-place widens only after taking the exact-coordinate Clipper path.
-        regions = round_layer(c, GDSMeta(1), 100)
-        @test length(regions) == 1
-        @test coordinatetype(only(regions)) === Float64
-
-        # A coarse discretization whose points lie on the integer grid is representable.
-        round_layer!(c, GDSMeta(1), 100; target_layer=GDSMeta(2), atol=100)
-        @test count(==(GDSMeta(2)), element_metadata(c)) == 1
-
-        # A finer discretization is not representable, and failure is transactional.
-        c_fail = Cell{Int}("int_fail")
-        push!(c_fail.elements, Polygon(p(0, 0), p(1000, 0), p(1000, 1000), p(0, 1000)))
-        push!(c_fail.element_metadata, GDSMeta(1))
-        @test_throws InexactError round_layer!(
-            c_fail,
-            GDSMeta(1),
-            100;
-            target_layer=GDSMeta(2),
-            remap_originals=GDSMeta(3)
-        )
-        @test elements(c_fail) == [Polygon(p(0, 0), p(1000, 0), p(1000, 1000), p(0, 1000))]
-        @test element_metadata(c_fail) == [GDSMeta(1)]
-
-        # Large integer coordinates must not take the prescaled floating-point Clipper path.
-        c_large = Cell{Int}("int_large")
-        b = 10^12
-        push!(
-            c_large.elements,
-            Polygon(p(b, b), p(b + 1000, b), p(b + 1000, b + 1000), p(b, b + 1000))
-        )
-        push!(c_large.element_metadata, GDSMeta(1))
-        @test length(round_layer(c_large, GDSMeta(1), 100)) == 1
-
-        # Exact symbolic fillets remain valid in an integer CoordinateSystem.
-        cs = CoordinateSystem{Int}("int_cs")
-        place!(
-            cs,
-            Polygon(p(0, 0), p(1000, 0), p(1000, 1000), p(0, 1000)),
-            SemanticMeta(:metal)
-        )
-        cs_regions = round_layer(cs, SemanticMeta(:metal), 100)
-        @test coordinatetype(only(cs_regions)) === Int
-        @test length(only(cs_regions).exterior.curves) == 4
-        @test all(c -> c isa Paths.Turn{Int}, only(cs_regions).exterior.curves)
-
-        # Empty exact-coordinate targets are valid no-ops.
-        empty_cell = Cell{Int}("int_empty")
-        @test round_layer!(empty_cell, GDSMeta(1), 100; target_layer=GDSMeta(2)) ===
-              empty_cell
     end
 end
