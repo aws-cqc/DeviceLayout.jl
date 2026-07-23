@@ -188,6 +188,13 @@
     Polygons.StyleDict
 ```
 
+#### Post-render operations
+
+```@docs
+    round_layer
+    round_layer!
+```
+
 #### [Curvilinear geometry](@id api-curvilinear)
 
 ```@docs
