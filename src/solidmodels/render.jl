@@ -919,11 +919,16 @@ function render!(
     return _render_orchestrator!(
         sm,
         cs;
-        emit! = (els, meta, k; zmap, points_tree, kwargs...) ->
+        (emit!)=(els, meta, k; zmap, points_tree, kwargs...) ->
             _add_to_current_solidmodel!(
-                els, meta, k; zmap=zmap, points_tree=points_tree, kwargs...
+                els,
+                meta,
+                k;
+                zmap=zmap,
+                points_tree=points_tree,
+                kwargs...
             ),
-        fragment! = _fragment_three_pass!,
+        (fragment!)=_fragment_three_pass!,
         map_meta=map_meta,
         postrender_ops=postrender_ops,
         retained_physical_groups=retained_physical_groups,
@@ -1016,14 +1021,8 @@ function _render_orchestrator!(
         meshsizes = sizeandgrading.(elements(flat)[idx]; kwargs...)
 
         # Add to model using kernel via the strategy-specific emit function.
-        group_dimtags_unflattened = emit!(
-            els,
-            meta,
-            kernel(sm);
-            zmap=zmap,
-            points_tree=points_tree,
-            kwargs...
-        )
+        group_dimtags_unflattened =
+            emit!(els, meta, kernel(sm); zmap=zmap, points_tree=points_tree, kwargs...)
 
         group_dimtags = reduce(vcat, group_dimtags_unflattened, init=Tuple{Int32, Int32}[])
         # If group already exists, add to it

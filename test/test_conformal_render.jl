@@ -403,18 +403,38 @@
 
         # Endpoints on the x axis; centers above and below.
         p1 = SolidModels.ConformalRender._cached_point_relaxed!(
-            k, ctx, -50.0, 0.0, 0.0, points_tree
+            k,
+            ctx,
+            -50.0,
+            0.0,
+            0.0,
+            points_tree
         )
         p2 = SolidModels.ConformalRender._cached_point_relaxed!(
-            k, ctx, 50.0, 0.0, 0.0, points_tree
+            k,
+            ctx,
+            50.0,
+            0.0,
+            0.0,
+            points_tree
         )
         # Center above chord: bulges downward → midpoint below chord.
         c_above = SolidModels.ConformalRender._cached_point_strict!(
-            k, ctx, 0.0, 80.0, 0.0, points_tree
+            k,
+            ctx,
+            0.0,
+            80.0,
+            0.0,
+            points_tree
         )
         # Center below chord: bulges upward → midpoint above chord.
         c_below = SolidModels.ConformalRender._cached_point_strict!(
-            k, ctx, 0.0, -80.0, 0.0, points_tree
+            k,
+            ctx,
+            0.0,
+            -80.0,
+            0.0,
+            points_tree
         )
 
         rej_before = ctx.stats[:midpoint_rejections]
@@ -444,9 +464,7 @@
         # which would normally not appear here — just to hit the fallback.
         straight = Paths.Straight(10.0μm, a, 0.0°)
         cp = CurvilinearPolygon([a, b], [straight], [1])
-        @test_throws ArgumentError add_conformal_loop!(
-            ctx, cp, k, 0.0μm; points_tree
-        )
+        @test_throws ArgumentError add_conformal_loop!(ctx, cp, k, 0.0μm; points_tree)
         gmsh.finalize()
     end
 
