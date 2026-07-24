@@ -44,31 +44,42 @@ geometry). If your postrender operations create new overlapping entities, use
     that curve. This is the "curve wins" rule that makes adjacent faces resolve
     to one OCC entity even when one side computed a line and the other an arc.
   - **Per-render cache**: the cache lives on a `ConformalRenderContext` struct
-    passed through calls. There is no global mutable state; nested/parallel
-    renders are safe.
+    passed through calls. There is no global mutable state — one render, one
+    context.
 
 # Preconditions
 
 For the cache to produce correct geometry:
 
- 1. **Shared endpoints ⟹ shared curve geometry.** If two faces share a boundary,
-    the CurvilinearPolygon points on both sides must resolve to the same OCC
-    point tags AND the curves spanning those tags must be the same geometric
-    curve. Callers can meet this by having both faces reference the same
-    `Paths.Segment` object (the "coordinated recovery" pattern from
-    `union2d_curved` where both operands are matched against the same
-    boolean-recovery ProvenanceRun), or by an upstream mutual-noding pass.
- 2. **No distinct co-endpoint edges.** The prefer-curve rule fuses curve
-    requests on shared endpoints into a single OCC tag. If your geometry
-    genuinely has two distinct edges spanning the same two points (say, a
-    figure-8 pinch or a self-crossing offset curve), the cache will wrongly
-    merge them.
+ 1. **Shared endpoints ⟹ shared curve geometry.** If two faces share a
+    boundary, the CurvilinearPolygon points on both sides must resolve to the
+    same OCC point tags AND the curves spanning those tags must be the same
+    geometric curve. Callers can meet this by having both faces reference the
+    same `Paths.Segment` object (the "coordinated recovery" pattern used in
+    e.g. `union2d_curved`), or by an upstream mutual-noding pass. To catch
+    accidental violations, the cache verifies a midpoint sample matches the
+    cached curve before reusing an entity, so a genuinely-different curve
+    spanning the same endpoints will fall through to a fresh OCC edge rather
+    than silently collapsing.
+ 2. **No distinct co-endpoint edges.** Even with the midpoint check, geometry
+    that has two curves crossing at both endpoints and at their midpoint (e.g.
+    a lens shape, or a self-crossing offset curve where both branches happen
+    to be mirror-symmetric across the endpoint chord) can defeat the check.
+    Ensure your input geometry does not contain such shapes.
  3. **Relaxed vertex merge is safe iff features > 500× the merge tolerance.**
     The default 2 nm merge is 500× smaller than a 1 µm minimum feature. If
-    you have features ~10× smaller, use `ConformalRenderContext(; vertex_merge_atol=…)` to tighten.
+    you have features ~10× smaller, use
+    `ConformalRenderContext(; vertex_merge_atol=…)` to tighten.
+ 4. **No overlapping areas at the same z within or across map_meta groups.**
+    The cache builds curve loops face-by-face; overlaps between faces at the
+    same z (whether within one physical group or across two) are not detected
+    or resolved. If your rendering can produce co-planar overlap, run with
+    `fragment_backstop=true` so the stock `_fragment_and_map!` pass runs
+    after postrender and reconciles the overlaps.
 
-When any of these are uncertain, `render_conformal!(..., fragment_backstop=true)`
-runs the stock 3-pass `_fragment_and_map!` after postrender as a safety net.
+`fragment_backstop=true` helps only with precondition (4). It does not
+recover from violations of (1)–(3): a wrongly-fused edge is already in the
+model before `_fragment_and_map!` runs.
 """
 module ConformalRender
 
@@ -76,31 +87,13 @@ using ..SolidModels
 using ..SolidModels:
     SolidModel,
     OpenCascade,
-    GmshNative,
     kernel,
-    gmsh,
     STP_UNIT,
     POINT_MERGE_ATOL,
-    _synchronize!,
+    _render_orchestrator!,
+    _fragment_three_pass!,
     _add_curve!,
-    _get_or_add_point!,
-    _postrender!,
-    _fragment_and_map!,
-    _get_or_add_points!,
-    _stp_float,
-    _collect_mesh_control_points!,
-    _used_group_names,
-    sizeandgrading,
-    to_primitives,
-    clear_mesh_control_points!,
-    finalize_size_fields!,
-    set_gmsh_option,
-    dimgroupdict,
-    dimtags,
-    hasgroup,
-    remove_group!,
-    reindex_physical_groups!
-import ..SolidModels: gmsh_meshsize
+    _get_or_add_point!
 import DeviceLayout
 import DeviceLayout:
     AbstractCoordinateSystem,
@@ -114,18 +107,26 @@ import DeviceLayout:
     getx,
     gety,
     points,
-    flatten,
-    elements,
-    element_metadata,
     coordinatetype,
-    onenanometer,
-    layer
+    onenanometer
 import DeviceLayout.Paths: bspline_approximation, pathlength
 import Unitful: ustrip, Length, @u_str, °
 import SpatialIndexing
 import SpatialIndexing: RTree
 
 export render_conformal!, ConformalRenderContext, add_conformal_loop!
+
+"""
+Entry in `endpoint_curve_index`: the signed OCC tag of the curve, plus a
+midpoint sample used to distinguish geometrically-different curves that
+happen to share both endpoints (e.g. two curves crossing to form a lens).
+The midpoint is stored in STP-unit coordinates in the canonical (min-endpoint
+→ max-endpoint) orientation.
+"""
+struct EndpointCurveEntry
+    signed_tag::Int
+    midpoint::NTuple{3, Float64}
+end
 
 """
     ConformalRenderContext(; vertex_merge_atol=2e-3, center_merge_atol=POINT_MERGE_ATOL)
@@ -135,20 +136,27 @@ Per-render cache and settings for a `render_conformal!` call.
   - `vertex_merge_atol` (µm): tolerance for merging polygon-vertex OCC points.
     Default `2e-3` µm = 2 nm, chosen to absorb Clipper integer-grid + float-drift
     divergence between the two sides of a shared boundary (~1.5 nm observed) while
-    staying 500× below typical minimum feature size (1 µm).
+    staying 500× below typical minimum feature size (1 µm). Also used as the
+    tolerance for the curve-midpoint geometric check.
   - `center_merge_atol` (µm): tolerance for merging arc centers and BSpline control
     points. Kept strict (`POINT_MERGE_ATOL` = 1e-9 µm = 1 pm) because relaxing here
     would corrupt curve geometry.
   - `curve_cache`: exact dedup by `(type, geometry_key…)`. Same request → same tag.
-  - `endpoint_curve_index`: `(min_pt, max_pt) → tag`, registered by arcs and
-    splines. Enforces the "prefer curve" invariant.
-  - `stats`: telemetry (hits, misses, arcs, splines, chord fallbacks).
+  - `endpoint_curve_index`: `(min_pt, max_pt) → EndpointCurveEntry`, registered
+    by arcs and splines. Enforces the "prefer curve" invariant subject to a
+    midpoint match.
+  - `point_coords`: `tag → (x, y, z)`, populated for every point emitted through
+    the cached point helpers. Used to compute curve midpoints without a
+    Gmsh round-trip.
+  - `stats`: telemetry (hits, misses, arcs, splines, chord fallbacks,
+    midpoint rejections).
 """
 mutable struct ConformalRenderContext
     vertex_merge_atol::Float64
     center_merge_atol::Float64
     curve_cache::Dict{Tuple, Int}
-    endpoint_curve_index::Dict{Tuple{Int, Int}, Int}
+    endpoint_curve_index::Dict{Tuple{Int, Int}, EndpointCurveEntry}
+    point_coords::Dict{Int, NTuple{3, Float64}}
     stats::Dict{Symbol, Int}
 end
 
@@ -159,15 +167,23 @@ ConformalRenderContext(;
     vertex_merge_atol,
     center_merge_atol,
     Dict{Tuple, Int}(),
-    Dict{Tuple{Int, Int}, Int}(),
+    Dict{Tuple{Int, Int}, EndpointCurveEntry}(),
+    Dict{Int, NTuple{3, Float64}}(),
     Dict{Symbol, Int}(
         :hits => 0,
         :misses => 0,
         :arcs => 0,
         :splines => 0,
-        :chord_fallbacks => 0
+        :chord_fallbacks => 0,
+        :midpoint_rejections => 0
     )
 )
+
+# Return true if two midpoints agree to within the context's vertex tolerance.
+_midpoint_match(a::NTuple{3, Float64}, b::NTuple{3, Float64}, atol::Float64) =
+    abs(a[1] - b[1]) <= atol &&
+    abs(a[2] - b[2]) <= atol &&
+    abs(a[3] - b[3]) <= atol
 
 # ─── Point merge ─────────────────────────────────────────────────────────────
 
@@ -181,8 +197,13 @@ function _cached_point_relaxed!(
     z::Float64,
     points_tree
 )
-    points_tree === nothing && return k.add_point(x, y, z)
-    return _get_or_add_point!(k, x, y, z, points_tree; atol=ctx.vertex_merge_atol)
+    tag = isnothing(points_tree) ? k.add_point(x, y, z) :
+          _get_or_add_point!(k, x, y, z, points_tree; atol=ctx.vertex_merge_atol)
+    # Record coords for later midpoint computation; the tag returned by
+    # `_get_or_add_point!` may correspond to a previously-inserted nearby point,
+    # so `get!` preserves the first-writer coords rather than overwriting.
+    get!(ctx.point_coords, tag, (x, y, z))
+    return tag
 end
 
 # Strict point insert. Used for arc centers and BSpline control points where
@@ -195,27 +216,50 @@ function _cached_point_strict!(
     z::Float64,
     points_tree
 )
-    points_tree === nothing && return k.add_point(x, y, z)
-    return _get_or_add_point!(k, x, y, z, points_tree; atol=ctx.center_merge_atol)
+    tag = isnothing(points_tree) ? k.add_point(x, y, z) :
+          _get_or_add_point!(k, x, y, z, points_tree; atol=ctx.center_merge_atol)
+    get!(ctx.point_coords, tag, (x, y, z))
+    return tag
 end
 
 # ─── Edge/curve cache ────────────────────────────────────────────────────────
 
-# Add a line, dedup on unordered endpoint pair.
+# Add a line, dedup on unordered endpoint pair. A cached curve on the same
+# endpoints (arc or spline) is reused ONLY if its stored midpoint matches the
+# line's midpoint at `vertex_merge_atol` — this prevents fusing genuinely
+# different curves that happen to share endpoints (see precondition 2).
 function _cached_add_line!(k, ctx::ConformalRenderContext, p1::Integer, p2::Integer)
     p1 == p2 && error("degenerate edge: p1 == p2 == $p1")
     lo, hi = minmax(p1, p2)
     key = (:line, lo, hi)
     existing = get(ctx.curve_cache, key, nothing)
-    if existing !== nothing
+    if !isnothing(existing)
         ctx.stats[:hits] += 1
         return p1 < p2 ? existing : -existing
     end
-    # Prefer-curve: a curve already spans these endpoints → reuse it.
+    # Prefer-curve: a curve already spans these endpoints → reuse only if the
+    # midpoint agrees. A line's midpoint is the average of its endpoints.
     existing_curve = get(ctx.endpoint_curve_index, (lo, hi), nothing)
-    if existing_curve !== nothing
-        ctx.stats[:hits] += 1
-        return p1 < p2 ? existing_curve : -existing_curve
+    if !isnothing(existing_curve)
+        lo_xyz = get(ctx.point_coords, lo, nothing)
+        hi_xyz = get(ctx.point_coords, hi, nothing)
+        if !isnothing(lo_xyz) && !isnothing(hi_xyz)
+            line_mid = (
+                0.5 * (lo_xyz[1] + hi_xyz[1]),
+                0.5 * (lo_xyz[2] + hi_xyz[2]),
+                0.5 * (lo_xyz[3] + hi_xyz[3])
+            )
+            if _midpoint_match(line_mid, existing_curve.midpoint, ctx.vertex_merge_atol)
+                ctx.stats[:hits] += 1
+                return p1 < p2 ? existing_curve.signed_tag :
+                       -existing_curve.signed_tag
+            end
+            ctx.stats[:midpoint_rejections] += 1
+        else
+            # Missing coord entry — err on the side of not fusing so we don't
+            # silently collapse curves whose midpoints we can't verify.
+            ctx.stats[:midpoint_rejections] += 1
+        end
     end
     ctx.stats[:misses] += 1
     tag = k.addLine(p1, p2)
@@ -223,8 +267,36 @@ function _cached_add_line!(k, ctx::ConformalRenderContext, p1::Integer, p2::Inte
     return tag
 end
 
-# Add a circle arc. Registers in the endpoint index so subsequent line requests
-# on the same endpoints reuse this arc (curve wins).
+# Midpoint of a circular arc (|α| < 180°, guaranteed by the caller-side arc
+# splitting) whose endpoints are on a circle centered at `c` with radius
+# `r = |p1 - c|`. Returned in the (min-endpoint, max-endpoint) orientation so
+# it can be compared against a stored midpoint regardless of traversal
+# direction.
+function _arc_midpoint(
+    p1_xyz::NTuple{3, Float64},
+    p2_xyz::NTuple{3, Float64},
+    center_xyz::NTuple{3, Float64}
+)
+    cx, cy, cz = center_xyz
+    chord_mid = (
+        0.5 * (p1_xyz[1] + p2_xyz[1]),
+        0.5 * (p1_xyz[2] + p2_xyz[2]),
+        0.5 * (p1_xyz[3] + p2_xyz[3])
+    )
+    dx = chord_mid[1] - cx
+    dy = chord_mid[2] - cy
+    dz = chord_mid[3] - cz
+    n = sqrt(dx * dx + dy * dy + dz * dz)
+    r = sqrt(
+        (p1_xyz[1] - cx)^2 + (p1_xyz[2] - cy)^2 + (p1_xyz[3] - cz)^2
+    )
+    n == 0.0 && return chord_mid  # semicircle degenerate; caller should split
+    return (cx + r * dx / n, cy + r * dy / n, cz + r * dz / n)
+end
+
+# Add a circle arc. Registers in the endpoint index so subsequent requests on
+# the same endpoints can reuse this arc — but only when the requester's own
+# midpoint matches, so genuinely different curves are not silently fused.
 function _cached_add_arc!(
     k,
     ctx::ConformalRenderContext,
@@ -236,32 +308,54 @@ function _cached_add_arc!(
     # Exact arc (center in key): the same Turn requested again → same tag.
     key = (:arc, lo, center, hi)
     existing = get(ctx.curve_cache, key, nothing)
-    if existing !== nothing
+    if !isnothing(existing)
         ctx.stats[:hits] += 1
         return p1 < p2 ? existing : -existing
     end
-    # Any curve already on these endpoints → reuse (handles float-jittered
-    # center of the coordinated Turn applied to the other side).
+    p1_xyz = get(ctx.point_coords, p1, nothing)
+    p2_xyz = get(ctx.point_coords, p2, nothing)
+    center_xyz = get(ctx.point_coords, center, nothing)
+    have_coords =
+        !isnothing(p1_xyz) && !isnothing(p2_xyz) && !isnothing(center_xyz)
+    arc_mid = have_coords ? _arc_midpoint(p1_xyz, p2_xyz, center_xyz) : nothing
+    # Any curve already on these endpoints → reuse only if its midpoint
+    # matches this arc's midpoint.
     existing_curve = get(ctx.endpoint_curve_index, (lo, hi), nothing)
-    if existing_curve !== nothing
-        ctx.stats[:hits] += 1
-        return p1 < p2 ? existing_curve : -existing_curve
+    if !isnothing(existing_curve) && !isnothing(arc_mid)
+        if _midpoint_match(arc_mid, existing_curve.midpoint, ctx.vertex_merge_atol)
+            ctx.stats[:hits] += 1
+            return p1 < p2 ? existing_curve.signed_tag :
+                   -existing_curve.signed_tag
+        end
+        ctx.stats[:midpoint_rejections] += 1
     end
     # Conformality backstop: a chord was already created on these endpoints
     # (the other side rendered this boundary as a line because it did not
-    # recover the arc). Reuse the chord so both faces share one tag; accuracy
-    # is lost in this one-sided cell only.
+    # recover the arc). Reuse the chord so both faces share one tag ONLY when
+    # the chord and arc midpoints agree (very tight arcs, r/chord ≈ 1).
+    # Otherwise reusing the chord silently substitutes a line for an arc.
     existing_line = get(ctx.curve_cache, (:line, lo, hi), nothing)
-    if existing_line !== nothing
-        ctx.stats[:hits] += 1
-        return p1 < p2 ? existing_line : -existing_line
+    if !isnothing(existing_line) && !isnothing(arc_mid) && have_coords
+        chord_mid = (
+            0.5 * (p1_xyz[1] + p2_xyz[1]),
+            0.5 * (p1_xyz[2] + p2_xyz[2]),
+            0.5 * (p1_xyz[3] + p2_xyz[3])
+        )
+        if _midpoint_match(arc_mid, chord_mid, ctx.vertex_merge_atol)
+            ctx.stats[:hits] += 1
+            ctx.stats[:chord_fallbacks] += 1
+            return p1 < p2 ? existing_line : -existing_line
+        end
     end
     ctx.stats[:misses] += 1
     ctx.stats[:arcs] += 1
     tag = k.add_circle_arc(p1, center, p2, -1)
     signed_tag = p1 < p2 ? tag : -tag
     ctx.curve_cache[key] = signed_tag
-    ctx.endpoint_curve_index[(lo, hi)] = signed_tag
+    if !isnothing(arc_mid)
+        ctx.endpoint_curve_index[(lo, hi)] =
+            EndpointCurveEntry(signed_tag, arc_mid)
+    end
     return tag
 end
 
@@ -269,6 +363,32 @@ end
 # reversal; and participates in the prefer-curve invariant via
 # `endpoint_curve_index` — a later request for a line (or arc) on the same
 # endpoints will reuse this spline instead of creating a duplicate edge.
+# Approximate midpoint of an interpolating BSpline from its control points.
+# For our (endpoint-anchored) BSplines the middle interior control point is a
+# good proxy for the geometric midpoint; when the control net is short we fall
+# back to the chord midpoint.
+function _spline_midpoint(
+    ctx::ConformalRenderContext,
+    pts::Vector{<:Integer}
+)
+    coords = [get(ctx.point_coords, p, nothing) for p in pts]
+    all(!isnothing, coords) || return nothing
+    n = length(coords)
+    if n == 2
+        return (
+            0.5 * (coords[1][1] + coords[2][1]),
+            0.5 * (coords[1][2] + coords[2][2]),
+            0.5 * (coords[1][3] + coords[2][3])
+        )
+    elseif isodd(n)
+        return coords[(n + 1) ÷ 2]
+    else
+        a = coords[n ÷ 2]
+        b = coords[n ÷ 2 + 1]
+        return (0.5 * (a[1] + b[1]), 0.5 * (a[2] + b[2]), 0.5 * (a[3] + b[3]))
+    end
+end
+
 function _cached_add_spline!(
     k,
     ctx::ConformalRenderContext,
@@ -279,29 +399,36 @@ function _cached_add_spline!(
     lo, hi = minmax(p1, p2)
     key = (:bspline, pts...)
     existing = get(ctx.curve_cache, key, nothing)
-    if existing !== nothing
+    if !isnothing(existing)
         ctx.stats[:hits] += 1
         return existing
     end
     rkey = (:bspline, reverse(pts)...)
     existing_r = get(ctx.curve_cache, rkey, nothing)
-    if existing_r !== nothing
+    if !isnothing(existing_r)
         ctx.stats[:hits] += 1
         return -existing_r
     end
-    # Any curve already on these endpoints → reuse. Handles a spline requested
-    # after an arc (or the reverse) on the same shared boundary.
+    # Any curve already on these endpoints → reuse only if the midpoint agrees.
+    spline_mid = _spline_midpoint(ctx, pts)
     existing_curve = get(ctx.endpoint_curve_index, (lo, hi), nothing)
-    if existing_curve !== nothing
-        ctx.stats[:hits] += 1
-        return p1 < p2 ? existing_curve : -existing_curve
+    if !isnothing(existing_curve) && !isnothing(spline_mid)
+        if _midpoint_match(spline_mid, existing_curve.midpoint, ctx.vertex_merge_atol)
+            ctx.stats[:hits] += 1
+            return p1 < p2 ? existing_curve.signed_tag :
+                   -existing_curve.signed_tag
+        end
+        ctx.stats[:midpoint_rejections] += 1
     end
     ctx.stats[:misses] += 1
     ctx.stats[:splines] += 1
     tag = k.addSpline(pts, -1, tangents)
     signed_tag = p1 < p2 ? tag : -tag
     ctx.curve_cache[key] = tag
-    ctx.endpoint_curve_index[(lo, hi)] = signed_tag
+    if !isnothing(spline_mid)
+        ctx.endpoint_curve_index[(lo, hi)] =
+            EndpointCurveEntry(signed_tag, spline_mid)
+    end
     return tag
 end
 
@@ -638,9 +765,13 @@ function _add_conformal_curve!(
     return tags
 end
 
-# Fallback: any segment type not specialized above (e.g. Straight) is handled
-# by DL's stock `_add_curve!` — those types don't benefit from caching (they're
-# already exact-and-cheap in stock DL).
+# Unsupported segment types fail loud rather than routing through the stock
+# `_add_curve!` — the stock fallback would BSpline-approximate anything it
+# received, including a Straight, and the resulting edge would not participate
+# in the cache and would break conformality with the caching side of a shared
+# boundary. Straights should never reach here because they do not appear in
+# `CurvilinearPolygon` unless the caller has hand-constructed one; any other
+# `Paths.Segment` subtype landing here is a real gap we want visible.
 _add_conformal_curve!(
     ctx::ConformalRenderContext,
     endpoints,
@@ -649,32 +780,39 @@ _add_conformal_curve!(
     z,
     points_tree;
     kwargs...
-) = _add_curve!(endpoints, seg, k, z; kwargs...)
+) = throw(
+    ArgumentError(
+        "ConformalRender: unsupported curve segment type $(typeof(seg)); " *
+        "specialize `_add_conformal_curve!` for this type or preprocess it to " *
+        "one of `Paths.Turn`, `Paths.BSpline`, or `Paths.OffsetSegment`."
+    )
+)
 
 # ─── Public entry point ──────────────────────────────────────────────────────
 
 """
     render_conformal!(sm::SolidModel, cs::AbstractCoordinateSystem;
         context=ConformalRenderContext(),
-        map_meta=layer, postrender_ops=[], retained_physical_groups=[],
-        zmap=(_)->zero(T), gmsh_options=..., skip_postrender=false,
-        auto_union=false, skip_unused_layers=false,
         fragment_backstop=false, kwargs...)
 
-Render `cs` into `sm` using the ConformalRender strategy. Same semantics as
-[`render!`](@ref) but without the post-render `_fragment_and_map!` pass by
-default.
+Render `cs` into `sm` using the ConformalRender strategy. Delegates to the
+same shared orchestrator as [`render!`](@ref); the only differences are:
+- OCC entities are emitted via the cached `_add_conformal!` path, so shared
+  boundaries between adjacent faces resolve to a single OCC edge.
+- The post-render `_fragment_and_map!` pass is skipped by default because
+  the cache already guarantees conformality on rendered geometry.
 
-The `context::ConformalRenderContext` holds the edge/curve cache and merge
-tolerances; pass an explicit context if you need custom tolerances or want to
-inspect cache statistics after the render.
+Accepts all of `render!`'s keyword arguments (`map_meta`, `postrender_ops`,
+`retained_physical_groups`, `zmap`, `gmsh_options`, `skip_postrender`,
+`auto_union`, `skip_unused_layers`, `meshing_parameters`) in addition to:
 
-`fragment_backstop=true` runs the stock 3-pass `_fragment_and_map!` sequence
-after postrender operations. Faces already resolved to a single OCC entity
-by the cache pass through as no-ops, so this is safe to combine with
-cache-resolved regions. Enable when the input geometry may not fully meet
-the "shared endpoints ⟹ shared curve" precondition, or when `postrender_ops`
-introduce overlapping entities that need reconciliation.
+- `context::ConformalRenderContext`: the edge/curve cache and merge tolerances.
+  Pass an explicit context to customize tolerances or inspect cache stats
+  after the render.
+- `fragment_backstop::Bool=false`: run the stock 3-pass `_fragment_and_map!`
+  after postrender operations. Enable when your input violates precondition 4
+  (overlapping areas at the same z), which the cache does not resolve on its
+  own. Does not recover from violations of preconditions 1–3.
 
 Not supported on `GmshNative` kernel.
 """
@@ -682,14 +820,6 @@ function render_conformal!(
     sm::SolidModel,
     cs::AbstractCoordinateSystem{T};
     context::ConformalRenderContext=ConformalRenderContext(),
-    map_meta=layer,
-    postrender_ops=[],
-    retained_physical_groups=[],
-    zmap=(_) -> zero(T),
-    gmsh_options=Dict{String, Union{String, Int, Float64}}(),
-    skip_postrender::Bool=false,
-    auto_union::Bool=false,
-    skip_unused_layers::Bool=false,
     fragment_backstop::Bool=false,
     kwargs...
 ) where {T}
@@ -697,99 +827,15 @@ function render_conformal!(
         "render_conformal! is only implemented for OpenCascade kernel; " *
         "got $(typeof(kernel(sm))). Use render! instead."
     )
-    gmsh.model.set_current(SolidModels.name(sm))
-    set_gmsh_option(gmsh_options)
-
-    flat = flatten(cs)
-    clear_mesh_control_points!()
-    points_tree = RTree{Float64, 3}(Int32)
-
-    used_names = if skip_unused_layers
-        _used_group_names(postrender_ops, retained_physical_groups)
-    else
-        nothing
-    end
-
-    for meta in unique(element_metadata(flat))
-        mapped_name = map_meta(meta)
-        isnothing(mapped_name) && continue
-        if !isnothing(used_names) &&
-           string(mapped_name) ∉ used_names &&
-           string(layer(meta)) ∉ used_names
-            continue
-        end
-        idx = (element_metadata(flat) .== meta)
-        els = to_primitives.(sm, elements(flat)[idx]; kwargs...)
-        meshsizes = sizeandgrading.(elements(flat)[idx]; kwargs...)
-
-        group_dimtags_unflattened = _add_conformal!(
-            context,
-            els,
-            meta,
-            kernel(sm);
-            zmap=zmap,
-            points_tree=points_tree,
-            kwargs...
-        )
-
-        group_dimtags = reduce(vcat, group_dimtags_unflattened, init=Tuple{Int32, Int32}[])
-        for dim in unique(first.(group_dimtags))
-            if hasgroup(sm, mapped_name, dim)
-                append!(group_dimtags, dimtags(sm[mapped_name, dim]))
-            end
-        end
-        sm[mapped_name] = group_dimtags
-
-        z_of_meta = _stp_float(zmap(meta))
-        for (prims, (h, α)) in zip(els, meshsizes)
-            _collect_mesh_control_points!(prims, h, α, z_of_meta)
-        end
-    end
-
-    _synchronize!(sm)
-    finalize_size_fields!()
-    _synchronize!(sm)
-    skip_postrender && return nothing
-
-    if auto_union
-        auto_union_ops = Tuple[]
-        for groupname in collect(keys(dimgroupdict(sm, 2)))
-            push!(auto_union_ops, (groupname, SolidModels.union_geom!, (groupname, 2)))
-        end
-        _postrender!(sm, auto_union_ops)
-        _synchronize!(sm)
-    end
-    _postrender!(sm, postrender_ops)
-    _synchronize!(sm)
-
-    # By default, no `_fragment_and_map!` pass: the conformal cache already
-    # deduplicates shared edges during render. But if the input geometry
-    # doesn't fully meet the cache's preconditions (see "Failure modes for the
-    # 'prefer curve' invariant" in the module docstring), or if `postrender_ops`
-    # introduce overlapping entities that need reconciliation, users can opt
-    # into the stock 3-pass fragment as a safety net via `fragment_backstop=true`.
-    # Faces already resolved to a single OCC entity by the cache pass through
-    # fragment as no-ops, so this is compatible with cache-resolved regions.
-    if fragment_backstop
-        _fragment_and_map!(sm, [0, 1])
-        _fragment_and_map!(sm, [1, 2])
-        _fragment_and_map!(sm, [2, 3])
-    end
-
-    gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
-
-    if !isempty(retained_physical_groups)
-        for d = 0:3
-            retain_groups = getindex.(filter(x -> x[2] == d, retained_physical_groups), 1)
-            all_groups = keys(dimgroupdict(sm, d))
-            for k in setdiff(all_groups, retain_groups)
-                remove_group!(sm[k, d], remove_entities=false)
-            end
-        end
-        reindex_physical_groups!(sm)
-    end
-
-    return _synchronize!(sm)
+    return _render_orchestrator!(
+        sm,
+        cs;
+        emit! = (els, meta, k; zmap, points_tree, kwargs...) -> _add_conformal!(
+            context, els, meta, k; zmap=zmap, points_tree=points_tree, kwargs...
+        ),
+        fragment! = fragment_backstop ? _fragment_three_pass! : (_) -> nothing,
+        kwargs...
+    )
 end
 
 end # module ConformalRender

@@ -9,7 +9,12 @@
         onenanometer,
         ClippedPolygon,
         difference2d,
-        Paths
+        Paths,
+        Path,
+        LineSegment,
+        straight!,
+        turn!,
+        bspline!
     using DeviceLayout.Polygons: Rounded
     using DeviceLayout.Curvilinear: CurvilinearPolygon, CurvilinearRegion
     using DeviceLayout.SolidModels:
@@ -20,6 +25,7 @@
         kernel,
         gmsh,
         hasgroup
+    import DeviceLayout
     import DeviceLayout.SolidModels
 
     @testset "ConformalRenderContext construction" begin
@@ -303,6 +309,191 @@
         # line request hits — otherwise a duplicate straight edge is created
         # and the shared boundary is non-conformal.
         @test ctx.stats[:hits] > hits_before
+        gmsh.finalize()
+    end
+
+    @testset "_add_conformal!(::LineSegment) 1D dispatch" begin
+        # A LineSegment placed on a coordinate system exercises the 1D-entity
+        # branch of _add_conformal!. It should register a curve and a physical
+        # group at dim=1.
+        cs = CoordinateSystem("linesegs", μm)
+        place!(cs, LineSegment(Point(0.0μm, 0.0μm), Point(10.0μm, 0.0μm)), :l1)
+        place!(cs, LineSegment(Point(10.0μm, 0.0μm), Point(10.0μm, 5.0μm)), :l1)
+
+        sm = SolidModel("linesegs"; overwrite=true)
+        render_conformal!(sm, cs)
+        # `l1` should end up as a group at dim=1 (segments do not get closed
+        # into a 2D face) with at least two 1D entities in the model.
+        @test hasgroup(sm, "l1", 1)
+        @test length(gmsh.model.occ.getEntities(1)) >= 2
+        gmsh.finalize()
+    end
+
+    @testset "arc curve_cache exact-key hit (existing !== nothing branch)" begin
+        # Same Turn requested twice → second call hits the exact-key branch
+        # and returns the same tag (up to sign).
+        sm = SolidModel("arc_dup"; overwrite=true)
+        k = kernel(sm)
+        ctx = ConformalRenderContext()
+        import SpatialIndexing
+        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+
+        R = 100.0μm
+        pp = [Point(0.0μm, 0.0μm), Point(R, 0.0μm), Point(0.0μm, R)]
+        turn = Paths.Turn(90°, R, α0=90°, p0=pp[2])
+        cp1 = CurvilinearPolygon(pp, [turn], [2])
+        cp2 = CurvilinearPolygon(pp, [turn], [2])  # same Turn object
+
+        misses_before = ctx.stats[:misses]
+        arcs_before = ctx.stats[:arcs]
+        add_conformal_loop!(ctx, cp1, k, 0.0μm; points_tree)
+        arcs_after_first = ctx.stats[:arcs]
+        add_conformal_loop!(ctx, cp2, k, 0.0μm; points_tree)
+        # Second render created zero new arcs (all hits from the cache).
+        @test ctx.stats[:arcs] == arcs_after_first
+        # And at least one exact-key hit was recorded.
+        @test ctx.stats[:hits] >= 1
+        gmsh.finalize()
+    end
+
+    @testset "spline curve_cache exact-key hit" begin
+        sm = SolidModel("spline_dup"; overwrite=true)
+        k = kernel(sm)
+        ctx = ConformalRenderContext()
+        import SpatialIndexing
+        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+
+        pp = [
+            Point(0.0μm, 0.0μm),
+            Point(100.0μm, 0.0μm),
+            Point(100.0μm, 100.0μm),
+            Point(0.0μm, 100.0μm)
+        ]
+        seg = Paths.BSpline(
+            [pp[2], Point(150.0μm, 50.0μm), pp[3]],
+            Point(1.0μm, 0.0μm),
+            Point(-1.0μm, 0.0μm)
+        )
+        cp1 = CurvilinearPolygon(pp, [seg], [2])
+        cp2 = CurvilinearPolygon(pp, [seg], [2])
+
+        add_conformal_loop!(ctx, cp1, k, 0.0μm; points_tree)
+        splines_after_first = ctx.stats[:splines]
+        add_conformal_loop!(ctx, cp2, k, 0.0μm; points_tree)
+        @test ctx.stats[:splines] == splines_after_first
+        @test ctx.stats[:hits] >= 1
+        gmsh.finalize()
+    end
+
+    @testset "midpoint check rejects 2-edge lens fusion" begin
+        # Precondition 2 case: two arcs on the same endpoints but different
+        # midpoints (bulge up vs. bulge down). Endpoint-only fusion would
+        # collapse both into one OCC edge. The midpoint check must keep them
+        # as two distinct entities.
+        #
+        # We drive the primitives directly rather than through
+        # add_conformal_loop! so we can construct the exact "two arcs on the
+        # same endpoints, different centers" case without a Path adapter.
+        sm = SolidModel("lens_primitive"; overwrite=true)
+        k = kernel(sm)
+        ctx = ConformalRenderContext()
+        import SpatialIndexing
+        SolidModels = DeviceLayout.SolidModels
+        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+
+        # Endpoints on the x axis; centers above and below.
+        p1 = SolidModels.ConformalRender._cached_point_relaxed!(
+            k, ctx, -50.0, 0.0, 0.0, points_tree
+        )
+        p2 = SolidModels.ConformalRender._cached_point_relaxed!(
+            k, ctx, 50.0, 0.0, 0.0, points_tree
+        )
+        # Center above chord: bulges downward → midpoint below chord.
+        c_above = SolidModels.ConformalRender._cached_point_strict!(
+            k, ctx, 0.0, 80.0, 0.0, points_tree
+        )
+        # Center below chord: bulges upward → midpoint above chord.
+        c_below = SolidModels.ConformalRender._cached_point_strict!(
+            k, ctx, 0.0, -80.0, 0.0, points_tree
+        )
+
+        rej_before = ctx.stats[:midpoint_rejections]
+        arcs_before = ctx.stats[:arcs]
+        tag_a = SolidModels.ConformalRender._cached_add_arc!(k, ctx, p1, c_above, p2)
+        tag_b = SolidModels.ConformalRender._cached_add_arc!(k, ctx, p1, c_below, p2)
+
+        @test ctx.stats[:arcs] == arcs_before + 2  # both arcs created fresh
+        @test ctx.stats[:midpoint_rejections] > rej_before
+        @test abs(tag_a) != abs(tag_b)  # distinct OCC entities
+        gmsh.finalize()
+    end
+
+    @testset "unsupported segment type throws ArgumentError" begin
+        # A Paths.Straight reaching the curve dispatcher should error rather
+        # than silently BSpline-approximating (which would leave the edge out
+        # of the cache and break conformality with the caching side).
+        sm = SolidModel("bad_seg"; overwrite=true)
+        k = kernel(sm)
+        ctx = ConformalRenderContext()
+        import SpatialIndexing
+        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+
+        a = Point(0.0μm, 0.0μm)
+        b = Point(10.0μm, 0.0μm)
+        # Hand-construct a CurvilinearPolygon carrying a Paths.Straight,
+        # which would normally not appear here — just to hit the fallback.
+        straight = Paths.Straight(10.0μm, a, 0.0°)
+        cp = CurvilinearPolygon([a, b], [straight], [1])
+        @test_throws ArgumentError add_conformal_loop!(
+            ctx, cp, k, 0.0μm; points_tree
+        )
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal! with Path(Trace) — straight + turn" begin
+        # Trace path with a straight and a 90° turn — the production shape,
+        # not a hand-built CurvilinearPolygon.
+        cs = CoordinateSystem("trace_path", nm)
+        pa = Path(Point(0.0μm, 0.0μm), α0=0°)
+        straight!(pa, 50μm, Paths.Trace(2.0μm))
+        turn!(pa, 90°, 20μm)
+        straight!(pa, 50μm)
+        place!(cs, pa, :l1)
+
+        sm = SolidModel("trace_path"; overwrite=true)
+        render_conformal!(sm, cs)
+        @test hasgroup(sm, "l1", 2)
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal! with Path(TaperTrace)" begin
+        # TaperTrace path — the width changes along the segment, which is the
+        # kind of style OffsetSegment gets pulled in for.
+        cs = CoordinateSystem("taper_path", nm)
+        pa = Path(Point(0.0μm, 0.0μm), α0=0°)
+        straight!(pa, 40μm, Paths.TaperTrace(1.0μm, 3.0μm))
+        turn!(pa, 45°, 30μm)
+        place!(cs, pa, :l1)
+
+        sm = SolidModel("taper_path"; overwrite=true)
+        render_conformal!(sm, cs)
+        @test hasgroup(sm, "l1", 2)
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal! with Path(SimpleCPW) — bspline routing" begin
+        # SimpleCPW with a bspline segment — exercises both the CPW inner+outer
+        # boundary rendering and the BSpline dispatch.
+        cs = CoordinateSystem("cpw_bspline", nm)
+        pa = Path(Point(0.0μm, 0.0μm), α0=0°)
+        straight!(pa, 20μm, Paths.SimpleCPW(2.0μm, 1.0μm))
+        bspline!(pa, [Point(60.0μm, 40.0μm)], 90°)
+        straight!(pa, 20μm)
+        place!(cs, pa, :l1)
+
+        sm = SolidModel("cpw_bspline"; overwrite=true)
+        render_conformal!(sm, cs)
+        @test hasgroup(sm, "l1", 2)
         gmsh.finalize()
     end
 end
