@@ -279,7 +279,9 @@ end
     terminate!(pa4; rounding=1.9, overlay_index=1)
     cf = Cell{Float64}("test")
     render!(cf, pa4, GDSMeta())
-    @test length(flatten(cf).elements) == 35
+    # Zero-length subsegments left around overlay terminations used to emit three
+    # degenerate zero-area rectangles (35 elements); they now expand to nothing (#269).
+    @test length(flatten(cf).elements) == 32
     @test bounds(cf) == Rectangle{Float64}((-6.0, -16.0), (26.0, 16.0))
 
     pa5 = Path(0, 0)
