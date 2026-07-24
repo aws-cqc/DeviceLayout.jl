@@ -903,7 +903,14 @@ pathtopolys(seg::Paths.Straight{T}, sty::Paths.TaperCPW; kwargs...) where {T} =
     to_polygons(seg, sty; kwargs...)
 
 # Dispatch node->primitive based on kernel and requirements for representing node exactly
-function pathtopolys(node::Paths.Node; kwargs...)
+function pathtopolys(node::Paths.Node{T}; kwargs...) where {T}
+    # Zero-length continuous-style nodes (zero-angle turns, or the zero-length nodes left
+    # around `attach!`) carry no geometry and expand to nothing. Their coincident endpoints
+    # would otherwise trip the closed-segment check meant for full turns (issue #269).
+    # Discrete styles are exempt: a `Corner` has zero pathlength but renders a polygon.
+    iszero(pathlength(node.seg)) &&
+        node.sty isa Paths.ContinuousStyle &&
+        return CurvilinearPolygon{T}[]
     return pathtopolys(node, islinear(node.seg, node.sty); kwargs...)
 end
 # A linear path can be exactly represented using plain Polygons.

@@ -1369,3 +1369,36 @@ end
         @test DeviceLayout.Curvilinear._assert_open_segment(open_seg) === nothing
     end
 end
+
+@testitem "Zero-length turns are ignored (#269)" setup = [CommonTestSetup] begin
+    # A zero-length turn has coincident endpoints, which used to trip the
+    # closed-segment check meant for full turns. Zero-length continuous-style
+    # nodes carry no geometry and expand to nothing instead.
+    function zpath(sty)
+        pa = Path(0.0μm, 0.0μm)
+        straight!(pa, 100μm, sty)
+        turn!(pa, 0.0°, 95.5μm)
+        straight!(pa, 100μm)
+        return pa
+    end
+
+    # Per-node expansion returns nothing instead of throwing
+    pa = zpath(Paths.SimpleTrace(10μm))
+    @test isempty(pathtopolys(pa.nodes[2]))
+
+    # Rendering the whole path ignores the zero-length turn
+    c = Cell("zeroturn", nm)
+    render!(c, zpath(Paths.SimpleTrace(10μm)), GDSMeta(0))
+    @test length(c.elements) == 2
+
+    c2 = Cell("zeroturncpw", nm)
+    render!(c2, zpath(Paths.SimpleCPW(10μm, 6μm)), GDSMeta(0))
+    @test length(c2.elements) == 4
+
+    # Zero-length subsegments inside a CompoundSegment: matching CompoundStyle
+    # (per-subsegment zip) and a plain style pinned over the compound segment
+    pc = zpath(Paths.SimpleTrace(10μm))
+    simplify!(pc)
+    @test length(pathtopolys(pc.nodes[1])) == 2
+    @test length(vcat(pathtopolys(pc.nodes[1].seg, Paths.SimpleTrace(10μm)))) == 2
+end

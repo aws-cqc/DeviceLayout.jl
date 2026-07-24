@@ -4,6 +4,9 @@ function _compound_pin_render(f::Paths.CompoundSegment{T}, s::Paths.Style, leaf)
     stops = starts .+ pathlength.(f.segments)
 
     pieces = map(f.segments, starts, stops) do se, l0, l
+        # Zero-length subsegments (e.g. zero-angle turns) carry no geometry; skip them
+        # so their coincident endpoints don't trip the closed-segment check (issue #269).
+        iszero(pathlength(se)) && return Polygon{T}[]
         return vcat(leaf(se, Paths.pin(s; start=l0, stop=l)))
     end
 
