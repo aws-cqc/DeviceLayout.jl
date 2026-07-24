@@ -1402,3 +1402,46 @@ end
     @test length(pathtopolys(pc.nodes[1])) == 2
     @test length(vcat(pathtopolys(pc.nodes[1].seg, Paths.SimpleTrace(10μm)))) == 2
 end
+
+@testitem "NoRender loops don't produce empty polygons" setup = [CommonTestSetup] begin
+    import DeviceLayout: NoRender, Plain, StyleDict, points
+    import DeviceLayout: CurvilinearPolygon, CurvilinearRegion
+
+    r = Rectangle(10.0μm, 10.0μm)
+    hole = Rectangle(2.0μm, 2.0μm) + Point(4.0μm, 4.0μm)
+
+    # A NoRender loop inside a Rounded style expands to nothing, not to a
+    # zero-point Polygon (which cannot be written to GDS).
+    @test isempty(to_polygons(Polygons.Rounded(1.0μm)(NoRender()(r))))
+    @test isempty(to_polygons(Polygons.Rounded(0.0μm)(NoRender()(r))))
+    @test isempty(
+        to_polygons(
+            Polygons.Rounded(0.5μm)(DeviceLayout.optional_entity(r, :flag; default=false))
+        )
+    )
+
+    # NoRender on a StyleDict contour under Rounded
+    sd = StyleDict()
+    sd[1] = NoRender()
+    @test isempty(to_polygons(Polygons.Rounded(0.5μm)(sd(union2d(r)))))
+
+    # A NoRender hole is subtracting nothing; the exterior still renders
+    sd_hole = StyleDict()
+    sd_hole[1] = Plain()
+    sd_hole[1, 1] = NoRender()
+    plgs = to_polygons(Polygons.Rounded(0.5μm)(sd_hole(difference2d(r, hole))))
+    @test length(plgs) == 1
+    @test !isempty(points(only(plgs)))
+
+    # Unstyled discretization of the empty sentinel and empty-exterior region
+    T = typeof(1.0μm)
+    @test isempty(to_polygons(CurvilinearPolygon(Point{T}[])))
+    @test isempty(to_polygons(CurvilinearRegion{T}(CurvilinearPolygon(Point{T}[]))))
+
+    # End to end: rendering and saving a cell with NoRender-styled entities works
+    c = Cell("norender", nm)
+    render!(c, Polygons.Rounded(1.0μm)(NoRender()(r)), GDSMeta(0))
+    render!(c, Polygons.Rounded(0.5μm)(sd_hole(difference2d(r, hole))), GDSMeta(1))
+    @test all(p -> !isempty(points(p)), c.elements)
+    save(joinpath(mktempdir(), "norender.gds"), c)
+end

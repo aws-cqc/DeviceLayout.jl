@@ -159,6 +159,9 @@ function to_polygons(
     rtol=nothing,
     kwargs...
 ) where {T}
+    # An empty CurvilinearPolygon is the sentinel for a NoRender styled_loop()
+    # but empty polygons are invalid for GDS export and operations like `bounds`
+    isempty(e.p) && return Polygon{T}[]
     i = 1
     p = Point{T}[]
 
@@ -282,12 +285,13 @@ CurvilinearRegion(points::Vector{Point{T}}, curves, curve_start_idx) where {T} =
 # Using `union2d` rather than `difference2d` keeps hole winding consistent with `ClippedPolygon`
 # and is robust to styles (e.g. composed `Rounded`) that round each loop independently and
 # preserve winding. See #241.
-function to_polygons(e::CurvilinearRegion; kwargs...)
-    isempty(e.holes) && return [to_polygons(e.exterior; kwargs...)]
+function to_polygons(e::CurvilinearRegion{T}; kwargs...) where {T}
+    # Empty loops are `NoRender` sentinels; drop them here
+    isempty(points(e.exterior)) && return Polygon{T}[]
+    holes = filter(h -> !isempty(points(h)), e.holes)
+    isempty(holes) && return [to_polygons(e.exterior; kwargs...)]
     return to_polygons(
-        union2d(
-            vcat(to_polygons(e.exterior; kwargs...), _hole_polygon.(e.holes; kwargs...))
-        )
+        union2d(vcat(to_polygons(e.exterior; kwargs...), _hole_polygon.(holes; kwargs...)))
     )
 end
 
@@ -300,13 +304,16 @@ end
 function _hole_polygon(h::CurvilinearPolygon; kwargs...)
     return Polygon(reverse(points(to_polygons(_reverse(h); kwargs...))))
 end
-function to_polygons(e::CurvilinearRegion, sty::Polygons.Rounded; kwargs...)
-    isempty(e.holes) && return [to_polygons(e.exterior, sty; kwargs...)]
+function to_polygons(e::CurvilinearRegion{T}, sty::Polygons.Rounded; kwargs...) where {T}
+    # See the unstyled method above: empty loops are `NoRender` sentinels and drop out.
+    isempty(points(e.exterior)) && return Polygon{T}[]
+    holes = filter(h -> !isempty(points(h)), e.holes)
+    isempty(holes) && return [to_polygons(e.exterior, sty; kwargs...)]
     return to_polygons(
         union2d(
             vcat(
                 to_polygons(e.exterior, sty; kwargs...),
-                [to_polygons(h, sty; kwargs...) for h in e.holes]
+                [to_polygons(h, sty; kwargs...) for h in holes]
             )
         )
     )
@@ -904,10 +911,8 @@ pathtopolys(seg::Paths.Straight{T}, sty::Paths.TaperCPW; kwargs...) where {T} =
 
 # Dispatch node->primitive based on kernel and requirements for representing node exactly
 function pathtopolys(node::Paths.Node{T}; kwargs...) where {T}
-    # Zero-length continuous-style nodes (zero-angle turns, or the zero-length nodes left
-    # around `attach!`) carry no geometry and expand to nothing. Their coincident endpoints
-    # would otherwise trip the closed-segment check meant for full turns (issue #269).
-    # Discrete styles are exempt: a `Corner` has zero pathlength but renders a polygon.
+    # Zero-length continuous-style nodes expand to nothing.
+    # Their coincident endpoints would otherwise trip the closed-segment check meant for full turns
     iszero(pathlength(node.seg)) &&
         node.sty isa Paths.ContinuousStyle &&
         return CurvilinearPolygon{T}[]
