@@ -6,6 +6,16 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Fixed
+
+  - Zero-length path nodes and compound subsegments with continuous styles (for example a
+    zero-angle `Turn`) are ignored during rendering instead of triggering the closed-segment
+    check meant for full turns. As a result, zero-length pieces (such as those left around
+    overlay terminations) no longer emit degenerate zero-area polygons in rendered output. (#269)
+  - Loops removed by styling (`NoRender`, including via `OptionalStyle`/`optional_entity` or a
+    `StyleDict` entry, nested inside `Rounded`) expand to no polygons instead of zero-point
+    `Polygon`s, which reached `Cell`s and could not be written to GDS. (#269)
+
 ## 1.16.0 (2026-07-20)
 
 In addition to new features and bug fixes, this release substantially refactors
