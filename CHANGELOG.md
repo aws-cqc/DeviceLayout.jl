@@ -66,6 +66,11 @@ The format of this changelog is based on
     components and single-chip target for `SolidModelsExperimental`, and the
     `SingleTransmonExperimental` example, whose `configfile` builds a Palace configuration
     from the saved metadata.
+  - `render!(::SolidModel, ...)` accepts `verbose=true` (also usable as a `SolidModelTarget`
+    rendering option), which logs each physical group created while rendering and each
+    postrendering operation, along with the resulting entity count, bounding box, and elapsed
+    time. Operations are logged before they run, so the operation responsible for a failure is
+    the last one logged. (#266)
 
 ### Changed
 

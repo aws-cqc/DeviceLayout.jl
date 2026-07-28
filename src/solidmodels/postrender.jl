@@ -3,13 +3,19 @@ function _postrender!(
     sm::SolidModel,
     operations;
     mesh_points_by_group=nothing,
-    mesh_seen=nothing
+    mesh_seen=nothing,
+    verbose=false
 )
     changed_meshsize = false
     # Operations
     for (destination, op, args, kwargs...) in operations
+        # Log the call before running it, so that an operation that errors or hangs is the
+        # last one logged and can be identified without stepping through by hand.
+        verbose && @info "Executing `$(_op_call_string(destination, op, args, kwargs))`"
+        t_op = time_ns()
         result = op(sm, args...; kwargs...)
         sm[destination] = result
+        verbose && @info "  $destination: $(_result_summary(result, t_op))"
         if !isempty(result) && !isnothing(mesh_points_by_group) && !isnothing(mesh_seen)
             changed_meshsize |=
                 _compose_meshsize!(mesh_points_by_group, op, args, kwargs, mesh_seen)
@@ -17,6 +23,41 @@ function _postrender!(
     end
     return changed_meshsize
 end
+
+"""
+    _op_call_string(destination, op, args, kwargs)
+
+Reconstruct the call `_postrender!` makes for an operation, as a string for verbose logging.
+
+`kwargs` is joined rather than iterated as pairs so that a malformed operation tuple is
+still reportable.
+"""
+function _op_call_string(destination, op, args, kwargs)
+    argstr = join(repr.(args), ", ")
+    kwstr = isempty(kwargs) ? "" : "; " * join(kwargs, ", ")
+    return "sm[$(repr(string(destination)))] = $op(sm, $argstr$kwstr)"
+end
+
+"""
+    _result_summary(dimtags, t0)
+
+Summarize the result of a rendering operation for verbose logging: entity count, dimensions,
+bounding box, and seconds elapsed since `t0` (as returned by `time_ns`).
+
+Bounds are queried per entity, so this is only computed when verbose logging is requested.
+"""
+function _result_summary(dimtags, t0)
+    elapsed = _elapsed_s(t0)
+    isempty(dimtags) && return "0 entities [$elapsed s]"
+    dims = join(sort(unique(first.(dimtags))), ", ")
+    # Oriented results like `get_boundary`'s carry the boundary orientation in the sign of the
+    # tag, and the kernel only knows the entity by its unsigned tag.
+    b = round.(bounds3d((dim, abs(tag)) for (dim, tag) in dimtags), sigdigits=8)
+    n = length(dimtags)
+    return "$n entities (dim $dims) in bounds (x1, y1, z1, x2, y2, z2) = $b [$elapsed s]"
+end
+
+_elapsed_s(t0) = round((time_ns() - t0) / 1e9, digits=3)
 
 function _fuse!(k, object, tool; tag=-1, remove_object=true, remove_tool=true)
     return _boolean_op!(
