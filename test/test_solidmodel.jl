@@ -2129,3 +2129,59 @@ end
         SolidModels.gmsh.finalize()
     end
 end
+
+@testitem "SolidModel verbose rendering (#266)" setup = [CommonTestSetup] begin
+    using Logging
+    cs = CoordinateSystem("verbose", nm)
+    place!(cs, centered(Rectangle(20μm, 10μm)), :l1)
+    postrender_ops = [
+        ("ext1", SolidModels.extrude_z!, (:l1, 5μm)),
+        # `get_boundary` (used by every bounded `SolidModelTarget`) is oriented by default,
+        # so it returns signed tags that the kernel only recognizes unsigned
+        ("bnd", SolidModels.get_boundary, ("ext1", 3)),
+        ("missing_ext", SolidModels.extrude_z!, (:nonexistent, 5μm))
+    ]
+    render_verbose(verbose) = begin
+        sm = SolidModel("verbose"; overwrite=true)
+        logs, _ = Test.collect_test_logs(min_level=Logging.Info) do
+            return render!(
+                sm,
+                cs,
+                zmap=(_) -> 0μm,
+                postrender_ops=postrender_ops,
+                verbose=verbose
+            )
+        end
+        return sm, logs
+    end
+
+    sm, logs = render_verbose(true)
+    msgs = string.(getproperty.(logs, :message))
+    # Groups rendered from `cs` are reported with entity count and bounds
+    # (bounds are the OpenCASCADE bounding box, so they aren't tight)
+    @test any(
+        contains.(
+            msgs,
+            "l1: 1 entities (dim 2) in bounds (x1, y1, z1, x2, y2, z2) = (-10.0, -5."
+        )
+    )
+    # Each postrender operation is reported before it runs, then summarized
+    @test any(contains.(msgs, "sm[\"ext1\"] = extrude_z!(sm, :l1, 5 μm)"))
+    # Extrusion returns the volume plus its top and lateral boundary surfaces
+    @test any(contains.(msgs, "ext1: 6 entities (dim 2, 3)"))
+    # An operation with signed tags is summarized without erroring on the bounds query
+    @test any(contains.(msgs, "bnd: 6 entities (dim 2) in bounds"))
+    # An operation with no result is still summarized rather than erroring
+    @test any(contains.(msgs, "missing_ext: 0 entities"))
+    # No message generation failed (`@info` reports those as `Error` records)
+    @test !any(record -> record.level >= Logging.Error, logs)
+    @test any(contains.(msgs, "fragmented dimensions [2, 3]"))
+    @test any(contains.(msgs, "render!: done"))
+    # Verbose logging doesn't change the geometry
+    @test length(SolidModels.entitytags(sm["ext1", 3])) == 1
+
+    _, quiet_logs = render_verbose(false)
+    quiet_msgs = string.(getproperty.(quiet_logs, :message))
+    @test !any(contains.(quiet_msgs, "render!:"))
+    @test !any(contains.(quiet_msgs, "Executing"))
+end

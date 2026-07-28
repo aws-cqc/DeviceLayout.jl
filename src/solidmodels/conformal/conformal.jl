@@ -881,7 +881,7 @@ function render_conformal!(
             points_cache=points_cache,
             kwargs...
         ),
-        (fragment!)=fragment_backstop ? _fragment_three_pass! : (_) -> nothing,
+        (fragment!)=fragment_backstop ? _fragment_three_pass! : (_; kwargs...) -> nothing,
         kwargs...
     )
 end

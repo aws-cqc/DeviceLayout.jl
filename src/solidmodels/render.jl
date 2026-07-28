@@ -1154,6 +1154,10 @@ Render `cs` to `sm`.
     operations, generated perimeter and curvature controls are repeated at requested extrusion
     mesh layers, or at intervals no larger than each control's target size when no layers are
     specified. Default is `true`.
+  - `verbose`: If `true`, log a message for each `PhysicalGroup` created while rendering `cs`
+    and for each postrendering operation, reporting the operation being run and then the
+    resulting entity count, bounding box, and elapsed time. Each operation is logged before it
+    runs, so the operation responsible for a failure is the last one logged. Default is `false`.
 
 Available postrendering operations include [`translate!`](@ref), [`extrude_z!`](@ref), [`revolve!`](@ref),
 [`union_geom!`](@ref), [`intersect_geom!`](@ref), [`difference_geom!`](@ref), [`fragment_geom!`](@ref), and [`box_selection`](@ref).
@@ -1176,6 +1180,7 @@ function render!(
     auto_union=false,
     skip_unused_layers=false,
     curvature_sizing=true,
+    verbose=false,
     kwargs...
 ) where {T}
     return _render_orchestrator!(
@@ -1201,16 +1206,19 @@ function render!(
         auto_union=auto_union,
         skip_unused_layers=skip_unused_layers,
         curvature_sizing=curvature_sizing,
+        verbose=verbose,
         kwargs...
     )
 end
 
 # Adjacent-dimension pairs avoid both exterior boundary loss ([3,2,1], PR #145)
 # and stale OCC bindings when combined ([1,2,3], Gmsh #3446 / issue #172).
-function _fragment_three_pass!(sm::SolidModel)
-    _fragment_and_map!(sm, [0, 1])
-    _fragment_and_map!(sm, [1, 2])
-    _fragment_and_map!(sm, [2, 3])
+function _fragment_three_pass!(sm::SolidModel; verbose=false)
+    for dims in ([0, 1], [1, 2], [2, 3])
+        t_fragment = time_ns()
+        _fragment_and_map!(sm, dims)
+        verbose && @info "  fragmented dimensions $dims [$(_elapsed_s(t_fragment)) s]"
+    end
     return sm
 end
 
@@ -1219,7 +1227,7 @@ end
 #   - `emit!(els, meta, k; zmap, points_cache, kwargs...)`: how OCC entities are
 #     added for a metadata group. Stock uses `_add_to_current_solidmodel!`;
 #     conformal wraps `_add_conformal!` closing over the caller's context.
-#   - `fragment!(sm)`: post-postrender fragment pass. Stock always runs the
+#   - `fragment!(sm; verbose)`: post-postrender fragment pass. Stock always runs the
 #     three-pass `_fragment_and_map!`; conformal only runs it when
 #     `fragment_backstop=true`.
 # Every other step (gmsh setup, metadata loop, control-point collection,
@@ -1239,8 +1247,10 @@ function _render_orchestrator!(
     auto_union=false,
     skip_unused_layers=false,
     curvature_sizing=true,
+    verbose=false,
     kwargs...
 ) where {T}
+    t_render = time_ns()
     gmsh.model.set_current(name(sm))
 
     if !isnothing(meshing_parameters)
@@ -1277,6 +1287,7 @@ function _render_orchestrator!(
     end
 
     # Create physical groups
+    verbose && @info "render!: rendering entities to physical groups of model $(name(sm))"
     for meta in unique(element_metadata(flat)) # For each unique (layer, level, index) triple
         mapped_name = map_meta(meta)
         isnothing(mapped_name) && continue
@@ -1285,6 +1296,7 @@ function _render_orchestrator!(
            string(layer(meta)) ∉ used_names
             continue
         end
+        t_group = time_ns()
         idx = (element_metadata(flat) .== meta) # Get the corresponding elements
         els = to_primitives.(sm, elements(flat)[idx]; kwargs...)
         meshsizes = sizeandgrading.(elements(flat)[idx]; kwargs...)
@@ -1303,6 +1315,7 @@ function _render_orchestrator!(
 
         # Make physical group for each dimension
         sm[mapped_name] = group_dimtags
+        verbose && @info "  $mapped_name: $(_result_summary(group_dimtags, t_group))"
 
         # Sample mesh size control points from the same primitive form added to the model.
         z_of_meta = _stp_float(zmap(meta))
@@ -1338,7 +1351,10 @@ function _render_orchestrator!(
     finalize_size_fields!()
     # Extrusions, Booleans, etc
     _synchronize!(sm)
-    skip_postrender && return nothing
+    if skip_postrender
+        verbose && @info "render!: skipping postrendering [$(_elapsed_s(t_render)) s]"
+        return nothing
+    end
     # Union each physical group to consolidate overlapping entities before postrender.
     # Doing this before extrusions/booleans reduces the cost of pairwise fragmentation.
     if auto_union
@@ -1346,13 +1362,16 @@ function _render_orchestrator!(
         for groupname in collect(keys(dimgroupdict(sm, 2))) # Only dim 2 will be present
             push!(auto_union_ops, (groupname, union_geom!, (groupname, 2)))
         end
-        _postrender!(sm, auto_union_ops)
+        verbose && @info "render!: unioning $(length(auto_union_ops)) 2D physical groups"
+        _postrender!(sm, auto_union_ops; verbose=verbose)
         _synchronize!(sm)
     end
-    meshsize_composed = _postrender!(sm, postrender_ops; mesh_points_by_group, mesh_seen)
+    verbose && @info "render!: running $(length(postrender_ops)) postrendering operations"
+    meshsize_composed =
+        _postrender!(sm, postrender_ops; mesh_points_by_group, mesh_seen, verbose)
     _synchronize!(sm)
     # Get rid of redundant entities and update groups accordingly.
-    fragment!(sm)
+    fragment!(sm; verbose)
 
     # Rebuild KDTrees to include mesh-size controls composed with extrusions.
     meshsize_composed && finalize_size_fields!()
@@ -1375,6 +1394,7 @@ function _render_orchestrator!(
         reindex_physical_groups!(sm)
     end
 
+    verbose && @info "render!: done [$(_elapsed_s(t_render)) s]"
     return _synchronize!(sm)
 end
 
