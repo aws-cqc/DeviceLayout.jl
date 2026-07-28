@@ -6,6 +6,8 @@ The format of this changelog is based on
 
 ## Unreleased
 
+## 1.16.1 (2026-07-28)
+
 ### Fixed
 
   - Zero-length path nodes and compound subsegments with continuous styles (for example a
