@@ -649,6 +649,20 @@ end
     pa0 = Path()
     straight!(pa0, 0μm, Paths.Trace(5μm))
     @test isempty(_normalize_curved_clip_arg(MeshSized(1μm)(pa0[1])))
+
+    # `Plain` and `OptionalStyle` are geometry-transparent too. `not_simulated` resolves to
+    # `Plain` by default, so a curved path node marked not-simulated must keep its arcs.
+    not_simulated = DeviceLayout.SchematicDrivenLayout.not_simulated
+    for node in (DeviceLayout.Plain()(pa[1]), not_simulated(pa[1]))
+        node_out = union2d_curved(node)
+        @test length(node_out) == 1
+        @test length(node_out[1].exterior.curves) == 2
+        @test isempty(to_polygons(xor2d(node_out, pathtopolys(pa))))
+    end
+    # The flag selects the branch: with `simulation=true`, not_simulated renders nothing.
+    ns = not_simulated(pa[1])
+    @test isempty(to_curvilinear(ns.ent, ns.sty; simulation=true))
+    @test length(to_curvilinear(ns.ent, ns.sty; simulation=false).curves) == 2
 end
 
 @testitem "Curve recovery — warn once on silent curve loss" setup = [CommonTestSetup] begin

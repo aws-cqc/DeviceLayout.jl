@@ -1804,9 +1804,12 @@ to_curvilinear(ent::CurvilinearPolygon, sty; kwargs...) = styled_loop(ent, sty; 
 # styles pass through. Without this method a `MeshSized` path node falls to the generic
 # `to_polygons` fallback and silently discretizes its arcs. Zero-length continuous-style
 # nodes (as left around `attach!`/`launch!`) expand to nothing, matching `_normalize_curved_clip_arg`.
+# The styles are listed explicitly rather than accepting any style, because `pathtopolys`
+# ignores the style: styles that do change geometry (`Rounded`, `ToTolerance`) must keep
+# falling back to `to_polygons`, which honors them.
 function to_curvilinear(
     n::Paths.Node{T},
-    ::Union{MeshSized, WithDirection};
+    ::Union{MeshSized, WithDirection, Plain};
     kwargs...
 ) where {T}
     iszero(pathlength(n.seg)) &&
@@ -1814,6 +1817,13 @@ function to_curvilinear(
         return CurvilinearPolygon{T}[]
     return pathtopolys(n; kwargs...)
 end
+# `OptionalStyle` selects one of its two branches, either of which may be geometry-transparent,
+# so resolve the flag first rather than treating the wrapper itself as opaque.
+to_curvilinear(n::Paths.Node, sty::OptionalStyle; kwargs...) = to_curvilinear(
+    n,
+    get(kwargs, sty.flag, sty.default) ? sty.true_style : sty.false_style;
+    kwargs...
+)
 to_curvilinear(ent::ClippedPolygon, sty; kwargs...) =
     to_curvilinear(ent, StyleDict(sty); kwargs...)
 to_curvilinear(ent::CurvilinearRegion, sty; kwargs...) =
