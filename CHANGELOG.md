@@ -24,6 +24,11 @@ The format of this changelog is based on
     OpenCASCADE can reject when rendering to a `SolidModel`, into simple regions. Pieces are
     classified by winding, so keyholed islands and holes are kept. Run it after boolean
     operations and `split_t_junctions!`.
+  - `render!(::SolidModel, ...)` accepts `verbose=true` (also usable as a `SolidModelTarget`
+    rendering option), which logs each physical group created while rendering and each
+    postrendering operation, along with the resulting entity count, bounding box, and elapsed
+    time. Operations are logged before they run, so the operation responsible for a failure is
+    the last one logged. (#266)
 
 ### Changed
 
