@@ -29,6 +29,11 @@ The format of this changelog is based on
   - `SolidModels.fragment_near!` makes one or more dim-3 physical groups (e.g. imported CAD
     parts) conformal with nearby geometry by fragmenting only the entities that touch the
     bounding boxes of their volumes, instead of the whole model.
+  - `render!(::SolidModel, ...)` accepts `verbose=true` (also usable as a `SolidModelTarget`
+    rendering option), which logs each physical group created while rendering and each
+    postrendering operation, along with the resulting entity count, bounding box, and elapsed
+    time. Operations are logged before they run, so the operation responsible for a failure is
+    the last one logged. (#266)
 
 ### Changed
 
