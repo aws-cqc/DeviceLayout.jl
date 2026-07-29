@@ -154,6 +154,24 @@
         straight!(pth, 10μm, Paths.TaperTrace(10μm, 20μm))
         @test halo(pth[1].sty, 20μm, 10μm) ==
               Paths.TaperCPW{typeof(1.0μm)}(30μm, 10μm, 40μm, 10μm, 10μm)
+
+        # A compound style is haloed substyle by substyle, so one starting with a
+        # zero-extent substyle still gets a halo for its remaining substyles. Both
+        # `AbstractCompoundStyle` subtypes must agree: `PeriodicStyle` here, and the
+        # `CompoundStyle` covering the same styles over the same intervals as a control.
+        periodic = Paths.PeriodicStyle([Paths.NoRender(), Paths.Trace(10μm)], [5μm, 5μm])
+        compound = Paths.CompoundStyle(
+            Paths.Style[Paths.NoRender(), Paths.Trace(10μm)],
+            [0.0μm, 5.0μm, 10.0μm],
+            :halo_periodic_control
+        )
+        for sty in (periodic, compound)
+            h = halo(sty, 2μm)
+            @test !isa(h, Paths.NoRender)
+            @test iszero(Paths.extent(h, 2μm))       # zero-extent substyle stays unrendered
+            @test Paths.extent(h, 7μm) ≈ 7μm         # 5μm trace half-width plus 2μm
+        end
+        @test halo(periodic, 2μm).lengths == periodic.lengths
     end
 end
 

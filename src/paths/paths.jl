@@ -1620,7 +1620,10 @@ function halo(sty::Style, outer_delta, inner_delta=nothing; kwargs...)
     )
 end
 
-function halo(sty::CompoundStyle, outer_delta, inner_delta=nothing; kwargs...)
+# Applies to every `AbstractCompoundStyle`, not just `CompoundStyle`: the generic `Style`
+# method decides whether to render a halo from the extent at `t == 0` alone, which discards
+# every later substyle if a compound style happens to start with a zero-extent one.
+function halo(sty::AbstractCompoundStyle, outer_delta, inner_delta=nothing; kwargs...)
     newsty = copy(sty)
     newsty.styles .= halo.(newsty.styles, Ref(outer_delta), Ref(inner_delta); kwargs...)
     return newsty

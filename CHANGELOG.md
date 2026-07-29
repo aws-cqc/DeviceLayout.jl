@@ -51,6 +51,13 @@ The format of this changelog is based on
   `OptionalStyle` as their outer style.
   - `ArrayReferences` as `Path` attachments now work with retrieving references and finding transformations (`refs` and `transformation`).
   - `SolidModelTarget` extrusion of levelwise layers treats positive thickness as "away from substrate" at all levels. Previously a levelwise `thickness` vector extruded levels 3 and 4 (and 7 and 8, and so on) toward the substrate instead of away from it.
+### Fixed
+
+  - `halo` of a `PeriodicStyle` is now taken substyle by substyle, as it already was for
+    `CompoundStyle`. Previously a `PeriodicStyle` fell through to the generic style method,
+    which decides whether to render a halo from the extent at the start of the style alone,
+    so a periodic style beginning with a zero-extent substyle (such as one alternating
+    `NoRender` with a trace) produced no halo at all.
 
 ## 1.16.1 (2026-07-28)
 
