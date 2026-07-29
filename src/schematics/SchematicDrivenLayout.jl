@@ -64,6 +64,7 @@ import DeviceLayout:
     transform,
     transformation,
     _geometry!
+import ..Paths
 import ..Paths: setα0p0!, setp0!, Route, RouteRule, route!
 import ..CoordinateSystems: append_coordsys!
 
@@ -105,9 +106,11 @@ export @component,
     not_simulated,
     not_simulated!,
     only_simulated,
+    only_simulated!,
     not_solidmodel,
     not_solidmodel!,
     only_solidmodel,
+    only_solidmodel!,
     origin,
     parameters,
     parameter_names,

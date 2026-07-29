@@ -20,6 +20,10 @@
         name::String = "test"
         hooks::NamedTuple = (;)
     end
+
+    struct UncachedTargetComponent <: AbstractComponent{typeof(1.0nm)}
+        name::String
+    end
     SchematicDrivenLayout.hooks(comp::TestDirectionalComponent) = comp.hooks
     check_rotation(::TestDirectionalComponent) = true
     allowed_rotation_angles(::TestDirectionalComponent) = [0, pi / 2]
@@ -565,6 +569,121 @@
         cell = Cell("test", nm)
         render!(cell, cs, target) # undef_meta, GDSMeta(2,2)
         @test cell.element_metadata == [GDSMeta(), GDSMeta(3, 3)]
+
+        # `not_simulated!`/`not_solidmodel!` recurse through a coordinate system's references,
+        # which may be either an array or a single reference. The two are sibling types, so
+        # both have to be handled or arrays raise a `MethodError` mid-traversal.
+        @testset "Optional-render helpers through references" begin
+            arr!(parent, child) = addarr!(
+                parent,
+                child,
+                Point(0μm, 0μm);
+                dc=Point(20μm, 0μm),
+                nc=2,
+                dr=Point(0μm, 20μm),
+                nr=2
+            )
+            function refparent(add!)
+                child = CoordinateSystem("child", nm)
+                render!(child, rect, meta)
+                parent = CoordinateSystem("parent", nm)
+                add!(parent, child)
+                return parent
+            end
+            # The geometry lives in the referenced cell, so it has to be flattened to count.
+            nrendered(cs, target) = length(flatten(Cell(cs, nm, target)).elements)
+            artwork = ArtworkTarget(tech)
+            for (add!, n) in ((addref!, 1), (arr!, 4))
+                # Without the helpers, the referenced geometry renders for either target.
+                @test nrendered(refparent(add!), artwork) == n
+                @test nrendered(refparent(add!), SimulationTarget(tech)) == n
+                @test nrendered(not_simulated!(refparent(add!)), artwork) == n
+                @test nrendered(not_simulated!(refparent(add!)), SimulationTarget(tech)) ==
+                      0
+                @test nrendered(not_solidmodel!(refparent(add!)), artwork) == n
+                @test nrendered(
+                    not_solidmodel!(refparent(add!)),
+                    ArtworkTarget(tech, rendering_options=(; solidmodel=true))
+                ) == 0
+            end
+        end
+
+        @testset "Identical styles are idempotent" begin
+            for f! in (not_simulated!, only_simulated!, not_solidmodel!, only_solidmodel!)
+                styled_cs = CoordinateSystem("styled", nm)
+                place!(styled_cs, rect, meta)
+                f!(styled_cs)
+                styled_ent = elements(styled_cs)[1]
+                f!(styled_cs)
+                @test elements(styled_cs)[1] === styled_ent
+            end
+        end
+
+        @testset "Uncached components warn" begin
+            cs = CoordinateSystem("uncached_parent", nm)
+            addref!(cs, UncachedTargetComponent("uncached"))
+            @test_logs (:warn, r"uncached component uncached") not_simulated!(cs)
+        end
+
+        @testset "Path references and idempotence" begin
+            child = CoordinateSystem("attached", nm)
+            place!(child, rect, meta)
+            pa = Path(Point(0μm, 0μm))
+            straight!(pa, 10μm, Paths.Trace(1μm))
+            attach!(pa, sref(child), 5μm)
+
+            parent = CoordinateSystem("pathparent", nm)
+            addref!(parent, pa)
+            not_simulated!(parent)
+
+            # A Path reference is replaced by a styled, reference-free node in its parent.
+            @test length(elements(parent)) == 1
+            @test elements(parent)[1] isa DeviceLayout.StyledEntity
+            @test DeviceLayout.unstyled(elements(parent)[1]) isa Paths.Node
+            # References attached to the Path are lifted into the parent and still recurse.
+            @test length(refs(parent)) == 1
+            @test structure(refs(parent)[1]) === child
+            @test elements(child)[1] isa DeviceLayout.StyledEntity
+
+            path_ent = elements(parent)[1]
+            child_ent = elements(child)[1]
+            not_simulated!(parent)
+            @test elements(parent)[1] === path_ent
+            @test elements(child)[1] === child_ent
+        end
+
+        @testset "Array references attached to curved paths" begin
+            child = CoordinateSystem("curved_attachment", nm)
+            place!(child, Rectangle(4μm, 2μm), meta)
+            attached = aref(
+                child,
+                Point(0μm, 0μm);
+                dc=Point(20μm, 0μm),
+                nc=2,
+                dr=Point(0μm, 20μm),
+                nr=2,
+                rot=30°
+            )
+
+            pa = Path(Point(0μm, 0μm))
+            straight!(pa, 100μm, Paths.SimpleTrace(10μm))
+            turn!(pa, 90°, 50μm)
+            attach!(pa, attached, 25μm; i=2)
+
+            parent = CoordinateSystem("curved_path_parent", nm)
+            addref!(parent, pa)
+            styled = deepcopy(parent)
+            not_simulated!(styled)
+
+            path_target = ArtworkTarget(tech)
+            rendered = flatten(Cell(styled, path_target))
+            rendered_sim = flatten(Cell(styled, SimulationTarget(tech)))
+            flattened = Cell(flatten(parent), path_target)
+            @test length(flattened.elements) == 6
+            @test length(rendered.elements) == length(flattened.elements)
+            @test all(isapprox.(rendered.elements, flattened.elements))
+            @test isempty(rendered_sim.elements)
+        end
     end
 
     @variant TestCompVariant TestComponent new_defaults =

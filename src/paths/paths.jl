@@ -37,6 +37,7 @@ import IntervalSets.(..)
 import DeviceLayout
 import DeviceLayout:
     AbstractComponent,
+    ArrayReference,
     Coordinate,
     CoordinateSystem,
     CoordinateUnits,

@@ -135,7 +135,7 @@ function attach!(
     end
 end
 
-function transformation(p::Path, c::StructureReference)
+function transformation(p::Path, c::GeometryReference)
     x = false
     for node in p.nodes
         if node.sty isa DecoratedStyle
@@ -162,12 +162,16 @@ end
 function transformation(
     segment::Segment,
     t,
-    c::StructureReference,
+    c::GeometryReference,
     s::Paths.DecoratedStyle,
     dir
 )
+    return path_transformation(segment, t, s, dir) ∘ transformation(c)
+end
+
+function path_transformation(segment::Segment, t, s::Paths.DecoratedStyle, dir)
     rot = direction(segment, t)
-    origin = Point(Rotation(rot)(c.origin)) + segment(t)
+    origin = segment(t)
     if dir != 0
         rot2 = if dir == -1
             rot + 90.0°
@@ -179,7 +183,7 @@ function transformation(
         origin += Point(dx, dy)
     end
 
-    return ScaledIsometry(origin, rot + rotation(c), xrefl(c), mag(c))
+    return ScaledIsometry(origin, rot)
 end
 
 # undocumented private methods for attach!
@@ -227,12 +231,10 @@ undecorate!(sty::Style, t) = sty
 # handling compound style is probably brittle if it has decorations inside
 
 function _refs(segment::Paths.Segment{T}, s::DecoratedStyle) where {T}
-    r = Vector{StructureReference{T}}(undef, length(s.refs))
+    r = Vector{GeometryReference{T}}(undef, length(s.refs))
     for (idx, t, dir, cref) in zip(eachindex(s.ts), s.ts, s.dirs, s.refs)
         (dir < -1 || dir > 1) && error("Invalid direction in $s.")
-        a = transformation(segment, t, cref, s, dir)
-        ref = sref(structure(cref), a)
-        r[idx] = ref
+        r[idx] = path_transformation(segment, t, s, dir)(cref)
     end
     return vcat(r, _refs(segment, s.s)) # vcat in case s.s is an overlay style and has more refs
 end

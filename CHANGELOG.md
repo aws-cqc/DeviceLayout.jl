@@ -29,6 +29,19 @@ The format of this changelog is based on
     `ParameterSet`, enabling independent programmatic templates such as
     `design.components.q1 = library.templates.qubit`.
   - Parameter-set YAML output now emits `Unitful.Quantity` values as unquoted plain scalars.
+  - Added in-place style helpers `only_simulated!` and `only_solidmodel!` to match the in-place versions
+  of `not_simulated!` and `not_solidmodel!`.
+  - All eight style helpers (in-place and out-of-place versions) are exported from `.SchematicDrivenLayout`.
+
+### Fixed
+
+  - The style helpers `not_simulated!` and `not_solidmodel!` now recurse through all references
+    to structures of any valid type. Previously array references and non-`CoordinateSystem` structures
+    raised a `MethodError` part-way through the traversal. References to `Path`s are handled by
+    separately adding the path's references and its `Paths.Node` entities
+    to the parent structure (with the style applied).
+  - The style helpers are now idempotent, and will not change entities that already have the identical
+  `OptionalStyle` as their outer style.
 
 ## 1.16.1 (2026-07-28)
 
