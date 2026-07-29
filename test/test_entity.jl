@@ -173,10 +173,8 @@
         end
         @test halo(periodic, 2μm).lengths == periodic.lengths
 
-        # `docs/src/tutorials/working_with_paths.md` gives two equivalent ways to bridge a
-        # path: overlaying a `PeriodicStyle` built from a template path, and `attach!` over a
-        # range. Their halos must agree, attachments included -- a halo is used as a keepout,
-        # so bridges missing from it invite fill or routing directly on top of them.
+        # Two equivalent canonical ways of bridging a path must agree on halos:
+        # Overlaying a `PeriodicStyle` built from a template path, and `attach!` over a range.
         bridge_cs = CoordinateSystem(uniquename("bridge"), nm)
         place!(bridge_cs, centered(Rectangle(10μm, 40μm)), SemanticMeta(:bridge))
         template = Path()
