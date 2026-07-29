@@ -6,6 +6,16 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Fixed
+
+  - `addstyle!(d::StyleDict, s::GeometryEntityStyle, node::Clipper.PolyNode)` no longer throws
+    an `UndefVarError`. This documented form of `addstyle!` referred to an undefined name in
+    its body, so it never worked; the equivalent `d[node] = s` spelling was unaffected.
+  - `rem_node!` now removes the node from a `SchematicGraph`'s name lookup as well as from its
+    node list. Previously the removed node stayed reachable as `g.<id>`, and using it then
+    failed obscurely — with a `MethodError` mentioning `Nothing`, or a `KeyError` whose key is
+    the whole `ComponentNode` — instead of reporting that the node had been removed.
+
 ## 1.16.1 (2026-07-28)
 
 ### Fixed
