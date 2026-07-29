@@ -242,7 +242,8 @@ end
 Return the `(dimension, integer tag)` tuples for `SolidModel` entities in `pg`.
 """
 dimtags(pg::AbstractPhysicalGroup) = [(pg.dim, tag) for tag in entitytags(pg)]
-dimtags(groups::Vector{<:AbstractPhysicalGroup}) = vcat(dimtags.(groups))
+dimtags(groups::Vector{<:AbstractPhysicalGroup}) =
+    reduce(vcat, dimtags.(groups); init=Tuple{Int32, Int32}[])
 
 name(pg::PhysicalGroup) = pg.name
 

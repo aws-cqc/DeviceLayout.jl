@@ -1011,7 +1011,7 @@ function remove_group!(
 end
 
 remove_group!(sm::SolidModel, group, dim; kwargs...) =
-    remove_group!.(sm, group, dim; kwargs...)
+    reduce(vcat, remove_group!.(sm, group, dim; kwargs...); init=Tuple{Int32, Int32}[])
 
 function remove_group!(group::PhysicalGroup; recursive=true, remove_entities=true)
     if remove_entities
