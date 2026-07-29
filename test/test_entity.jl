@@ -172,6 +172,36 @@
             @test Paths.extent(h, 7μm) ≈ 7μm         # 5μm trace half-width plus 2μm
         end
         @test halo(periodic, 2μm).lengths == periodic.lengths
+
+        # `docs/src/tutorials/working_with_paths.md` gives two equivalent ways to bridge a
+        # path: overlaying a `PeriodicStyle` built from a template path, and `attach!` over a
+        # range. Their halos must agree, attachments included -- a halo is used as a keepout,
+        # so bridges missing from it invite fill or routing directly on top of them.
+        bridge_cs = CoordinateSystem(uniquename("bridge"), nm)
+        place!(bridge_cs, centered(Rectangle(10μm, 40μm)), SemanticMeta(:bridge))
+        template = Path()
+        straight!(template, 100μm, Paths.NoRender())
+        attach!(template, sref(bridge_cs), 50μm)
+        function bridged(use_overlay)
+            pa = Path(Point(0μm, 0μm))
+            straight!(pa, 500μm, Paths.CPW(10μm, 6μm))
+            if use_overlay
+                overlay!(pa, Paths.PeriodicStyle(template), DeviceLayout.NORENDER_META)
+            else
+                attach!(pa, sref(bridge_cs), (50μm):(100μm):(450μm))
+            end
+            cs = CoordinateSystem(uniquename("bridged"), nm)
+            place!(cs, pa, SemanticMeta(:base))
+            return cs
+        end
+        nbridges(cs) =
+            count(m -> layer(m) == :bridge, DeviceLayout.element_metadata(flatten(cs)))
+
+        overlay_halo = halo(bridged(true), 5μm)
+        attach_halo = halo(bridged(false), 5μm)
+        @test nbridges(attach_halo) == 5
+        @test nbridges(overlay_halo) == nbridges(attach_halo)
+        @test bounds(overlay_halo) ≈ bounds(attach_halo)
     end
 end
 
