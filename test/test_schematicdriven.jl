@@ -231,6 +231,22 @@
         SchematicDrivenLayout.matching_hooks(t1::TestComponent, ::TestComponent) =
             SchematicDrivenLayout.matching_hooks(t1, Spacer())
 
+        # `rem_node!` drops the node from `nodes` and from the name lookup. `node_dict` is
+        # keyed by `Symbol`, as `add_node!` inserts it, so deleting with the node's `String`
+        # id deletes nothing: the removed node stays reachable as `g.<id>` and every later
+        # use of it fails obscurely, since `indexof` then returns `nothing`.
+        @testset "Remove" begin
+            g3 = SchematicGraph("test_remove")
+            keep = add_node!(g3, template)
+            drop = add_node!(g3, bq)
+            @test Symbol(drop.id) in keys(g3.node_dict)
+            @test rem_node!(g3, drop) === drop
+            @test nodes(g3) == [keep]
+            @test !(Symbol(drop.id) in keys(g3.node_dict))
+            @test Symbol(keep.id) in keys(g3.node_dict)
+            @test getproperty(g3, Symbol(keep.id)) === keep
+        end
+
         @testset "Replace" begin
             append_x(tc, p) =
                 TestComponent(name=(tc.name * "$(ustrip(mm, p.x))"), hooks=tc.hooks)
