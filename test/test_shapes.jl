@@ -145,6 +145,18 @@
     @test d2[[1, 1]].min_angle == Polygons.Rounded(0.25μm).min_angle
     @test d2[[1, 1]].p0 == Polygons.Rounded(0.25μm).p0
 
+    # `addstyle!` is documented for all three location forms, and the `PolyNode` form must
+    # agree with the `setindex!` spelling above, which routes through it.
+    d3 = StyleDict()
+    Polygons.addstyle!(d3, Polygons.Rounded(0.25μm), rd1[1, 1])
+    @test to_polygons(DeviceLayout.styled(rd1, d3)) == to_polygons(rds)
+    d3 = StyleDict()
+    Polygons.addstyle!(d3, Polygons.Rounded(0.25μm), 1, 1)
+    @test to_polygons(DeviceLayout.styled(rd1, d3)) == to_polygons(rds)
+    d3 = StyleDict()
+    Polygons.addstyle!(d3, Polygons.Rounded(0.25μm), [1, 1])
+    @test to_polygons(DeviceLayout.styled(rd1, d3)) == to_polygons(rds)
+
     # Apply a Rounding style specified by target points
     sty = Polygons.Rounded(2.0μm, p0=[Point(1.0μm, 1.0μm), Point(-1.0μm, -1.0μm)])
     r = centered(Rectangle(2.0μm, 2.0μm))
