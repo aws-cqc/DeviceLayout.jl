@@ -1559,3 +1559,40 @@ end
         end
     end
 end
+
+@testitem "Schematic + SolidModel + levelwise extrusion signs" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+
+    # A levelwise layer's thickness vector indexes levels 1, 2, ...; positive thickness is
+    # away from that level's substrate surface. Odd levels are substrate tops (outward is
+    # +z) and even levels are substrate bottoms (outward is -z), matching `layer_z`.
+    # A schematic is needed only to resolve indexed layers, so an empty one suffices.
+    sch = plan(SchematicGraph("levelwise_extrusion_signs"); log_dir=nothing)
+    dz_by_group(target) =
+        Dict(op[1] => op[3][2] for op in SchematicDrivenLayout.extrusion_ops(target, sch))
+
+    n = 6
+    thicknesses = [(10 * lev)nm for lev = 1:n]
+    outward(lev) = isodd(lev) ? 1 : -1
+
+    # Levels beyond 2 are reachable without a third substrate: in a two-chip flip-chip,
+    # level 3 is the outer face of the top chip.
+    tech = ProcessTechnology((;), (; thickness=(; metal=thicknesses)))
+    dz = dz_by_group(SolidModelTarget(tech; levelwise_layers=[:metal]))
+    for lev = 1:n
+        @test dz["metal_L$(lev)_extrusion"] == outward(lev) * thicknesses[lev]
+    end
+
+    # A substrate layer extrudes into its substrate, flipping the base sign at every level.
+    subtech = ProcessTechnology((;), (; thickness=(; chip_outline=thicknesses)))
+    subdz = dz_by_group(
+        SolidModelTarget(
+            subtech;
+            levelwise_layers=[:chip_outline],
+            substrate_layers=[:chip_outline]
+        )
+    )
+    for lev = 1:n
+        @test subdz["chip_outline_L$(lev)_extrusion"] == -outward(lev) * thicknesses[lev]
+    end
+end
