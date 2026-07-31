@@ -726,6 +726,75 @@ end
         line_arc_cornerindices,
         rounded_corner_segment_arc_arc
 
+    """
+        check_arc_arc_fillets(cp, fillet_r; atol_length=1.0nm, atol_angle=1e-6)
+
+    Assert that `rounded_corner_segment_arc_arc` produces valid fillets at every arc-arc
+    corner of `cp`: the fillet is a `Paths.Turn` of the requested radius, its endpoints are the
+    tangent points on the two arcs, those tangent points lie on the arcs' circles, and the
+    fillet center is at distance R±r from each arc center (external or internal tangency).
+    """
+    function check_arc_arc_fillets(cp, fillet_r; atol_length=1.0nm, atol_angle=1e-6)
+        n_aa = 0
+        n_filleted = 0
+        for i in arc_arc_cornerindices(cp)
+            edge = edge_type_at_vertex(cp, i)
+            n_aa += 1
+            seg = rounded_corner_segment_arc_arc(edge.incoming, edge.outgoing, fillet_r)
+            isnothing(seg) && continue
+            n_filleted += 1
+
+            @test seg.fillet isa Paths.Turn
+            @test seg.fillet.r ≈ fillet_r
+
+            O_in = Paths.curvaturecenter(edge.incoming)
+            O_out = Paths.curvaturecenter(edge.outgoing)
+            R_in = abs(edge.incoming.r)
+            R_out = abs(edge.outgoing.r)
+
+            # Tangent points lie on their respective arc circles.
+            @test isapprox(norm(seg.T_in - O_in), R_in, atol=atol_length)
+            @test isapprox(norm(seg.T_out - O_out), R_out, atol=atol_length)
+
+            # Fillet runs T_in → T_out.
+            @test isapprox(Paths.p0(seg.fillet), seg.T_in, atol=atol_length)
+            @test isapprox(Paths.p1(seg.fillet), seg.T_out, atol=atol_length)
+
+            # Fillet center is `fillet_r` from each tangent point, and R±r from each arc center.
+            C_f = Paths.curvaturecenter(seg.fillet)
+            @test isapprox(norm(C_f - seg.T_in), fillet_r, atol=atol_length)
+            @test isapprox(norm(C_f - seg.T_out), fillet_r, atol=atol_length)
+            d_in = norm(C_f - O_in)
+            d_out = norm(C_f - O_out)
+            @test isapprox(d_in, R_in + fillet_r, atol=atol_length) ||
+                  isapprox(d_in, abs(R_in - fillet_r), atol=atol_length)
+            @test isapprox(d_out, R_out + fillet_r, atol=atol_length) ||
+                  isapprox(d_out, abs(R_out - fillet_r), atol=atol_length)
+
+            # G1 tangency: fillet heading at each end matches the arc's heading at the tangent
+            # point (mod π, since headings may be recorded in either traversal sense).
+            α_in_arc = Paths.direction(
+                edge.incoming,
+                Paths.pathlength_nearest(edge.incoming, seg.T_in)
+            )
+            α_out_arc = Paths.direction(
+                edge.outgoing,
+                Paths.pathlength_nearest(edge.outgoing, seg.T_out)
+            )
+            @test isapprox_angle(Paths.α0(seg.fillet), α_in_arc, atol=atol_angle) ||
+                  isapprox_angle(Paths.α0(seg.fillet), α_in_arc + π, atol=atol_angle)
+            @test isapprox_angle(Paths.α1(seg.fillet), α_out_arc, atol=atol_angle) ||
+                  isapprox_angle(Paths.α1(seg.fillet), α_out_arc + π, atol=atol_angle)
+
+            # Sampled points along the fillet stay at radius `fillet_r` from its center.
+            L_f = Paths.pathlength(seg.fillet)
+            for t in range(zero(L_f), L_f, length=9)
+                @test isapprox(norm(seg.fillet(t) - C_f), fillet_r, atol=atol_length)
+            end
+        end
+        @test n_filleted == n_aa
+    end
+
     # Build a Turn from p_start to p_end with a given signed sweep. Circle geometry:
     # R = |chord| / (2 sin(β/2)); start heading = chord angle − β/2.
     function arc_between(p_start, p_end, sweep)
