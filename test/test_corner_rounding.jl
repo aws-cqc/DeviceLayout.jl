@@ -771,8 +771,7 @@ end
             @test isapprox(d_out, R_out + fillet_r, atol=atol_length) ||
                   isapprox(d_out, abs(R_out - fillet_r), atol=atol_length)
 
-            # G1 tangency: fillet heading at each end matches the arc's heading at the tangent
-            # point (mod π, since headings may be recorded in either traversal sense).
+            # G1 tangency with the same traversal direction as each arc.
             α_in_arc = Paths.direction(
                 edge.incoming,
                 Paths.pathlength_nearest(edge.incoming, seg.T_in)
@@ -781,10 +780,8 @@ end
                 edge.outgoing,
                 Paths.pathlength_nearest(edge.outgoing, seg.T_out)
             )
-            @test isapprox_angle(Paths.α0(seg.fillet), α_in_arc, atol=atol_angle) ||
-                  isapprox_angle(Paths.α0(seg.fillet), α_in_arc + π, atol=atol_angle)
-            @test isapprox_angle(Paths.α1(seg.fillet), α_out_arc, atol=atol_angle) ||
-                  isapprox_angle(Paths.α1(seg.fillet), α_out_arc + π, atol=atol_angle)
+            @test isapprox_angle(Paths.α0(seg.fillet), α_in_arc, atol=atol_angle)
+            @test isapprox_angle(Paths.α1(seg.fillet), α_out_arc, atol=atol_angle)
 
             # Sampled points along the fillet stay at radius `fillet_r` from its center.
             L_f = Paths.pathlength(seg.fillet)
@@ -842,15 +839,26 @@ end
     @test sort(arc_arc_cornerindices(crescent)) == [1, 2]
     check_arc_arc_fillets(crescent, fillet_r)
 
-    # Fillet radius exceeds both arc radii (r > R) and the chosen fillet is internally tangent
-    # to the small arc — the fillet circle contains it, so the tangent point flips to O − R·u.
-    # check_arc_arc_fillets asserts each contact is on its arc circle and exactly `fillet_r`
-    # from the fillet center, which fails if the internal-tangency sign is wrong.
-    rgt_in = Paths.Turn(300°, 0.3μm; p0=O, α0=0°)          # R = 0.3μm < fillet_r = 0.8μm
-    rgt_out = Paths.Turn(-300°, 0.5μm; p0=Paths.p1(rgt_in), α0=Paths.α1(rgt_in) + 60°)
-    r_gt_R = CurvilinearPolygon([O, Paths.p1(rgt_in)], [rgt_in, rgt_out], [1, 2])
-    @test !isempty(arc_arc_cornerindices(r_gt_R))
-    check_arc_arc_fillets(r_gt_R, fillet_r)
+    # Positive cases using the same arc pairs as the oversized rejections below.
+    case_a_in = reverse(Paths.Turn(300.0°, 1.0μm; α0=180.0°))
+    case_a_out = Paths.Turn(-300°, 1.0μm; α0=170°)
+    case_a = CurvilinearPolygon(
+        [Paths.p0(case_a_in), Paths.p1(case_a_in), Paths.p1(case_a_out)],
+        [case_a_in, case_a_out],
+        [1, 2]
+    )
+    @test arc_arc_cornerindices(case_a) == [2]
+    check_arc_arc_fillets(case_a, 0.2μm)
+
+    case_b_in = reverse(Paths.Turn(-60.0°, 1.0μm; α0=180.0°))
+    case_b_out = Paths.Turn(70.0°, 1.1μm; α0=120°)
+    case_b = CurvilinearPolygon(
+        [Paths.p0(case_b_in), Paths.p1(case_b_in), Paths.p1(case_b_out)],
+        [case_b_in, case_b_out],
+        [1, 2]
+    )
+    @test arc_arc_cornerindices(case_b) == [2]
+    check_arc_arc_fillets(case_b, 0.02μm)
 
     # Multi-corner via differencing: a clover subtracted from a rectangle becomes a star-shaped
     # hole whose four arc-arc cusps are rounded. Confirms differencing is lossless for an uncut
@@ -931,6 +939,16 @@ end
     b_kink = Paths.Turn(-90°, 2.0μm; p0=Paths.p1(a_kink), α0=Paths.α1(a_kink) + 40°)
     @test rounded_corner_segment_arc_arc(a_kink, b_kink, 50.0μm) === nothing
     @test !isnothing(rounded_corner_segment_arc_arc(a_kink, b_kink, 0.3μm))
+
+    # Reversed-direction candidates: tangent points lie on both arcs, but G1 traversal fails.
+    wrong_dir_in = reverse(Paths.Turn(300.0°, 1.0μm; α0=180.0°))
+    wrong_dir_out = Paths.Turn(-300°, 1.0μm; α0=170°)
+    @test rounded_corner_segment_arc_arc(wrong_dir_in, wrong_dir_out, 2μm) === nothing
+
+    wrong_dir_small_in = reverse(Paths.Turn(-60.0°, 1.0μm; α0=180.0°))
+    wrong_dir_small_out = Paths.Turn(70.0°, 1.1μm; α0=120°)
+    @test rounded_corner_segment_arc_arc(wrong_dir_small_in, wrong_dir_small_out, 0.2μm) ===
+          nothing
 
     # Rendering the rounded shapes must not error.
     @test_nowarn render!(

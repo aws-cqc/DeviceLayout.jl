@@ -1670,11 +1670,16 @@ function rounded_corner_segment_arc_arc(
     α0 = angle_start + sign(dα) * π / 2 # heading = radius direction rotated into travel
 
     fillet = Paths.Turn(uconvert(°, dα), r; p0=T_in, α0=uconvert(°, α0))
-    # The fillet must actually span T_in → T_out; the p1 check catches a wrong sweep sign
-    # before it corrupts CurvilinearPolygon bookkeeping downstream.
+    t_in = Paths.pathlength_nearest(arc_in, T_in)
+    t_out = Paths.pathlength_nearest(arc_out, T_out)
+
+    # The fillet must span T_in → T_out and match the traversal direction of both arcs.
+    # Endpoint-only checks can accept a tangent line whose direction is reversed.
     (
         isapprox(Paths.p0(fillet), T_in; atol=atol) &&
-        isapprox(Paths.p1(fillet), T_out; atol=atol)
+        isapprox(Paths.p1(fillet), T_out; atol=atol) &&
+        isapprox_angle(Paths.α0(fillet), Paths.direction(arc_in, t_in); atol=min_angle) &&
+        isapprox_angle(Paths.α1(fillet), Paths.direction(arc_out, t_out); atol=min_angle)
     ) || return nothing
     return (; fillet, T_in, T_out)
 end
