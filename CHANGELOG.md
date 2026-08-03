@@ -22,6 +22,12 @@ The format of this changelog is based on
     supported final graph-component values, including defaults and recursively realized
     composite subgraphs while preserving attached top-level metadata. Scalar leaves and ordinary
     arrays are retained; unsupported custom values such as `Point`s are omitted.
+
+### Changed
+
+  - `ParameterSet` namespaces are now copied by assignment from another root or scoped
+    `ParameterSet`, enabling independent programmatic templates such as
+    `design.components.q1 = library.templates.qubit`.
   - Parameter-set YAML output now emits `Unitful.Quantity` values as unquoted plain scalars.
 
 ## 1.16.1 (2026-07-28)

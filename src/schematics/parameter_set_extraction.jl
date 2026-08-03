@@ -3,7 +3,12 @@ const _UNSUPPORTED_PARAMETER_VALUE = _UnsupportedParameterValue()
 
 _extracted_array_value(value::Union{Number, AbstractString, Symbol, Nothing}) =
     _parameter_value_copy(value)
-function _extracted_array_value(value::Array)
+function _extracted_array_value(value::Vector)
+    if isempty(value) &&
+       eltype(value) !== Any &&
+       !(eltype(value) <: Union{Number, AbstractString, Symbol, Nothing, Vector})
+        return _UNSUPPORTED_PARAMETER_VALUE
+    end
     result = map(_extracted_array_value, value)
     any(child -> child isa _UnsupportedParameterValue, result) &&
         return _UNSUPPORTED_PARAMETER_VALUE
@@ -17,6 +22,7 @@ function _extracted_parameter_value(value::NamedTuple)
         extracted = _extracted_parameter_value(child)
         extracted isa _UnsupportedParameterValue || (result[string(key)] = extracted)
     end
+    !isempty(value) && isempty(result) && return _UNSUPPORTED_PARAMETER_VALUE
     return result
 end
 function _extracted_parameter_value(value::AbstractDict)
@@ -25,9 +31,10 @@ function _extracted_parameter_value(value::AbstractDict)
         extracted = _extracted_parameter_value(child)
         extracted isa _UnsupportedParameterValue || (result[string(key)] = extracted)
     end
+    !isempty(value) && isempty(result) && return _UNSUPPORTED_PARAMETER_VALUE
     return result
 end
-_extracted_parameter_value(value::Array) = _extracted_array_value(value)
+_extracted_parameter_value(value::Vector) = _extracted_array_value(value)
 _extracted_parameter_value(value::Union{Number, AbstractString, Symbol, Nothing}) =
     _parameter_value_copy(value)
 _extracted_parameter_value(::Any) = _UNSUPPORTED_PARAMETER_VALUE
@@ -103,6 +110,8 @@ function _extract_graph_components!(
 
         namespace = _extraction_namespace!(destination, segments, parent_address)
         parameter_data = _extracted_parameter_value(parameters(component(node)))
+        parameter_data isa _UnsupportedParameterValue &&
+            (parameter_data = Dict{String, Any}())
         _merge_extracted_namespaces!(namespace, parameter_data, address_segments)
 
         comp = component(node)
@@ -128,9 +137,9 @@ Each component is stored below `components` at its unique node ID. Dots in node
 IDs become nested namespace segments, and composite-component graphs are
 recursively nested below their parent component. Parameter values are taken
 from the constructed component instances, so defaults and applied overrides
-are both included. Scalar values and ordinary `Array`s are retained. Named
-tuples and dictionaries form parameter namespaces. Other values, including
-`Point`s and component-valued parameters, are omitted.
+are both included. Scalar values and ordinary one-dimensional `Array`s are
+retained. Named tuples and dictionaries form parameter namespaces. Other
+values, including `Point`s and component-valued parameters, are omitted.
 
 If `g` carries a source `ParameterSet`, its top-level namespaces other than
 `components` are deep-copied into the result. The source `components` namespace
@@ -145,7 +154,10 @@ function extract_parameter_set(g::SchematicGraph)
     data = if isnothing(parameter_set(g))
         Dict{String, Any}()
     else
-        _parameter_value_copy(getfield(parameter_set(g), :data))
+        Dict{String, Any}(
+            key => _parameter_value_copy(value) for
+            (key, value) in getfield(parameter_set(g), :data) if key != "components"
+        )
     end
     extracted_components = Dict{String, Any}()
     data["components"] = extracted_components

@@ -91,6 +91,9 @@ components:
     cap_length: 600μm
 ```
 
+Loaded aliases are detached from one another. Mutating `components.q1` does not
+mutate `templates.qubit`.
+
 ## Programmatic Templates and Merging
 
 A template can live in any `ParameterSet` namespace, including a separate
@@ -210,8 +213,14 @@ ps.components.cap2.finger_count = 8
 g = SchematicGraph("two_caps", ps)
 
 # Create components from parameter set
-cap1 = create_component(MyCapacitor, ps, "components.cap1")
-cap2 = create_component(MyCapacitor, ps, "components.cap2")
+cap1 = set_parameters(
+    create_component(MyCapacitor, ps, "components.cap1"),
+    "cap1",
+)
+cap2 = set_parameters(
+    create_component(MyCapacitor, ps, "components.cap2"),
+    "cap2",
+)
 
 # Build schematic
 cap1_node = add_node!(g, cap1)
@@ -246,9 +255,9 @@ contents. Composite extraction realizes lazy subgraphs. The result has no
 source path or access history and shares no mutable parameter data with the
 graph or its attached source.
 
-Extraction retains scalar parameter leaves and ordinary Julia `Array`s.
-`NamedTuple`s and dictionaries become namespaces. Unsupported custom values,
-including `Point`s and component-valued parameters, are omitted.
+Extraction retains scalar parameter leaves and ordinary one-dimensional Julia
+`Array`s. `NamedTuple`s and dictionaries become namespaces. Unsupported custom
+values, including `Point`s and component-valued parameters, are omitted.
 
 ## Composite Components with ParameterSet
 

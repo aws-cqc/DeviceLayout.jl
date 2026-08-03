@@ -277,6 +277,22 @@
         design2.variants.fast.q1 = library.templates.qubit
         design2.variants.fast.q1.width = 400
         @test library.templates.qubit.width == 300
+
+        root_template = ParameterSet()
+        root_template.width = 500
+        root_template.routing.offsets = [4, 5]
+        design.components.q2 = root_template
+        @test design.components.q2.width == 500
+        @test !haskey(design.components.q2.data, "global")
+        @test !haskey(design.components.q2.data, "components")
+
+        raw_template = Dict{String, Any}(
+            "width" => 600,
+            "routing" => Dict{String, Any}("offsets" => [6, 7])
+        )
+        design.components.q3 = raw_template
+        push!(design.components.q3.routing.offsets, 8)
+        @test raw_template["routing"]["offsets"] == [6, 7]
     end
 
     @testset "Recursive ParameterSet merge" begin
@@ -337,6 +353,30 @@
         # Self-merge is a no-op rather than recursively descending forever.
         @test merge!(destination.components.q1, destination.components.q1) isa ParameterSet
         @test destination.components.q1.width == 350
+
+        auto = ParameterSet()
+        merge!(auto.components.q1, base.components.q1)
+        @test auto.components.q1.width == 300
+
+        shared = Dict{String, Any}("offsets" => [1, 2])
+        aliased_destination = ParameterSet(
+            Dict{String, Any}(
+                "global" => Dict{String, Any}(),
+                "components" =>
+                    Dict{String, Any}("q1" => Dict{String, Any}("routing" => shared))
+            )
+        )
+        aliased_source = ParameterSet(
+            Dict{String, Any}(
+                "global" => Dict{String, Any}(),
+                "components" =>
+                    Dict{String, Any}("q1" => Dict{String, Any}("routing" => shared))
+            )
+        )
+        merge!(aliased_destination.components.q1, aliased_source.components.q1)
+        push!(aliased_destination.components.q1.routing.offsets, 3)
+        @test shared["offsets"] == [1, 2]
+        @test aliased_source.components.q1.routing.offsets == [1, 2]
     end
 
     @testset "propertynames" begin
@@ -643,6 +683,7 @@ end
         name = "assembly"
         cap_length = 600μm
         template = ExampleRectangleIsland(name="template", cap_width=30μm)
+        templates = (island=ExampleRectangleIsland(name="nested_template"),)
     end
 
     function SchematicDrivenLayout._build_subcomponents(c::ExtractionComposite)
@@ -686,6 +727,8 @@ end
     @compdef struct ExtractionArrayComponent <: Component
         name = "array_component"
         offsets = [0μm, 25μm]
+        unsupported_points = typeof(Point(0μm, 0μm))[]
+        unsupported_matrix = [0μm 25μm; 50μm 75μm]
     end
 
     @testset "Complete detached extraction" begin
@@ -717,6 +760,7 @@ end
         @test q1.name == "assembly"
         @test q1.cap_length == 700μm
         @test !haskey(q1.data, "template")
+        @test !haskey(q1.data, "templates")
 
         # Accessing the composite child realizes its lazy graph and captures
         # the child's final parameters, including the forwarded parent value.
@@ -758,6 +802,8 @@ end
 
         extracted = extract_parameter_set(g)
         @test extracted.components.route.offsets == [0μm, 25μm]
+        @test !haskey(extracted.components.route.data, "unsupported_points")
+        @test !haskey(extracted.components.route.data, "unsupported_matrix")
 
         push!(extracted.components.route.offsets, 50μm)
         @test parameters(component).offsets == [0μm, 25μm]
@@ -776,6 +822,7 @@ end
         @test extracted.components.island.cap_width == 41μm
         @test extracted.components.island.cap_length ==
               parameters(ExampleRectangleIsland()).cap_length
+        @test extracted.components.island.junction_pos == :bottom
 
         io = IOBuffer()
         save_parameter_set(io, extracted)
@@ -783,6 +830,7 @@ end
         @test reloaded.components.island.cap_width == 41μm
         @test reloaded.components.island.cap_length ==
               parameters(ExampleRectangleIsland()).cap_length
+        @test reloaded.components.island.junction_pos == :bottom
     end
 
     @testset "Component path collision" begin
@@ -810,6 +858,7 @@ end
         ps = ParameterSet()
         ps.global.version = 1
         ps.global.process_node = "fab_v3"
+        ps.global.junction_pos = :bottom
         ps.components.cap.finger_length = 150μm
         ps.components.cap.finger_count = 6
 
@@ -822,12 +871,14 @@ end
               contains(yaml_str, "finger_length: 150.0μm")
         # Ordinary strings retain YAML.jl's default quoting.
         @test contains(yaml_str, "process_node: \"fab_v3\"")
+        @test contains(yaml_str, "junction_pos: !symbol \"bottom\"")
         # Plain numbers stay as numbers
         @test contains(yaml_str, "finger_count: 6")
         @test contains(yaml_str, "version: 1")
 
         reloaded = ParameterSet(IOBuffer(yaml_str))
         @test reloaded.global.process_node == "fab_v3"
+        @test reloaded.global.junction_pos == :bottom
     end
 
     @testset "ParameterSet from IO" begin
@@ -858,6 +909,8 @@ end
             cap_width: 24μm
             cap_length: 520μm
             cap_gap: 30μm
+            routing:
+              offsets: [0μm, 25μm]
         components:
           q1:
             <<: *qubit
@@ -868,6 +921,8 @@ end
         @test ps.components.q1.cap_width == 24μm
         @test ps.components.q1.cap_length == 600μm
         @test ps.components.q1.cap_gap == 30μm
+        push!(ps.components.q1.routing.offsets, 50μm)
+        @test ps.templates.qubit.routing.offsets == [0μm, 25μm]
     end
 
     @testset "ParameterSet from IO parses unit arrays" begin
@@ -896,6 +951,16 @@ end
         reloaded = ParameterSet(IOBuffer(take!(io)))
 
         @test reloaded.components.routing.pad_offsets == [0μm, 25μm, 50μm]
+    end
+
+    @testset "Unsupported array-like values fail clearly" begin
+        point_ps = ParameterSet()
+        point_ps.components.anchor.p1 = Point(10μm, 20μm)
+        @test_throws ArgumentError save_parameter_set(IOBuffer(), point_ps)
+
+        matrix_ps = ParameterSet()
+        matrix_ps.components.routing.offsets = [0μm 25μm; 50μm 75μm]
+        @test_throws ArgumentError save_parameter_set(IOBuffer(), matrix_ps)
     end
 
     @testset "Factored unit after a flow sequence is not valid YAML" begin

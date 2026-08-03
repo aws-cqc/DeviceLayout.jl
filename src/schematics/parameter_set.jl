@@ -112,7 +112,15 @@ function _missing_error(d::MissingNamespace)
     throw(ParameterKeyError(d.key, _namespace_path(d)))
 end
 
-_parameter_value_copy(value::ParameterSet) = _parameter_value_copy(getfield(value, :data))
+function _parameter_value_copy(value::ParameterSet)
+    result = _parameter_value_copy(getfield(value, :data))
+    if isempty(getfield(value, :prefix))
+        for namespace in REQUIRED_NAMESPACES
+            isempty(result[namespace]) && delete!(result, namespace)
+        end
+    end
+    return result
+end
 _parameter_value_copy(value::Pair) =
     Dict{String, Any}(string(first(value)) => _parameter_value_copy(last(value)))
 function _parameter_value_copy(value::AbstractDict)
@@ -123,6 +131,7 @@ end
 _parameter_value_copy(value) = deepcopy(value)
 
 _parameter_assignment_value(value::ParameterSet) = _parameter_value_copy(value)
+_parameter_assignment_value(value::AbstractDict) = _parameter_value_copy(value)
 _parameter_assignment_value(value::Pair) =
     Dict{String, Any}(string(first(value)) => _parameter_assignment_value(last(value)))
 _parameter_assignment_value(value) = value
@@ -239,10 +248,30 @@ not mark any leaves as accessed.
 """
 function Base.merge!(destination::ParameterSet, sources::ParameterSet...)
     destination_data = getfield(destination, :data)
-    for source in sources
-        _merge_parameter_data!(destination_data, getfield(source, :data))
+    source_data = [
+        _parameter_value_copy(getfield(source, :data)) for
+        source in sources if getfield(source, :data) !== destination_data
+    ]
+    isempty(source_data) && return destination
+
+    detached_destination = _parameter_value_copy(destination_data)
+    empty!(destination_data)
+    _merge_parameter_data!(destination_data, detached_destination)
+    for data in source_data
+        _merge_parameter_data!(destination_data, data)
     end
     return destination
+end
+
+function Base.merge!(destination::MissingNamespace, sources::ParameterSet...)
+    data = _materialize!(destination)
+    scoped = ParameterSet(
+        "",
+        data,
+        getfield(destination, :accessed),
+        _namespace_path(destination)
+    )
+    return merge!(scoped, sources...)
 end
 
 """
@@ -436,8 +465,8 @@ leaf_params(ps::ParameterSet) = leaf_params(getproperty(ps, :data))
 
 Save a `ParameterSet` to a YAML file at `path` or write YAML to an `IO` stream.
 
-`Unitful.Quantity` values are serialized as `"<value><unit>"` (e.g. `"150μm"`)
-for lossless round-tripping.
+`Unitful.Quantity` values are serialized as unquoted `<value><unit>` scalars
+(e.g. `150μm`) for lossless round-tripping.
 
 Requires `YAML.jl` to be loaded (`using YAML`).
 """
