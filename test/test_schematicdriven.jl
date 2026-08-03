@@ -597,16 +597,21 @@
                 # Without the helpers, the referenced geometry renders for either target.
                 @test nrendered(refparent(add!), artwork) == n
                 @test nrendered(refparent(add!), SimulationTarget(tech)) == n
-                @test nrendered(not_simulated!(refparent(add!)), artwork) == n
-                @test nrendered(not_simulated!(refparent(add!)), SimulationTarget(tech)) ==
+                parent = refparent(add!)
+                not_simulated!(parent)
+                @test nrendered(parent, artwork) == n
+                @test nrendered(parent, SimulationTarget(tech)) ==
                       0
-                @test nrendered(not_solidmodel!(refparent(add!)), artwork) == n
+                                parent = refparent(add!)
+                parent = refparent(add!)
+                not_solidmodel!(parent)
+                @test nrendered(parent, artwork) == n
                 @test nrendered(
-                    not_solidmodel!(refparent(add!)),
+                    parent,
                     ArtworkTarget(tech, rendering_options=(; solidmodel=true))
                 ) == 0
             end
-        end
+        end #= @testset "Optional-render helpers through references" begin =#
 
         @testset "Identical styles are idempotent" begin
             for f! in (not_simulated!, only_simulated!, not_solidmodel!, only_solidmodel!)
@@ -636,20 +641,45 @@
             addref!(parent, pa)
             not_simulated!(parent)
 
-            # A Path reference is replaced by a styled, reference-free node in its parent.
-            @test length(elements(parent)) == 1
-            @test elements(parent)[1] isa DeviceLayout.StyledEntity
-            @test DeviceLayout.unstyled(elements(parent)[1]) isa Paths.Node
-            # References attached to the Path are lifted into the parent and still recurse.
-            @test length(refs(parent)) == 1
-            @test structure(refs(parent)[1]) === child
+            # A Path reference is replaced by a CoordinateSystem containing its nodes as elements
+            cs_equiv = parent.refs[1].structure
+            @test cs_equiv isa CoordinateSystem
+            @test length(elements(cs_equiv)) == 1
+            @test elements(cs_equiv)[1] isa DeviceLayout.StyledEntity
+            @test DeviceLayout.unstyled(elements(cs_equiv)[1]) isa Paths.Node
+            # References attached to the Path are identical in the equivalent CS
+            @test length(refs(cs_equiv)) == 1
+            @test structure(refs(cs_equiv)[1]) === child
             @test elements(child)[1] isa DeviceLayout.StyledEntity
 
-            path_ent = elements(parent)[1]
+            path_ent = elements(cs_equiv)[1]
             child_ent = elements(child)[1]
-            not_simulated!(parent)
-            @test elements(parent)[1] === path_ent
+            not_simulated!(cs_equiv)
+            @test elements(cs_equiv)[1] === path_ent
             @test elements(child)[1] === child_ent
+        end
+
+        @testset "Cell references" begin
+            child = Cell("attached", nm)
+            render!(child, rect, GDSMeta())
+            cell = Cell("cell", nm)
+            render!(cell, rect, GDSMeta())
+            addref!(cell, child, Point(5μm, 5μm))
+
+            parent = CoordinateSystem("cellparent", nm)
+            addref!(parent, cell, Point(5μm, 5μm))
+            not_simulated!(parent)
+
+            # A Cell reference is replaced by a CoordinateSystem
+            cs_equiv = parent.refs[1].structure
+            @test cs_equiv isa CoordinateSystem
+            @test length(elements(cs_equiv)) == 1
+            @test elements(cs_equiv)[1] isa DeviceLayout.StyledEntity
+            @test DeviceLayout.unstyled(elements(cs_equiv)[1]) isa Polygon
+            # References attached to the Cell are in the equivalent CS but not identical
+            @test length(refs(cs_equiv)) == 1
+            @test structure(refs(cs_equiv)[1]) isa CoordinateSystem
+            @test elements(cs_equiv.refs[1].structure)[1] isa DeviceLayout.StyledEntity
         end
 
         @testset "Array references attached to curved paths" begin

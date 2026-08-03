@@ -38,8 +38,8 @@ The format of this changelog is based on
   - The style helpers `not_simulated!` and `not_solidmodel!` now recurse through all references
     to structures of any valid type. Previously array references and non-`CoordinateSystem` structures
     raised a `MethodError` part-way through the traversal. References to `Path`s are handled by
-    separately adding the path's references and its `Paths.Node` entities
-    to the parent structure (with the style applied).
+    replacing the `Path` with an equivalent `CoordinateSystem` containing its references and its undecorated
+    nodes separately.
   - The style helpers are now idempotent, and will not change entities that already have the identical
   `OptionalStyle` as their outer style.
 

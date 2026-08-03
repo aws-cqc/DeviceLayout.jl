@@ -13,35 +13,33 @@ end
 
 _apply_target_style!(geom::GeometryStructure, sty::OptionalStyle) = begin
     # A Path is an AbstractComponent, but its geometry is stored as path nodes rather than in a
-    # CoordinateSystem. Replace each Path reference with equivalent entities and lift its
-    # references into this parent structure.
-    i = firstindex(refs(geom))
-    while i <= lastindex(refs(geom))
+    # CoordinateSystem. Replace each Path reference with an equivalent CoordinateSystem containing
+    # its references as well as its undecorated nodes as elements (with the style applied).
+    # Cells are also replaced with CoordinateSystems.
+    for i in eachindex(refs(geom))
         ref = refs(geom)[i]
         if structure(ref) isa Paths.Path
             pa = structure(ref)
-            if isempty(pa)
-                deleteat!(refs(geom), i)
-                continue
-            end
-            append!(elements(geom), transformation(ref).(undecorated.(elements(pa))))
-            append!(element_metadata(geom), element_metadata(pa))
-            append!(refs(geom), refs(pa))
-            deleteat!(refs(geom), i)
-        else
-            i += 1
+            cs = flatten(pa; depth=0) # Creates an equivalent CoordinateSystem
+            reftype = ref isa ArrayReference ? ArrayReference : StructureReference # Reference type without parameters
+            refs(geom)[i] = reftype(cs, transformation(ref))
+        elseif structure(ref) isa Cell # Cells can't hold styled entities, upgrade to CoordinateSystem
+            c = structure(ref)
+            cs = CoordinateSystem{coordinatetype(c)}(c) # Equivalent CoordinateSystem
+            reftype = ref isa ArrayReference ? ArrayReference : StructureReference # Reference type without parameters
+            refs(geom)[i] = reftype(cs, transformation(ref))
         end
     end
     elements(geom) .= _apply_target_style.(elements(geom), Ref(sty))
+    ok = true
     for ref in refs(geom)
-        _apply_target_style!(ref, sty)
+        ok = ok && _apply_target_style!(ref, sty)
     end
-    return geom
+    return ok
 end
 
 function _apply_target_style!(ref::DeviceLayout.GeometryReference, sty::OptionalStyle)
-    _apply_target_style!(structure(ref), sty)
-    return ref
+    return _apply_target_style!(structure(ref), sty)
 end
 
 function _apply_target_style!(comp::AbstractComponent, sty::OptionalStyle)
@@ -50,8 +48,7 @@ function _apply_target_style!(comp::AbstractComponent, sty::OptionalStyle)
         @warn "Cannot apply target style in place to uncached component $(name(comp)); its geometry is not cached"
         return false
     end
-    _apply_target_style!(geometry(comp), sty)
-    return true
+    return _apply_target_style!(geometry(comp), sty)
 end
 
 """
