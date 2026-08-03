@@ -58,7 +58,9 @@ for selective rendering using [styles](@ref concept-entitystyles):
 - **`only_simulated(entity)`**: Entity rendered only when `simulation=true`.
 - **`not_solidmodel(entity)` / `only_solidmodel(entity)`**: Similarly toggles rendering to 3D targets.
 
-This lets a single design produce different outputs for fabrication versus simulation.
+This lets a single design produce different outputs for fabrication versus simulation. These methods can also be used on `Path`s, as shorthand for applying them to `undecorated(simplify(pa))`, returning a single entity without any attached references.
+
+These also have in-place versions that can be applied to `CoordinateSystem`s (as in `not_simulated!(cs)`), which replace entities with their styled versions. `Path`s and `Cell`s in the reference hierarchy of `cs` are replaced with equivalent `CoordinateSystem`s containing their geometry and references.
 
 ## Rendering Arbitrary Paths
 

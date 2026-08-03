@@ -151,6 +151,10 @@ SchematicDrivenLayout.level_z
     SchematicDrivenLayout.only_simulated
     SchematicDrivenLayout.not_solidmodel
     SchematicDrivenLayout.only_solidmodel
+    SchematicDrivenLayout.not_simulated!
+    SchematicDrivenLayout.only_simulated!
+    SchematicDrivenLayout.not_solidmodel!
+    SchematicDrivenLayout.only_solidmodel!
 ```
 
 ### [PDKs](@id api-pdks)

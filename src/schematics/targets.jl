@@ -152,6 +152,8 @@ not_simulated(pa::Paths.Path) = not_simulated(undecorated(Paths.simplify(pa)))
 
 Return a styled entity equivalent to `only_simulated(simplify(pa))`.
 
+The result is a `GeometryEntity` (not a `Path`), so any references attached to `pa` are dropped.
+
 See also [`only_simulated(::GeometryEntity)`](@ref).
 """
 only_simulated(pa::Paths.Path) = only_simulated(undecorated(Paths.simplify(pa)))
@@ -161,6 +163,8 @@ only_simulated(pa::Paths.Path) = only_simulated(undecorated(Paths.simplify(pa)))
 
 Return a styled entity equivalent to `not_solidmodel(simplify(pa))`.
 
+The result is a `GeometryEntity` (not a `Path`), so any references attached to `pa` are dropped.
+
 See also [`not_solidmodel(::GeometryEntity)`](@ref).
 """
 not_solidmodel(pa::Paths.Path) = not_solidmodel(undecorated(Paths.simplify(pa)))
@@ -169,6 +173,8 @@ not_solidmodel(pa::Paths.Path) = not_solidmodel(undecorated(Paths.simplify(pa)))
     only_solidmodel(pa::Paths.Path)
 
 Return a styled entity equivalent to `only_solidmodel(simplify(pa))`.
+
+The result is a `GeometryEntity` (not a `Path`), so any references attached to `pa` are dropped.
 
 See also [`only_solidmodel(::GeometryEntity)`](@ref).
 """
