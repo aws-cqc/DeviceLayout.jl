@@ -600,9 +600,8 @@
                 parent = refparent(add!)
                 not_simulated!(parent)
                 @test nrendered(parent, artwork) == n
-                @test nrendered(parent, SimulationTarget(tech)) ==
-                      0
-                                parent = refparent(add!)
+                @test nrendered(parent, SimulationTarget(tech)) == 0
+                parent = refparent(add!)
                 parent = refparent(add!)
                 not_solidmodel!(parent)
                 @test nrendered(parent, artwork) == n
