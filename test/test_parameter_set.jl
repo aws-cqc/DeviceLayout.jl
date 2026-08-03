@@ -728,7 +728,16 @@ end
         name = "array_component"
         offsets = [0μm, 25μm]
         unsupported_points = typeof(Point(0μm, 0μm))[]
+        mixed_values = Any[1, Point(0μm, 0μm)]
+        settings = Dict{String, Any}("gain" => 2, "origin" => Point(0μm, 0μm))
+        unsupported_settings = Dict{String, Any}("origin" => Point(0μm, 0μm))
         unsupported_matrix = [0μm 25μm; 50μm 75μm]
+    end
+
+    @compdef struct ExtractionMergeCollisionComponent <: Component
+        name = "parent"
+        settings = (gain=2,)
+        child = 1
     end
 
     @testset "Complete detached extraction" begin
@@ -803,6 +812,10 @@ end
         extracted = extract_parameter_set(g)
         @test extracted.components.route.offsets == [0μm, 25μm]
         @test !haskey(extracted.components.route.data, "unsupported_points")
+        @test !haskey(extracted.components.route.data, "mixed_values")
+        @test extracted.components.route.settings.gain == 2
+        @test !haskey(extracted.components.route.settings.data, "origin")
+        @test !haskey(extracted.components.route.data, "unsupported_settings")
         @test !haskey(extracted.components.route.data, "unsupported_matrix")
 
         push!(extracted.components.route.offsets, 50μm)
@@ -845,6 +858,24 @@ end
         @test err isa ArgumentError
         @test occursin("components.collision.child", err.msg)
         @test occursin("parameter leaf", err.msg)
+
+        merge_g = SchematicGraph("merge_collision")
+        add_node!(
+            merge_g,
+            ExampleRectangleIsland(name="nested");
+            base_id="parent.settings.nested"
+        )
+        add_node!(merge_g, ExampleRectangleIsland(name="child"); base_id="parent.child")
+        add_node!(merge_g, ExtractionMergeCollisionComponent(); base_id="parent")
+        merge_err = try
+            extract_parameter_set(merge_g)
+            nothing
+        catch e
+            e
+        end
+        @test merge_err isa ArgumentError
+        @test occursin("components.parent.child", merge_err.msg)
+        @test occursin("parameter leaf", merge_err.msg)
     end
 end
 
