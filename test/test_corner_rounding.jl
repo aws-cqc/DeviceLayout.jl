@@ -1,6 +1,10 @@
 @testitem "Line-arc rounding" setup = [CommonTestSetup] begin
     using LinearAlgebra
-    using DeviceLayout.Curvilinear: edge_type_at_vertex
+    using DeviceLayout.Curvilinear:
+        arc_arc_cornerindices,
+        edge_type_at_vertex,
+        line_arc_cornerindices,
+        rounded_corner_segment_line_arc
 
     # 24×16μm rectangle with 13 arc features covering various arc sweeps,
     # angles between straight lines, and tangency types (internal/external).
@@ -267,6 +271,53 @@
     # endpoints, G1 tangency, radius, center distances, on-circle sweep). See
     # check_line_arc_fillets in CommonTestSetup.
     check_line_arc_fillets(cp, pts, fillet_r)
+
+    # One two-arc triangle with a near-cusp arc-arc corner and two near-cusp line-arc corners
+    # along the closing segment.
+    cusp_a = Paths.Turn(90°, 2.0μm; p0=Point(0.0μm, 0.0μm), α0=0°)
+    cusp_b = Paths.Turn(90°, 2.0μm; p0=Paths.p1(cusp_a), α0=271°)
+    cusp_cp = CurvilinearPolygon(
+        [Paths.p0(cusp_a), Paths.p1(cusp_a), Paths.p1(cusp_b)],
+        [cusp_a, cusp_b],
+        [1, 2]
+    )
+    cusp_r = 0.2μm
+    cusp_min_angle = 2 * π / 180
+    @test line_arc_cornerindices(cusp_cp) == [1, 3]
+    @test arc_arc_cornerindices(cusp_cp) == [2]
+    for i in line_arc_cornerindices(cusp_cp)
+        edge = edge_type_at_vertex(cusp_cp, i)
+        arc_is_outgoing = edge.outgoing != :straight
+        arc_curve = arc_is_outgoing ? edge.outgoing : edge.incoming
+        p_line =
+            arc_is_outgoing ? cusp_cp.p[mod1(i - 1, length(cusp_cp.p))] :
+            cusp_cp.p[mod1(i + 1, length(cusp_cp.p))]
+        seg = rounded_corner_segment_line_arc(
+            p_line,
+            cusp_cp.p[i],
+            arc_curve,
+            arc_is_outgoing,
+            cusp_r;
+            min_angle=cusp_min_angle
+        )
+        @test !isnothing(seg)
+
+        v_line = (cusp_cp.p[i] - p_line) / norm(cusp_cp.p[i] - p_line)
+        line_direction = atan(v_line.y, v_line.x)
+        arc_direction =
+            Paths.direction(arc_curve, Paths.pathlength_nearest(arc_curve, seg.T_arc))
+        if arc_is_outgoing
+            @test isapprox_angle(Paths.α0(seg.fillet), line_direction; atol=1e-6)
+            @test isapprox_angle(Paths.α1(seg.fillet), arc_direction; atol=1e-6)
+        else
+            @test isapprox_angle(Paths.α0(seg.fillet), arc_direction; atol=1e-6)
+            @test isapprox_angle(Paths.α1(seg.fillet), line_direction + π; atol=1e-6)
+        end
+    end
+    rounded_cusp =
+        Curvilinear.round_to_curvilinearpolygon(cusp_cp, cusp_r; min_angle=cusp_min_angle)
+    @test length(rounded_cusp.curves) == 5
+    @test count(c -> isapprox(abs(c.r), cusp_r, atol=1.0nm), rounded_cusp.curves) == 3
 
     # round_to_curvilinearpolygon (SolidModel pipeline)
     # Verify that styled_loop produces a CurvilinearPolygon with fillet curves
@@ -948,6 +999,24 @@ end
     b_kink = Paths.Turn(-90°, 2.0μm; p0=Paths.p1(a_kink), α0=Paths.α1(a_kink) + 40°)
     @test rounded_corner_segment_arc_arc(a_kink, b_kink, 50.0μm) === nothing
     @test !isnothing(rounded_corner_segment_arc_arc(a_kink, b_kink, 0.3μm))
+
+    # Near-cusp: within the caller's anti-parallel tolerance, but still roundable.
+    a_cusp = Paths.Turn(90°, 2.0μm; p0=O, α0=0°)
+    b_cusp = Paths.Turn(90°, 2.0μm; p0=Paths.p1(a_cusp), α0=271°)
+    cusp_seg = rounded_corner_segment_arc_arc(a_cusp, b_cusp, 0.2μm; min_angle=2 * π / 180)
+    @test !isnothing(cusp_seg)
+    cusp_t_in = Paths.pathlength_nearest(a_cusp, cusp_seg.T_in)
+    cusp_t_out = Paths.pathlength_nearest(b_cusp, cusp_seg.T_out)
+    @test isapprox_angle(
+        Paths.α0(cusp_seg.fillet),
+        Paths.direction(a_cusp, cusp_t_in);
+        atol=1e-6
+    )
+    @test isapprox_angle(
+        Paths.α1(cusp_seg.fillet),
+        Paths.direction(b_cusp, cusp_t_out);
+        atol=1e-6
+    )
 
     # Reversed-direction candidates: tangent points lie on both arcs, but G1 traversal fails.
     wrong_dir_in = reverse(Paths.Turn(300.0°, 1.0μm; α0=180.0°))

@@ -1428,27 +1428,20 @@ function rounded_corner_segment_line_arc(
         Paths.direction(arc_curve, arc_len)
     end
 
-    # Check if line and arc tangent are nearly parallel (already smooth)
-    if isapprox_angle(α_line, α_arc; atol=min_angle) ||
-       isapprox_angle(α_line, α_arc + π; atol=min_angle)
+    # Matching traversal headings are already smooth. Anti-parallel headings form a cusp
+    # that may still be roundable.
+    smooth = if arc_is_outgoing
+        isapprox_angle(α_line, α_arc; atol=min_angle)
+    else
+        isapprox_angle(α_line + π, α_arc; atol=min_angle)
+    end
+    if smooth
         return nothing
     end
 
     # Arc geometry
     O = Paths.curvaturecenter(arc_curve)
-    R = arc_curve.r
-
-    # Determine which side of the line the polygon interior is on.
-    # Use a coordinate-derived offset to avoid both collinear degeneracy and
-    # Unitful ContextUnits mismatches (atol may have different unit context).
-    offset_scale = line_len * 1e-6
-    p_virtual = p_corner + Point(cos(α_arc), sin(α_arc)) * offset_scale
-    turn_sign = DeviceLayout.orientation(p_line, p_corner, p_virtual)
-    if !arc_is_outgoing
-        turn_sign = -turn_sign
-    end
-    # If orientation is degenerate (collinear), skip this corner
-    iszero(turn_sign) && return nothing
+    R = abs(arc_curve.r)
 
     # Fillet center C_f must satisfy:
     #   (1) distance to straight edge = r  (tangent to line)
@@ -1456,10 +1449,8 @@ function rounded_corner_segment_line_arc(
     # Constraint (1): C_f lies on a line parallel to the edge, offset by r.
     # Constraint (2): C_f lies on a circle of radius D centered at O.
     n_line = Point(-v_line.y, v_line.x)
-    fillet_side = sign(turn_sign)
-    p_offset = p_corner + (r * fillet_side) * n_line
 
-    function solve_for_D(D_val)
+    function solve_for_D(p_offset, D_val)
         w = p_offset - O
         b = w.x * v_line.x + w.y * v_line.y
         c = w.x * w.x + w.y * w.y - D_val * D_val
@@ -1476,72 +1467,111 @@ function rounded_corner_segment_line_arc(
         return -atol < t < line_len + atol
     end
 
-    function find_best_center(D_val)
-        candidates = solve_for_D(D_val)
-        isempty(candidates) && return nothing
-        valid = filter(validate_t_line, candidates)
-        isempty(valid) && return nothing
-        _, idx = findmin(cf -> norm(cf - p_corner), valid)
-        return valid[idx]
+    # In-sweep test: pathlength_nearest clamps out-of-sweep points, so arc(nearest(Tp)) == Tp
+    # iff the point lies on the arc sweep.
+    function on_arc(Tp)
+        t = Paths.pathlength_nearest(arc_curve, Tp)
+        return isapprox(arc_curve(t), Tp; atol=atol)
     end
 
-    C_f_ext = find_best_center(R + r)
-    C_f_int = abs(R - r) > zero(R) ? find_best_center(abs(R - r)) : nothing
-    ext_ok = !isnothing(C_f_ext)
-    int_ok = !isnothing(C_f_int)
+    # Tangent point on the arc circle. Try both sides of the center line; internal tangency with
+    # r > R flips to O - R*u.
+    function tangent_points_on_arc(C_f)
+        norm_cf_o = norm(C_f - O)
+        norm_cf_o < atol && return Point{float(V)}[]
+        cf_dir = (C_f - O) / norm_cf_o
+        return (O + R * cf_dir, O - R * cf_dir)
+    end
 
-    C_f = if ext_ok && int_ok
-        norm(C_f_ext - p_corner) < norm(C_f_int - p_corner) ? C_f_ext : C_f_int
-    elseif ext_ok
-        C_f_ext
-    elseif int_ok
-        C_f_int
-    else
+    function make_fillet(C_f, T_line, T_arc_pt)
+        # Winding order determines start/end:
+        #   arc_is_outgoing=true:  ...line → T_line → [fillet] → T_arc → arc...
+        #   arc_is_outgoing=false: ...arc → T_arc → [fillet] → T_line → line...
+        start_pt, end_pt = arc_is_outgoing ? (T_line, T_arc_pt) : (T_arc_pt, T_line)
+
+        # When tangent points coincide with C_f (fillet_r < atol),
+        # the direction vectors are undefined — skip rounding this corner.
+        norm_start = norm(start_pt - C_f)
+        norm_end = norm(end_pt - C_f)
+        (norm_start < atol || norm_end < atol) && return nothing
+        d_start = (start_pt - C_f) / norm_start
+        d_end = (end_pt - C_f) / norm_end
+
+        cross_val = d_start.x * d_end.y - d_start.y * d_end.x
+        dot_val = d_start.x * d_end.x + d_start.y * d_end.y
+        dα = atan(cross_val, dot_val)
+
+        # When the fillet sweep angle is tiny, the arc sagitta
+        # (r·(1 - cos(dα/2))) is sub-nanometer — GMSH can't distinguish it from
+        # a line and rejects it. Skip rounding this corner.
+        abs(dα) < min_angle && return nothing
+
+        # Tangent direction at start: perpendicular to radius, rotated by sweep direction
+        angle_start = atan(d_start.y, d_start.x)
+        α0 = angle_start + sign(dα) * π / 2
+
+        return Paths.Turn(uconvert(°, dα), r; p0=start_pt, α0=uconvert(°, α0))
+    end
+
+    function valid_candidate(C_f)
+        validate_t_line(C_f) || return nothing
+
+        # Tangent point on line: foot of perpendicular from C_f
+        t_proj = (C_f - p_line).x * v_line.x + (C_f - p_line).y * v_line.y
+        T_line = p_line + t_proj * v_line
+
+        for T_arc_pt in tangent_points_on_arc(C_f)
+            isapprox(norm(C_f - T_arc_pt), r; atol=atol) || continue
+            on_arc(T_arc_pt) || continue
+
+            fillet = make_fillet(C_f, T_line, T_arc_pt)
+            isnothing(fillet) && continue
+
+            t_arc = Paths.pathlength_nearest(arc_curve, T_arc_pt)
+            line_direction = arc_is_outgoing ? α_line : α_line + π
+            arc_direction = Paths.direction(arc_curve, t_arc)
+            headings_match = if arc_is_outgoing
+                isapprox_angle(Paths.α0(fillet), line_direction; atol=min_angle) &&
+                    isapprox_angle(Paths.α1(fillet), arc_direction; atol=min_angle)
+            else
+                isapprox_angle(Paths.α0(fillet), arc_direction; atol=min_angle) &&
+                    isapprox_angle(Paths.α1(fillet), line_direction; atol=min_angle)
+            end
+            headings_match || continue
+
+            (
+                isapprox(
+                    Paths.p0(fillet),
+                    arc_is_outgoing ? T_line : T_arc_pt;
+                    atol=atol
+                ) &&
+                isapprox(Paths.p1(fillet), arc_is_outgoing ? T_arc_pt : T_line; atol=atol)
+            ) || continue
+
+            return (; fillet, T_line, T_arc=T_arc_pt)
+        end
         return nothing
     end
 
-    # Tangent point on line: foot of perpendicular from C_f
-    t_proj = (C_f - p_line).x * v_line.x + (C_f - p_line).y * v_line.y
-    T_line = p_line + t_proj * v_line
+    best = nothing
+    best_dist = zero(V)
+    D_vals = abs(R - r) > zero(R) ? (R + r, abs(R - r)) : (R + r,)
+    for fillet_side in (-1, 1)
+        p_offset = p_corner + (r * fillet_side) * n_line
+        for D_val in D_vals
+            for C_f in solve_for_D(p_offset, D_val)
+                candidate = valid_candidate(C_f)
+                isnothing(candidate) && continue
+                d = norm(C_f - p_corner)
+                if isnothing(best) || d < best_dist
+                    best = candidate
+                    best_dist = d
+                end
+            end
+        end
+    end
 
-    # Tangent point on arc: point on arc in direction of fillet center
-    # When C_f ≈ O (fillet_r ≈ arc_r), the direction is undefined
-    # and the fillet geometry is degenerate — skip rounding this corner.
-    norm_cf_o = norm(C_f - O)
-    norm_cf_o < atol && return nothing
-    cf_dir = (C_f - O) / norm_cf_o
-    T_arc_pt = O + R * cf_dir
-
-    # Construct fillet Turn segment
-    # Winding order determines start/end:
-    #   arc_is_outgoing=true:  ...line → T_line → [fillet] → T_arc → arc...
-    #   arc_is_outgoing=false: ...arc → T_arc → [fillet] → T_line → line...
-    start_pt, end_pt = arc_is_outgoing ? (T_line, T_arc_pt) : (T_arc_pt, T_line)
-
-    # When tangent points coincide with C_f (fillet_r < atol),
-    # the direction vectors are undefined — skip rounding this corner.
-    norm_start = norm(start_pt - C_f)
-    norm_end = norm(end_pt - C_f)
-    (norm_start < atol || norm_end < atol) && return nothing
-    d_start = (start_pt - C_f) / norm_start
-    d_end = (end_pt - C_f) / norm_end
-
-    cross_val = d_start.x * d_end.y - d_start.y * d_end.x
-    dot_val = d_start.x * d_end.x + d_start.y * d_end.y
-    dα = atan(cross_val, dot_val)
-
-    # When the fillet sweep angle is tiny, the arc sagitta
-    # (r·(1 - cos(dα/2))) is sub-nanometer — GMSH can't distinguish it from
-    # a line and rejects it. Skip rounding this corner.
-    abs(dα) < min_angle && return nothing
-
-    # Tangent direction at start: perpendicular to radius, rotated by sweep direction
-    angle_start = atan(d_start.y, d_start.x)
-    α0 = angle_start + sign(dα) * π / 2
-
-    fillet = Paths.Turn(uconvert(°, dα), r; p0=start_pt, α0=uconvert(°, α0))
-
-    return (; fillet, T_line, T_arc=T_arc_pt)
+    return best
 end
 
 _arc_arc_coordtype(::Type{T1}, ::Type{T2}) where {T1, T2} = float(promote_type(T1, T2))
@@ -1589,11 +1619,10 @@ function rounded_corner_segment_arc_arc(
     O_out = Paths.curvaturecenter(arc_out)
     p_corner = Paths.p1(arc_in) # == Paths.p0(arc_out)
 
-    # Already-smooth (G1) guard: matching or anti-parallel headings at the corner need no fillet.
+    # Matching headings are already smooth; anti-parallel headings form a cusp that may round.
     α_in = Paths.direction(arc_in, Paths.pathlength(arc_in))
     α_out = Paths.direction(arc_out, zero(Paths.pathlength(arc_out)))
-    if isapprox_angle(α_in, α_out; atol=min_angle) ||
-       isapprox_angle(α_in, α_out + π; atol=min_angle)
+    if isapprox_angle(α_in, α_out; atol=min_angle)
         return nothing
     end
     # min_side_len: accepted for parity with the line-arc solver, unused (no straight stub here).
