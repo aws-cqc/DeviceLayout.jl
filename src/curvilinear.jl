@@ -36,7 +36,7 @@ import DeviceLayout: MeshSized, WithDirection, OptionalStyle, Plain, NoRender
 using DeviceLayout.Paths
 import DeviceLayout.Polygons: cornerindices, iscircle, StyleDict, Rounded
 import DeviceLayout.Polygons.Clipper: PolyNode, contour
-import Unitful: uconvert, °, Length
+import Unitful: uconvert, °, Length, numtype, unit
 
 using ..Points
 using ..Polygons
@@ -1544,6 +1544,18 @@ function rounded_corner_segment_line_arc(
     return (; fillet, T_line, T_arc=T_arc_pt)
 end
 
+_arc_arc_coordtype(::Type{T1}, ::Type{T2}) where {T1, T2} = float(promote_type(T1, T2))
+function _arc_arc_coordtype(::Type{T1}, ::Type{T2}) where {T1 <: Length, T2 <: Length}
+    try
+        V = float(promote_type(T1, T2))
+        zero(V)
+        return V
+    catch
+        N = float(promote_type(numtype(T1), numtype(T2)))
+        return typeof(one(N) * unit(DeviceLayout.onemicron(T1)))
+    end
+end
+
 """
     rounded_corner_segment_arc_arc(arc_in, arc_out, radius; min_side_len, min_angle)
 
@@ -1559,15 +1571,17 @@ Returns `(; fillet::Paths.Turn, T_in::Point, T_out::Point)` or `nothing`, where 
 are the tangent points on the incoming/outgoing arcs (used by the caller to trim both arcs).
 """
 function rounded_corner_segment_arc_arc(
-    arc_in::Paths.Turn{T},
-    arc_out::Paths.Turn{T},
+    arc_in::Paths.Turn{T1},
+    arc_out::Paths.Turn{T2},
     radius::S;
     min_side_len=radius,
     min_angle=1e-3
-) where {T, S <: DeviceLayout.Coordinate}
-    V = float(T)
+) where {T1, T2, S <: DeviceLayout.Coordinate}
+    V = _arc_arc_coordtype(T1, T2)
+    arc_in = convert(Paths.Turn{V}, arc_in)
+    arc_out = convert(Paths.Turn{V}, arc_out)
     r = convert(V, radius)
-    atol = DeviceLayout.Polygons._round_atol(T, S)
+    atol = DeviceLayout.Polygons._round_atol(V, S)
 
     R_in = abs(arc_in.r) # arc.r is signed by handedness; tangency needs the geometric radius
     R_out = abs(arc_out.r)

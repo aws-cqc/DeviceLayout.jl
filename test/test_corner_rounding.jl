@@ -850,6 +850,15 @@ end
     @test arc_arc_cornerindices(case_a) == [2]
     check_arc_arc_fillets(case_a, 0.2μm)
 
+    case_a_mixed_in = reverse(Paths.Turn(300.0°, 1.0μm2nm; α0=180.0°))
+    case_a_mixed_out = Paths.Turn(-300°, 1.0μm2μm; α0=170°)
+    case_a_mixed = rounded_corner_segment_arc_arc(case_a_mixed_in, case_a_mixed_out, 0.2μm)
+    mixed_T = typeof(1.0μm2nm)
+    @test !isnothing(case_a_mixed)
+    @test case_a_mixed.fillet isa Paths.Turn{mixed_T}
+    @test case_a_mixed.T_in isa Point{mixed_T}
+    @test case_a_mixed.T_out isa Point{mixed_T}
+
     case_b_in = reverse(Paths.Turn(-60.0°, 1.0μm; α0=180.0°))
     case_b_out = Paths.Turn(70.0°, 1.1μm; α0=120°)
     case_b = CurvilinearPolygon(
