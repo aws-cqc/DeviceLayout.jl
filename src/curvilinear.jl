@@ -1179,7 +1179,7 @@ function round_to_curvilinearpolygon(
     new_points = Point{V}[]
     # Fillets are always Turns, but a surviving original curve pushed through untouched can be
     # any Segment (e.g. a BSpline on an un-roundable corner), so hold the general element type.
-    new_curves = Paths.Segment[]
+    new_curves = Paths.Segment{V}[]
     new_curve_start_idx = Int[]
 
     # Track trims for existing curves when rounding line-arc corners
