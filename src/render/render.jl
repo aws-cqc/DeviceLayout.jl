@@ -60,6 +60,19 @@ function render!(c::Cell{S}, text::Texts.Text, meta::GDSMeta=GDSMeta(); kwargs..
     return text!(c, text, meta)
 end
 
+function render!(
+    c::Cell,
+    text::StyledEntity{T, U, OptionalStyle},
+    meta::GDSMeta=GDSMeta();
+    kwargs...
+) where {T, U <: Texts.Text{T}}
+    opt = style(text)
+    selected = get(kwargs, opt.flag, opt.default) ? opt.true_style : opt.false_style
+    selected isa Plain && return render!(c, entity(text), meta; kwargs...)
+    selected isa NoRender && return c
+    return render!(c, selected(entity(text)), meta; kwargs...)
+end
+
 function render!(c::Cell{S}, text::Vector{Texts.Text{S}}, meta::Vector{GDSMeta}) where {S}
     return text!(c, text, meta) # Can just append
 end

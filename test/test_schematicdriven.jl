@@ -570,147 +570,220 @@
         render!(cell, cs, target) # undef_meta, GDSMeta(2,2)
         @test cell.element_metadata == [GDSMeta(), GDSMeta(3, 3)]
 
-        # `not_simulated!`/`not_solidmodel!` recurse through a coordinate system's references,
-        # which may be either an array or a single reference. The two are sibling types, so
-        # both have to be handled or arrays raise a `MethodError` mid-traversal.
-        @testset "Optional-render helpers through references" begin
-            arr!(parent, child) = addarr!(
-                parent,
-                child,
-                Point(0μm, 0μm);
-                dc=Point(20μm, 0μm),
-                nc=2,
-                dr=Point(0μm, 20μm),
-                nr=2
-            )
-            function refparent(add!)
-                child = CoordinateSystem("child", nm)
-                render!(child, rect, meta)
-                parent = CoordinateSystem("parent", nm)
-                add!(parent, child)
-                return parent
-            end
-            # The geometry lives in the referenced cell, so it has to be flattened to count.
-            nrendered(cs, target) = length(flatten(Cell(cs, nm, target)).elements)
+        @testset "Target style helpers" begin
             artwork = ArtworkTarget(tech)
-            for (add!, n) in ((addref!, 1), (arr!, 4))
-                # Without the helpers, the referenced geometry renders for either target.
-                @test nrendered(refparent(add!), artwork) == n
-                @test nrendered(refparent(add!), SimulationTarget(tech)) == n
-                parent = refparent(add!)
-                not_simulated!(parent)
-                @test nrendered(parent, artwork) == n
-                @test nrendered(parent, SimulationTarget(tech)) == 0
-                parent = refparent(add!)
-                not_solidmodel!(parent)
-                @test nrendered(parent, artwork) == n
-                @test nrendered(
-                    parent,
-                    ArtworkTarget(tech, rendering_options=(; solidmodel=true))
-                ) == 0
-            end
-        end #= @testset "Optional-render helpers through references" begin =#
-
-        @testset "Identical styles are idempotent" begin
-            for f! in (not_simulated!, only_simulated!, not_solidmodel!, only_solidmodel!)
-                styled_cs = CoordinateSystem("styled", nm)
-                place!(styled_cs, rect, meta)
-                f!(styled_cs)
-                styled_ent = elements(styled_cs)[1]
-                f!(styled_cs)
-                @test elements(styled_cs)[1] === styled_ent
-            end
-        end
-
-        @testset "Uncached components warn" begin
-            cs = CoordinateSystem("uncached_parent", nm)
-            addref!(cs, UncachedTargetComponent("uncached"))
-            @test_logs (:warn, r"uncached component uncached") not_simulated!(cs)
-        end
-
-        @testset "Path references and idempotence" begin
-            child = CoordinateSystem("attached", nm)
-            place!(child, rect, meta)
-            pa = Path(Point(0μm, 0μm))
-            straight!(pa, 10μm, Paths.Trace(1μm))
-            attach!(pa, sref(child), 5μm)
-
-            parent = CoordinateSystem("pathparent", nm)
-            addref!(parent, pa)
-            not_simulated!(parent)
-
-            # A Path reference is replaced by a CoordinateSystem containing its nodes as elements
-            cs_equiv = parent.refs[1].structure
-            @test cs_equiv isa CoordinateSystem
-            @test length(elements(cs_equiv)) == 1
-            @test elements(cs_equiv)[1] isa DeviceLayout.StyledEntity
-            @test DeviceLayout.unstyled(elements(cs_equiv)[1]) isa Paths.Node
-            # References attached to the Path are identical in the equivalent CS
-            @test length(refs(cs_equiv)) == 1
-            @test structure(refs(cs_equiv)[1]) === child
-            @test elements(child)[1] isa DeviceLayout.StyledEntity
-
-            path_ent = elements(cs_equiv)[1]
-            child_ent = elements(child)[1]
-            not_simulated!(cs_equiv)
-            @test elements(cs_equiv)[1] === path_ent
-            @test elements(child)[1] === child_ent
-        end
-
-        @testset "Cell references" begin
-            child = Cell("attached", nm)
-            render!(child, rect, GDSMeta())
-            cell = Cell("cell", nm)
-            render!(cell, rect, GDSMeta())
-            addref!(cell, child, Point(5μm, 5μm))
-
-            parent = CoordinateSystem("cellparent", nm)
-            addref!(parent, cell, Point(5μm, 5μm))
-            not_simulated!(parent)
-
-            # A Cell reference is replaced by a CoordinateSystem
-            cs_equiv = parent.refs[1].structure
-            @test cs_equiv isa CoordinateSystem
-            @test length(elements(cs_equiv)) == 1
-            @test elements(cs_equiv)[1] isa DeviceLayout.StyledEntity
-            @test DeviceLayout.unstyled(elements(cs_equiv)[1]) isa Polygon
-            # References attached to the Cell are in the equivalent CS but not identical
-            @test length(refs(cs_equiv)) == 1
-            @test structure(refs(cs_equiv)[1]) isa CoordinateSystem
-            @test elements(cs_equiv.refs[1].structure)[1] isa DeviceLayout.StyledEntity
-        end
-
-        @testset "Array references attached to curved paths" begin
-            child = CoordinateSystem("curved_attachment", nm)
-            place!(child, Rectangle(4μm, 2μm), meta)
-            attached = aref(
-                child,
-                Point(0μm, 0μm);
-                dc=Point(20μm, 0μm),
-                nc=2,
-                dr=Point(0μm, 20μm),
-                nr=2,
-                rot=30°
+            simulation = SimulationTarget(tech)
+            solidmodel = ArtworkTarget(tech, rendering_options=(; solidmodel=true))
+            helper_cases = (
+                (not_simulated!, artwork, simulation),
+                (only_simulated!, simulation, artwork),
+                (not_solidmodel!, artwork, solidmodel),
+                (only_solidmodel!, solidmodel, artwork)
             )
+            nrendered(cs, target) = length(elements(flatten(Cell(cs, nm, target))))
 
-            pa = Path(Point(0μm, 0μm))
-            straight!(pa, 100μm, Paths.SimpleTrace(10.0μm))
-            turn!(pa, 90°, 50μm)
-            attach!(pa, attached, 25μm; i=2)
+            @testset "Coordinate-system references" begin
+                arr!(parent, child) = addarr!(
+                    parent,
+                    child,
+                    Point(0μm, 0μm);
+                    dc=Point(20μm, 0μm),
+                    nc=2,
+                    dr=Point(0μm, 20μm),
+                    nr=2
+                )
+                function refparent(add!)
+                    child = CoordinateSystem("child", nm)
+                    render!(child, rect, meta)
+                    parent = CoordinateSystem("parent", nm)
+                    add!(parent, child)
+                    return parent
+                end
 
-            parent = CoordinateSystem("curved_path_parent", nm)
-            addref!(parent, pa)
-            styled = deepcopy(parent)
-            not_simulated!(styled)
+                for (add!, count) in ((addref!, 1), (arr!, 4))
+                    for (f!, visible_target, hidden_target) in helper_cases
+                        parent = refparent(add!)
+                        @test f!(parent) === parent
+                        @test nrendered(parent, visible_target) == count
+                        @test nrendered(parent, hidden_target) == 0
+                    end
+                end
 
-            path_target = ArtworkTarget(tech)
-            rendered = flatten(Cell(styled, path_target))
-            rendered_sim = flatten(Cell(styled, SimulationTarget(tech)))
-            flattened = Cell(flatten(parent), path_target)
-            @test length(flattened.elements) == 6
-            @test length(rendered.elements) == length(flattened.elements)
-            @test all(isapprox.(rendered.elements, flattened.elements))
-            @test isempty(rendered_sim.elements)
+                ref = only(refs(refparent(addref!)))
+                @test not_simulated!(ref) === ref
+            end
+
+            @testset "Identical styles are idempotent" begin
+                for (f!, _, _) in helper_cases
+                    styled_cs = CoordinateSystem("styled", nm)
+                    place!(styled_cs, rect, meta)
+                    f!(styled_cs)
+                    styled_ent = only(elements(styled_cs))
+                    f!(styled_cs)
+                    @test only(elements(styled_cs)) === styled_ent
+                end
+            end
+
+            @testset "Component traversal continues after a warning" begin
+                cached = SchematicDrivenLayout.ArrowAnnotation(meta=meta)
+                trailing = CoordinateSystem("trailing", nm)
+                place!(trailing, rect, meta)
+                parent = CoordinateSystem("component_parent", nm)
+                addref!(parent, cached)
+                addref!(parent, UncachedTargetComponent("uncached"))
+                addref!(parent, trailing)
+
+                result = @test_logs (:warn, r"uncached component uncached") not_simulated!(
+                    parent
+                )
+                @test result === parent
+                @test only(elements(geometry(cached))) isa DeviceLayout.StyledEntity
+                @test only(elements(trailing)) isa DeviceLayout.StyledEntity
+            end
+
+            @testset "Path overloads and references" begin
+                child = CoordinateSystem("attached", nm)
+                place!(child, rect, meta)
+                pa = Path(Point(0μm, 0μm))
+                straight!(pa, 10μm, Paths.Trace(1μm))
+                attach!(pa, sref(child), 5μm)
+
+                for (f, (_, visible_target, hidden_target)) in zip(
+                    (not_simulated, only_simulated, not_solidmodel, only_solidmodel),
+                    helper_cases
+                )
+                    styled_path = CoordinateSystem("styled_path", nm)
+                    place!(styled_path, f(pa), meta)
+                    @test nrendered(styled_path, visible_target) == 1
+                    @test nrendered(styled_path, hidden_target) == 0
+                end
+
+                parent = CoordinateSystem("pathparent", nm)
+                addref!(parent, pa)
+                not_simulated!(parent)
+                cs_equiv = structure(only(refs(parent)))
+                @test cs_equiv isa CoordinateSystem
+                @test length(elements(cs_equiv)) == 1
+                @test only(elements(cs_equiv)) isa DeviceLayout.StyledEntity
+                @test DeviceLayout.unstyled(only(elements(cs_equiv))) isa Paths.Node
+                @test structure(only(refs(cs_equiv))) === child
+                @test only(elements(child)) isa DeviceLayout.StyledEntity
+
+                path_ent = only(elements(cs_equiv))
+                child_ent = only(elements(child))
+                not_simulated!(cs_equiv)
+                @test only(elements(cs_equiv)) === path_ent
+                @test only(elements(child)) === child_ent
+            end
+
+            @testset "Array references attached to curved paths" begin
+                child = CoordinateSystem("curved_attachment", nm)
+                place!(child, Rectangle(4μm, 2μm), meta)
+                attached = aref(
+                    child,
+                    Point(0μm, 0μm);
+                    dc=Point(20μm, 0μm),
+                    nc=2,
+                    dr=Point(0μm, 20μm),
+                    nr=2,
+                    rot=30°
+                )
+
+                pa = Path(Point(0μm, 0μm))
+                straight!(pa, 100μm, Paths.SimpleTrace(10.0μm))
+                turn!(pa, 90°, 50μm)
+                attach!(pa, attached, 25μm; i=2)
+
+                parent = CoordinateSystem("curved_path_parent", nm)
+                addref!(parent, pa)
+                styled = deepcopy(parent)
+                not_simulated!(styled)
+
+                rendered = flatten(Cell(styled, artwork))
+                rendered_sim = flatten(Cell(styled, simulation))
+                flattened = Cell(flatten(parent), artwork)
+                @test length(flattened.elements) == 6
+                @test length(rendered.elements) == length(flattened.elements)
+                @test all(isapprox.(rendered.elements, flattened.elements))
+                @test isempty(rendered_sim.elements)
+            end
+
+            @testset "Cell references preserve all contents" begin
+                child = Cell("attached", nm)
+                render!(child, rect, GDSMeta())
+                cell = Cell("cell", nm)
+                render!(cell, rect, GDSMeta())
+                text!(cell, "label", Point(1μm, 2μm), GDSMeta(1, 2))
+                addref!(cell, child, Point(5μm, 5μm))
+
+                parent = CoordinateSystem("cellparent", nm)
+                addref!(parent, cell, Point(5μm, 5μm))
+                not_simulated!(parent)
+                cs_equiv = structure(only(refs(parent)))
+                unstyled = DeviceLayout.unstyled.(elements(cs_equiv))
+                @test cs_equiv isa CoordinateSystem
+                @test count(x -> x isa Polygon, unstyled) == 1
+                @test count(x -> x isa Texts.Text, unstyled) == 1
+                @test element_metadata(cs_equiv) == [GDSMeta(), GDSMeta(1, 2)]
+                @test structure(only(refs(cs_equiv))) isa CoordinateSystem
+                @test only(elements(structure(only(refs(cs_equiv))))) isa
+                      DeviceLayout.StyledEntity
+            end
+
+            @testset "Path and Cell arrays preserve their shape" begin
+                array_path = Path(Point(0μm, 0μm))
+                straight!(array_path, 10μm, Paths.SimpleTrace(1.0μm))
+                array_cell = Cell("array_cell", nm)
+                render!(array_cell, rect, GDSMeta())
+                text!(array_cell, "label", Point(1μm, 2μm), GDSMeta(1, 2))
+
+                for (geom, expected_counts) in ((array_path, (6, 0)), (array_cell, (6, 6)))
+                    original = aref(
+                        geom,
+                        Point(3μm, 4μm);
+                        dc=Point(20μm, 1μm),
+                        nc=2,
+                        dr=Point(2μm, 30μm),
+                        nr=3,
+                        xrefl=true,
+                        mag=1.5,
+                        rot=30°
+                    )
+                    parent = CoordinateSystem("array_parent", nm)
+                    addref!(parent, original)
+                    not_simulated!(parent)
+                    replacement = only(refs(parent))
+
+                    @test replacement isa ArrayReference
+                    @test transformation(replacement) == transformation(original)
+                    @test (
+                        replacement.deltacol,
+                        replacement.deltarow,
+                        replacement.col,
+                        replacement.row
+                    ) == (original.deltacol, original.deltarow, original.col, original.row)
+
+                    rendered = flatten(Cell(parent, nm, artwork))
+                    @test (length(elements(rendered)), length(rendered.texts)) ==
+                          expected_counts
+                    if geom isa Cell
+                        @test rendered.text_metadata == fill(GDSMeta(1, 2), 6)
+                    end
+                    hidden = flatten(Cell(parent, nm, simulation))
+                    @test isempty(elements(hidden))
+                    @test isempty(hidden.texts)
+                end
+            end
+
+            @testset "Direct Path and Cell references require a parent" begin
+                pa = Path(Point(0μm, 0μm))
+                straight!(pa, 10μm, Paths.Trace(1μm))
+                cell = Cell("direct_cell", nm)
+                render!(cell, rect, GDSMeta())
+                for (f!, _, _) in helper_cases, geom in (pa, cell)
+                    @test_throws ArgumentError f!(sref(geom))
+                end
+            end
         end
     end
 

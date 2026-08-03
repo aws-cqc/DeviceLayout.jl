@@ -57,7 +57,8 @@ _apply_target_style!(geom::GeometryStructure, sty::OptionalStyle) = begin
 end
 
 function _apply_target_style!(ref::DeviceLayout.GeometryReference, sty::OptionalStyle)
-    return _apply_target_style!(structure(ref), sty)
+    _apply_target_style!(structure(ref), sty)
+    return ref
 end
 
 function _apply_target_style!(comp::AbstractComponent, sty::OptionalStyle)
