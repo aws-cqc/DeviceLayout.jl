@@ -11,6 +11,26 @@ function _apply_target_style(ent::GeometryEntity, sty::OptionalStyle)
     return sty(ent)
 end
 
+_replace_structure(ref::StructureReference, geom::GeometryStructure) =
+    sref(geom, transformation(ref))
+_replace_structure(ref::ArrayReference, geom::GeometryStructure) = aref(
+    geom,
+    transformation(ref);
+    deltacol=ref.deltacol,
+    deltarow=ref.deltarow,
+    col=ref.col,
+    row=ref.row
+)
+
+_apply_target_style!(geom::Union{Path, Cell}, sty::OptionalStyle) = throw(
+    ArgumentError(
+        """
+    Cannot modify structure "$(name(geom))" in place.
+    Another structure must hold a reference to it, so it can be replaced completely (with a `CoordinateSystem`).
+"""
+    )
+)
+
 _apply_target_style!(geom::GeometryStructure, sty::OptionalStyle) = begin
     # A Path is an AbstractComponent, but its geometry is stored as path nodes rather than in a
     # CoordinateSystem. Replace each Path reference with an equivalent CoordinateSystem containing
@@ -21,21 +41,19 @@ _apply_target_style!(geom::GeometryStructure, sty::OptionalStyle) = begin
         if structure(ref) isa Paths.Path
             pa = structure(ref)
             cs = flatten(pa; depth=0) # Creates an equivalent CoordinateSystem
-            reftype = ref isa ArrayReference ? ArrayReference : StructureReference # Reference type without parameters
-            refs(geom)[i] = reftype(cs, transformation(ref))
+            refs(geom)[i] = _replace_structure(ref, cs)
         elseif structure(ref) isa Cell # Cells can't hold styled entities, upgrade to CoordinateSystem
             c = structure(ref)
-            cs = CoordinateSystem{coordinatetype(c)}(c) # Equivalent CoordinateSystem
-            reftype = ref isa ArrayReference ? ArrayReference : StructureReference # Reference type without parameters
-            refs(geom)[i] = reftype(cs, transformation(ref))
+            cs = CoordinateSystem{coordinatetype(c)}(name(c))
+            append_coordsys!(cs, c) # Equivalent CoordinateSystem
+            refs(geom)[i] = _replace_structure(ref, cs)
         end
     end
     elements(geom) .= _apply_target_style.(elements(geom), Ref(sty))
-    ok = true
     for ref in refs(geom)
-        ok = ok && _apply_target_style!(ref, sty)
+        _apply_target_style!(ref, sty)
     end
-    return ok
+    return geom
 end
 
 function _apply_target_style!(ref::DeviceLayout.GeometryReference, sty::OptionalStyle)
@@ -46,9 +64,10 @@ function _apply_target_style!(comp::AbstractComponent, sty::OptionalStyle)
     cached = hasproperty(comp, :_geometry) || hasproperty(comp, :_schematic)
     if !cached
         @warn "Cannot apply target style in place to uncached component $(name(comp)); its geometry is not cached"
-        return false
+        return comp
     end
-    return _apply_target_style!(geometry(comp), sty)
+    _apply_target_style!(geometry(comp), sty)
+    return comp
 end
 
 """

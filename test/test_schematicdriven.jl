@@ -602,7 +602,6 @@
                 @test nrendered(parent, artwork) == n
                 @test nrendered(parent, SimulationTarget(tech)) == 0
                 parent = refparent(add!)
-                parent = refparent(add!)
                 not_solidmodel!(parent)
                 @test nrendered(parent, artwork) == n
                 @test nrendered(
@@ -695,7 +694,7 @@
             )
 
             pa = Path(Point(0μm, 0μm))
-            straight!(pa, 100μm, Paths.SimpleTrace(10μm))
+            straight!(pa, 100μm, Paths.SimpleTrace(10.0μm))
             turn!(pa, 90°, 50μm)
             attach!(pa, attached, 25μm; i=2)
 

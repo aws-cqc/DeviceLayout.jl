@@ -42,6 +42,7 @@ The format of this changelog is based on
     nodes separately.
   - The style helpers are now idempotent, and will not change entities that already have the identical
   `OptionalStyle` as their outer style.
+  - `ArrayReferences` as `Path` attachments now work with retrieving references and finding transformations (`refs` and `transformation`).
 
 ## 1.16.1 (2026-07-28)
 
