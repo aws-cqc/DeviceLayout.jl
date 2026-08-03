@@ -112,6 +112,21 @@ function _missing_error(d::MissingNamespace)
     throw(ParameterKeyError(d.key, _namespace_path(d)))
 end
 
+_parameter_value_copy(value::ParameterSet) = _parameter_value_copy(getfield(value, :data))
+_parameter_value_copy(value::Pair) =
+    Dict{String, Any}(string(first(value)) => _parameter_value_copy(last(value)))
+function _parameter_value_copy(value::AbstractDict)
+    return Dict{String, Any}(
+        string(key) => _parameter_value_copy(child) for (key, child) in value
+    )
+end
+_parameter_value_copy(value) = deepcopy(value)
+
+_parameter_assignment_value(value::ParameterSet) = _parameter_value_copy(value)
+_parameter_assignment_value(value::Pair) =
+    Dict{String, Any}(string(first(value)) => _parameter_assignment_value(last(value)))
+_parameter_assignment_value(value) = value
+
 """
     _materialize!(d::MissingNamespace) -> Dict{String, Any}
 
@@ -172,9 +187,8 @@ function Base.setproperty!(d::MissingNamespace, s::Symbol, value)
         error("MissingNamespace.$s is an internal field and cannot be assigned")
     materialized = _materialize!(d)
     # Julia convention: `a.b = x` evaluates to `x`, so return the original RHS
-    # even when we wrap a `Pair` into a nested namespace Dict for storage.
-    stored = value isa Pair ? Dict{String, Any}(String(value.first) => value.second) : value
-    materialized[String(s)] = stored
+    # even when we normalize a namespace value for storage.
+    materialized[String(s)] = _parameter_assignment_value(value)
     return value
 end
 
@@ -197,6 +211,54 @@ ParameterSet(path::String, data::Dict{String, Any}) =
     ParameterSet(path, data, Set{String}())
 ParameterSet(data::Dict{String, Any}) = ParameterSet("", data)
 ParameterSet() = ParameterSet(Dict{String, Any}())
+
+function _merge_parameter_data!(destination::Dict{String, Any}, source::Dict{String, Any})
+    destination === source && return destination
+    for (key, source_value) in source
+        if haskey(destination, key) &&
+           destination[key] isa Dict{String, Any} &&
+           source_value isa Dict{String, Any}
+            _merge_parameter_data!(destination[key], source_value)
+        else
+            destination[key] = _parameter_value_copy(source_value)
+        end
+    end
+    return destination
+end
+
+"""
+    merge!(destination::ParameterSet, sources::ParameterSet...)
+
+Recursively merge `sources` into `destination`, from left to right.
+
+When both sides contain a namespace, their contents are merged recursively.
+Otherwise the later value replaces the earlier value. Inserted values are
+deep-copied, so the destination never shares mutable parameter data with a
+source. Source paths, scopes, and access logs are not merged, and merging does
+not mark any leaves as accessed.
+"""
+function Base.merge!(destination::ParameterSet, sources::ParameterSet...)
+    destination_data = getfield(destination, :data)
+    for source in sources
+        _merge_parameter_data!(destination_data, getfield(source, :data))
+    end
+    return destination
+end
+
+"""
+    merge(first::ParameterSet, rest::ParameterSet...)
+
+Return a detached recursive merge of the supplied parameter sets.
+
+The result has the same scope prefix as `first`, an empty source path, and an
+empty access log. Later sets take precedence, with the same behavior as
+[`merge!`](@ref).
+"""
+function Base.merge(first::ParameterSet, rest::ParameterSet...)
+    data = _parameter_value_copy(getfield(first, :data))
+    result = ParameterSet("", data, Set{String}(), getfield(first, :prefix))
+    return merge!(result, rest...)
+end
 
 function Base.getproperty(ps::ParameterSet, s::Symbol)
     s in (:path, :data, :accessed, :prefix) && return getfield(ps, s)
@@ -227,9 +289,8 @@ function Base.setproperty!(ps::ParameterSet, s::Symbol, value)
     )
     d = getfield(ps, :data)
     # Julia convention: `a.b = x` evaluates to `x`, so return the original RHS
-    # even when we wrap a `Pair` into a nested namespace Dict for storage.
-    stored = value isa Pair ? Dict{String, Any}(String(value.first) => value.second) : value
-    d[String(s)] = stored
+    # even when we normalize a namespace value for storage.
+    d[String(s)] = _parameter_assignment_value(value)
     return value
 end
 

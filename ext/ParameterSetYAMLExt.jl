@@ -5,6 +5,12 @@ import DeviceLayout.SchematicDrivenLayout: ParameterSet
 import YAML
 import Unitful
 
+struct _PlainYAMLString
+    value::String
+end
+
+Base.string(value::_PlainYAMLString) = value.value
+
 """
     _parse_units!(data::Dict{String, Any})
 
@@ -35,7 +41,7 @@ function _parse_unit_value(v::Dict{String, Any})
     return v
 end
 
-_parse_unit_value(v::AbstractVector) = map(_parse_unit_value, v)
+_parse_unit_value(v::Array) = map(_parse_unit_value, v)
 _parse_unit_value(v) = v
 
 function _parse_units!(data::Dict{String, Any})
@@ -56,8 +62,9 @@ function _serialize_unit_value(v::Dict{String, Any})
     return _serialize_units(v)
 end
 
-_serialize_unit_value(v::AbstractVector) = map(_serialize_unit_value, v)
-_serialize_unit_value(v::Unitful.Quantity) = "$(Unitful.ustrip(v))$(Unitful.unit(v))"
+_serialize_unit_value(v::Array) = map(_serialize_unit_value, v)
+_serialize_unit_value(v::Unitful.Quantity) =
+    _PlainYAMLString("$(Unitful.ustrip(v))$(Unitful.unit(v))")
 _serialize_unit_value(v) = v
 
 function _serialize_units(data::Dict{String, Any})

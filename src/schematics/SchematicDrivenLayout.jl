@@ -83,6 +83,7 @@ export @component,
     components,
     create_component,
     default_parameters,
+    extract_parameter_set,
     facing,
     filter_parameters,
     find_components,
@@ -141,6 +142,7 @@ include("components/components.jl")
 include("components/compdef.jl")
 include("components/composite_components.jl")
 include("components/builtin_components.jl")
+include("parameter_set_extraction.jl")
 include("routes.jl")
 include("components/variants.jl")
 include("solidmodels.jl")

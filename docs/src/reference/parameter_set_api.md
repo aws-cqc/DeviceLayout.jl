@@ -9,7 +9,12 @@ DeviceLayout.SchematicDrivenLayout.ParameterKeyError
 DeviceLayout.SchematicDrivenLayout.resolve
 DeviceLayout.SchematicDrivenLayout.leaf_params
 DeviceLayout.SchematicDrivenLayout.save_parameter_set
+DeviceLayout.SchematicDrivenLayout.extract_parameter_set
 ```
+
+`Base.merge` and `Base.merge!` are also implemented for root and scoped
+`ParameterSet`s. They recursively merge namespaces, deep-copy inserted values,
+and apply multiple sources from left to right.
 
 ## Component construction from a `ParameterSet`
 

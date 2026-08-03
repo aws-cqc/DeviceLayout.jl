@@ -75,6 +75,63 @@ using YAML  # activates the ParameterSetYAMLExt extension
 ps = ParameterSet("design_params.yaml")
 ```
 
+YAML anchors and merge keys are resolved when the file is loaded, so shared
+parameter templates can also be authored directly in YAML:
+
+```yaml
+templates:
+  qubit: &qubit
+    cap_width: 24μm
+    cap_length: 520μm
+    cap_gap: 30μm
+
+components:
+  q1:
+    <<: *qubit
+    cap_length: 600μm
+```
+
+## Programmatic Templates and Merging
+
+A template can live in any `ParameterSet` namespace, including a separate
+parameter-library set. Assigning a scoped `ParameterSet` copies its complete
+subtree:
+
+```julia
+library = ParameterSet()
+library.templates.qubit.cap_width = 24μm
+library.templates.qubit.cap_length = 520μm
+library.templates.qubit.routing.offsets = [0μm, 25μm]
+
+design = ParameterSet()
+design.components.q1 = library.templates.qubit
+design.components.q1.cap_length = 600μm
+```
+
+The copy is independent. Changing `design.components.q1` or one of its nested
+arrays does not mutate `library.templates.qubit`.
+
+Use `merge!` to recursively overlay one or more parameter subtrees:
+
+```julia
+process = ParameterSet()
+process.components.q1.cap_gap = 28μm
+
+local_overrides = ParameterSet()
+local_overrides.components.q1.cap_length = 650μm
+
+merge!(
+    design.components.q1,
+    process.components.q1,
+    local_overrides.components.q1,
+)
+```
+
+Sources are applied from left to right, so later values win. Namespaces are
+merged recursively; when a namespace and leaf occupy the same key, the later
+value replaces the earlier one. `merge(a, b, ...)` provides the same behavior
+without mutating `a` and returns a detached `ParameterSet`.
+
 ## Reading Parameters
 
 Use dot syntax to navigate the hierarchy:
@@ -162,6 +219,36 @@ cap2_node = fuse!(g, cap1_node => :p1, cap2 => :p0)
 
 sch = plan(g; log_dir=nothing)
 ```
+
+## Extracting Final Parameters from a Graph
+
+An attached parameter set is the source document and may contain only
+overrides. Use `extract_parameter_set` to obtain a detached set containing the
+supported final parameters of the component instances in a constructed graph:
+
+```julia
+resolved = extract_parameter_set(g)
+
+resolved.components.cap1.finger_length
+resolved.components.cap1.finger_gap  # included even when it came from a default
+```
+
+Components are addressed by their unique graph node IDs. Dotted IDs become
+nested namespaces, and composite subcomponents are nested below their parent:
+
+```julia
+resolved.components.module.q1.island.cap_width
+```
+
+The graph's attached `global` and other top-level metadata are copied into the
+result, while its source `components` namespace is replaced by the final graph
+contents. Composite extraction realizes lazy subgraphs. The result has no
+source path or access history and shares no mutable parameter data with the
+graph or its attached source.
+
+Extraction retains scalar parameter leaves and ordinary Julia `Array`s.
+`NamedTuple`s and dictionaries become namespaces. Unsupported custom values,
+including `Point`s and component-valued parameters, are omitted.
 
 ## Composite Components with ParameterSet
 
