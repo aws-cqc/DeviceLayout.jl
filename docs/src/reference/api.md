@@ -195,6 +195,7 @@
     CurvilinearRegion
     Curvilinear.edge_type_at_vertex
     Curvilinear.line_arc_cornerindices
+    Curvilinear.arc_arc_cornerindices
     difference2d_curved
     intersect2d_curved
     recover_curves

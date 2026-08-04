@@ -97,14 +97,20 @@ In addition to other generic [entity styles](./geometry.md#Entity-Styles) like `
 ### Rounding
 
 The [`Rounded`](@ref Polygons.Rounded) style applies fillet arcs to selected corners of a
-polygon. It handles two kinds of corners:
+polygon. It handles three kinds of corners:
 
   - **Straight-straight corners** (two straight edges meeting at a vertex) — available for
     both `Polygon` and `CurvilinearPolygon`.
   - **Line-arc corners** (a straight edge meeting a circular arc) — for
     `CurvilinearPolygon` only.
+  - **Arc-arc corners** (two circular arcs meeting at a vertex) — for `CurvilinearPolygon`
+    only. The fillet is the arc of radius `r` tangent to both adjacent arcs.
 
-Arc-arc corners (two arcs meeting at a vertex) are not supported and are left as-is.
+Arc-arc corners arise, for example, where the recovered arcs of two curved features meet, or
+in curve-bearing shapes built directly from arcs. Note that a curve-preserving Boolean only
+keeps an arc-arc corner if *neither* of its two arcs was cut by the operation; where two
+curved boundaries cross, the arcs are clipped to polylines (see
+[Recovering curves through clipping](@ref)) and the corner becomes line-arc or polygonal.
 
 Corner selection uses the `p0` keyword to target specific vertices by their coordinates.
 When `p0` is empty (the default), all eligible corners are rounded. The
@@ -154,7 +160,7 @@ half-annulus polygons.)
 
 #### Selecting line-arc corners
 
-[`Curvilinear.line_arc_cornerindices`](@ref) identifies vertices where a straight edge meets a curve.
+[`Curvilinear.line_arc_cornerindices`](@ref) identifies vertices where a straight edge meets a circular arc.
 This is useful for components that need to round only arc-to-straight transitions while leaving other corners sharp:
 
 ```julia

@@ -6,6 +6,14 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - Corner rounding now handles **arc-arc corners** (where two circular arcs meet), in
+    addition to straight-straight and line-arc corners. `Rounded` fillets such a corner with
+    an arc tangent to both adjacent arcs, honoring `p0`/`inverse_selection` like the other
+    corner types, on both the GDS and `SolidModel` paths. New exports
+    `Curvilinear.arc_arc_cornerindices` and `Curvilinear.rounded_corner_segment_arc_arc`.
+
 ## 1.16.1 (2026-07-28)
 
 ### Fixed
