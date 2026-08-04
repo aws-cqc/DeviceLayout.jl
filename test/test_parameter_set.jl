@@ -377,6 +377,37 @@
         push!(aliased_destination.components.q1.routing.offsets, 3)
         @test shared["offsets"] == [1, 2]
         @test aliased_source.components.q1.routing.offsets == [1, 2]
+
+        # Rebuilding the destination subtree is what buys detachment, so scoped
+        # views taken before the merge are stale in both directions.
+        stale_destination = ParameterSet()
+        stale_destination.components.q1.width = 300
+        stale_source = ParameterSet()
+        stale_source.components.q1.width = 350
+
+        stale_view = stale_destination.components.q1
+        merge!(stale_destination, stale_source)
+        @test stale_destination.components.q1.width == 350
+        @test stale_view.width == 300
+        stale_view.width = 999
+        @test stale_destination.components.q1.width == 350
+        # A view re-derived after the merge tracks the destination again.
+        fresh_view = stale_destination.components.q1
+        fresh_view.width = 375
+        @test stale_destination.components.q1.width == 375
+
+        # Only namespaces strictly below the merge target are rebuilt, so a view
+        # at the target level survives while a deeper one goes stale.
+        level_destination = ParameterSet()
+        level_destination.components.q1.routing.gap = 10
+        level_source = ParameterSet()
+        level_source.components.q1.routing.gap = 99
+
+        same_level_view = level_destination.components.q1
+        nested_view = level_destination.components.q1.routing
+        merge!(level_destination.components.q1, level_source.components.q1)
+        @test same_level_view.routing.gap == 99
+        @test nested_view.gap == 10
     end
 
     @testset "propertynames" begin
@@ -732,6 +763,10 @@ end
         settings = Dict{String, Any}("gain" => 2, "origin" => Point(0μm, 0μm))
         unsupported_settings = Dict{String, Any}("origin" => Point(0μm, 0μm))
         unsupported_matrix = [0μm 25μm; 50μm 75μm]
+        stepped_offsets = (0μm):(25μm):(50μm)
+        counted_indices = 1:3
+        viewed_offsets = view([0μm, 25μm, 50μm], 1:2)
+        unsupported_point = Point(0μm, 0μm)
     end
 
     @compdef struct ExtractionMergeCollisionComponent <: Component
@@ -818,8 +853,27 @@ end
         @test !haskey(extracted.components.route.data, "unsupported_settings")
         @test !haskey(extracted.components.route.data, "unsupported_matrix")
 
+        # Non-`Vector` `AbstractVector`s (ranges, views) are materialized as
+        # plain vectors rather than dropped.
+        @test extracted.components.route.stepped_offsets == [0μm, 25μm, 50μm]
+        @test extracted.components.route.stepped_offsets isa Vector
+        @test extracted.components.route.counted_indices == [1, 2, 3]
+        @test extracted.components.route.counted_indices isa Vector
+        @test extracted.components.route.viewed_offsets == [0μm, 25μm]
+        @test extracted.components.route.viewed_offsets isa Vector
+        # `Point` is a `StaticVector`, so it stays omitted instead of becoming
+        # a two-element coordinate array.
+        @test !haskey(extracted.components.route.data, "unsupported_point")
+
         push!(extracted.components.route.offsets, 50μm)
         @test parameters(component).offsets == [0μm, 25μm]
+
+        io = IOBuffer()
+        save_parameter_set(io, extracted)
+        reloaded = ParameterSet(IOBuffer(take!(io)))
+        @test reloaded.components.route.stepped_offsets == [0μm, 25μm, 50μm]
+        @test reloaded.components.route.counted_indices == [1, 2, 3]
+        @test reloaded.components.route.viewed_offsets == [0μm, 25μm]
     end
 
     @testset "Extraction without attached source and YAML round-trip" begin

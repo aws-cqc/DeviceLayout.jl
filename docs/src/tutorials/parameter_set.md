@@ -135,6 +135,19 @@ merged recursively; when a namespace and leaf occupy the same key, the later
 value replaces the earlier one. `merge(a, b, ...)` provides the same behavior
 without mutating `a` and returns a detached `ParameterSet`.
 
+!!! warning
+
+    `merge!` rebuilds the namespaces below the destination so that the result
+    never shares mutable data with a source. A scoped `ParameterSet` reaching
+    below the merge target still points at the superseded subtree, so re-derive
+    it from the destination afterwards rather than reusing the old handle:
+
+    ```julia
+    routing = design.components.q1.routing   # taken before the merge
+    merge!(design.components.q1, process.components.q1)
+    routing = design.components.q1.routing   # re-derive to see merged values
+    ```
+
 ## Reading Parameters
 
 Use dot syntax to navigate the hierarchy:

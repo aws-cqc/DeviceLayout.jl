@@ -245,6 +245,17 @@ Otherwise the later value replaces the earlier value. Inserted values are
 deep-copied, so the destination never shares mutable parameter data with a
 source. Source paths, scopes, and access logs are not merged, and merging does
 not mark any leaves as accessed.
+
+!!! warning "Nested scoped views are invalidated"
+
+    To guarantee detachment even when `destination` already aliases parameter
+    data owned by a source, every namespace strictly below `destination` is
+    rebuilt. A view at the merge target level stays valid, because
+    `destination`'s own dict is reused, but scoped views
+    (`sub = ps.components.q1.routing`) and `MissingNamespace` handles reaching
+    deeper keep referring to the superseded dictionaries: they neither observe
+    merged values nor write back into `destination`. Re-derive them from
+    `destination` after merging.
 """
 function Base.merge!(destination::ParameterSet, sources::ParameterSet...)
     destination_data = getfield(destination, :data)

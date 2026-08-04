@@ -18,6 +18,7 @@ import Logging:
     shouldlog,
     with_logger
 import LoggingExtras: FormatLogger, MinLevelLogger, TeeLogger
+import StaticArrays
 
 import DeviceLayout:
     AbstractComponent,

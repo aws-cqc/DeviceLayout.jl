@@ -1,19 +1,28 @@
 struct _UnsupportedParameterValue end
 const _UNSUPPORTED_PARAMETER_VALUE = _UnsupportedParameterValue()
 
+# An empty array carries no elements to inspect, so support is decided from its
+# element type alone.
+_supported_array_element_type(::Type{Any}) = true
+_supported_array_element_type(::Type{T}) where {T} =
+    T <: Union{Number, AbstractString, Symbol, Nothing, AbstractVector} &&
+    !(T <: StaticArrays.StaticVector)
+
 _extracted_array_value(value::Union{Number, AbstractString, Symbol, Nothing}) =
     _parameter_value_copy(value)
-function _extracted_array_value(value::Vector)
-    if isempty(value) &&
-       eltype(value) !== Any &&
-       !(eltype(value) <: Union{Number, AbstractString, Symbol, Nothing, Vector})
+function _extracted_array_value(value::AbstractVector)
+    isempty(value) &&
+        !_supported_array_element_type(eltype(value)) &&
         return _UNSUPPORTED_PARAMETER_VALUE
-    end
-    result = map(_extracted_array_value, value)
+    result = map(_extracted_array_value, collect(value))
     any(child -> child isa _UnsupportedParameterValue, result) &&
         return _UNSUPPORTED_PARAMETER_VALUE
     return result
 end
+# `Point` and other `StaticVector`s are `AbstractVector`s, but they represent
+# single geometric values rather than parameter arrays, so they stay unsupported
+# instead of degrading into plain vectors of coordinates.
+_extracted_array_value(::StaticArrays.StaticVector) = _UNSUPPORTED_PARAMETER_VALUE
 _extracted_array_value(::Any) = _UNSUPPORTED_PARAMETER_VALUE
 
 function _extracted_parameter_value(value::NamedTuple)
@@ -34,7 +43,8 @@ function _extracted_parameter_value(value::AbstractDict)
     !isempty(value) && isempty(result) && return _UNSUPPORTED_PARAMETER_VALUE
     return result
 end
-_extracted_parameter_value(value::Vector) = _extracted_array_value(value)
+_extracted_parameter_value(value::AbstractVector) = _extracted_array_value(value)
+_extracted_parameter_value(::StaticArrays.StaticVector) = _UNSUPPORTED_PARAMETER_VALUE
 _extracted_parameter_value(value::Union{Number, AbstractString, Symbol, Nothing}) =
     _parameter_value_copy(value)
 _extracted_parameter_value(::Any) = _UNSUPPORTED_PARAMETER_VALUE
@@ -137,9 +147,11 @@ Each component is stored below `components` at its unique node ID. Dots in node
 IDs become nested namespace segments, and composite-component graphs are
 recursively nested below their parent component. Parameter values are taken
 from the constructed component instances, so defaults and applied overrides
-are both included. Scalar values and ordinary one-dimensional `Array`s are
-retained. Named tuples and dictionaries form parameter namespaces. Other
-values, including `Point`s and component-valued parameters, are omitted.
+are both included. Scalar values are retained, as are one-dimensional
+`AbstractArray`s of supported values; ranges and views are materialized as plain
+`Vector`s. Named tuples and dictionaries form parameter namespaces. Other
+values are omitted, including component-valued parameters and `Point`s, which
+are `StaticVector`s standing for single geometric values rather than arrays.
 
 If `g` carries a source `ParameterSet`, its top-level namespaces other than
 `components` are deep-copied into the result. The source `components` namespace
