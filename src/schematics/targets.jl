@@ -1,3 +1,76 @@
+_target_style(flag::Symbol, only::Bool) = OptionalStyle(
+    only ? DeviceLayout.Plain() : DeviceLayout.NoRender(),
+    flag,
+    false_style=only ? DeviceLayout.NoRender() : DeviceLayout.Plain(),
+    default=false
+)
+
+# Avoid accumulating identical OptionalStyles when an in-place helper is called more than once.
+function _apply_target_style(ent::GeometryEntity, sty::OptionalStyle)
+    ent isa DeviceLayout.StyledEntity && isequal(ent.sty, sty) && return ent
+    return sty(ent)
+end
+
+_replace_structure(ref::StructureReference, geom::GeometryStructure) =
+    sref(geom, transformation(ref))
+_replace_structure(ref::ArrayReference, geom::GeometryStructure) = aref(
+    geom,
+    transformation(ref);
+    deltacol=ref.deltacol,
+    deltarow=ref.deltarow,
+    col=ref.col,
+    row=ref.row
+)
+
+_apply_target_style!(geom::Union{Path, Cell}, sty::OptionalStyle) = throw(
+    ArgumentError(
+        """
+    Cannot modify structure "$(name(geom))" in place.
+    Another structure must hold a reference to it, so it can be replaced completely (with a `CoordinateSystem`).
+"""
+    )
+)
+
+_apply_target_style!(geom::GeometryStructure, sty::OptionalStyle) = begin
+    # A Path is an AbstractComponent, but its geometry is stored as path nodes rather than in a
+    # CoordinateSystem. Replace each Path reference with an equivalent CoordinateSystem containing
+    # its references as well as its undecorated nodes as elements (with the style applied).
+    # Cells are also replaced with CoordinateSystems.
+    for i in eachindex(refs(geom))
+        ref = refs(geom)[i]
+        if structure(ref) isa Paths.Path
+            pa = structure(ref)
+            cs = flatten(pa; depth=0) # Creates an equivalent CoordinateSystem
+            refs(geom)[i] = _replace_structure(ref, cs)
+        elseif structure(ref) isa Cell # Cells can't hold styled entities, upgrade to CoordinateSystem
+            c = structure(ref)
+            cs = CoordinateSystem{coordinatetype(c)}(name(c))
+            append_coordsys!(cs, c) # Equivalent CoordinateSystem
+            refs(geom)[i] = _replace_structure(ref, cs)
+        end
+    end
+    elements(geom) .= _apply_target_style.(elements(geom), Ref(sty))
+    for ref in refs(geom)
+        _apply_target_style!(ref, sty)
+    end
+    return geom
+end
+
+function _apply_target_style!(ref::DeviceLayout.GeometryReference, sty::OptionalStyle)
+    _apply_target_style!(structure(ref), sty)
+    return ref
+end
+
+function _apply_target_style!(comp::AbstractComponent, sty::OptionalStyle)
+    cached = hasproperty(comp, :_geometry) || hasproperty(comp, :_schematic)
+    if !cached
+        @warn "Cannot apply target style in place to uncached component $(name(comp)); its geometry is not cached"
+        return comp
+    end
+    _apply_target_style!(geometry(comp), sty)
+    return comp
+end
+
 """
     not_simulated(ent::GeometryEntity)
 
@@ -7,18 +80,7 @@ The `simulation` option can be set as a keyword argument to `render!` or as an e
 `rendering_options` in the `Target` provided to `render!`.
 """
 not_simulated(ent::GeometryEntity) =
-    OptionalStyle(DeviceLayout.NoRender(), DeviceLayout.Plain(), :simulation, false)(ent)
-
-function not_simulated!(cs::CoordinateSystem)
-    not_simulated!.(cs.refs)
-    cs.elements .= not_simulated.(cs.elements)
-    return cs
-end
-
-function not_simulated!(csref::CoordinateSystemReference)
-    not_simulated!(csref.structure)
-    return csref
-end
+    _apply_target_style(ent, _target_style(:simulation, false))
 
 """
     only_simulated(ent::GeometryEntity)
@@ -28,7 +90,8 @@ Return a `GeometryEntity` that is rendered if and only if `simulation=true` in t
 The `simulation` option can be set as a keyword argument to `render!` or as an element in
 `rendering_options` in the `Target` provided to `render!`.
 """
-only_simulated(ent::GeometryEntity) = optional_entity(ent, :simulation, default=false)
+only_simulated(ent::GeometryEntity) =
+    _apply_target_style(ent, _target_style(:simulation, true))
 
 """
     not_solidmodel(ent::GeometryEntity)
@@ -39,18 +102,7 @@ The `solidmodel` option can be set as a keyword argument to `render!` or as an e
 `rendering_options` in the `Target` provided to `render!`.
 """
 not_solidmodel(ent::GeometryEntity) =
-    OptionalStyle(DeviceLayout.NoRender(), DeviceLayout.Plain(), :solidmodel, false)(ent)
-
-function not_solidmodel!(cs::CoordinateSystem)
-    not_solidmodel!.(cs.refs)
-    cs.elements .= not_solidmodel.(cs.elements)
-    return cs
-end
-
-function not_solidmodel!(csref::CoordinateSystemReference)
-    not_solidmodel!(csref.structure)
-    return csref
-end
+    _apply_target_style(ent, _target_style(:solidmodel, false))
 
 """
     only_solidmodel(ent::GeometryEntity)
@@ -60,7 +112,93 @@ Return a `GeometryEntity` that is rendered if and only if `solidmodel=true` in t
 The `solidmodel` option can be set as a keyword argument to `render!` or as an element in
 `rendering_options` in the `Target` provided to `render!`.
 """
-only_solidmodel(ent::GeometryEntity) = optional_entity(ent, :solidmodel, default=false)
+only_solidmodel(ent::GeometryEntity) =
+    _apply_target_style(ent, _target_style(:solidmodel, true))
+
+"""
+    not_simulated!(cs::CoordinateSystem)
+
+Apply [`not_simulated`](@ref) in-place to every element in `cs`, recursing into references.
+"""
+not_simulated!(cs::CoordinateSystem) =
+    _apply_target_style!(cs, _target_style(:simulation, false))
+
+"""
+    only_simulated!(cs::CoordinateSystem)
+
+Apply [`only_simulated`](@ref) in-place to every element in `cs`, recursing into references.
+"""
+only_simulated!(cs::CoordinateSystem) =
+    _apply_target_style!(cs, _target_style(:simulation, true))
+
+"""
+    not_solidmodel!(cs::CoordinateSystem)
+
+Apply [`not_solidmodel`](@ref) in-place to every element in `cs`, recursing into references.
+"""
+not_solidmodel!(cs::CoordinateSystem) =
+    _apply_target_style!(cs, _target_style(:solidmodel, false))
+
+"""
+    only_solidmodel!(cs::CoordinateSystem)
+
+Apply [`only_solidmodel`](@ref) in-place to every element in `cs`, recursing into references.
+"""
+only_solidmodel!(cs::CoordinateSystem) =
+    _apply_target_style!(cs, _target_style(:solidmodel, true))
+
+not_simulated!(ref::DeviceLayout.GeometryReference) =
+    _apply_target_style!(ref, _target_style(:simulation, false))
+only_simulated!(ref::DeviceLayout.GeometryReference) =
+    _apply_target_style!(ref, _target_style(:simulation, true))
+not_solidmodel!(ref::DeviceLayout.GeometryReference) =
+    _apply_target_style!(ref, _target_style(:solidmodel, false))
+only_solidmodel!(ref::DeviceLayout.GeometryReference) =
+    _apply_target_style!(ref, _target_style(:solidmodel, true))
+
+"""
+    not_simulated(pa::Paths.Path)
+
+Return a styled entity equivalent to `not_simulated(simplify(pa))`.
+
+The result is a `GeometryEntity` (not a `Path`), so any references attached to `pa` are dropped.
+
+See also [`not_simulated(::GeometryEntity)`](@ref).
+"""
+not_simulated(pa::Paths.Path) = not_simulated(undecorated(Paths.simplify(pa)))
+
+"""
+    only_simulated(pa::Paths.Path)
+
+Return a styled entity equivalent to `only_simulated(simplify(pa))`.
+
+The result is a `GeometryEntity` (not a `Path`), so any references attached to `pa` are dropped.
+
+See also [`only_simulated(::GeometryEntity)`](@ref).
+"""
+only_simulated(pa::Paths.Path) = only_simulated(undecorated(Paths.simplify(pa)))
+
+"""
+    not_solidmodel(pa::Paths.Path)
+
+Return a styled entity equivalent to `not_solidmodel(simplify(pa))`.
+
+The result is a `GeometryEntity` (not a `Path`), so any references attached to `pa` are dropped.
+
+See also [`not_solidmodel(::GeometryEntity)`](@ref).
+"""
+not_solidmodel(pa::Paths.Path) = not_solidmodel(undecorated(Paths.simplify(pa)))
+
+"""
+    only_solidmodel(pa::Paths.Path)
+
+Return a styled entity equivalent to `only_solidmodel(simplify(pa))`.
+
+The result is a `GeometryEntity` (not a `Path`), so any references attached to `pa` are dropped.
+
+See also [`only_solidmodel(::GeometryEntity)`](@ref).
+"""
+only_solidmodel(pa::Paths.Path) = only_solidmodel(undecorated(Paths.simplify(pa)))
 
 """
     facing(l::Int)

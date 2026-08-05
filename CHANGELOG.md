@@ -22,6 +22,14 @@ The format of this changelog is based on
     composite subgraphs while preserving attached top-level metadata. Scalar leaves and
     one-dimensional `AbstractArray`s including ranges and views are retained as plain vectors;
     unsupported custom values such as `Point`s are omitted.
+  - Added in-place style helpers `only_simulated!` and `only_solidmodel!` to match the in-place versions
+    of `not_simulated!` and `not_solidmodel!`. All eight style helpers (in-place and out-of-place versions)
+    are exported from `.SchematicDrivenLayout`.
+  - The style helpers `not_simulated!` and `not_solidmodel!` now recurse through all references
+    to structures of any valid type. Previously array references and non-`CoordinateSystem` structures
+    raised a `MethodError` part-way through the traversal. References to `Path`s are handled by
+    replacing the `Path` with an equivalent `CoordinateSystem` containing its references and its undecorated
+    nodes separately.
 
 ### Changed
 
@@ -29,6 +37,12 @@ The format of this changelog is based on
     `ParameterSet`, enabling independent programmatic templates such as
     `design.components.q1 = library.templates.qubit`.
   - Parameter-set YAML output now emits `Unitful.Quantity` values as unquoted plain scalars.
+
+### Fixed
+
+  - The style helpers are now idempotent, and will not change entities that already have the identical
+  `OptionalStyle` as their outer style.
+  - `ArrayReferences` as `Path` attachments now work with retrieving references and finding transformations (`refs` and `transformation`).
 
 ## 1.16.1 (2026-07-28)
 
