@@ -13,9 +13,6 @@ The format of this changelog is based on
     an arc tangent to both adjacent arcs, honoring `p0`/`inverse_selection` like the other
     corner types, on both the GDS and `SolidModel` paths. New exports
     `Curvilinear.arc_arc_cornerindices` and `Curvilinear.rounded_corner_segment_arc_arc`.
-  - `ParameterSet` namespaces can now be copied by assignment from another root or scoped
-    `ParameterSet`, enabling independent programmatic templates such as
-    `design.components.q1 = library.templates.qubit`.
   - Added recursive `merge` and `merge!` support for `ParameterSet`, with later sources taking
     precedence and no mutable parameter data shared with the sources. `merge!` rebuilds the
     destination's namespaces, so scoped views held from before the merge are stale and must be
