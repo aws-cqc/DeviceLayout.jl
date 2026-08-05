@@ -1,9 +1,20 @@
 module ParameterSetYAMLExt
 
 import DeviceLayout
-import DeviceLayout.SchematicDrivenLayout: ParameterSet
+import DeviceLayout.SchematicDrivenLayout: ParameterSet, _parameter_value_copy
 import YAML
 import Unitful
+
+struct _PlainYAMLScalar
+    value::String
+end
+
+Base.string(value::_PlainYAMLScalar) = value.value
+Base.show(io::IO, value::_PlainYAMLScalar) = print(io, value.value)
+
+const _PARAMETER_SET_YAML_CONSTRUCTORS = Dict{String, Function}(
+    "!symbol" => (constructor, node) -> Symbol(YAML.construct_scalar(constructor, node))
+)
 
 """
     _parse_units!(data::Dict{String, Any})
@@ -35,7 +46,7 @@ function _parse_unit_value(v::Dict{String, Any})
     return v
 end
 
-_parse_unit_value(v::AbstractVector) = map(_parse_unit_value, v)
+_parse_unit_value(v::Vector) = map(_parse_unit_value, v)
 _parse_unit_value(v) = v
 
 function _parse_units!(data::Dict{String, Any})
@@ -49,15 +60,25 @@ end
     _serialize_units(data::Dict{String, Any}) -> Dict{String, Any}
 
 Return a deep copy of `data` with `Unitful.Quantity` values, including values
-inside arrays, converted to strings like `"150μm"` (no space, round-trips
-through `Unitful.uparse`).
+inside arrays, converted to unquoted YAML scalars like `150μm` (no space,
+round-trips through `Unitful.uparse`).
 """
 function _serialize_unit_value(v::Dict{String, Any})
     return _serialize_units(v)
 end
 
-_serialize_unit_value(v::AbstractVector) = map(_serialize_unit_value, v)
-_serialize_unit_value(v::Unitful.Quantity) = "$(Unitful.ustrip(v))$(Unitful.unit(v))"
+_serialize_unit_value(v::Vector) = map(_serialize_unit_value, v)
+function _serialize_unit_value(v::AbstractArray)
+    throw(
+        ArgumentError(
+            "Cannot save ParameterSet value of type $(typeof(v)): " *
+            "only one-dimensional Array values are supported."
+        )
+    )
+end
+_serialize_unit_value(v::Unitful.Quantity) =
+    _PlainYAMLScalar("$(Unitful.ustrip(v))$(Unitful.unit(v))")
+_serialize_unit_value(v::Symbol) = _PlainYAMLScalar("!symbol $(repr(String(v)))")
 _serialize_unit_value(v) = v
 
 function _serialize_units(data::Dict{String, Any})
@@ -79,7 +100,12 @@ converted in place.
 Requires `YAML.jl` to be loaded (`using YAML`).
 """
 function ParameterSet(io::IO, path::String="")
-    data = YAML.load(io; dicttype=Dict{String, Any})
+    data = YAML.load(
+        io,
+        _PARAMETER_SET_YAML_CONSTRUCTORS;
+        dicttype=Dict{String, Any}
+    )
+    data = _parameter_value_copy(data)
     _parse_units!(data)
     return DeviceLayout.SchematicDrivenLayout.ParameterSet(path, data)
 end

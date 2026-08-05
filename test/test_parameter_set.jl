@@ -253,6 +253,163 @@
         @test_throws "a.b" (mn2.c = 1)
     end
 
+    @testset "Copied subtree assignment" begin
+        library = ParameterSet()
+        library.templates.qubit.width = 300
+        library.templates.qubit.routing.offsets = [1, 2]
+
+        design = ParameterSet()
+        assigned = (design.components.q1 = library.templates.qubit)
+        @test assigned isa ParameterSet
+        @test assigned.data === library.templates.qubit.data
+        @test isempty(library.accessed)
+        @test design.components.q1.width == 300
+        @test design.components.q1.routing.offsets == [1, 2]
+
+        design.components.q1.width = 350
+        push!(design.components.q1.routing.offsets, 3)
+        @test library.templates.qubit.width == 300
+        @test library.templates.qubit.routing.offsets == [1, 2]
+
+        # The same copy behavior applies when a missing destination path must
+        # first be materialized.
+        design2 = ParameterSet()
+        design2.variants.fast.q1 = library.templates.qubit
+        design2.variants.fast.q1.width = 400
+        @test library.templates.qubit.width == 300
+
+        root_template = ParameterSet()
+        root_template.width = 500
+        root_template.routing.offsets = [4, 5]
+        design.components.q2 = root_template
+        @test design.components.q2.width == 500
+        @test !haskey(design.components.q2.data, "global")
+        @test !haskey(design.components.q2.data, "components")
+
+        raw_template = Dict{String, Any}(
+            "width" => 600,
+            "routing" => Dict{String, Any}("offsets" => [6, 7])
+        )
+        design.components.q3 = raw_template
+        push!(design.components.q3.routing.offsets, 8)
+        @test raw_template["routing"]["offsets"] == [6, 7]
+    end
+
+    @testset "Recursive ParameterSet merge" begin
+        base = ParameterSet()
+        base.components.q1.width = 300
+        base.components.q1.routing.gap = 20
+        base.components.q1.routing.offsets = [1, 2]
+        base.components.q1.mode.options = 1
+        base.components.q1.replaced = 1
+
+        process = ParameterSet()
+        process.components.q1.routing.gap = 25
+        process.components.q1.mode = "fast"
+        process.components.q1.replaced.value = 2
+
+        local_overrides = ParameterSet()
+        local_overrides.components.q1.width = 350
+
+        result =
+            merge(base.components.q1, process.components.q1, local_overrides.components.q1)
+        @test isempty(base.accessed)
+        @test isempty(process.accessed)
+        @test isempty(local_overrides.accessed)
+        @test result.width == 350
+        @test result.routing.gap == 25
+        @test result.routing.offsets == [1, 2]
+        @test result.mode == "fast"
+        @test result.replaced.value == 2
+        @test result.path == ""
+        @test result.prefix == "components.q1"
+
+        # The non-mutating result and mutating destination are both detached
+        # from every source.
+        push!(result.routing.offsets, 3)
+        @test base.components.q1.routing.offsets == [1, 2]
+
+        destination = ParameterSet()
+        destination.components.q1 = base.components.q1
+        empty!(base.accessed)
+        returned = merge!(
+            destination.components.q1,
+            process.components.q1,
+            local_overrides.components.q1
+        )
+        @test returned isa ParameterSet
+        @test isempty(destination.accessed)
+        @test isempty(base.accessed)
+        @test isempty(process.accessed)
+        @test isempty(local_overrides.accessed)
+        @test destination.components.q1.width == 350
+        @test destination.components.q1.routing.gap == 25
+        @test destination.components.q1.mode == "fast"
+        @test destination.components.q1.replaced.value == 2
+
+        process.components.q1.routing.gap = 99
+        @test destination.components.q1.routing.gap == 25
+
+        # Self-merge is a no-op rather than recursively descending forever.
+        @test merge!(destination.components.q1, destination.components.q1) isa ParameterSet
+        @test destination.components.q1.width == 350
+
+        auto = ParameterSet()
+        merge!(auto.components.q1, base.components.q1)
+        @test auto.components.q1.width == 300
+
+        shared = Dict{String, Any}("offsets" => [1, 2])
+        aliased_destination = ParameterSet(
+            Dict{String, Any}(
+                "global" => Dict{String, Any}(),
+                "components" =>
+                    Dict{String, Any}("q1" => Dict{String, Any}("routing" => shared))
+            )
+        )
+        aliased_source = ParameterSet(
+            Dict{String, Any}(
+                "global" => Dict{String, Any}(),
+                "components" =>
+                    Dict{String, Any}("q1" => Dict{String, Any}("routing" => shared))
+            )
+        )
+        merge!(aliased_destination.components.q1, aliased_source.components.q1)
+        push!(aliased_destination.components.q1.routing.offsets, 3)
+        @test shared["offsets"] == [1, 2]
+        @test aliased_source.components.q1.routing.offsets == [1, 2]
+
+        # Rebuilding the destination subtree is what buys detachment, so scoped
+        # views taken before the merge are stale in both directions.
+        stale_destination = ParameterSet()
+        stale_destination.components.q1.width = 300
+        stale_source = ParameterSet()
+        stale_source.components.q1.width = 350
+
+        stale_view = stale_destination.components.q1
+        merge!(stale_destination, stale_source)
+        @test stale_destination.components.q1.width == 350
+        @test stale_view.width == 300
+        stale_view.width = 999
+        @test stale_destination.components.q1.width == 350
+        # A view re-derived after the merge tracks the destination again.
+        fresh_view = stale_destination.components.q1
+        fresh_view.width = 375
+        @test stale_destination.components.q1.width == 375
+
+        # Only namespaces strictly below the merge target are rebuilt, so a view
+        # at the target level survives while a deeper one goes stale.
+        level_destination = ParameterSet()
+        level_destination.components.q1.routing.gap = 10
+        level_source = ParameterSet()
+        level_source.components.q1.routing.gap = 99
+
+        same_level_view = level_destination.components.q1
+        nested_view = level_destination.components.q1.routing
+        merge!(level_destination.components.q1, level_source.components.q1)
+        @test same_level_view.routing.gap == 99
+        @test nested_view.gap == 10
+    end
+
     @testset "propertynames" begin
         ps = ParameterSet()
         ps.extra = 42
@@ -547,6 +704,235 @@ end
     end
 end
 
+@testitem "SchematicGraph ParameterSet extraction" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+    using DeviceLayout.SchematicDrivenLayout.ExamplePDK.Transmons: ExampleRectangleIsland
+    using Unitful: μm
+    using YAML
+
+    @compdef struct ExtractionComposite <: CompositeComponent
+        name = "assembly"
+        cap_length = 600μm
+        template = ExampleRectangleIsland(name="template", cap_width=30μm)
+        templates = (island=ExampleRectangleIsland(name="nested_template"),)
+    end
+
+    function SchematicDrivenLayout._build_subcomponents(c::ExtractionComposite)
+        island = set_parameters(c.template, "island"; cap_length=c.cap_length)
+        return (; island)
+    end
+
+    function SchematicDrivenLayout._graph!(
+        g::SchematicGraph,
+        ::ExtractionComposite,
+        subcomponents::NamedTuple
+    )
+        add_node!(g, subcomponents.island)
+        return g
+    end
+
+    SchematicDrivenLayout.map_hooks(::Type{ExtractionComposite}) =
+        Dict{Pair{Int, Symbol}, Symbol}()
+
+    @compdef struct ExtractionCollisionComposite <: CompositeComponent
+        name = "collision"
+        child = 1
+    end
+
+    function SchematicDrivenLayout._build_subcomponents(::ExtractionCollisionComposite)
+        return (; child=ExampleRectangleIsland(name="child"))
+    end
+
+    function SchematicDrivenLayout._graph!(
+        g::SchematicGraph,
+        ::ExtractionCollisionComposite,
+        subcomponents::NamedTuple
+    )
+        add_node!(g, subcomponents.child)
+        return g
+    end
+
+    SchematicDrivenLayout.map_hooks(::Type{ExtractionCollisionComposite}) =
+        Dict{Pair{Int, Symbol}, Symbol}()
+
+    @compdef struct ExtractionArrayComponent <: Component
+        name = "array_component"
+        offsets = [0μm, 25μm]
+        unsupported_points = typeof(Point(0μm, 0μm))[]
+        mixed_values = Any[1, Point(0μm, 0μm)]
+        settings = Dict{String, Any}("gain" => 2, "origin" => Point(0μm, 0μm))
+        unsupported_settings = Dict{String, Any}("origin" => Point(0μm, 0μm))
+        unsupported_matrix = [0μm 25μm; 50μm 75μm]
+        stepped_offsets = (0μm):(25μm):(50μm)
+        counted_indices = 1:3
+        viewed_offsets = view([0μm, 25μm, 50μm], 1:2)
+        unsupported_point = Point(0μm, 0μm)
+    end
+
+    @compdef struct ExtractionMergeCollisionComponent <: Component
+        name = "parent"
+        settings = (gain=2,)
+        child = 1
+    end
+
+    @testset "Complete detached extraction" begin
+        source = ParameterSet()
+        source.global.process = "fab-v3"
+        source.templates.qubit.cap_width = 24μm
+        source.custom.revision = 7
+        source.components.stale.width = 999μm
+
+        g = SchematicGraph("chip", source)
+        assembly = ExtractionComposite(cap_length=700μm)
+        add_node!(g, assembly; base_id="module.q1")
+        shared = ExampleRectangleIsland(name="shared", cap_width=40μm)
+        add_node!(g, shared; base_id="q2")
+        add_node!(g, shared; base_id="q3")
+
+        extracted = extract_parameter_set(g)
+
+        @test extracted.path == ""
+        @test isempty(extracted.accessed)
+        @test extracted.global.process == "fab-v3"
+        @test extracted.templates.qubit.cap_width == 24μm
+        @test extracted.custom.revision == 7
+        @test !haskey(extracted.data["components"], "stale")
+
+        # Dotted IDs become nested namespaces. Supported parent defaults and
+        # overrides are represented; component-valued parameters are omitted.
+        q1 = extracted.components.module.q1
+        @test q1.name == "assembly"
+        @test q1.cap_length == 700μm
+        @test !haskey(q1.data, "template")
+        @test !haskey(q1.data, "templates")
+
+        # Accessing the composite child realizes its lazy graph and captures
+        # the child's final parameters, including the forwarded parent value.
+        @test q1.island.name == "island"
+        @test q1.island.cap_width == 30μm
+        @test q1.island.cap_length == 700μm
+
+        @test extracted.components.q2.cap_width == 40μm
+        @test extracted.components.q3.cap_width == 40μm
+
+        extracted.global.process = "changed"
+        extracted.templates.qubit.cap_width = 100μm
+        extracted.components.q2.cap_width = 10μm
+        @test source.global.process == "fab-v3"
+        @test source.templates.qubit.cap_width == 24μm
+        @test parameters(shared).cap_width == 40μm
+        @test parameter_set(g) === source
+    end
+
+    @testset "Unsupported Point is omitted" begin
+        g = SchematicGraph("spacer")
+        add_node!(g, Spacer(10μm, 20μm); base_id="anchor")
+
+        extracted = extract_parameter_set(g)
+        @test extracted.components.anchor.name == "spacer"
+        @test !haskey(extracted.components.anchor.data, "p1")
+
+        io = IOBuffer()
+        @test save_parameter_set(io, extracted) === io
+        reloaded = ParameterSet(IOBuffer(take!(io)))
+        @test reloaded.components.anchor.name == "spacer"
+        @test !haskey(reloaded.components.anchor.data, "p1")
+    end
+
+    @testset "Ordinary Array is retained" begin
+        component = ExtractionArrayComponent()
+        g = SchematicGraph("array")
+        add_node!(g, component; base_id="route")
+
+        extracted = extract_parameter_set(g)
+        @test extracted.components.route.offsets == [0μm, 25μm]
+        @test !haskey(extracted.components.route.data, "unsupported_points")
+        @test !haskey(extracted.components.route.data, "mixed_values")
+        @test extracted.components.route.settings.gain == 2
+        @test !haskey(extracted.components.route.settings.data, "origin")
+        @test !haskey(extracted.components.route.data, "unsupported_settings")
+        @test !haskey(extracted.components.route.data, "unsupported_matrix")
+
+        # Non-`Vector` `AbstractVector`s (ranges, views) are materialized as
+        # plain vectors rather than dropped.
+        @test extracted.components.route.stepped_offsets == [0μm, 25μm, 50μm]
+        @test extracted.components.route.stepped_offsets isa Vector
+        @test extracted.components.route.counted_indices == [1, 2, 3]
+        @test extracted.components.route.counted_indices isa Vector
+        @test extracted.components.route.viewed_offsets == [0μm, 25μm]
+        @test extracted.components.route.viewed_offsets isa Vector
+        # `Point` is a `StaticVector`, so it stays omitted instead of becoming
+        # a two-element coordinate array.
+        @test !haskey(extracted.components.route.data, "unsupported_point")
+
+        push!(extracted.components.route.offsets, 50μm)
+        @test parameters(component).offsets == [0μm, 25μm]
+
+        io = IOBuffer()
+        save_parameter_set(io, extracted)
+        reloaded = ParameterSet(IOBuffer(take!(io)))
+        @test reloaded.components.route.stepped_offsets == [0μm, 25μm, 50μm]
+        @test reloaded.components.route.counted_indices == [1, 2, 3]
+        @test reloaded.components.route.viewed_offsets == [0μm, 25μm]
+    end
+
+    @testset "Extraction without attached source and YAML round-trip" begin
+        g = SchematicGraph("bare")
+        add_node!(
+            g,
+            ExampleRectangleIsland(name="island", cap_width=41μm);
+            base_id="island"
+        )
+
+        extracted = extract_parameter_set(g)
+        @test isempty(extracted.global.data)
+        @test extracted.components.island.cap_width == 41μm
+        @test extracted.components.island.cap_length ==
+              parameters(ExampleRectangleIsland()).cap_length
+        @test extracted.components.island.junction_pos == :bottom
+
+        io = IOBuffer()
+        save_parameter_set(io, extracted)
+        reloaded = ParameterSet(IOBuffer(take!(io)))
+        @test reloaded.components.island.cap_width == 41μm
+        @test reloaded.components.island.cap_length ==
+              parameters(ExampleRectangleIsland()).cap_length
+        @test reloaded.components.island.junction_pos == :bottom
+    end
+
+    @testset "Component path collision" begin
+        g = SchematicGraph("collision")
+        add_node!(g, ExtractionCollisionComposite())
+        err = try
+            extract_parameter_set(g)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("components.collision.child", err.msg)
+        @test occursin("parameter leaf", err.msg)
+
+        merge_g = SchematicGraph("merge_collision")
+        add_node!(
+            merge_g,
+            ExampleRectangleIsland(name="nested");
+            base_id="parent.settings.nested"
+        )
+        add_node!(merge_g, ExampleRectangleIsland(name="child"); base_id="parent.child")
+        add_node!(merge_g, ExtractionMergeCollisionComponent(); base_id="parent")
+        merge_err = try
+            extract_parameter_set(merge_g)
+            nothing
+        catch e
+            e
+        end
+        @test merge_err isa ArgumentError
+        @test occursin("components.parent.child", merge_err.msg)
+        @test occursin("parameter leaf", merge_err.msg)
+    end
+end
+
 @testitem "ParameterSet YAML IO" setup = [CommonTestSetup] begin
     using DeviceLayout.SchematicDrivenLayout:
         ParameterSet, resolve, leaf_params, save_parameter_set
@@ -556,6 +942,8 @@ end
     @testset "save_parameter_set to IO" begin
         ps = ParameterSet()
         ps.global.version = 1
+        ps.global.process_node = "fab_v3"
+        ps.global.junction_pos = :bottom
         ps.components.cap.finger_length = 150μm
         ps.components.cap.finger_count = 6
 
@@ -563,12 +951,19 @@ end
         save_parameter_set(io, ps)
         yaml_str = String(take!(io))
 
-        # Unitful quantities serialized as quoted unit strings
-        @test contains(yaml_str, "finger_length: \"150μm\"") ||
-              contains(yaml_str, "finger_length: \"150.0μm\"")
+        # Unitful quantities use plain YAML scalars.
+        @test contains(yaml_str, "finger_length: 150μm") ||
+              contains(yaml_str, "finger_length: 150.0μm")
+        # Ordinary strings retain YAML.jl's default quoting.
+        @test contains(yaml_str, "process_node: \"fab_v3\"")
+        @test contains(yaml_str, "junction_pos: !symbol \"bottom\"")
         # Plain numbers stay as numbers
         @test contains(yaml_str, "finger_count: 6")
         @test contains(yaml_str, "version: 1")
+
+        reloaded = ParameterSet(IOBuffer(yaml_str))
+        @test reloaded.global.process_node == "fab_v3"
+        @test reloaded.global.junction_pos == :bottom
     end
 
     @testset "ParameterSet from IO" begin
@@ -590,6 +985,31 @@ end
         @test ps.components.qubit.finger_count == 4
     end
 
+    @testset "YAML anchors and merge keys" begin
+        yaml_str = """
+        global:
+          version: 1
+        templates:
+          qubit: &qubit
+            cap_width: 24μm
+            cap_length: 520μm
+            cap_gap: 30μm
+            routing:
+              offsets: [0μm, 25μm]
+        components:
+          q1:
+            <<: *qubit
+            cap_length: 600μm
+        """
+        ps = ParameterSet(IOBuffer(yaml_str))
+
+        @test ps.components.q1.cap_width == 24μm
+        @test ps.components.q1.cap_length == 600μm
+        @test ps.components.q1.cap_gap == 30μm
+        push!(ps.components.q1.routing.offsets, 50μm)
+        @test ps.templates.qubit.routing.offsets == [0μm, 25μm]
+    end
+
     @testset "ParameterSet from IO parses unit arrays" begin
         # Each element is its own YAML scalar (`0μm`), so the array walk in
         # `_parse_units!` converts them element-wise to ContextUnits quantities.
@@ -605,6 +1025,27 @@ end
         @test all(x -> x isa Unitful.Quantity, offsets)
         @test all(x -> Unitful.unit(x) isa Unitful.ContextUnits, offsets)
         @test leaf_params(ps.components.routing).pad_offsets == offsets
+    end
+
+    @testset "Ordinary arrays save and reload" begin
+        ps = ParameterSet()
+        ps.components.routing.pad_offsets = [0μm, 25μm, 50μm]
+
+        io = IOBuffer()
+        save_parameter_set(io, ps)
+        reloaded = ParameterSet(IOBuffer(take!(io)))
+
+        @test reloaded.components.routing.pad_offsets == [0μm, 25μm, 50μm]
+    end
+
+    @testset "Unsupported array-like values fail clearly" begin
+        point_ps = ParameterSet()
+        point_ps.components.anchor.p1 = Point(10μm, 20μm)
+        @test_throws ArgumentError save_parameter_set(IOBuffer(), point_ps)
+
+        matrix_ps = ParameterSet()
+        matrix_ps.components.routing.offsets = [0μm 25μm; 50μm 75μm]
+        @test_throws ArgumentError save_parameter_set(IOBuffer(), matrix_ps)
     end
 
     @testset "Factored unit after a flow sequence is not valid YAML" begin

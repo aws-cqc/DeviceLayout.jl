@@ -13,6 +13,22 @@ The format of this changelog is based on
     an arc tangent to both adjacent arcs, honoring `p0`/`inverse_selection` like the other
     corner types, on both the GDS and `SolidModel` paths. New exports
     `Curvilinear.arc_arc_cornerindices` and `Curvilinear.rounded_corner_segment_arc_arc`.
+  - Added recursive `merge` and `merge!` support for `ParameterSet`, with later sources taking
+    precedence and no mutable parameter data shared with the sources. `merge!` rebuilds the
+    destination's namespaces, so scoped views held from before the merge are stale and must be
+    re-derived.
+  - Added `extract_parameter_set(g::SchematicGraph)` to create a detached parameter tree from
+    supported final graph-component values, including defaults and recursively realized
+    composite subgraphs while preserving attached top-level metadata. Scalar leaves and
+    one-dimensional `AbstractArray`s including ranges and views are retained as plain vectors;
+    unsupported custom values such as `Point`s are omitted.
+
+### Changed
+
+  - `ParameterSet` namespaces are now copied by assignment from another root or scoped
+    `ParameterSet`, enabling independent programmatic templates such as
+    `design.components.q1 = library.templates.qubit`.
+  - Parameter-set YAML output now emits `Unitful.Quantity` values as unquoted plain scalars.
 
 ## 1.16.1 (2026-07-28)
 
