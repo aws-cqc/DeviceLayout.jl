@@ -438,6 +438,7 @@ end
 
 include("render.jl")
 include("postrender.jl")
+include("experimental.jl")
 include("conformal/conformal.jl")
 
 using .ConformalRender: render_conformal!, ConformalRenderContext, add_conformal_loop!
