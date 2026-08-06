@@ -1,14 +1,7 @@
 """
-Broad, extensible material classification for source layers.
+Material classification for source layers.
 """
-abstract type Material end
-struct Metal <: Material end
-struct Dielectric <: Material end
-struct NullMaterial <: Material end
-
-const METAL = Metal()
-const DIELECTRIC = Dielectric()
-const NULL = NullMaterial()
+@enum Material METAL DIELECTRIC NULL
 
 abstract type Role end
 struct Generic <: Role end

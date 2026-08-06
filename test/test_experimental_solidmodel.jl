@@ -21,9 +21,6 @@
     )
     @test !occursin(r"(?<!\.)\bflatten\s*\(", integration_source)
 
-    @test METAL isa Material
-    @test DIELECTRIC isa Material
-    @test NULL isa Material
     @test LumpedPort("-Z") == LumpedPort([0.0, 0.0, -1.0])
     @test_throws ArgumentError LumpedPort("north")
 
