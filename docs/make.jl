@@ -24,7 +24,12 @@ DocMeta.setdocmeta!(
 
 makedocs(
     repo=Documenter.Remotes.GitHub("aws-cqc", "DeviceLayout.jl"),
-    modules=[DeviceLayout, CoordinateTransformations, DeviceLayout.SchematicDrivenLayout],
+    modules=[
+        DeviceLayout,
+        CoordinateTransformations,
+        DeviceLayout.SchematicDrivenLayout,
+        DeviceLayout.SolidModels.Experimental
+    ],
     warnonly=true,
     checkdocs=:none,
     format=Documenter.HTML(
@@ -63,6 +68,7 @@ makedocs(
             "Routes" => "concepts/routes.md",
             "Rendering and Export" => "concepts/render.md",
             "Solid Models (3D Geometry)" => "concepts/solidmodels.md",
+            "Solid Models (Experimental)" => "concepts/experimental_solidmodels.md",
             "Schematic-Driven Design" => "concepts/schematic_driven_design.md",
             "Components" => "concepts/components.md",
             "Autofill" => "concepts/autofill.md",

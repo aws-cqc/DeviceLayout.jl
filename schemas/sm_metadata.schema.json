@@ -1,0 +1,161 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/aws-cqc/DeviceLayout.jl/schemas/sm_metadata.schema.json",
+  "title": "DeviceLayout experimental solid-model metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["metadata", "physical_groups", "layers", "tagged", "terminals", "ground"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "length_units", "assembly"],
+      "properties": {
+        "schema_version": { "const": "1.0.0" },
+        "length_units": { "const": "um" },
+        "assembly": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["levels"],
+          "properties": {
+            "levels": {
+              "type": "object",
+              "propertyNames": { "pattern": "^-?(0|[1-9][0-9]*)$" },
+              "additionalProperties": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "physical_groups": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/physical_group" }
+    },
+    "layers": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/layer" }
+    },
+    "tagged": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/tagged" }
+    },
+    "terminals": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/terminal" }
+    },
+    "ground": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/group_membership" }
+    }
+  },
+  "definitions": {
+    "string_array": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": ["Generic", "Terminal", "Ground", "Tag", "WavePort", "LumpedPort"]
+        },
+        "direction": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "LumpedPort" } } },
+          "then": { "required": ["direction"] },
+          "else": { "not": { "required": ["direction"] } }
+        }
+      ]
+    },
+    "entity_meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "index", "role"],
+      "properties": {
+        "name": { "type": "string" },
+        "index": { "type": "integer" },
+        "role": { "$ref": "#/definitions/role" }
+      }
+    },
+    "physical_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "dim", "entity_meta"],
+      "properties": {
+        "tag": { "type": "integer", "minimum": 1 },
+        "dim": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "entity_meta": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/definitions/entity_meta" }
+          ]
+        }
+      }
+    },
+    "layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pgs", "dim", "type"],
+      "properties": {
+        "pgs": { "$ref": "#/definitions/string_array" },
+        "dim": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "type": { "enum": ["source", "generated"] },
+        "level": { "type": "integer" },
+        "height": { "type": "number" },
+        "thickness": { "type": "number" },
+        "parents": { "$ref": "#/definitions/string_array" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "source" } } },
+          "then": { "required": ["level", "height", "thickness"] },
+          "else": {
+            "not": {
+              "anyOf": [
+                { "required": ["level"] },
+                { "required": ["height"] },
+                { "required": ["thickness"] }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "tagged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pgs", "layer"],
+      "properties": {
+        "pgs": { "$ref": "#/definitions/string_array" },
+        "layer": { "type": "string" }
+      }
+    },
+    "group_membership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pgs"],
+      "properties": {
+        "pgs": { "$ref": "#/definitions/string_array" }
+      }
+    },
+    "terminal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pgs", "locators"],
+      "properties": {
+        "pgs": { "$ref": "#/definitions/string_array" },
+        "locators": { "$ref": "#/definitions/string_array" }
+      }
+    }
+  }
+}
