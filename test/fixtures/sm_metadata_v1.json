@@ -1,0 +1,31 @@
+{
+  "metadata": {
+    "schema_version": "1.0.0",
+    "length_units": "um",
+    "assembly": { "levels": { "1": 0.0, "2": 500.0 } }
+  },
+  "physical_groups": {
+    "port__jj__i1__rLumpedPort": {
+      "tag": 1,
+      "dim": 2,
+      "entity_meta": {
+        "name": "jj",
+        "index": 1,
+        "role": { "type": "LumpedPort", "direction": [0.0, 1.0, 0.0] }
+      }
+    }
+  },
+  "layers": {
+    "port": {
+      "pgs": ["port__jj__i1__rLumpedPort"],
+      "dim": 2,
+      "type": "source",
+      "level": 1,
+      "height": 0.0,
+      "thickness": 0.0
+    }
+  },
+  "tagged": {},
+  "terminals": {},
+  "ground": {}
+}

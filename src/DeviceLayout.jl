@@ -646,6 +646,13 @@ export PolyText,
 include("schematics/SchematicDrivenLayout.jl")
 export SchematicDrivenLayout
 
+# SolidModels loads before SchematicDrivenLayout. Complete the opt-in Experimental target
+# integration only after the schematic API is available, avoiding a circular module load.
+Base.include(
+    SolidModels.Experimental,
+    joinpath(@__DIR__, "solidmodels", "experimental", "schematic_integration.jl")
+)
+
 include("precompile.jl")
 
 end
