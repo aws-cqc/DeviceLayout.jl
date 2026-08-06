@@ -41,7 +41,7 @@ function serialize_metadata(
             # Entity meta
             if pgr.entity_meta !== nothing
                 em = pgr.entity_meta
-                role_dict = Dict{String, Any}("type" => _role_tag(em.role))
+                role_dict = Dict{String, Any}("type" => string(em.role))
                 if em.role isa LumpedPort
                     role_dict["direction"] = em.role.direction
                 end
