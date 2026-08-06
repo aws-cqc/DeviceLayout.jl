@@ -41,17 +41,7 @@ function LumpedPort(direction::String)
     return LumpedPort(directions[direction])
 end
 
-Base.:(==)(::Generic, ::Generic) = true
-Base.:(==)(::Terminal, ::Terminal) = true
-Base.:(==)(::Ground, ::Ground) = true
-Base.:(==)(::Tag, ::Tag) = true
-Base.:(==)(::WavePort, ::WavePort) = true
 Base.:(==)(a::LumpedPort, b::LumpedPort) = a.direction == b.direction
-Base.hash(::Generic, h::UInt) = hash(Generic, h)
-Base.hash(::Terminal, h::UInt) = hash(Terminal, h)
-Base.hash(::Ground, h::UInt) = hash(Ground, h)
-Base.hash(::Tag, h::UInt) = hash(Tag, h)
-Base.hash(::WavePort, h::UInt) = hash(WavePort, h)
 Base.hash(p::LumpedPort, h::UInt) = hash((LumpedPort, p.direction), h)
 
 Base.show(io::IO, ::Generic) = print(io, "Generic")
@@ -59,14 +49,7 @@ Base.show(io::IO, ::Terminal) = print(io, "Terminal")
 Base.show(io::IO, ::Ground) = print(io, "Ground")
 Base.show(io::IO, ::Tag) = print(io, "Tag")
 Base.show(io::IO, ::WavePort) = print(io, "WavePort")
-Base.show(io::IO, p::LumpedPort) = print(io, "LumpedPort($(p.direction))")
-
-_role_tag(::Generic) = "Generic"
-_role_tag(::Terminal) = "Terminal"
-_role_tag(::Ground) = "Ground"
-_role_tag(::Tag) = "Tag"
-_role_tag(::WavePort) = "WavePort"
-_role_tag(::LumpedPort) = "LumpedPort"
+Base.show(io::IO, ::LumpedPort) = print(io, "LumpedPort")
 
 """
     EntityMeta(layer::Symbol; name="", index=1, role=Generic())
@@ -97,7 +80,7 @@ Base.broadcastable(m::EntityMeta) = Ref(m)
 Return the stable physical-group name for an `EntityMeta`.
 """
 function physical_group_name(m::EntityMeta)::String
-    return "$(m.layer)__$(m.name)__i$(m.index)__r$(_role_tag(m.role))"
+    return "$(m.layer)__$(m.name)__i$(m.index)__r$(string(m.role))"
 end
 
 # Retained as the prototype compiler spelling, within the Experimental namespace.
