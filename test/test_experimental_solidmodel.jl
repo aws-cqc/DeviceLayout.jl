@@ -21,7 +21,16 @@
     )
     @test !occursin(r"(?<!\.)\bflatten\s*\(", integration_source)
 
-    @test LumpedPort("-Z") == LumpedPort([0.0, 0.0, -1.0])
+    @test METAL isa Material
+    @test DIELECTRIC isa Material
+    @test NULL isa Material
+
+    lumped_port = LumpedPort("-Z")
+    equal_lumped_port = LumpedPort([0.0, 0.0, -1.0])
+    @test lumped_port == equal_lumped_port
+    @test hash(lumped_port) == hash(equal_lumped_port)
+    @test string.((Generic(), Terminal(), Ground(), Tag(), WavePort(), lumped_port)) ==
+          ("Generic", "Terminal", "Ground", "Tag", "WavePort", "LumpedPort")
     @test_throws ArgumentError LumpedPort("north")
 
     meta = EntityMeta(:metal; name="island", index=3, role=Terminal)
