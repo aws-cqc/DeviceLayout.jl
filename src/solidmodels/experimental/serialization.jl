@@ -1,12 +1,11 @@
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# Metadata JSON serialization
-# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ─── Metadata JSON serialization ─────────────────────────────────────────────
 
 """
     serialize_metadata(
         registry, terminal_result, tag_records, split_results,
-        cc_entity_tags, iface_layer_parents, stack, levels, sm, lumped_port_directions
-    ) -> Dict
+        cc_entity_tags, interface_layer_parents, stack, levels, sm,
+        lumped_port_directions
+    ) -> Dict{String, Any}
 
 Serialize the solid model metadata to a JSON-compatible dictionary.
 """
@@ -14,14 +13,14 @@ function serialize_metadata(
     registry::Registry,
     terminal_result::NamedTuple{(:terminals, :ground)},
     tag_records::Vector{Tuple{String, String, Symbol}},
-    split_results::Dict,
+    split_results::AbstractDict,
     cc_entity_tags::Dict{String, Vector{Int32}},
-    iface_layer_parents::Dict{Symbol, Vector{String}},
+    interface_layer_parents::Dict{Symbol, Vector{String}},
     stack::SourceStack,
     levels::StackLevels,
     sm::SolidModel,
     lumped_port_directions::Dict{String, Vector{Float64}}
-)::Dict{String, Any}
+)
     metadata = Dict{String, Any}(
         "schema_version" => "1.0.0",
         "length_units" => "um",
@@ -31,63 +30,68 @@ function serialize_metadata(
     )
 
     physical_groups = Dict{String, Any}()
-    for (layer_name, state) in registry
-        for pgr in state.pgs
-            # Skip PGs that don't exist in the solid model (e.g. empty deferred intersections)
-            gd = SolidModels.dimgroupdict(sm, state.dim)
-            haskey(gd, pgr.name) || continue
+    for (_, state) in registry
+        dimension_groups = SolidModels.dimgroupdict(sm, state.dim)
+        for record in state.pgs
+            # Skip PGs that do not exist in the solid model (for example, empty deferred
+            # intersections).
+            haskey(dimension_groups, record.name) || continue
 
-            pg_entry = Dict{String, Any}("tag" => gd[pgr.name].grouptag, "dim" => state.dim)
+            pg_entry = Dict{String, Any}(
+                "tag" => dimension_groups[record.name].grouptag,
+                "dim" => state.dim
+            )
 
-            # Entity meta
-            if pgr.entity_meta !== nothing
-                em = pgr.entity_meta
-                role_dict = Dict{String, Any}("type" => string(em.role))
-                if em.role isa LumpedPort
-                    identity = physical_group_name(em)
-                    haskey(lumped_port_directions, identity) || error(
+            # Entity metadata.
+            if !isnothing(record.entity_meta)
+                entity_meta = record.entity_meta
+                role_dict = Dict{String, Any}("type" => string(entity_meta.role))
+                if entity_meta.role isa LumpedPort
+                    source_name = physical_group_name(entity_meta)
+                    haskey(lumped_port_directions, source_name) || error(
                         "Internal metadata serialization error: LumpedPort record " *
-                        "'$(pgr.name)' has no resolved direction for source identity " *
-                        "'$identity'"
+                        "'$(record.name)' has no resolved direction for source identity " *
+                        "'$source_name'"
                     )
-                    role_dict["direction"] = lumped_port_directions[identity]
+                    role_dict["direction"] = lumped_port_directions[source_name]
                 end
                 pg_entry["entity_meta"] = Dict{String, Any}(
-                    "name" => em.name,
-                    "index" => em.index,
+                    "name" => entity_meta.name,
+                    "index" => entity_meta.index,
                     "role" => role_dict
                 )
             else
                 pg_entry["entity_meta"] = nothing
             end
 
-            physical_groups[pgr.name] = pg_entry
+            physical_groups[record.name] = pg_entry
         end
     end
 
     # Build layers map: layer name → {pgs, layer metadata, parents (for interfaces)}
     layers_dict = Dict{String, Any}()
     for (layer_name, state) in registry
+        dimension_groups = SolidModels.dimgroupdict(sm, state.dim)
         pg_names = String[]
-        for pgr in state.pgs
-            gd = SolidModels.dimgroupdict(sm, state.dim)
-            haskey(gd, pgr.name) || continue
-            push!(pg_names, pgr.name)
+        for record in state.pgs
+            haskey(dimension_groups, record.name) || continue
+            push!(pg_names, record.name)
         end
         isempty(pg_names) && continue
 
         layer_entry = Dict{String, Any}("pgs" => pg_names, "dim" => state.dim)
         if haskey(stack, layer_name)
-            sl = stack[layer_name]
+            source_layer = stack[layer_name]
             layer_entry["type"] = "source"
-            layer_entry["level"] = first_level(sl)
-            layer_entry["height"] = _micron_value(first_height(sl))
-            layer_entry["thickness"] = _micron_value(resolve_thickness(sl, levels))
+            layer_entry["level"] = first_level(source_layer)
+            layer_entry["height"] = _micron_value(first_height(source_layer))
+            layer_entry["thickness"] =
+                _micron_value(resolve_thickness(source_layer, levels))
         else
             layer_entry["type"] = "generated"
         end
-        if haskey(iface_layer_parents, layer_name)
-            layer_entry["parents"] = iface_layer_parents[layer_name]
+        if haskey(interface_layer_parents, layer_name)
+            layer_entry["parents"] = interface_layer_parents[layer_name]
         end
         layers_dict[string(layer_name)] = layer_entry
     end
@@ -102,10 +106,10 @@ function serialize_metadata(
 
     # Build terminals dict with sub-PG references
     terminals_dict = Dict{String, Any}()
-    for (cc_name, locator_tags) in terminal_result.terminals
+    for (cc_name, cc_locators) in terminal_result.terminals
         sub_pg_names = _resolve_entity_pgs(cc_entity_tags, cc_name, sm)
         terminals_dict[cc_name] =
-            Dict{String, Any}("pgs" => sub_pg_names, "locators" => locator_tags)
+            Dict{String, Any}("pgs" => sub_pg_names, "locators" => cc_locators)
     end
 
     # Build ground dict with sub-PG references
@@ -126,6 +130,8 @@ function serialize_metadata(
 end
 
 """
+    write_metadata(path::AbstractString, metadata::AbstractDict)
+
 Write a metadata dictionary as indented JSON. Rendering never calls this function.
 """
 function write_metadata(path::AbstractString, metadata::AbstractDict)

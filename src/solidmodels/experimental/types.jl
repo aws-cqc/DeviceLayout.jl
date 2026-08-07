@@ -1,8 +1,15 @@
 """
+    @enum Material METAL DIELECTRIC NULL
+
 Material classification for source layers.
 """
 @enum Material METAL DIELECTRIC NULL
 
+"""
+    abstract type Role
+
+Supertype for functional roles attached to [`EntityMeta`](@ref).
+"""
 abstract type Role end
 struct Generic <: Role end
 abstract type Locator <: Role end
@@ -13,6 +20,8 @@ abstract type Port <: Role end
 struct WavePort <: Port end
 
 """
+    LumpedPort()
+
 Role for a rendered lumped-port surface. Its in-plane direction is carried by a
 [`DeviceLayout.WithDirection`](@ref) style on the placed geometry.
 """
@@ -34,7 +43,7 @@ struct EntityMeta <: DeviceLayout.Meta
     role::Role
 end
 
-_resolve_role(role::Role) = role
+_resolve_role(r::Role) = r
 _resolve_role(::Type{R}) where {R <: Role} = R()
 
 function EntityMeta(
@@ -52,11 +61,13 @@ DeviceLayout.name(m::EntityMeta) = m.name
 Base.broadcastable(m::EntityMeta) = Ref(m)
 
 """
-Return the stable physical-group name for an `EntityMeta`.
+    physical_group_name(m::EntityMeta) -> String
+
+Return the stable physical-group name for `m`.
 """
-function physical_group_name(m::EntityMeta)::String
-    return "$(m.layer)__$(m.name)__i$(m.index)__r$(string(m.role))"
+function physical_group_name(m::EntityMeta)
+    return string(m.layer, "__", m.name, "__i", m.index, "__r", m.role)
 end
 
-# Retained as the prototype compiler spelling, within the Experimental namespace.
+# Preserve the prototype compiler spelling within the Experimental namespace.
 map_meta(m::EntityMeta) = physical_group_name(m)

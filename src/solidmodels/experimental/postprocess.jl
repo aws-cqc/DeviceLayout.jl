@@ -1,42 +1,63 @@
+"""
+    _execute_deferred_interfaces!(sm, deferred_interfaces)
+
+After fragmentation, compute interface PGs as set intersections of entity memberships.
+
+Handles two cases:
+
+  - Same-dimension (for example, 3D∩3D or 2D∩2D): the interface is the set of shared
+    boundary entities at dimension `dim - 1` (faces for volumes, curves for surfaces).
+  - Mixed-dimension (for example, 2D∩3D): the interface is the set of lower-dimensional
+    entities in one PG that are also boundary faces of entities in the other PG.
+"""
 function _execute_deferred_interfaces!(
     sm::SolidModel,
     deferred_interfaces::Vector{DeferredInterface}
 )
     isempty(deferred_interfaces) && return nothing
 
-    for di in deferred_interfaces
-        obj_dim, tool_dim = di.obj_dim, di.tool_dim
+    for deferred_interface in deferred_interfaces
+        obj_dim, tool_dim = deferred_interface.obj_dim, deferred_interface.tool_dim
 
         if obj_dim == tool_dim
             # Same-dim: shared boundary entities (dim-1) between adjacent groups
             dim = obj_dim
-            bdy_dim = dim - 1
-            if !SolidModels.hasgroup(sm, di.obj_pg_name, dim)
+            boundary_dim = dim - 1
+            if !SolidModels.hasgroup(sm, deferred_interface.obj_pg_name, dim)
                 continue
             end
-            if !SolidModels.hasgroup(sm, di.tool_pg_name, dim)
+            if !SolidModels.hasgroup(sm, deferred_interface.tool_pg_name, dim)
                 continue
             end
 
-            obj_dts = SolidModels.dimtags(sm[di.obj_pg_name, dim])
-            tool_dts = SolidModels.dimtags(sm[di.tool_pg_name, dim])
-            obj_bdy = SolidModels.gmsh.model.getBoundary(obj_dts, false, false, false)
-            tool_bdy = SolidModels.gmsh.model.getBoundary(tool_dts, false, false, false)
-            obj_bdy_tags = Set(abs(t) for (d, t) in obj_bdy if d == bdy_dim)
-            tool_bdy_tags = Set(abs(t) for (d, t) in tool_bdy if d == bdy_dim)
+            obj_dimtags = SolidModels.dimtags(sm[deferred_interface.obj_pg_name, dim])
+            tool_dimtags = SolidModels.dimtags(sm[deferred_interface.tool_pg_name, dim])
+            obj_boundary_dimtags =
+                SolidModels.gmsh.model.getBoundary(obj_dimtags, false, false, false)
+            tool_boundary_dimtags =
+                SolidModels.gmsh.model.getBoundary(tool_dimtags, false, false, false)
+            obj_boundary_tags =
+                Set(abs(t) for (d, t) in obj_boundary_dimtags if d == boundary_dim)
+            tool_boundary_tags =
+                Set(abs(t) for (d, t) in tool_boundary_dimtags if d == boundary_dim)
 
-            interface_tags = intersect(obj_bdy_tags, tool_bdy_tags)
+            interface_tags = intersect(obj_boundary_tags, tool_boundary_tags)
             if !isempty(interface_tags)
-                sm[di.dest_name] =
-                    Tuple{Int32, Int32}[(Int32(bdy_dim), Int32(t)) for t in interface_tags]
+                sm[deferred_interface.dest_name] = Tuple{Int32, Int32}[
+                    (Int32(boundary_dim), Int32(t)) for t in interface_tags
+                ]
             end
         else
             # Mixed-dim: lo-dim entities that are boundary faces of hi-dim entities
             lo_dim = min(obj_dim, tool_dim)
             hi_dim = max(obj_dim, tool_dim)
 
-            lo_name = obj_dim <= tool_dim ? di.obj_pg_name : di.tool_pg_name
-            hi_name = obj_dim <= tool_dim ? di.tool_pg_name : di.obj_pg_name
+            lo_name =
+                obj_dim <= tool_dim ? deferred_interface.obj_pg_name :
+                deferred_interface.tool_pg_name
+            hi_name =
+                obj_dim <= tool_dim ? deferred_interface.tool_pg_name :
+                deferred_interface.obj_pg_name
 
             if !SolidModels.hasgroup(sm, lo_name, lo_dim)
                 continue
@@ -46,13 +67,14 @@ function _execute_deferred_interfaces!(
             end
 
             lo_tags = Set(SolidModels.entitytags(sm[lo_name, lo_dim]))
-            hi_dts = SolidModels.dimtags(sm[hi_name, hi_dim])
-            bdy = SolidModels.gmsh.model.getBoundary(hi_dts, false, false, false)
-            bdy_tags = Set(abs(t) for (d, t) in bdy if d == lo_dim)
+            hi_dimtags = SolidModels.dimtags(sm[hi_name, hi_dim])
+            boundary_dimtags =
+                SolidModels.gmsh.model.getBoundary(hi_dimtags, false, false, false)
+            boundary_tags = Set(abs(t) for (d, t) in boundary_dimtags if d == lo_dim)
 
-            interface_tags = intersect(lo_tags, bdy_tags)
+            interface_tags = intersect(lo_tags, boundary_tags)
             if !isempty(interface_tags)
-                sm[di.dest_name] =
+                sm[deferred_interface.dest_name] =
                     Tuple{Int32, Int32}[(Int32(lo_dim), Int32(t)) for t in interface_tags]
             end
         end
@@ -61,7 +83,7 @@ function _execute_deferred_interfaces!(
     return nothing
 end
 
-# ─── 2D PG deduplication ─────────────────────────────────────────────────────────────────
+# ─── 2D PG deduplication ─────────────────────────────────────────────────────
 
 """
     _deduplicate_2d_pgs!(sm, registry)
@@ -83,15 +105,15 @@ function _deduplicate_2d_pgs!(sm::SolidModel, registry::Registry)
     pg_to_layer = Dict{String, Symbol}()
     for (layer_name, state) in registry
         state.dim != 2 && continue
-        for pgr in state.pgs
-            pg_to_layer[pgr.name] = layer_name
+        for record in state.pgs
+            pg_to_layer[record.name] = layer_name
         end
     end
 
     entity_layers = Dict{Int32, Set{Symbol}}()  # entity tag → set of layers
     for (pg_name, pg) in SolidModels.dimgroupdict(sm, 2)
         layer = get(pg_to_layer, pg_name, nothing)
-        layer === nothing && continue
+        isnothing(layer) && continue
         for t in SolidModels.entitytags(pg)
             layers_set = get!(Set{Symbol}, entity_layers, t)
             push!(layers_set, layer)
@@ -101,7 +123,7 @@ function _deduplicate_2d_pgs!(sm::SolidModel, registry::Registry)
     # Phase 2: For each PG, group entities by membership signature.
     # Identify which PGs need splitting.
     # signature = sorted tuple of layers (frozen for use as dict key)
-    Signature = Vector{Symbol}
+    Signature = Tuple{Vararg{Symbol}}
 
     pgs_to_split = Dict{String, Dict{Signature, Vector{Int32}}}()
     for (pg_name, pg) in SolidModels.dimgroupdict(sm, 2)
@@ -111,8 +133,8 @@ function _deduplicate_2d_pgs!(sm::SolidModel, registry::Registry)
 
         groups = Dict{Signature, Vector{Int32}}()
         for t in tags
-            sig = sort(collect(get(entity_layers, t, Set{Symbol}())))
-            tag_list = get!(Vector{Int32}, groups, sig)
+            signature = Tuple(sort!(collect(get(entity_layers, t, Set{Symbol}()))))
+            tag_list = get!(Vector{Int32}, groups, signature)
             push!(tag_list, t)
         end
 
@@ -137,17 +159,17 @@ function _deduplicate_2d_pgs!(sm::SolidModel, registry::Registry)
         pg_layer = pg_to_layer[pg_name]
         sub_pgs = Tuple{String, Signature}[]
 
-        for (sig, tags) in groups
-            if length(sig) == 1 && sig[1] == pg_layer && length(groups) > 1
+        for (signature, tags) in groups
+            if length(signature) == 1 && signature[1] == pg_layer && length(groups) > 1
                 # Residual: entities exclusive to this PG's own layer — keep original name
                 sub_name = pg_name
             else
                 # Shared or foreign: generate a content-addressed name
                 dimtags_str = join(sort(["2,$(t)" for t in tags]), "&")
-                digest = sha1(Vector{UInt8}(dimtags_str))
+                digest = sha1(dimtags_str)
                 sub_name = "__" * bytes2hex(digest)[1:16]
             end
-            push!(sub_pgs, (sub_name, sig))
+            push!(sub_pgs, (sub_name, signature))
 
             # Create or update the PG in Gmsh
             if sub_name == pg_name
@@ -212,15 +234,15 @@ function _deduplicate_2d_pgs!(sm::SolidModel, registry::Registry)
     for (original_pg_name, sub_pgs) in split_results
         original_layer = pg_to_layer[original_pg_name]
 
-        for (sub_name, sig) in sub_pgs
+        for (sub_name, signature) in sub_pgs
             # Create a PGRecord for the sub-PG
             sub_record = PGRecord(sub_name, original_layer, nothing)
 
-            for layer_name in sig
+            for layer_name in signature
                 !haskey(registry, layer_name) && continue
                 registry[layer_name].dim != 2 && continue
                 # Avoid duplicates
-                any(r -> r.name == sub_name, registry[layer_name].pgs) && continue
+                any(record -> record.name == sub_name, registry[layer_name].pgs) && continue
                 push!(registry[layer_name].pgs, sub_record)
             end
         end
@@ -228,7 +250,10 @@ function _deduplicate_2d_pgs!(sm::SolidModel, registry::Registry)
         # Remove the original PG from registry if it was fully replaced
         if !any(name == original_pg_name for (name, _) in sub_pgs)
             if haskey(registry, original_layer)
-                filter!(r -> r.name != original_pg_name, registry[original_layer].pgs)
+                filter!(
+                    record -> record.name != original_pg_name,
+                    registry[original_layer].pgs
+                )
             end
         end
     end
@@ -236,7 +261,7 @@ function _deduplicate_2d_pgs!(sm::SolidModel, registry::Registry)
     return split_results
 end
 
-# ─── restrict_to_volume! ──────────────────────────────────────────────────────────────────
+# ─── restrict_to_volume! ─────────────────────────────────────────────────────
 
 struct LocatorRecord
     name::String
@@ -254,24 +279,20 @@ end
 Extract one locator record per transformed reference occurrence without flattening `cs`.
 Locator geometry is excluded from the mesh but remains visible to this discovery pass.
 """
-function _extract_locator_positions(
-    cs,
-    stack::SourceStack,
-    levels::StackLevels
-)::Vector{LocatorRecord}
+function _extract_locator_positions(cs, stack::SourceStack, levels::StackLevels)
     records = LocatorRecord[]
-    for (structure, transformation) in DeviceLayout.traversal(cs)
-        for (meta, elem) in zip(element_metadata(structure), elements(structure))
-            meta isa EntityMeta || continue
-            meta.role isa Locator || continue
-            meta.role isa Terminal && isempty(meta.name) && continue
-            meta.role isa Tag &&
-                isempty(meta.name) &&
+    for (subcs, trans) in DeviceLayout.traversal(cs)
+        for (entity_meta, element) in zip(element_metadata(subcs), elements(subcs))
+            entity_meta isa EntityMeta || continue
+            entity_meta.role isa Locator || continue
+            entity_meta.role isa Terminal && isempty(entity_meta.name) && continue
+            entity_meta.role isa Tag &&
+                isempty(entity_meta.name) &&
                 throw(ArgumentError("Tag locators must have a nonempty name"))
-            source_layer = _require_source_layer(stack, meta; context="locator")
+            source_layer = _require_source_layer(stack, entity_meta; context="locator")
             source_layer.solidmodel || continue
-            global_elem = transformation(elem)
-            ctr = center(bounds(global_elem))
+            global_element = trans(element)
+            ctr = center(bounds(global_element))
             cx = _micron_value(getx(ctr))
             cy = _micron_value(gety(ctr))
             z = _micron_value(
@@ -279,7 +300,15 @@ function _extract_locator_positions(
             )
             push!(
                 records,
-                LocatorRecord(meta.name, meta.index, meta.role, meta.layer, cx, cy, z)
+                LocatorRecord(
+                    entity_meta.name,
+                    entity_meta.index,
+                    entity_meta.role,
+                    entity_meta.layer,
+                    cx,
+                    cy,
+                    z
+                )
             )
         end
     end
@@ -287,16 +316,21 @@ function _extract_locator_positions(
 end
 
 """
-    find_terminals(sm::SolidModel, registry::Registry, stack::SourceStack, locators::Vector{LocatorRecord})
+    find_terminals(
+        sm::SolidModel,
+        registry::Registry,
+        stack::SourceStack,
+        locators::Vector{LocatorRecord}
+    )
 
 Identify electrostatic terminals and ground via connected components of metal surfaces.
 Locator positions are matched to CCs using exact point-in-surface queries
-(`gmsh.model.isInside`). Ground is identified by the `Ground` locator (required).
-CCs with no locators at all emit a warning.
+(`gmsh.model.isInside`). Ground locators designate the CCs reported as ground. CCs with
+no locators at all emit a warning.
 
 Returns a named tuple `(terminals, ground)` where:
 
-  - `terminals::Dict{String, Vector{String}}`: CC name → locator tags (non-ground CCs only)
+  - `terminals::Dict{String, Vector{String}}`: CC name → locator names (non-ground CCs only)
   - `ground::Vector{String}`: CC names designated as ground
 """
 function find_terminals(
@@ -312,15 +346,15 @@ function find_terminals(
     metal_pg_names = String[]
     for (layer_name, state) in registry
         !haskey(stack, layer_name) && continue
-        sl = stack[layer_name]
-        sl.material != METAL && continue
+        source_layer = stack[layer_name]
+        source_layer.material != METAL && continue
         state.dim != 2 && continue
-        for pgr in state.pgs
-            if pgr.entity_meta !== nothing
-                role = pgr.entity_meta.role
+        for record in state.pgs
+            if !isnothing(record.entity_meta)
+                role = record.entity_meta.role
                 (role isa Terminal || role isa Ground) && continue
             end
-            push!(metal_pg_names, pgr.name)
+            push!(metal_pg_names, record.name)
         end
     end
 
@@ -330,62 +364,64 @@ function find_terminals(
 
     # Build a map from surface entity tag -> CC index
     tag_to_cc = Dict{Tuple{Int32, Int32}, Int}()
-    for (i, cc) in enumerate(ccs)
-        for dt in cc
-            tag_to_cc[dt] = i
+    for (idx, cc) in enumerate(ccs)
+        for dimtag in cc
+            tag_to_cc[dimtag] = idx
         end
     end
 
     # For each CC, compute a hash name and assign PG
     cc_names = Vector{String}(undef, length(ccs))
-    all_ccs = Dict{String, Vector{String}}()
-    for (i, cc) in enumerate(ccs)
+    cc_locators = Dict{String, Vector{String}}()
+    for (idx, cc) in enumerate(ccs)
         cc_str = join(sort(["$(d),$(t)" for (d, t) in cc]), "&")
-        digest = sha1(Vector{UInt8}(cc_str))
-        ccn = string(_METAL_CC_LAYER) * "__" * bytes2hex(digest)[1:16]
-        cc_names[i] = ccn
-        sm[ccn] = cc
-        all_ccs[ccn] = String[]
+        digest = sha1(cc_str)
+        cc_name = string(_METAL_CC_LAYER) * "__" * bytes2hex(digest)[1:16]
+        cc_names[idx] = cc_name
+        sm[cc_name] = cc
+        cc_locators[cc_name] = String[]
     end
 
-    # Assign locator tags to CCs using gmsh.model.isInside for exact point-in-surface
+    # Assign locator names to CCs using gmsh.model.isInside for exact point-in-surface
     # geometric queries. For each locator, find the single coplanar entity that contains
-    # its center point, then tag that entity's CC.
-    # Only Terminal and Ground locators participate (Tags are handled by _resolve_tag_locators!).
+    # its center point, then associate the locator with that entity's CC.
+    # Only Terminal and Ground locators participate (Tags are handled by
+    # _resolve_tag_locators!).
     ground_cc_indices = Set{Int}()
     terminal_locators =
-        filter(loc -> loc.role isa Terminal || loc.role isa Ground, locators)
-    for loc in terminal_locators
-        found_cc = 0
-        n_hits = 0
-        for (dt, cc_idx) in tag_to_cc
-            dim, tag = dt
-            bb = SolidModels.gmsh.model.getBoundingBox(Int(dim), Int(tag))
-            xmin, ymin, zmin, xmax, ymax, zmax = bb
+        filter(locator -> locator.role isa Terminal || locator.role isa Ground, locators)
+    for locator in terminal_locators
+        matched_cc_idx = 0
+        hit_count = 0
+        for (dimtag, cc_idx) in tag_to_cc
+            dim, tag = dimtag
+            _, _, zmin, _, _, zmax =
+                SolidModels.gmsh.model.getBoundingBox(Int(dim), Int(tag))
             # Only match horizontal (flat) surfaces coplanar with the locator
             z_tol = 1e-6
-            (abs(zmax - zmin) < z_tol && abs(zmin - loc.z) < z_tol) || continue
-            n = SolidModels.gmsh.model.isInside(
+            (abs(zmax - zmin) < z_tol && abs(zmin - locator.z) < z_tol) || continue
+            inside_count = SolidModels.gmsh.model.isInside(
                 Int(dim),
                 Int(tag),
-                [loc.center_x, loc.center_y, loc.z]
+                [locator.center_x, locator.center_y, locator.z]
             )
-            if n > 0
-                n_hits += 1
-                found_cc = cc_idx
+            if inside_count > 0
+                hit_count += 1
+                matched_cc_idx = cc_idx
             end
         end
-        if n_hits > 1
+        if hit_count > 1
             error(
-                "Locator '$(loc.name)' at ($(loc.center_x), $(loc.center_y), $(loc.z)) " *
-                "matched $n_hits entities; expected exactly 1 on a fragmented plane"
+                "Locator '$(locator.name)' at " *
+                "($(locator.center_x), $(locator.center_y), $(locator.z)) matched " *
+                "$hit_count entities; expected exactly 1 on a fragmented plane"
             )
         end
-        if found_cc > 0
-            if loc.role isa Ground
-                push!(ground_cc_indices, found_cc)
+        if matched_cc_idx > 0
+            if locator.role isa Ground
+                push!(ground_cc_indices, matched_cc_idx)
             else
-                push!(all_ccs[cc_names[found_cc]], loc.name)
+                push!(cc_locators[cc_names[matched_cc_idx]], locator.name)
             end
         end
     end
@@ -393,31 +429,29 @@ function find_terminals(
     # Partition into terminals and ground
     terminals = Dict{String, Vector{String}}()
     ground = String[]
-    for (i, ccn) in enumerate(cc_names)
-        if i in ground_cc_indices
-            push!(ground, ccn)
+    for (idx, cc_name) in enumerate(cc_names)
+        if idx in ground_cc_indices
+            push!(ground, cc_name)
         else
-            if isempty(all_ccs[ccn])
-                @warn "Metal CC '$ccn' has no locators (neither Terminal nor Ground). " *
-                      "Did you forget a Ground locator?"
+            if isempty(cc_locators[cc_name])
+                @warn "Metal CC '$cc_name' has no locators " *
+                      "(neither Terminal nor Ground). Did you forget a Ground locator?"
             end
-            terminals[ccn] = all_ccs[ccn]
+            terminals[cc_name] = cc_locators[cc_name]
         end
     end
 
     return (; terminals, ground)
 end
 
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# Tag locator resolution
-# ═══════════════════════════════════════════════════════════════════════════════════════════
+# ─── Tag locator resolution ──────────────────────────────────────────────────
 
 """
     _resolve_tag_locators!(sm, registry, locators, deferred_interfaces, interfaces)
 
 After fragmentation, resolve Tag locators by finding the 2D surface entity that
-contains each locator's center point and creating a dedicated PG for it. The PG
-is named using `map_meta` with the Tag locator's layer, name, and index, and is
+contains each locator's center point and creating a dedicated PG for it. The PG is named
+using `physical_group_name` with the Tag locator's layer, name, and index, and is
 registered in the final registry under the locator's layer.
 
 For each Tag PG, any pending deferred interfaces whose object references the parent
@@ -431,14 +465,14 @@ function _resolve_tag_locators!(
     deferred_interfaces::Vector{DeferredInterface},
     interfaces::Dict{String, Tuple{String, String}}
 )
-    tag_locators = filter(loc -> loc.role isa Tag, locators)
+    tag_locators = filter(locator -> locator.role isa Tag, locators)
     isempty(tag_locators) && return nothing
 
-    for loc in tag_locators
+    for locator in tag_locators
         # A Tag is meaningful only within its declared source layer. Searching all 2D
         # groups could attach it to an unrelated coplanar or overlapping layer.
-        haskey(registry, loc.layer) || continue
-        layer_state = registry[loc.layer]
+        haskey(registry, locator.layer) || continue
+        layer_state = registry[locator.layer]
         layer_state.dim == 2 || continue
         layer_tags = Set{Int32}()
         for record in layer_state.pgs
@@ -447,36 +481,38 @@ function _resolve_tag_locators!(
         end
 
         found_tag = Int32(0)
-        n_hits = 0
+        hit_count = 0
         for tag in layer_tags
-            bb = SolidModels.gmsh.model.getBoundingBox(2, Int(tag))
-            xmin, ymin, zmin, xmax, ymax, zmax = bb
+            _, _, zmin, _, _, zmax = SolidModels.gmsh.model.getBoundingBox(2, Int(tag))
             z_tol = 1e-6
-            (abs(zmax - zmin) < z_tol && abs(zmin - loc.z) < z_tol) || continue
-            n = SolidModels.gmsh.model.isInside(
+            (abs(zmax - zmin) < z_tol && abs(zmin - locator.z) < z_tol) || continue
+            inside_count = SolidModels.gmsh.model.isInside(
                 2,
                 Int(tag),
-                [loc.center_x, loc.center_y, loc.z]
+                [locator.center_x, locator.center_y, locator.z]
             )
-            if n > 0
-                n_hits += 1
+            if inside_count > 0
+                hit_count += 1
                 found_tag = tag
             end
         end
-        if n_hits > 1
+        if hit_count > 1
             error(
-                "Tag locator '$(loc.name)' at ($(loc.center_x), $(loc.center_y), $(loc.z)) " *
-                "matched $n_hits entities; expected exactly 1 on a fragmented plane"
+                "Tag locator '$(locator.name)' at " *
+                "($(locator.center_x), $(locator.center_y), $(locator.z)) matched " *
+                "$hit_count entities; expected exactly 1 on a fragmented plane"
             )
         end
         if found_tag == 0
-            @warn "Tag locator '$(loc.name)' at ($(loc.center_x), $(loc.center_y), $(loc.z)) " *
-                  "did not match any 2D entity"
+            @warn "Tag locator '$(locator.name)' at " *
+                  "($(locator.center_x), $(locator.center_y), $(locator.z)) did not " *
+                  "match any 2D entity"
             continue
         end
 
-        meta = EntityMeta(loc.layer; name=loc.name, index=loc.index, role=Tag())
-        pg_name = map_meta(meta)
+        entity_meta =
+            EntityMeta(locator.layer; name=locator.name, index=locator.index, role=Tag())
+        pg_name = physical_group_name(entity_meta)
 
         # Create PG in the solid model
         sm[pg_name] = Tuple{Int32, Int32}[(Int32(2), found_tag)]
@@ -484,14 +520,14 @@ function _resolve_tag_locators!(
         # Remove tagged entity from all other 2D PGs on the same layer and
         # duplicate deferred interfaces for the Tag PG
         parent_pg_names = String[]
-        if haskey(registry, loc.layer) && registry[loc.layer].dim == 2
-            for pgr in registry[loc.layer].pgs
-                SolidModels.hasgroup(sm, pgr.name, 2) || continue
-                existing_dts = SolidModels.dimtags(sm[pgr.name, 2])
-                filtered = filter(dt -> dt[2] != found_tag, existing_dts)
-                if length(filtered) < length(existing_dts)
-                    sm[pgr.name] = filtered
-                    push!(parent_pg_names, pgr.name)
+        if haskey(registry, locator.layer) && registry[locator.layer].dim == 2
+            for record in registry[locator.layer].pgs
+                SolidModels.hasgroup(sm, record.name, 2) || continue
+                existing_dimtags = SolidModels.dimtags(sm[record.name, 2])
+                filtered = filter(dimtag -> dimtag[2] != found_tag, existing_dimtags)
+                if length(filtered) < length(existing_dimtags)
+                    sm[record.name] = filtered
+                    push!(parent_pg_names, record.name)
                 end
             end
         end
@@ -499,88 +535,84 @@ function _resolve_tag_locators!(
         # For each deferred interface that references a parent PG as object,
         # add a parallel entry with the Tag PG as object
         for parent_name in parent_pg_names
-            for di in copy(deferred_interfaces)
-                if di.obj_pg_name == parent_name
-                    dest_layer = _find_pg_layer(di.dest_name, registry)
-                    dest_layer === nothing && continue
-                    new_dest = generated_pg_name(
+            for deferred_interface in copy(deferred_interfaces)
+                if deferred_interface.obj_pg_name == parent_name
+                    dest_layer = _find_pg_layer(deferred_interface.dest_name, registry)
+                    isnothing(dest_layer) && continue
+                    dest_name = generated_pg_name(
                         dest_layer,
                         pg_name,
-                        [di.tool_pg_name];
+                        [deferred_interface.tool_pg_name];
                         operation=:intersect,
-                        parameters=(di.obj_dim, di.tool_dim)
+                        parameters=(
+                            deferred_interface.obj_dim,
+                            deferred_interface.tool_dim
+                        )
                     )
-                    _generated_record_exists(registry, dest_layer, new_dest) && continue
+                    _generated_record_exists(registry, dest_layer, dest_name) && continue
                     push!(
                         deferred_interfaces,
                         DeferredInterface(
-                            new_dest,
+                            dest_name,
                             pg_name,
-                            di.tool_pg_name,
-                            di.obj_dim,
-                            di.tool_dim
+                            deferred_interface.tool_pg_name,
+                            deferred_interface.obj_dim,
+                            deferred_interface.tool_dim
                         )
                     )
                     # Register in the interface layer
-                    new_record = PGRecord(new_dest, dest_layer, nothing)
+                    new_record = PGRecord(dest_name, dest_layer, nothing)
                     push!(registry[dest_layer].pgs, new_record)
-                    interfaces[new_dest] = (pg_name, di.tool_pg_name)
+                    interfaces[dest_name] = (pg_name, deferred_interface.tool_pg_name)
                 end
             end
         end
 
         # Register in the final registry
-        record = PGRecord(pg_name, loc.layer, meta)
-        if haskey(registry, loc.layer)
-            push!(registry[loc.layer].pgs, record)
+        record = PGRecord(pg_name, locator.layer, entity_meta)
+        if haskey(registry, locator.layer)
+            push!(registry[locator.layer].pgs, record)
         else
-            registry[loc.layer] = LayerState([record], 2)
+            registry[locator.layer] = LayerState([record], 2)
         end
     end
 
     return nothing
 end
 
-function _find_pg_layer(pg_name::String, registry::Registry)::Union{Symbol, Nothing}
-    for (layer_name, state) in registry
-        any(record -> record.name == pg_name, state.pgs) && return layer_name
+function _find_pg_layer(pg::String, reg::Registry)
+    for (layer_name, state) in reg
+        any(record -> record.name == pg, state.pgs) && return layer_name
     end
     return nothing
 end
 
-function _resolve_split_pgs(
-    pg_name::String,
-    split_results::Dict,
-    sm::SolidModel
-)::Vector{String}
-    if haskey(split_results, pg_name)
+function _resolve_split_pgs(pg::String, split_results::AbstractDict, sm::SolidModel)
+    if haskey(split_results, pg)
         return String[
-            name for
-            (name, _) in split_results[pg_name] if SolidModels.hasgroup(sm, name, 2)
+            name for (name, _) in split_results[pg] if SolidModels.hasgroup(sm, name, 2)
         ]
-    elseif SolidModels.hasgroup(sm, pg_name, 2)
-        return [pg_name]
+    elseif SolidModels.hasgroup(sm, pg, 2)
+        return [pg]
     else
         return String[]
     end
 end
 
 """
-Find which current 2D PGs contain entities exclusively from a specific CC.
+    _resolve_entity_pgs(cc_entity_tags, cc_name, sm) -> Vector{String}
 
-If a PG contains entities from multiple CCs, it is split first so that each CC
-gets its own dedicated sub-PG. This ensures no PG tag appears in multiple
-terminal/ground entries.
+Return the current 2D PGs containing entities from a specific CC.
+
+Callers must first call [`_split_shared_cc_pgs!`](@ref) so each returned PG belongs to only
+one CC and no PG tag appears in multiple terminal or ground entries.
 """
 function _resolve_entity_pgs(
     cc_entity_tags::Dict{String, Vector{Int32}},
     cc_name::String,
     sm::SolidModel
-)::Vector{String}
+)
     !haskey(cc_entity_tags, cc_name) && return String[]
-    # First call triggers a one-time split of any PGs shared between CCs.
-    # Use a closure-captured cache to avoid re-splitting on subsequent calls.
-    # (Handled at the call site via _split_shared_cc_pgs! instead.)
     target_tags = Set(cc_entity_tags[cc_name])
     pg_names = String[]
     for (name, pg) in SolidModels.dimgroupdict(sm, 2)
@@ -595,6 +627,8 @@ function _resolve_entity_pgs(
 end
 
 """
+    _split_shared_cc_pgs!(sm, cc_entity_tags)
+
 Split any 2D PG that contains entities from multiple CCs into per-CC sub-PGs.
 """
 function _split_shared_cc_pgs!(sm::SolidModel, cc_entity_tags::Dict{String, Vector{Int32}})
@@ -606,8 +640,6 @@ function _split_shared_cc_pgs!(sm::SolidModel, cc_entity_tags::Dict{String, Vect
         end
     end
 
-    all_cc_entities = Set(keys(entity_to_cc))
-
     # Find PGs that contain entities from multiple CCs
     for (pg_name, pg) in collect(SolidModels.dimgroupdict(sm, 2))
         pg_tags = SolidModels.entitytags(pg)
@@ -615,9 +647,9 @@ function _split_shared_cc_pgs!(sm::SolidModel, cc_entity_tags::Dict{String, Vect
         cc_groups = Dict{String, Vector{Int32}}()
         non_cc_tags = Int32[]
         for t in pg_tags
-            cc = get(entity_to_cc, t, nothing)
-            if cc !== nothing
-                push!(get!(Vector{Int32}, cc_groups, cc), t)
+            cc_name = get(entity_to_cc, t, nothing)
+            if !isnothing(cc_name)
+                push!(get!(Vector{Int32}, cc_groups, cc_name), t)
             else
                 push!(non_cc_tags, t)
             end
@@ -633,69 +665,69 @@ function _split_shared_cc_pgs!(sm::SolidModel, cc_entity_tags::Dict{String, Vect
         sm[pg_name] = Tuple{Int32, Int32}[(Int32(2), t) for t in keep_tags]
 
         # Create new sub-PGs for remaining CCs
-        for cc in cc_names_sorted[2:end]
-            tags = cc_groups[cc]
+        for cc_name in cc_names_sorted[2:end]
+            tags = cc_groups[cc_name]
             dimtags_str = join(sort(["2,$(t)" for t in tags]), "&")
-            digest = sha1(Vector{UInt8}(dimtags_str))
+            digest = sha1(dimtags_str)
             sub_name = "__" * bytes2hex(digest)[1:16]
             sm[sub_name] = Tuple{Int32, Int32}[(Int32(2), t) for t in tags]
         end
     end
+    return nothing
 end
 
 """
-    remap_to_visualization_pgs!(sm::SolidModel, sm_metadata::Dict)
+    remap_to_visualization_pgs!(sm::SolidModel, visualization_metadata::AbstractDict)
 
-Replace the chopped 2D physical groups in `sm` with a smaller set of human-
-readable PGs derived from `sm_metadata`. Intended for `.viz.msh2` exports
-opened in the gmsh GUI; the resulting model is **not** Palace-compatible
-(entities will belong to multiple PGs, producing duplicated element lines).
+Replace the chopped 2D physical groups in `sm` with a smaller set of human-readable PGs
+from `visualization_metadata`. Intended for `.viz.msh2` exports opened in the Gmsh GUI;
+the resulting model is **not** Palace-compatible (entities will belong to multiple PGs,
+producing duplicated element lines).
 
-Five passes (in order) collect entities from chopped PGs and union them
-into new named PGs:
+Five passes (in order) collect entities from chopped PGs and union them into new named
+PGs:
 
- 1. one PG per `metadata.layers` entry (skipping `METAL_CC`), named after
-    the layer
- 2. one PG per `metadata.terminals` entry, named
+ 1. one PG per `visualization_metadata["layers"]` entry (skipping `METAL_CC`), named
+    after the layer
+ 2. one PG per `visualization_metadata["terminals"]` entry, named
     `TERMINAL_<loc1>+<loc2>+...`
- 3. a single `GROUND` PG covering all `metadata.ground` entries
- 4. one PG per `metadata.tagged` entry, named `TAG_<tag_name>`
- 5. one PG per `metadata.physical_groups` entry whose `entity_meta` is
-    non-null — the original PG already carries useful info, so the
-    existing PG is left in place
+ 3. a single `GROUND` PG covering all `visualization_metadata["ground"]` entries
+ 4. one PG per `visualization_metadata["tagged"]` entry, named `TAG_<tag_name>`
+ 5. one PG per `visualization_metadata["physical_groups"]` entry whose `entity_meta` is
+    non-null—the original PG already carries useful info, so the existing PG is left in
+    place
 
-After the new PGs are added, every chopped sub-PG (those whose record was
-absorbed into a layer/terminal/etc. PG and whose original name carries no
-information) is removed via `SolidModels.remove_group!` with
-`recursive=false, remove_entities=false`. The mesh entities themselves are
-never touched.
+After the new PGs are added, every chopped sub-PG (those whose record was absorbed into a
+layer/terminal/etc. PG and whose original name carries no information) is removed via
+`SolidModels.remove_group!` with `recursive=false, remove_entities=false`. The mesh
+entities themselves are never touched.
 """
-function remap_to_visualization_pgs!(sm::SolidModels.SolidModel, sm_metadata::Dict)
-    layers = get(sm_metadata, "layers", Dict{String, Any}())
-    terminals = get(sm_metadata, "terminals", Dict{String, Any}())
-    ground = get(sm_metadata, "ground", Dict{String, Any}())
-    tagged = get(sm_metadata, "tagged", Dict{String, Any}())
-    physical_groups = get(sm_metadata, "physical_groups", Dict{String, Any}())
+function remap_to_visualization_pgs!(sm::SolidModel, visualization_metadata::AbstractDict)
+    layers = get(visualization_metadata, "layers", Dict{String, Any}())
+    terminals = get(visualization_metadata, "terminals", Dict{String, Any}())
+    ground = get(visualization_metadata, "ground", Dict{String, Any}())
+    tagged = get(visualization_metadata, "tagged", Dict{String, Any}())
+    physical_groups = get(visualization_metadata, "physical_groups", Dict{String, Any}())
 
     # PGs whose entity_meta is non-null already have useful names — keep them
     # in place and never remove them.
     keep_existing = Set{String}()
     for (pg_name, pg_data) in physical_groups
-        if get(pg_data, "entity_meta", nothing) !== nothing
+        if !isnothing(get(pg_data, "entity_meta", nothing))
             push!(keep_existing, pg_name)
         end
     end
 
     # Helper: union of entity tags across a list of chopped 2D PG names.
-    function _union_entities(pg_names)
-        ets = Set{Int32}()
+    function _union_entity_tags(pg_names)
+        entity_tags = Set{Int32}()
         for pg_name in pg_names
             SolidModels.hasgroup(sm, pg_name, 2) || continue
             for t in SolidModels.entitytags(sm[pg_name, 2])
-                push!(ets, t)
+                push!(entity_tags, t)
             end
         end
-        return ets
+        return entity_tags
     end
 
     # Track which chopped PGs were absorbed and should be removed at the end.
@@ -706,9 +738,9 @@ function remap_to_visualization_pgs!(sm::SolidModels.SolidModel, sm_metadata::Di
         layer_name == string(_METAL_CC_LAYER) && continue
         get(layer_data, "dim", 2) == 2 || continue
         pg_names = get(layer_data, "pgs", String[])
-        ets = _union_entities(pg_names)
-        isempty(ets) && continue
-        sm[layer_name] = [(Int32(2), t) for t in sort!(collect(ets))]
+        entity_tags = _union_entity_tags(pg_names)
+        isempty(entity_tags) && continue
+        sm[layer_name] = [(Int32(2), t) for t in sort!(collect(entity_tags))]
         for pg_name in pg_names
             pg_name in keep_existing && continue
             push!(absorbed, pg_name)
@@ -727,10 +759,10 @@ function remap_to_visualization_pgs!(sm::SolidModels.SolidModel, sm_metadata::Di
             @warn "Terminal CC '$cc_name' has no PGs; skipping in viz remap."
             continue
         end
-        ets = _union_entities(pg_names)
-        isempty(ets) && continue
+        entity_tags = _union_entity_tags(pg_names)
+        isempty(entity_tags) && continue
         new_name = "TERMINAL_" * join(locators, "+")
-        sm[new_name] = [(Int32(2), t) for t in sort!(collect(ets))]
+        sm[new_name] = [(Int32(2), t) for t in sort!(collect(entity_tags))]
         for pg_name in pg_names
             pg_name in keep_existing && continue
             push!(absorbed, pg_name)
@@ -738,21 +770,21 @@ function remap_to_visualization_pgs!(sm::SolidModels.SolidModel, sm_metadata::Di
     end
 
     # Pass 3: ground (single GROUND PG covering all ground CCs).
-    ground_ets = Set{Int32}()
+    ground_entity_tags = Set{Int32}()
     for (cc_name, cc_data) in ground
         pg_names = get(cc_data, "pgs", String[])
         if isempty(pg_names)
             @warn "Ground CC '$cc_name' has no PGs; skipping in viz remap."
             continue
         end
-        union!(ground_ets, _union_entities(pg_names))
+        union!(ground_entity_tags, _union_entity_tags(pg_names))
         for pg_name in pg_names
             pg_name in keep_existing && continue
             push!(absorbed, pg_name)
         end
     end
-    if !isempty(ground_ets)
-        sm["GROUND"] = [(Int32(2), t) for t in sort!(collect(ground_ets))]
+    if !isempty(ground_entity_tags)
+        sm["GROUND"] = [(Int32(2), t) for t in sort!(collect(ground_entity_tags))]
     end
 
     # Pass 4: tagged (one PG per tag, named TAG_<tag_name>).
@@ -762,9 +794,9 @@ function remap_to_visualization_pgs!(sm::SolidModels.SolidModel, sm_metadata::Di
             @warn "Tag '$tag_name' has no PGs; skipping in viz remap."
             continue
         end
-        ets = _union_entities(pg_names)
-        isempty(ets) && continue
-        sm["TAG_" * tag_name] = [(Int32(2), t) for t in sort!(collect(ets))]
+        entity_tags = _union_entity_tags(pg_names)
+        isempty(entity_tags) && continue
+        sm["TAG_" * tag_name] = [(Int32(2), t) for t in sort!(collect(entity_tags))]
         for pg_name in pg_names
             pg_name in keep_existing && continue
             push!(absorbed, pg_name)
@@ -807,22 +839,24 @@ function _warn_potential_overlaps(
 
     # Compute actual z-ranges using resolve_thickness (handles level-pair syntax)
     layer_z_ranges = Dict{Symbol, Tuple{Float64, Float64}}()
-    for ln in extruded_source_layers
-        sl = stack[ln]
-        z_base = _micron_value(_stack_z(levels[first_level(sl)], first_height(sl)))
-        thick = _micron_value(resolve_thickness(sl, levels))
-        z_min = min(z_base, z_base + thick)
-        z_max = max(z_base, z_base + thick)
-        layer_z_ranges[ln] = (z_min, z_max)
+    for layer_name in extruded_source_layers
+        source_layer = stack[layer_name]
+        z_base = _micron_value(
+            _stack_z(levels[first_level(source_layer)], first_height(source_layer))
+        )
+        thickness = _micron_value(resolve_thickness(source_layer, levels))
+        z_min = min(z_base, z_base + thickness)
+        z_max = max(z_base, z_base + thickness)
+        layer_z_ranges[layer_name] = (z_min, z_max)
     end
 
-    for ln_a in extruded_source_layers
-        za_min, za_max = layer_z_ranges[ln_a]
-        for ln_b in extruded_source_layers
-            ln_b <= ln_a && continue
-            zb_min, zb_max = layer_z_ranges[ln_b]
+    for layer_a in extruded_source_layers
+        za_min, za_max = layer_z_ranges[layer_a]
+        for layer_b in extruded_source_layers
+            layer_b <= layer_a && continue
+            zb_min, zb_max = layer_z_ranges[layer_b]
             if za_min <= zb_max && zb_min <= za_max
-                @warn "Layers $ln_a and $ln_b are both 3D volumes with overlapping " *
+                @warn "Layers $layer_a and $layer_b are both 3D volumes with overlapping " *
                       "z-ranges that remain in the final registry. If they occupy the " *
                       "same spatial region, one must be subtracted from the other to " *
                       "avoid OCC geometry failures."
@@ -832,7 +866,3 @@ function _warn_potential_overlaps(
 
     return nothing
 end
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# Top-level render! method
-# ═══════════════════════════════════════════════════════════════════════════════════════════

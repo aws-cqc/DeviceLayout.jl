@@ -3,14 +3,14 @@
                 contour_only=false, keep_interior=true, gds_meta=nothing,
                 solidmodel=true)
 
-Describes one symbol-keyed source layer. `gds_meta === nothing` hides the layer only
+Describes one symbol-keyed source layer. `isnothing(gds_meta)` hides the layer only
 from artwork; `solidmodel=false` hides it only from solid-model geometry and metadata.
 A paired level derives its effective thickness from [`StackLevels`](@ref).
 """
 struct SourceLayer{T <: Coordinate}
     material::Material
     level::Union{Int, Pair{Int, Int}}
-    height::Union{T, Tuple{T, T}}
+    height::Union{T, NTuple{2, T}}
     thickness::T
     contour_only::Bool
     keep_interior::Bool
@@ -21,7 +21,7 @@ end
 function SourceLayer(
     material::Material;
     level::Union{Int, Pair{Int, Int}}=1,
-    height::Union{Coordinate, Tuple{Coordinate, Coordinate}}=0μm,
+    height::Union{Coordinate, NTuple{2, Coordinate}}=0μm,
     thickness::Coordinate=0μm,
     contour_only::Bool=false,
     keep_interior::Bool=true,
@@ -48,13 +48,27 @@ function SourceLayer(
     )
 end
 
+"""
+    first_level(sl::SourceLayer)
+
+Return the first assembly level referenced by `sl`.
+"""
 first_level(sl::SourceLayer) = sl.level isa Pair ? first(sl.level) : sl.level
+
+"""
+    first_height(sl::SourceLayer)
+
+Return the height associated with [`first_level`](@ref) for `sl`.
+"""
 first_height(sl::SourceLayer) = sl.height isa Tuple ? first(sl.height) : sl.height
 _referenced_levels(sl::SourceLayer) =
     sl.level isa Pair ? (first(sl.level), last(sl.level)) : (sl.level,)
 
 """
-An ordered-by-insertion mapping from plain layer symbols to source-layer records.
+    SourceStack()
+    SourceStack(pairs::Pair{Symbol, <:SourceLayer}...)
+
+Mapping from plain layer symbols to source-layer records.
 """
 struct SourceStack
     layers::Dict{Symbol, SourceLayer}
@@ -72,6 +86,8 @@ Base.length(s::SourceStack) = length(s.layers)
 Base.iterate(s::SourceStack, state...) = iterate(s.layers, state...)
 
 """
+    StackLevels(pairs::Pair{Int}...)
+
 Mapping from assembly level indices to z coordinates.
 """
 struct StackLevels{T <: Coordinate}
@@ -104,25 +120,28 @@ _subtract_height(delta, height::Real) = delta - height * μm
 _subtract_height(delta, height) = delta - height
 
 """
+    resolve_thickness(sl::SourceLayer, levels::StackLevels)
+
 Resolve a source layer's explicit or level-pair-derived extrusion thickness.
 """
 function resolve_thickness(sl::SourceLayer, levels::StackLevels)
     if sl.level isa Pair
-        src, dst = first(sl.level), last(sl.level)
+        source_level, destination_level = first(sl.level), last(sl.level)
         if sl.height isa Tuple
-            h_src, h_dst = sl.height
-            return _stack_z(levels[dst], h_dst) - _stack_z(levels[src], h_src)
+            source_height, destination_height = sl.height
+            return _stack_z(levels[destination_level], destination_height) -
+                   _stack_z(levels[source_level], source_height)
         end
-        return _subtract_height(levels[dst] - levels[src], sl.height)
+        return _subtract_height(levels[destination_level] - levels[source_level], sl.height)
     end
     return sl.thickness
 end
 
 function _validate_source_layer(layer_name::Symbol, sl::SourceLayer, levels::StackLevels)
-    for level_index in _referenced_levels(sl)
-        haskey(levels, level_index) || throw(
+    for idx in _referenced_levels(sl)
+        haskey(levels, idx) || throw(
             ArgumentError(
-                "Source layer :$layer_name references missing assembly level $level_index"
+                "Source layer :$layer_name references missing assembly level $idx"
             )
         )
     end
@@ -136,12 +155,12 @@ function _validate_stack(stack::SourceStack, levels::StackLevels)
     return nothing
 end
 
-function _require_source_layer(stack::SourceStack, meta::EntityMeta; context="entity")
-    haskey(stack, meta.layer) || throw(
+function _require_source_layer(stack::SourceStack, m::EntityMeta; context="entity")
+    haskey(stack, m.layer) || throw(
         ArgumentError(
-            "$context references layer :$(meta.layer), which is absent from SourceStack " *
-            "(entity name=$(repr(meta.name)), index=$(meta.index))"
+            "$context references layer :$(m.layer), which is absent from SourceStack " *
+            "(entity name=$(repr(m.name)), index=$(m.index))"
         )
     )
-    return stack[meta.layer]
+    return stack[m.layer]
 end
