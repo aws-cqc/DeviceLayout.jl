@@ -19,41 +19,46 @@ struct DeferredInterface
     tool_dim::Int
 end
 
+"""
+    generated_pg_name(dest, obj_pg, tool_pgs; operation, parameters=()) -> String
+
+Return the content-addressed physical-group name for a generated layer operation.
+"""
 function generated_pg_name(
     dest::Symbol,
     obj_pg::String,
     tool_pgs::Vector{String};
     operation::Symbol,
     parameters=()
-)::String
+)
     content =
         join((string(operation), obj_pg, join(sort(tool_pgs), "&"), repr(parameters)), "\0")
-    digest = sha1(Vector{UInt8}(content))
+    digest = sha1(content)
     return string(dest) * "__" * bytes2hex(digest)[1:16]
 end
 
 _content_kwargs(kwargs) = Tuple(sort(collect(kwargs); by=keyword -> string(first(keyword))))
 
 function _generated_record_exists(
-    registry::Registry,
+    reg::Registry,
     dest::Symbol,
     name::String,
     pending::Vector{PGRecord}=PGRecord[]
 )
     any(record -> record.name == name, pending) && return true
-    return haskey(registry, dest) && any(record -> record.name == name, registry[dest].pgs)
+    return haskey(reg, dest) && any(record -> record.name == name, reg[dest].pgs)
 end
 
-function _operation_argument_error(index::Integer, dest, message::AbstractString)
-    destination = dest isa Symbol ? ":$dest" : repr(dest)
-    return ArgumentError("Layer operation $index for destination $destination $message")
+function _operation_argument_error(idx::Integer, dest, msg::AbstractString)
+    dest_repr = dest isa Symbol ? ":$dest" : repr(dest)
+    return ArgumentError("Layer operation $idx for destination $dest_repr $msg")
 end
 
-function _require_destination_dimension(registry::Registry, dest::Symbol, dim::Int)
-    if haskey(registry, dest) && registry[dest].dim != dim
+function _require_destination_dimension(reg::Registry, dest::Symbol, dim::Int)
+    if haskey(reg, dest) && reg[dest].dim != dim
         throw(
             ArgumentError(
-                "Destination layer :$dest has dimension $(registry[dest].dim), " *
+                "Destination layer :$dest has dimension $(reg[dest].dim), " *
                 "so dimension $dim physical groups cannot be appended"
             )
         )
@@ -61,110 +66,141 @@ function _require_destination_dimension(registry::Registry, dest::Symbol, dim::I
     return nothing
 end
 
-function _validate_layer_operation(operation, index::Integer)
+function _validate_layer_operation(operation, operation_idx::Integer)
     operation isa Tuple || throw(
-        ArgumentError("Layer operation $index must be a Tuple, got $(typeof(operation))")
+        ArgumentError(
+            "Layer operation $operation_idx must be a Tuple, got $(typeof(operation))"
+        )
     )
     length(operation) >= 3 || throw(
         ArgumentError(
-            "Layer operation $index must contain destination, function, and arguments"
+            "Layer operation $operation_idx must contain destination, function, and arguments"
         )
     )
-    dest, op_fn, args = operation[1], operation[2], operation[3]
+    dest, operation_fn, args = operation[1], operation[2], operation[3]
     dest isa Symbol || throw(
-        ArgumentError("Layer operation $index has non-Symbol destination $(repr(dest))")
+        ArgumentError(
+            "Layer operation $operation_idx has non-Symbol destination $(repr(dest))"
+        )
     )
-    args isa Tuple ||
-        throw(_operation_argument_error(index, dest, "must use a Tuple of arguments"))
+    args isa Tuple || throw(
+        _operation_argument_error(operation_idx, dest, "must use a Tuple of arguments")
+    )
     for keyword in operation[4:end]
         (keyword isa Pair && first(keyword) isa Symbol) || throw(
             _operation_argument_error(
-                index,
+                operation_idx,
                 dest,
                 "has malformed keyword $(repr(keyword)); expected :name => value"
             )
         )
     end
     keyword_values = Dict{Symbol, Any}(operation[4:end])
-    length(keyword_values) == length(operation) - 3 ||
-        throw(_operation_argument_error(index, dest, "contains duplicate keyword names"))
+    length(keyword_values) == length(operation) - 3 || throw(
+        _operation_argument_error(operation_idx, dest, "contains duplicate keyword names")
+    )
 
     require_arity(n) =
         length(args) == n || throw(
             _operation_argument_error(
-                index,
+                operation_idx,
                 dest,
                 "expects $n argument$(n == 1 ? "" : "s"), got $(length(args))"
             )
         )
     require_symbol(value, label) =
-        value isa Symbol ||
-        throw(_operation_argument_error(index, dest, "requires $label to be a Symbol"))
+        value isa Symbol || throw(
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "requires $label to be a Symbol"
+            )
+        )
     allowed_keywords = Symbol[]
 
-    if op_fn == SolidModels.extrude_z!
+    if operation_fn == SolidModels.extrude_z!
         require_arity(0)
-    elseif op_fn == SolidModels.difference_geom!
+    elseif operation_fn == SolidModels.difference_geom!
         append!(allowed_keywords, (:remove_object, :remove_tool))
         require_arity(2)
         require_symbol(args[1], "the object layer")
         tools = args[2] isa AbstractVector ? args[2] : (args[2],)
         isempty(tools) && throw(
-            _operation_argument_error(index, dest, "requires at least one tool layer")
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "requires at least one tool layer"
+            )
         )
-        all(tool -> tool isa Symbol, tools) ||
-            throw(_operation_argument_error(index, dest, "requires Symbol tool layers"))
-    elseif op_fn == SolidModels.union_geom!
+        all(tool -> tool isa Symbol, tools) || throw(
+            _operation_argument_error(operation_idx, dest, "requires Symbol tool layers")
+        )
+    elseif operation_fn == SolidModels.union_geom!
         isempty(args) && throw(
-            _operation_argument_error(index, dest, "requires at least one source layer")
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "requires at least one source layer"
+            )
         )
-        all(source -> source isa Symbol, args) ||
-            throw(_operation_argument_error(index, dest, "requires Symbol source layers"))
-    elseif op_fn == SolidModels.intersect_geom!
+        all(source -> source isa Symbol, args) || throw(
+            _operation_argument_error(operation_idx, dest, "requires Symbol source layers")
+        )
+    elseif operation_fn == SolidModels.intersect_geom!
         require_arity(2)
         require_symbol(args[1], "the object layer")
         require_symbol(args[2], "the tool layer")
-    elseif op_fn == SolidModels.restrict_to_volume!
+    elseif operation_fn == SolidModels.restrict_to_volume!
         require_arity(1)
         require_symbol(args[1], "the bounding-volume layer")
-    elseif op_fn == SolidModels.get_boundary
+    elseif operation_fn == SolidModels.get_boundary
         append!(allowed_keywords, (:combined, :oriented, :recursive, :direction, :position))
         require_arity(1)
         require_symbol(args[1], "the source layer")
-    elseif op_fn == SolidModels.translate!
+    elseif operation_fn == SolidModels.translate!
         push!(allowed_keywords, :copy)
         require_arity(4)
         require_symbol(args[1], "the source layer")
         all(value -> value isa Coordinate, args[2:4]) || throw(
             _operation_argument_error(
-                index,
+                operation_idx,
                 dest,
                 "requires Coordinate translation offsets"
             )
         )
-    elseif op_fn == SolidModels.remove_group!
+    elseif operation_fn == SolidModels.remove_group!
         push!(allowed_keywords, :remove_entities)
         require_arity(1)
         require_symbol(args[1], "the source layer")
-    elseif op_fn == SolidModels.revolve!
+    elseif operation_fn == SolidModels.revolve!
         require_arity(8)
         require_symbol(args[1], "the source layer")
         all(value -> value isa Real, args[2:8]) || throw(
-            _operation_argument_error(index, dest, "requires seven Real revolution values")
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "requires seven Real revolution values"
+            )
         )
-    elseif op_fn == SolidModels.set_periodic!
+    elseif operation_fn == SolidModels.set_periodic!
         require_arity(2)
         require_symbol(args[1], "the first periodic layer")
         require_symbol(args[2], "the second periodic layer")
     else
-        throw(_operation_argument_error(index, dest, "uses unsupported operation $op_fn"))
+        throw(
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "uses unsupported operation $operation_fn"
+            )
+        )
     end
     for keyword in operation[4:end]
         first(keyword) in allowed_keywords || throw(
             _operation_argument_error(
-                index,
+                operation_idx,
                 dest,
-                "does not support keyword :$(first(keyword)) for $op_fn"
+                "does not support keyword :$(first(keyword)) for $operation_fn"
             )
         )
     end
@@ -183,7 +219,7 @@ function _validate_layer_operation(operation, index::Integer)
     )
         keyword_values[keyword_name] isa Bool || throw(
             _operation_argument_error(
-                index,
+                operation_idx,
                 dest,
                 "requires keyword :$keyword_name to have a Bool value"
             )
@@ -203,7 +239,7 @@ function _validate_layer_operation(operation, index::Integer)
         end
         valid_value || throw(
             _operation_argument_error(
-                index,
+                operation_idx,
                 dest,
                 "requires keyword :$keyword_name to be one of $(join(choices, ", "))"
             )
@@ -225,9 +261,9 @@ const _EXTERIOR_BOUNDARY_LAYERS = Dict(
 
 function _entity_metas(cs)
     metas = EntityMeta[]
-    for (structure, _) in DeviceLayout.traversal(cs)
-        for meta in element_metadata(structure)
-            meta isa EntityMeta && push!(metas, meta)
+    for (subcs, _) in DeviceLayout.traversal(cs)
+        for entity_meta in element_metadata(subcs)
+            entity_meta isa EntityMeta && push!(metas, entity_meta)
         end
     end
     return metas
@@ -235,36 +271,36 @@ end
 
 function _preflight(cs, stack::SourceStack, levels::StackLevels, ops::Vector{Tuple})
     _validate_stack(stack, levels)
-    for meta in _entity_metas(cs)
-        _require_source_layer(stack, meta; context="placed EntityMeta")
+    for entity_meta in _entity_metas(cs)
+        _require_source_layer(stack, entity_meta; context="placed EntityMeta")
     end
     # Validate operation syntax before Gmsh. Registry-aware source-layer validation happens
     # during compilation, where previously generated destination layers are available.
-    for (index, operation) in enumerate(ops)
-        _validate_layer_operation(operation, index)
+    for (operation_idx, operation) in enumerate(ops)
+        _validate_layer_operation(operation, operation_idx)
     end
     return nothing
 end
 
-function _meta_z(stack::SourceStack, levels::StackLevels, meta::EntityMeta)
-    source_layer = _require_source_layer(stack, meta)
-    return _stack_z(levels[first_level(source_layer)], first_height(source_layer))
+function _meta_z(stack::SourceStack, levels::StackLevels, m::EntityMeta)
+    sl = _require_source_layer(stack, m)
+    return _stack_z(levels[first_level(sl)], first_height(sl))
 end
 
-function _map_meta_for_stack(stack::SourceStack, meta::EntityMeta)
-    source_layer = _require_source_layer(stack, meta)
-    (!source_layer.solidmodel || meta.role isa Locator) && return nothing
-    return physical_group_name(meta)
+function _map_meta_for_stack(stack::SourceStack, m::EntityMeta)
+    sl = _require_source_layer(stack, m)
+    (!sl.solidmodel || m.role isa Locator) && return nothing
+    return physical_group_name(m)
 end
 _map_meta_for_stack(::SourceStack, ::DeviceLayout.Meta) = nothing
 
-function _build_initial_registry(cs, stack::SourceStack)::Registry
+function _build_initial_registry(cs, stack::SourceStack)
     registry = Registry()
-    for meta in unique(_entity_metas(cs))
-        source_layer = _require_source_layer(stack, meta)
-        (!source_layer.solidmodel || meta.role isa Locator) && continue
-        record = PGRecord(physical_group_name(meta), meta.layer, meta)
-        state = get!(registry, meta.layer) do
+    for entity_meta in unique(_entity_metas(cs))
+        source_layer = _require_source_layer(stack, entity_meta)
+        (!source_layer.solidmodel || entity_meta.role isa Locator) && continue
+        record = PGRecord(physical_group_name(entity_meta), entity_meta.layer, entity_meta)
+        state = get!(registry, entity_meta.layer) do
             return LayerState(PGRecord[], 2)
         end
         any(existing -> existing.name == record.name, state.pgs) || push!(state.pgs, record)
@@ -272,27 +308,23 @@ function _build_initial_registry(cs, stack::SourceStack)::Registry
     return registry
 end
 
-function _schedule_extrusions(
-    stack::SourceStack,
-    registry::Registry,
-    levels::StackLevels
-)::Vector{Tuple}
+function _schedule_extrusions(stack::SourceStack, reg::Registry, levels::StackLevels)
     operations = Tuple[]
     for (layer_name, source_layer) in stack
-        haskey(registry, layer_name) || continue
+        haskey(reg, layer_name) || continue
         iszero(resolve_thickness(source_layer, levels)) && continue
         push!(operations, (layer_name, SolidModels.extrude_z!, ()))
     end
     return operations
 end
 
-function _retained_physical_groups(registry::Registry, deferred::Vector{DeferredInterface})
+function _retained_physical_groups(reg::Registry, deferred::Vector{DeferredInterface})
     deferred_names = Set(interface.dest_name for interface in deferred)
     retained = Set{Tuple{String, Int}}()
-    for state in values(registry)
+    for state in values(reg)
         for record in state.pgs
             record.name in deferred_names && continue
-            record.entity_meta !== nothing &&
+            !isnothing(record.entity_meta) &&
                 record.entity_meta.role isa Locator &&
                 continue
             push!(retained, (record.name, state.dim))
@@ -302,9 +334,13 @@ function _retained_physical_groups(registry::Registry, deferred::Vector{Deferred
 end
 
 """
-Return operations extracting all six axis-aligned exterior faces of a volume layer.
+    exnboundaries(bounding_volume_layer::Symbol) -> Vector{Tuple}
+
+Return operations extracting all six axis-aligned exterior faces of
+`bounding_volume_layer` into `:EXTBND_XMIN`, `:EXTBND_XMAX`, `:EXTBND_YMIN`,
+`:EXTBND_YMAX`, `:EXTBND_ZMIN`, and `:EXTBND_ZMAX`.
 """
-function exnboundaries(bounding_volume_layer::Symbol)::Vector{Tuple}
+function exnboundaries(bounding_volume_layer::Symbol)
     operations = Tuple[]
     for direction in ("X", "Y", "Z"), position in ("min", "max")
         destination = _EXTERIOR_BOUNDARY_LAYERS[(direction, position)]

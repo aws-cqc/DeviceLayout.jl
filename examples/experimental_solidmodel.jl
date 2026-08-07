@@ -28,14 +28,14 @@ stack = SourceStack(
     :metal => SourceLayer(NULL; level=1, gds_meta=GDSMeta(10, 0)),
     :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(11, 0))
 )
-target = DeviceLayout.SolidModels.Experimental.SolidModelTarget(levels, stack)
+target = Experimental.SolidModelTarget(levels, stack)
 
-model = SolidModel("experimental_solidmodel"; overwrite=true)
-metadata = render!(model, schematic, target)
+solid_model = SolidModel("experimental_solidmodel"; overwrite=true)
+metadata = render!(solid_model, schematic, target)
 write_metadata(joinpath(build_dir, "sm_metadata.json"), metadata)
-DeviceLayout.save(joinpath(build_dir, "model.xao"), model)
+DeviceLayout.save(joinpath(build_dir, "model.xao"), solid_model)
 SolidModels.gmsh.model.mesh.generate(2)
-save(joinpath(build_dir, "model.msh2"), model)
+save(joinpath(build_dir, "model.msh2"), solid_model)
 
 artwork = Cell("experimental_solidmodel", μm)
 render!(artwork, geometry, stack)
