@@ -11,6 +11,11 @@ mkpath(build_dir)
 
 geometry = CoordinateSystem("device", μm)
 place!(geometry, centered(Rectangle(100μm, 60μm)), EntityMeta(:metal; name="island"))
+place!(
+    geometry,
+    WithDirection(π / 2)(Rectangle(Point(55μm, -10μm), Point(60μm, 10μm))),
+    EntityMeta(:port; name="drive", role=LumpedPort)
+)
 
 component = BasicComponent(geometry)
 graph = SchematicGraph("experimental_solidmodel")
@@ -19,7 +24,10 @@ schematic = plan(graph; log_dir=build_dir)
 check!(schematic)
 
 levels = StackLevels(1 => 0μm)
-stack = SourceStack(:metal => SourceLayer(NULL; level=1, gds_meta=GDSMeta(10, 0)))
+stack = SourceStack(
+    :metal => SourceLayer(NULL; level=1, gds_meta=GDSMeta(10, 0)),
+    :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(11, 0))
+)
 target = DeviceLayout.SolidModels.Experimental.SolidModelTarget(levels, stack)
 
 model = SolidModel("experimental_solidmodel"; overwrite=true)

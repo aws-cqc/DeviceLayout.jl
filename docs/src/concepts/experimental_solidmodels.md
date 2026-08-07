@@ -17,10 +17,21 @@ Geometry participating in this pipeline uses `Experimental.EntityMeta`:
 ```julia
 using DeviceLayout
 using DeviceLayout.SolidModels.Experimental
+using Unitful: μm, °
 
+coordinate_system = CoordinateSystem("device", μm)
 metal = EntityMeta(:metal; name="island", role=Terminal())
-port = EntityMeta(:port; name="jj", role=LumpedPort("+Y"))
+port = EntityMeta(:port; name="jj", role=LumpedPort)
+port_geometry = Rectangle(5μm, 20μm) |> WithDirection(90°)
+place!(coordinate_system, port_geometry, port)
 ```
+
+`LumpedPort` is a role, while its required in-plane orientation belongs to the geometry's
+`WithDirection` style. The angle is measured counterclockwise from local +X and is transformed
+through rotations and reflections during placement. Metadata serializes the final orientation
+as `[cos(theta), sin(theta), 0.0]`. Occurrences that share one physical-group identity must
+have equal final directions; otherwise give them distinct `EntityMeta` `name` or `index`
+values.
 
 The layer is a plain `Symbol`. A `SourceStack` is authoritative for its assembly level,
 z position, material class, extrusion, and output visibility:
