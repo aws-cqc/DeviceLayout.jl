@@ -916,6 +916,67 @@ function render!(
     skip_unused_layers=false,
     kwargs...
 ) where {T}
+    return _render_orchestrator!(
+        sm,
+        cs;
+        (emit!)=(els, meta, k; zmap, points_tree, kwargs...) ->
+            _add_to_current_solidmodel!(
+                els,
+                meta,
+                k;
+                zmap=zmap,
+                points_tree=points_tree,
+                kwargs...
+            ),
+        (fragment!)=_fragment_three_pass!,
+        map_meta=map_meta,
+        postrender_ops=postrender_ops,
+        retained_physical_groups=retained_physical_groups,
+        zmap=zmap,
+        gmsh_options=gmsh_options,
+        meshing_parameters=meshing_parameters,
+        skip_postrender=skip_postrender,
+        auto_union=auto_union,
+        skip_unused_layers=skip_unused_layers,
+        kwargs...
+    )
+end
+
+# Adjacent-dimension pairs avoid both exterior boundary loss ([3,2,1], PR #145)
+# and stale OCC bindings when combined ([1,2,3], Gmsh #3446 / issue #172).
+function _fragment_three_pass!(sm::SolidModel)
+    _fragment_and_map!(sm, [0, 1])
+    _fragment_and_map!(sm, [1, 2])
+    _fragment_and_map!(sm, [2, 3])
+    return sm
+end
+
+# Shared orchestrator body called by both `render!` and `render_conformal!`.
+# The two entry points differ only in:
+#   - `emit!(els, meta, k; zmap, points_tree, kwargs...)`: how OCC entities are
+#     added for a metadata group. Stock uses `_add_to_current_solidmodel!`;
+#     conformal wraps `_add_conformal!` closing over the caller's context.
+#   - `fragment!(sm)`: post-postrender fragment pass. Stock always runs the
+#     three-pass `_fragment_and_map!`; conformal only runs it when
+#     `fragment_backstop=true`.
+# Every other step (gmsh setup, metadata loop, control-point collection,
+# postrender, retained-group cleanup, final synchronize) is common.
+function _render_orchestrator!(
+    sm::SolidModel,
+    cs::AbstractCoordinateSystem{T};
+    emit!,
+    fragment!,
+    map_meta=layer,
+    postrender_ops=[],
+    retained_physical_groups=[],
+    zmap=(_) -> zero(T),
+    gmsh_options=Dict{String, Union{String, Int, Float64}}(),
+    meshing_parameters::Union{Nothing, MeshingParameters}=nothing,
+    skip_postrender=false,
+    auto_union=false,
+    skip_unused_layers=false,
+    kwargs...
+) where {T}
     gmsh.model.set_current(name(sm))
 
     if !isnothing(meshing_parameters)
@@ -959,15 +1020,9 @@ function render!(
         els = to_primitives.(sm, elements(flat)[idx]; kwargs...)
         meshsizes = sizeandgrading.(elements(flat)[idx]; kwargs...)
 
-        # Add to model using kernel
-        group_dimtags_unflattened = _add_to_current_solidmodel!(
-            els,
-            meta,
-            kernel(sm);
-            zmap=zmap,
-            points_tree=points_tree,
-            kwargs...
-        )
+        # Add to model using kernel via the strategy-specific emit function.
+        group_dimtags_unflattened =
+            emit!(els, meta, kernel(sm); zmap=zmap, points_tree=points_tree, kwargs...)
 
         group_dimtags = reduce(vcat, group_dimtags_unflattened, init=Tuple{Int32, Int32}[])
         # If group already exists, add to it
@@ -1007,11 +1062,7 @@ function render!(
     _postrender!(sm, postrender_ops)
     _synchronize!(sm)
     # Get rid of redundant entities and update groups accordingly.
-    # Adjacent-dimension pairs avoid both exterior boundary loss ([3,2,1], PR #145)
-    # and stale OCC bindings when combined ([1,2,3], Gmsh #3446 / issue #172).
-    _fragment_and_map!(sm, [0, 1])
-    _fragment_and_map!(sm, [1, 2])
-    _fragment_and_map!(sm, [2, 3])
+    fragment!(sm)
 
     # Pass in call back function for meshing against the vertices found previously.
     gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
