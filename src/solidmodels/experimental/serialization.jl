@@ -5,7 +5,7 @@
 """
     serialize_metadata(
         registry, terminal_result, tag_records, split_results,
-        cc_entity_tags, iface_layer_parents, target, sm
+        cc_entity_tags, iface_layer_parents, stack, levels, sm, lumped_port_directions
     ) -> Dict
 
 Serialize the solid model metadata to a JSON-compatible dictionary.
@@ -19,7 +19,8 @@ function serialize_metadata(
     iface_layer_parents::Dict{Symbol, Vector{String}},
     stack::SourceStack,
     levels::StackLevels,
-    sm::SolidModel
+    sm::SolidModel,
+    lumped_port_directions::Dict{String, Vector{Float64}}
 )::Dict{String, Any}
     metadata = Dict{String, Any}(
         "schema_version" => "1.0.0",
@@ -43,7 +44,13 @@ function serialize_metadata(
                 em = pgr.entity_meta
                 role_dict = Dict{String, Any}("type" => string(em.role))
                 if em.role isa LumpedPort
-                    role_dict["direction"] = em.role.direction
+                    identity = physical_group_name(em)
+                    haskey(lumped_port_directions, identity) || error(
+                        "Internal metadata serialization error: LumpedPort record " *
+                        "'$(pgr.name)' has no resolved direction for source identity " *
+                        "'$identity'"
+                    )
+                    role_dict["direction"] = lumped_port_directions[identity]
                 end
                 pg_entry["entity_meta"] = Dict{String, Any}(
                     "name" => em.name,
