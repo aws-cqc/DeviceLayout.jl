@@ -25,20 +25,26 @@
     @test DIELECTRIC isa Material
     @test NULL isa Material
 
-    lumped_port = LumpedPort("-Z")
-    equal_lumped_port = LumpedPort([0.0, 0.0, -1.0])
-    @test lumped_port == equal_lumped_port
-    @test hash(lumped_port) == hash(equal_lumped_port)
-    @test string.((Generic(), Terminal(), Ground(), Tag(), WavePort(), lumped_port)) ==
-          ("Generic", "Terminal", "Ground", "Tag", "WavePort", "LumpedPort")
-    @test_throws ArgumentError LumpedPort("north")
+    lumped_port = LumpedPort()
+    @test fieldnames(LumpedPort) == ()
+    @test LumpedPort() == lumped_port
+    roles = (Generic(), Terminal(), Ground(), Tag(), WavePort(), lumped_port)
+    role_names = ("Generic", "Terminal", "Ground", "Tag", "WavePort", "LumpedPort")
+    @test string.(roles) == role_names
+    @test [
+        physical_group_name(EntityMeta(:metal; name="role", role=role)) for role in roles
+    ] == ["metal__role__i1__r$name" for name in role_names]
 
-    meta = EntityMeta(:metal; name="island", index=3, role=Terminal)
-    @test layer(meta) == :metal
-    @test layerindex(meta) == 3
-    @test level(meta) == 1
-    @test name(meta) == "island"
-    @test physical_group_name(meta) == "metal__island__i3__rTerminal"
+    instance_role_meta = EntityMeta(:metal; role=Terminal())
+    type_role_meta = EntityMeta(:metal; name="island", index=3, role=Terminal)
+    @test instance_role_meta.role isa Terminal
+    @test type_role_meta.role isa Terminal
+    @test_throws TypeError EntityMeta(:metal; role="Terminal")
+    @test layer(type_role_meta) == :metal
+    @test layerindex(type_role_meta) == 3
+    @test level(type_role_meta) == 1
+    @test name(type_role_meta) == "island"
+    @test physical_group_name(type_role_meta) == "metal__island__i3__rTerminal"
 
     levels = StackLevels(1 => 0μm, 2 => 500μm)
     pair_layer =
@@ -321,6 +327,70 @@ end
     )
 end
 
+@testitem "Experimental LumpedPort directions" begin
+    using DeviceLayout
+    using DeviceLayout.SolidModels.Experimental
+    import Unitful: μm, °
+
+    const direction_map = Experimental._extract_lumped_port_directions
+
+    local_cs = CoordinateSystem("local_port", μm)
+    nested_port = meshsized_entity(
+        optional_entity(WithDirection(30°)(Rectangle(2μm, 1μm)), :port; default=true),
+        0.2μm
+    )
+    local_meta = EntityMeta(:port; name="local", role=LumpedPort)
+    place!(local_cs, nested_port, local_meta)
+    @test direction_map(local_cs)[physical_group_name(local_meta)] ≈
+          [cospi(1 / 6), 0.5, 0.0]
+
+    transformed = CoordinateSystem("transformed_ports", μm)
+    addref!(transformed, local_cs; rot=90°)
+    rotated = direction_map(transformed)[physical_group_name(local_meta)]
+    @test rotated ≈ [-0.5, cospi(1 / 6), 0.0]
+
+    reflected = CoordinateSystem("reflected_ports", μm)
+    addref!(reflected, local_cs; rot=90°, xrefl=true)
+    reflected_direction = direction_map(reflected)[physical_group_name(local_meta)]
+    @test reflected_direction ≈ [0.5, cospi(1 / 6), 0.0]
+
+    missing = CoordinateSystem("missing_direction", μm)
+    place!(missing, Rectangle(1μm, 1μm), EntityMeta(:port; name="missing", role=LumpedPort))
+    error = try
+        direction_map(missing)
+        nothing
+    catch caught
+        caught
+    end
+    @test error isa ArgumentError
+    @test occursin("WithDirection", sprint(showerror, error))
+    @test occursin("port__missing__i1__rLumpedPort", sprint(showerror, error))
+
+    shared = CoordinateSystem("shared_port", μm)
+    shared_meta = EntityMeta(:port; role=LumpedPort)
+    place!(shared, WithDirection(0°)(Rectangle(1μm, 1μm)), shared_meta)
+
+    identical = CoordinateSystem("identical_directions", μm)
+    addref!(identical, shared, Point(0μm, 0μm))
+    addref!(identical, shared, Point(2μm, 0μm))
+    @test direction_map(identical)[physical_group_name(shared_meta)] == [1.0, 0.0, 0.0]
+
+    conflicting = CoordinateSystem("conflicting_directions", μm)
+    addref!(conflicting, shared)
+    addref!(conflicting, shared; rot=90°)
+    conflict = try
+        direction_map(conflicting)
+        nothing
+    catch caught
+        caught
+    end
+    @test conflict isa ArgumentError
+    @test occursin("inconsistent final directions", sprint(showerror, conflict))
+    @test occursin("distinct", sprint(showerror, conflict))
+    @test occursin("name", sprint(showerror, conflict))
+    @test occursin("index", sprint(showerror, conflict))
+end
+
 @testitem "Experimental Tag resolution stays within its declared layer" begin
     using DeviceLayout
     using DeviceLayout.SolidModels
@@ -353,7 +423,7 @@ end
     using DeviceLayout.SolidModels.Experimental
     using JSON
     using JSONSchema
-    import Unitful: μm
+    import Unitful: μm, °
 
     schema_path = joinpath(pkgdir(DeviceLayout), "schemas", "sm_metadata.schema.json")
     schema = JSONSchema.Schema(JSON.parsefile(schema_path); parent_dir=dirname(schema_path))
@@ -367,14 +437,42 @@ end
 
     geometry = CoordinateSystem("shape", μm)
     place!(geometry, Rectangle(10μm, 10μm), EntityMeta(:surface; name="pad"))
+    place!(
+        geometry,
+        WithDirection(90°)(Rectangle(Point(12μm, 0μm), Point(14μm, 2μm))),
+        EntityMeta(:port; name="drive", role=LumpedPort)
+    )
     graph = SchematicGraph("experimental_render")
     add_node!(graph, BasicComponent(geometry); base_id="q1")
     schematic = plan(graph; log_dir=nothing)
     check!(schematic)
     target = Experimental.SolidModelTarget(
         StackLevels(1 => 0μm),
-        SourceStack(:surface => SourceLayer(NULL; level=1, gds_meta=GDSMeta(4, 0)))
+        SourceStack(
+            :surface => SourceLayer(NULL; level=1, gds_meta=GDSMeta(4, 0)),
+            :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(5, 0))
+        )
     )
+
+    missing_geometry = CoordinateSystem("missing_port_style", μm)
+    place!(
+        missing_geometry,
+        Rectangle(2μm, 2μm),
+        EntityMeta(:port; name="missing", role=LumpedPort)
+    )
+    missing_graph = SchematicGraph("missing_port_style")
+    add_node!(missing_graph, BasicComponent(missing_geometry); base_id="q1")
+    missing_schematic = plan(missing_graph; log_dir=nothing) |> check!
+    missing_model = SolidModel("experimental_missing_port_style"; overwrite=true)
+    missing_error = try
+        render!(missing_model, missing_schematic, target)
+        nothing
+    catch caught
+        caught
+    end
+    @test missing_error isa ArgumentError
+    @test occursin("WithDirection", sprint(showerror, missing_error))
+    @test isempty(SolidModels.dimgroupdict(missing_model, 2))
 
     output_dir = mktempdir()
     before = readdir(output_dir)
@@ -384,7 +482,11 @@ end
     end
     @test readdir(output_dir) == before
     @test JSONSchema.validate(schema, metadata) === nothing
-    @test haskey(metadata["physical_groups"], "surface__q1.pad__i1__rGeneric")
+    generic_pg = metadata["physical_groups"]["surface__q1.pad__i1__rGeneric"]
+    @test generic_pg["entity_meta"]["role"]["type"] == "Generic"
+    port_pg = metadata["physical_groups"]["port__q1.drive__i1__rLumpedPort"]
+    @test port_pg["entity_meta"]["role"] ==
+          Dict("type" => "LumpedPort", "direction" => [0.0, 1.0, 0.0])
     @test element_metadata(geometry)[1].name == "pad"
 
     second_model = SolidModel("experimental_schema_test_repeat"; overwrite=true)

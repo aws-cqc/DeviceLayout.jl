@@ -60,6 +60,48 @@ function _prefix_placement_names!(schematic::Schematic)
     return schematic
 end
 
+function _direction_vector(direction)
+    turns = Float64(ustrip(°, direction)) / 180
+    return Float64[cospi(turns), sinpi(turns), 0.0]
+end
+
+"""
+Resolve the final in-plane direction of every placed lumped-port occurrence without
+flattening the hierarchy. Keys are source physical-group identities, which remain stable
+when compiler operations generate new physical-group names while preserving `entity_meta`.
+"""
+function _extract_lumped_port_directions(cs)::Dict{String, Vector{Float64}}
+    directions = Dict{String, Vector{Float64}}()
+    for (structure, transformation) in DeviceLayout.traversal(cs)
+        for (entity, meta) in zip(elements(structure), element_metadata(structure))
+            meta isa EntityMeta && meta.role isa LumpedPort || continue
+            identity = physical_group_name(meta)
+            local_direction = DeviceLayout.extract_direction(entity)
+            local_direction === nothing && throw(
+                ArgumentError(
+                    "Placed LumpedPort '$identity' has no WithDirection style; " *
+                    "annotate its geometry with `entity |> WithDirection(angle)`"
+                )
+            )
+            direction = _direction_vector(
+                DeviceLayout.rotated_direction(local_direction, transformation)
+            )
+            if haskey(directions, identity) &&
+               !isapprox(directions[identity], direction; atol=1e-12, rtol=1e-12)
+                throw(
+                    ArgumentError(
+                        "Placed LumpedPort occurrences for physical-group identity " *
+                        "'$identity' have inconsistent final directions; assign distinct " *
+                        "EntityMeta `name` or `index` values"
+                    )
+                )
+            end
+            directions[identity] = direction
+        end
+    end
+    return directions
+end
+
 function _working_schematic(schematic::Schematic{S}) where {S}
     # Copy the geometry tree and node-reference values together so shared-reference identity is
     # preserved. Keep graph-node keys from the caller: identity, rather than coordinate-system
@@ -183,6 +225,7 @@ function render!(
     try
         build!(working; strict=strict)
         _prefix_placement_names!(working)
+        lumped_port_directions = _extract_lumped_port_directions(working.coordinate_system)
         _preflight(working.coordinate_system, target.stack, target.levels, target.ops)
 
         locators = _extract_locator_positions(
@@ -271,7 +314,8 @@ function render!(
                     interface_layer_parents,
                     target.stack,
                     target.levels,
-                    solid_model
+                    solid_model,
+                    lumped_port_directions
                 )
             end
         finally
