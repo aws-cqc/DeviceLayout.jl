@@ -170,15 +170,18 @@ function layer_extrusions_dz(target, sch)
             end
         else
             for (lev, t_level) in pairs(t)
-                sgn = isodd(lev) ? sgn : -sgn
+                # Levelwise thickness is measured away from the substrate surface, using the
+                # same level convention as `layer_z`: odd levels are substrate tops (outward
+                # is +z), even levels are substrate bottoms (outward is -z).
+                lev_sgn = isodd(lev) ? sgn : -sgn
                 if ly in indexed_layers(target)
                     for m in element_metadata(sch.coordinate_system)
                         if layer(m) == ly && level(m) == lev
-                            t_dict[_map_meta_fn(target)(m)] = (sgn * t_level, dim)
+                            t_dict[_map_meta_fn(target)(m)] = (lev_sgn * t_level, dim)
                         end
                     end
                 else
-                    t_dict[string(ly) * "_L$lev"] = (sgn * t_level, dim)
+                    t_dict[string(ly) * "_L$lev"] = (lev_sgn * t_level, dim)
                 end
             end
         end
