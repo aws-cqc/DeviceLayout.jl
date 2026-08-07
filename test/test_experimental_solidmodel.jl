@@ -45,6 +45,7 @@
     @test level(type_role_meta) == 1
     @test name(type_role_meta) == "island"
     @test physical_group_name(type_role_meta) == "metal__island__i3__rTerminal"
+    @test Experimental.map_meta(type_role_meta) == physical_group_name(type_role_meta)
 
     levels = StackLevels(1 => 0μm, 2 => 500μm)
     pair_layer =
@@ -61,7 +62,7 @@
         SourceStack(:bad => SourceLayer(NULL; level=3, gds_meta=GDSMeta(1, 0)))
     bad_cs = CoordinateSystem("bad", μm)
     place!(bad_cs, Rectangle(1μm, 1μm), EntityMeta(:bad; name="bad_level"))
-    @test_throws ArgumentError DeviceLayout.SolidModels.Experimental._preflight(
+    @test_throws ArgumentError Experimental._preflight(
         bad_cs,
         missing_level_stack,
         levels,
@@ -92,7 +93,7 @@ end
     missing = CoordinateSystem("missing", μm)
     place!(missing, Rectangle(1μm, 1μm), EntityMeta(:unknown; name="bad", index=4))
     @test_throws ArgumentError render!(Cell("missing", μm), missing, stack)
-    registry = DeviceLayout.SolidModels.Experimental._build_initial_registry(cs, stack)
+    registry = Experimental._build_initial_registry(cs, stack)
     @test !haskey(registry, :art_only)
     @test haskey(registry, :second)
 end
@@ -195,15 +196,15 @@ end
         (:bad, identity, (:metal,))
     ]
     for operation in malformed_operations
-        error = try
+        err = try
             compile_layer_ops([operation], stack, registry; levels)
             nothing
         catch caught
             caught
         end
-        @test error isa ArgumentError
-        @test occursin("Layer operation 1", sprint(showerror, error))
-        @test occursin(":bad", sprint(showerror, error))
+        @test err isa ArgumentError
+        @test occursin("Layer operation 1", sprint(showerror, err))
+        @test occursin(":bad", sprint(showerror, err))
     end
 
     append_registry = deepcopy(registry)
@@ -262,23 +263,23 @@ end
     addref!(geometry, nested)
     component = BasicComponent(geometry)
     graph = SchematicGraph("placement_copy")
-    first_node = add_node!(graph, component; base_id="q1")
-    second_node = add_node!(graph, component; base_id="q2")
-    schematic = plan(graph; log_dir=nothing)
-    check!(schematic)
+    add_node!(graph, component; base_id="q1")
+    add_node!(graph, component; base_id="q2")
+    sch = plan(graph; log_dir=nothing)
+    check!(sch)
 
     original_metadata = deepcopy(element_metadata(component.geometry))
-    working = DeviceLayout.SolidModels.Experimental._working_schematic(schematic)
+    working = Experimental._working_schematic(sch)
     build!(working)
-    DeviceLayout.SolidModels.Experimental._prefix_placement_names!(working)
+    Experimental._prefix_placement_names!(working)
 
     names_by_node = Dict{String, Vector{String}}()
-    for (node, reference) in working.ref_dict
+    for (node, ref) in working.ref_dict
         names_by_node[node.id] = [
-            meta.name for
-            (structure, _) in DeviceLayout.traversal(DeviceLayout.structure(reference))
-            for meta in element_metadata(structure) if
-            meta isa EntityMeta && !isempty(meta.name)
+            entity_meta.name for
+            (subcs, _) in DeviceLayout.traversal(DeviceLayout.structure(ref)) for
+            entity_meta in element_metadata(subcs) if
+            entity_meta isa EntityMeta && !isempty(entity_meta.name)
         ]
     end
     @test "q1.island" in names_by_node["q1"]
@@ -290,9 +291,10 @@ end
         vcat(values(names_by_node)...)
     )
     empty_names = [
-        meta.name for
-        (structure, _) in DeviceLayout.traversal(working.coordinate_system) for
-        meta in element_metadata(structure) if meta isa EntityMeta && isempty(meta.name)
+        entity_meta.name for
+        (subcs, _) in DeviceLayout.traversal(working.coordinate_system) for
+        entity_meta in element_metadata(subcs) if
+        entity_meta isa EntityMeta && isempty(entity_meta.name)
     ]
     @test length(empty_names) == 2
     @test element_metadata(component.geometry) == original_metadata
@@ -308,22 +310,14 @@ end
     addref!(root, locator_geometry, Point(10μm, 0μm))
     addref!(root, locator_geometry, Point(-10μm, 5μm))
     stack = SourceStack(:metal => SourceLayer(METAL; level=1))
-    locators = DeviceLayout.SolidModels.Experimental._extract_locator_positions(
-        root,
-        stack,
-        StackLevels(1 => 0μm)
-    )
+    locators = Experimental._extract_locator_positions(root, stack, StackLevels(1 => 0μm))
     @test length(locators) == 2
     @test sort([locator.center_x for locator in locators]) == [-10.0, 10.0]
     @test sort([locator.center_y for locator in locators]) == [0.0, 5.0]
 
     hidden_stack = SourceStack(:metal => SourceLayer(METAL; level=1, solidmodel=false))
     @test isempty(
-        DeviceLayout.SolidModels.Experimental._extract_locator_positions(
-            root,
-            hidden_stack,
-            StackLevels(1 => 0μm)
-        )
+        Experimental._extract_locator_positions(root, hidden_stack, StackLevels(1 => 0μm))
     )
 end
 
@@ -356,15 +350,15 @@ end
 
     missing = CoordinateSystem("missing_direction", μm)
     place!(missing, Rectangle(1μm, 1μm), EntityMeta(:port; name="missing", role=LumpedPort))
-    error = try
+    err = try
         direction_map(missing)
         nothing
     catch caught
         caught
     end
-    @test error isa ArgumentError
-    @test occursin("WithDirection", sprint(showerror, error))
-    @test occursin("port__missing__i1__rLumpedPort", sprint(showerror, error))
+    @test err isa ArgumentError
+    @test occursin("WithDirection", sprint(showerror, err))
+    @test occursin("port__missing__i1__rLumpedPort", sprint(showerror, err))
 
     shared = CoordinateSystem("shared_port", μm)
     shared_meta = EntityMeta(:port; role=LumpedPort)
@@ -378,17 +372,17 @@ end
     conflicting = CoordinateSystem("conflicting_directions", μm)
     addref!(conflicting, shared)
     addref!(conflicting, shared; rot=90°)
-    conflict = try
+    conflict_err = try
         direction_map(conflicting)
         nothing
     catch caught
         caught
     end
-    @test conflict isa ArgumentError
-    @test occursin("inconsistent final directions", sprint(showerror, conflict))
-    @test occursin("distinct", sprint(showerror, conflict))
-    @test occursin("name", sprint(showerror, conflict))
-    @test occursin("index", sprint(showerror, conflict))
+    @test conflict_err isa ArgumentError
+    @test occursin("inconsistent final directions", sprint(showerror, conflict_err))
+    @test occursin("distinct", sprint(showerror, conflict_err))
+    @test occursin("name", sprint(showerror, conflict_err))
+    @test occursin("index", sprint(showerror, conflict_err))
 end
 
 @testitem "Experimental Tag resolution stays within its declared layer" begin
@@ -397,12 +391,12 @@ end
     using DeviceLayout.SolidModels.Experimental
     using DeviceLayout.SolidModels.Experimental: PGRecord, LayerState, Registry
 
-    model = SolidModel("experimental_tag_layer"; overwrite=true)
+    sm = SolidModel("experimental_tag_layer"; overwrite=true)
     first_tag = SolidModels.gmsh.model.occ.addRectangle(0.0, 0.0, 0.0, 10.0, 10.0)
     second_tag = SolidModels.gmsh.model.occ.addRectangle(0.0, 0.0, 0.0, 10.0, 10.0)
     SolidModels.gmsh.model.occ.synchronize()
-    model["layer_a"] = [(Int32(2), Int32(first_tag))]
-    model["layer_b"] = [(Int32(2), Int32(second_tag))]
+    sm["layer_a"] = [(Int32(2), Int32(first_tag))]
+    sm["layer_b"] = [(Int32(2), Int32(second_tag))]
     registry = Registry(
         :a => LayerState([PGRecord("layer_a", :a, EntityMeta(:a))], 2),
         :b => LayerState([PGRecord("layer_b", :b, EntityMeta(:b))], 2)
@@ -410,10 +404,10 @@ end
     locator = Experimental.LocatorRecord("tag", 1, Tag(), :a, 5.0, 5.0, 0.0)
     deferred = Experimental.DeferredInterface[]
     interfaces = Dict{String, Tuple{String, String}}()
-    Experimental._resolve_tag_locators!(model, registry, [locator], deferred, interfaces)
+    Experimental._resolve_tag_locators!(sm, registry, [locator], deferred, interfaces)
     tag_name = physical_group_name(EntityMeta(:a; name="tag", role=Tag()))
-    @test SolidModels.hasgroup(model, tag_name, 2)
-    @test SolidModels.entitytags(model[tag_name, 2]) == [Int32(first_tag)]
+    @test SolidModels.hasgroup(sm, tag_name, 2)
+    @test SolidModels.entitytags(sm[tag_name, 2]) == [Int32(first_tag)]
 end
 
 @testitem "Experimental rendered metadata conforms to schema" begin
@@ -421,7 +415,7 @@ end
     using DeviceLayout.SchematicDrivenLayout
     using DeviceLayout.SolidModels
     using DeviceLayout.SolidModels.Experimental
-    using JSON
+    import JSON
     using JSONSchema
     import Unitful: μm, °
 
@@ -430,10 +424,10 @@ end
     fixture = JSON.parsefile(
         joinpath(pkgdir(DeviceLayout), "test", "fixtures", "sm_metadata_v1.json")
     )
-    @test JSONSchema.validate(schema, fixture) === nothing
+    @test isnothing(JSONSchema.validate(schema, fixture))
     invalid_fixture = deepcopy(fixture)
     invalid_fixture["metadata"]["assembly"]["levels"] = Dict("not-an-integer" => 0.0)
-    @test JSONSchema.validate(schema, invalid_fixture) !== nothing
+    @test !isnothing(JSONSchema.validate(schema, invalid_fixture))
 
     geometry = CoordinateSystem("shape", μm)
     place!(geometry, Rectangle(10μm, 10μm), EntityMeta(:surface; name="pad"))
@@ -444,8 +438,8 @@ end
     )
     graph = SchematicGraph("experimental_render")
     add_node!(graph, BasicComponent(geometry); base_id="q1")
-    schematic = plan(graph; log_dir=nothing)
-    check!(schematic)
+    sch = plan(graph; log_dir=nothing)
+    check!(sch)
     target = Experimental.SolidModelTarget(
         StackLevels(1 => 0μm),
         SourceStack(
@@ -462,26 +456,26 @@ end
     )
     missing_graph = SchematicGraph("missing_port_style")
     add_node!(missing_graph, BasicComponent(missing_geometry); base_id="q1")
-    missing_schematic = plan(missing_graph; log_dir=nothing) |> check!
-    missing_model = SolidModel("experimental_missing_port_style"; overwrite=true)
-    missing_error = try
-        render!(missing_model, missing_schematic, target)
+    missing_sch = plan(missing_graph; log_dir=nothing) |> check!
+    missing_sm = SolidModel("experimental_missing_port_style"; overwrite=true)
+    missing_err = try
+        render!(missing_sm, missing_sch, target)
         nothing
     catch caught
         caught
     end
-    @test missing_error isa ArgumentError
-    @test occursin("WithDirection", sprint(showerror, missing_error))
-    @test isempty(SolidModels.dimgroupdict(missing_model, 2))
+    @test missing_err isa ArgumentError
+    @test occursin("WithDirection", sprint(showerror, missing_err))
+    @test isempty(SolidModels.dimgroupdict(missing_sm, 2))
 
     output_dir = mktempdir()
     before = readdir(output_dir)
     metadata = cd(output_dir) do
-        model = SolidModel("experimental_schema_test"; overwrite=true)
-        return render!(model, schematic, target)
+        sm = SolidModel("experimental_schema_test"; overwrite=true)
+        return render!(sm, sch, target)
     end
     @test readdir(output_dir) == before
-    @test JSONSchema.validate(schema, metadata) === nothing
+    @test isnothing(JSONSchema.validate(schema, metadata))
     generic_pg = metadata["physical_groups"]["surface__q1.pad__i1__rGeneric"]
     @test generic_pg["entity_meta"]["role"]["type"] == "Generic"
     port_pg = metadata["physical_groups"]["port__q1.drive__i1__rLumpedPort"]
@@ -489,8 +483,8 @@ end
           Dict("type" => "LumpedPort", "direction" => [0.0, 1.0, 0.0])
     @test element_metadata(geometry)[1].name == "pad"
 
-    second_model = SolidModel("experimental_schema_test_repeat"; overwrite=true)
-    repeated_metadata = render!(second_model, schematic, target)
+    second_sm = SolidModel("experimental_schema_test_repeat"; overwrite=true)
+    repeated_metadata = render!(second_sm, sch, target)
     @test repeated_metadata == metadata
     @test element_metadata(geometry)[1].name == "pad"
 
@@ -498,8 +492,8 @@ end
     write_metadata(json_path, metadata)
     @test JSON.parsefile(json_path) == metadata
     @test_throws ArgumentError begin
-        model = SolidModel("experimental_no_output_dir"; overwrite=true)
-        render!(model, schematic, target; output_dir=output_dir)
+        sm = SolidModel("experimental_no_output_dir"; overwrite=true)
+        render!(sm, sch, target; output_dir=output_dir)
     end
 end
 
@@ -513,13 +507,13 @@ end
     place!(unitless_geometry, Rectangle(10.0, 5.0), EntityMeta(:surface; name="shape"))
     unitless_graph = SchematicGraph("unitless_render")
     add_node!(unitless_graph, BasicComponent(unitless_geometry); base_id="q1")
-    unitless_schematic = plan(unitless_graph; log_dir=nothing) |> check!
+    unitless_sch = plan(unitless_graph; log_dir=nothing) |> check!
     unitless_target = Experimental.SolidModelTarget(
         StackLevels(1 => 2.0),
         SourceStack(:surface => SourceLayer(NULL; level=1, height=3.0, thickness=0.0))
     )
-    unitless_model = SolidModel("experimental_unitless"; overwrite=true)
-    unitless_metadata = render!(unitless_model, unitless_schematic, unitless_target)
+    unitless_sm = SolidModel("experimental_unitless"; overwrite=true)
+    unitless_metadata = render!(unitless_sm, unitless_sch, unitless_target)
     @test unitless_metadata["metadata"]["assembly"]["levels"]["1"] == 2.0
     @test unitless_metadata["layers"]["surface"]["height"] == 3.0
     @test unitless_metadata["layers"]["surface"]["thickness"] == 0.0
@@ -544,22 +538,22 @@ end
     warning_graph = SchematicGraph("finalization_warning")
     add_node!(warning_graph, BasicComponent(warning_geometry); base_id="q1")
     log_dir = mktempdir()
-    warning_schematic = plan(warning_graph; log_dir=log_dir) |> check!
+    warning_sch = plan(warning_graph; log_dir=log_dir) |> check!
     warning_target = Experimental.SolidModelTarget(
         StackLevels(1 => 0.0),
         SourceStack(:metal => SourceLayer(METAL; level=1))
     )
-    strict_model = SolidModel("experimental_strict_warning"; overwrite=true)
+    strict_sm = SolidModel("experimental_strict_warning"; overwrite=true)
     @test_throws ErrorException render!(
-        strict_model,
-        warning_schematic,
+        strict_sm,
+        warning_sch,
         warning_target;
         strict=:warn
     )
-    @test isfile(warning_schematic.logger.logname)
-    @test contains(read(warning_schematic.logger.logname, String), "has no locators")
+    @test isfile(warning_sch.logger.logname)
+    @test contains(read(warning_sch.logger.logname, String), "has no locators")
 
     # A second render proves the exceptional strict path closed its working logfile.
-    nonstrict_model = SolidModel("experimental_strict_cleanup"; overwrite=true)
-    @test render!(nonstrict_model, warning_schematic, warning_target; strict=:no) isa Dict
+    nonstrict_sm = SolidModel("experimental_strict_cleanup"; overwrite=true)
+    @test render!(nonstrict_sm, warning_sch, warning_target; strict=:no) isa Dict
 end

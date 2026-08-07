@@ -1,7 +1,7 @@
 module Experimental
 
 using SHA
-using JSON
+import JSON
 using Logging
 using Unitful
 using DeviceLayout
