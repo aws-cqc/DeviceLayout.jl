@@ -13,43 +13,12 @@ abstract type Port <: Role end
 struct WavePort <: Port end
 
 """
-A rendered lumped-port surface with a three-dimensional orientation vector.
+Role for a rendered lumped-port surface. Its in-plane direction is carried by a
+[`DeviceLayout.WithDirection`](@ref) style on the placed geometry.
 """
-struct LumpedPort <: Port
-    direction::Vector{Float64}
-    function LumpedPort(direction::Vector{Float64})
-        length(direction) == 3 || throw(ArgumentError("direction must have 3 components"))
-        return new(direction)
-    end
-end
-LumpedPort(direction::AbstractVector{<:Real}) = LumpedPort(Float64.(direction))
+struct LumpedPort <: Port end
 
-function LumpedPort(direction::String)
-    directions = Dict(
-        "+X" => [1.0, 0.0, 0.0],
-        "-X" => [-1.0, 0.0, 0.0],
-        "+Y" => [0.0, 1.0, 0.0],
-        "-Y" => [0.0, -1.0, 0.0],
-        "+Z" => [0.0, 0.0, 1.0],
-        "-Z" => [0.0, 0.0, -1.0]
-    )
-    haskey(directions, direction) || throw(
-        ArgumentError(
-            "direction must be one of: $(join(sort!(collect(keys(directions))), ", "))"
-        )
-    )
-    return LumpedPort(directions[direction])
-end
-
-Base.:(==)(a::LumpedPort, b::LumpedPort) = a.direction == b.direction
-Base.hash(p::LumpedPort, h::UInt) = hash((LumpedPort, p.direction), h)
-
-Base.show(io::IO, ::Generic) = print(io, "Generic")
-Base.show(io::IO, ::Terminal) = print(io, "Terminal")
-Base.show(io::IO, ::Ground) = print(io, "Ground")
-Base.show(io::IO, ::Tag) = print(io, "Tag")
-Base.show(io::IO, ::WavePort) = print(io, "WavePort")
-Base.show(io::IO, ::LumpedPort) = print(io, "LumpedPort")
+Base.show(io::IO, r::Role) = print(io, nameof(typeof(r)))
 
 """
     EntityMeta(layer::Symbol; name="", index=1, role=Generic())
@@ -65,10 +34,16 @@ struct EntityMeta <: DeviceLayout.Meta
     role::Role
 end
 
-function EntityMeta(layer::Symbol; name::String="", index::Int=1, role=Generic())
-    resolved_role = role isa Type{<:Role} ? role() : role
-    resolved_role isa Role || throw(ArgumentError("role must be a Role or Role type"))
-    return EntityMeta(layer, name, index, resolved_role)
+_resolve_role(role::Role) = role
+_resolve_role(::Type{R}) where {R <: Role} = R()
+
+function EntityMeta(
+    layer::Symbol;
+    name::String="",
+    index::Int=1,
+    role::Union{Role, Type{<:Role}}=Generic()
+)
+    return EntityMeta(layer, name, index, _resolve_role(role))
 end
 
 DeviceLayout.layer(m::EntityMeta) = m.layer
