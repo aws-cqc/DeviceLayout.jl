@@ -1620,7 +1620,8 @@ function halo(sty::Style, outer_delta, inner_delta=nothing; kwargs...)
     )
 end
 
-function halo(sty::CompoundStyle, outer_delta, inner_delta=nothing; kwargs...)
+# All compound styles should be taken style-by-style rather than falling back to generic
+function halo(sty::AbstractCompoundStyle, outer_delta, inner_delta=nothing; kwargs...)
     newsty = copy(sty)
     newsty.styles .= halo.(newsty.styles, Ref(outer_delta), Ref(inner_delta); kwargs...)
     return newsty

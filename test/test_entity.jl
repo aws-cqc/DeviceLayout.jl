@@ -154,6 +154,52 @@
         straight!(pth, 10μm, Paths.TaperTrace(10μm, 20μm))
         @test halo(pth[1].sty, 20μm, 10μm) ==
               Paths.TaperCPW{typeof(1.0μm)}(30μm, 10μm, 40μm, 10μm, 10μm)
+
+        # A compound style is haloed substyle by substyle, so one starting with a
+        # zero-extent substyle still gets a halo for its remaining substyles. Both
+        # `AbstractCompoundStyle` subtypes must agree: `PeriodicStyle` here, and the
+        # `CompoundStyle` covering the same styles over the same intervals as a control.
+        periodic = Paths.PeriodicStyle([Paths.NoRender(), Paths.Trace(10μm)], [5μm, 5μm])
+        compound = Paths.CompoundStyle(
+            Paths.Style[Paths.NoRender(), Paths.Trace(10μm)],
+            [0.0μm, 5.0μm, 10.0μm],
+            :halo_periodic_control
+        )
+        for sty in (periodic, compound)
+            h = halo(sty, 2μm)
+            @test !isa(h, Paths.NoRender)
+            @test iszero(Paths.extent(h, 2μm))       # zero-extent substyle stays unrendered
+            @test Paths.extent(h, 7μm) ≈ 7μm         # 5μm trace half-width plus 2μm
+        end
+        @test halo(periodic, 2μm).lengths == periodic.lengths
+
+        # Two equivalent canonical ways of bridging a path must agree on halos:
+        # Overlaying a `PeriodicStyle` built from a template path, and `attach!` over a range.
+        bridge_cs = CoordinateSystem(uniquename("bridge"), nm)
+        place!(bridge_cs, centered(Rectangle(10μm, 40μm)), SemanticMeta(:bridge))
+        template = Path()
+        straight!(template, 100μm, Paths.NoRender())
+        attach!(template, sref(bridge_cs), 50μm)
+        function bridged(use_overlay)
+            pa = Path(Point(0μm, 0μm))
+            straight!(pa, 500μm, Paths.CPW(10μm, 6μm))
+            if use_overlay
+                overlay!(pa, Paths.PeriodicStyle(template), DeviceLayout.NORENDER_META)
+            else
+                attach!(pa, sref(bridge_cs), (50μm):(100μm):(450μm))
+            end
+            cs = CoordinateSystem(uniquename("bridged"), nm)
+            place!(cs, pa, SemanticMeta(:base))
+            return cs
+        end
+        nbridges(cs) =
+            count(m -> layer(m) == :bridge, DeviceLayout.element_metadata(flatten(cs)))
+
+        overlay_halo = halo(bridged(true), 5μm)
+        attach_halo = halo(bridged(false), 5μm)
+        @test nbridges(attach_halo) == 5
+        @test nbridges(overlay_halo) == nbridges(attach_halo)
+        @test bounds(overlay_halo) ≈ bounds(attach_halo)
     end
 end
 
