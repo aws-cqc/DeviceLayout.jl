@@ -30,6 +30,13 @@ The format of this changelog is based on
     raised a `MethodError` part-way through the traversal. References to `Path`s are handled by
     replacing the `Path` with an equivalent `CoordinateSystem` containing its references and its undecorated
     nodes separately.
+  - `round_layer` and `round_layer!` apply corner rounding to the rendered geometry of a
+    layer as a post-render pass. The layer's elements (including those inside references)
+    are flattened and unioned before rounding, so corners are rounded correctly where
+    separately-drawn shapes meet, and holes are preserved. Rounding is symbolic
+    (`CurvilinearRegion` with true arcs); for `CoordinateSystem` input, curves already
+    present in the layer survive the union exactly when their full discretized footprint
+    remains on the result boundary.
 
 ### Changed
 
