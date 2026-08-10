@@ -1439,6 +1439,24 @@
         SolidModels.finalize_size_fields!()
         @test all(sort(collect(keys(SolidModels.mesh_control_trees()))) .== [(0.5, 0.75)])
 
+        # Explicit and default grading can normalize to the same tree key. Both point sets
+        # must survive finalization.
+        SolidModels.clear_mesh_control_points!()
+        SolidModels.add_mesh_size_point([0.0, 0.0, 0.0]; h=0.5, α=-1)
+        SolidModels.add_mesh_size_point([10.0, 0.0, 0.0]; h=0.5, α=0.75)
+        SolidModels.finalize_size_fields!()
+        @test collect(keys(SolidModels.mesh_control_trees())) == [(0.5, 0.75)]
+        for x in (0.0, 10.0)
+            @test SolidModels.gmsh_meshsize(
+                Cint(0),
+                Cint(0),
+                Cdouble(x),
+                Cdouble(0.0),
+                Cdouble(0.0),
+                Cdouble(0.0)
+            ) == 0.5
+        end
+
         # Check that the KDTree implementation matches a brute force search
         import Random: seed!, default_rng, rand
         rng = seed!(default_rng(), 111)
@@ -1516,6 +1534,82 @@
             cps = first(values(SolidModels.mesh_control_points()))
             @test !isempty(cps)
             @test all(p -> p[3] == 5.0, cps)
+        end
+
+        @testset "Curvature-center control points" begin
+            turn = Paths.Turn(90°, 2.0μm; p0=Point(0.0μm, 0.0μm), α0=0°)
+
+            SolidModels.clear_mesh_control_points!()
+            SolidModels._collect_mesh_control_points!(turn, 0.0, -1.0, 5.0)
+            cps = SolidModels.mesh_control_points()
+            @test collect(keys(cps)) == [(2.0, -1.0)]
+            @test only(cps[(2.0, -1.0)]) ≈ SVector(0.0, 2.0, 5.0)
+
+            SolidModels.finalize_size_fields!()
+            for s in range(zero(pathlength(turn)), pathlength(turn), length=3)
+                p = turn(s)
+                @test SolidModels.gmsh_meshsize(
+                    Cint(0),
+                    Cint(0),
+                    Cdouble(ustrip(STP_UNIT, p.x)),
+                    Cdouble(ustrip(STP_UNIT, p.y)),
+                    Cdouble(5.0),
+                    Cdouble(0.0)
+                ) ≈ 2.0
+            end
+
+            SolidModels.clear_mesh_control_points!()
+            offset_turn = Paths.offset(turn, 0.5μm)
+            SolidModels._collect_mesh_control_points!(offset_turn, 0.0, -1.0, 3.0)
+            cps = SolidModels.mesh_control_points()
+            @test collect(keys(cps)) == [(1.5, -1.0)]
+            @test only(cps[(1.5, -1.0)]) ≈ SVector(0.0, 2.0, 3.0)
+
+            circle = Circle(Point(3μm, 4μm), 2μm)
+            SolidModels.clear_mesh_control_points!()
+            SolidModels._collect_mesh_control_points!(circle, 0.0, -1.0, 7.0)
+            cps = SolidModels.mesh_control_points()
+            @test collect(keys(cps)) == [(2.0, -1.0)]
+            @test only(cps[(2.0, -1.0)]) ≈ SVector(3.0, 4.0, 7.0)
+
+            SolidModels.clear_mesh_control_points!()
+            SolidModels._collect_mesh_control_points!(
+                CurvilinearPolygon(circle),
+                0.0,
+                -1.0,
+                7.0
+            )
+            @test length(only(values(SolidModels.mesh_control_points()))) == 1
+
+            SolidModels.clear_mesh_control_points!()
+            ellipse = Ellipse(Point(3μm, 4μm), (2μm, 1μm), 0°)
+            SolidModels._collect_mesh_control_points!(ellipse, 0.0, -1.0, 7.0)
+            @test isempty(SolidModels.mesh_control_points())
+
+            SolidModels.clear_mesh_control_points!()
+            SolidModels._collect_mesh_control_points!(
+                turn,
+                0.0,
+                -1.0,
+                5.0;
+                curvature_sizing=false
+            )
+            @test isempty(SolidModels.mesh_control_points())
+        end
+
+        @testset "Rounded geometry curvature sizing" begin
+            cs = CoordinateSystem("curvature_sizing", nm)
+            render!(cs, Polygons.Rounded(2μm)(Rectangle(10μm, 10μm)), SemanticMeta(:curved))
+
+            sm_curved = SolidModel("curvature_sizing_on", overwrite=true)
+            render!(sm_curved, cs)
+            cps = SolidModels.mesh_control_points()
+            @test haskey(cps, (2.0, -1.0))
+            @test length(cps[(2.0, -1.0)]) == 4
+
+            sm_uncontrolled = SolidModel("curvature_sizing_off", overwrite=true)
+            render!(sm_uncontrolled, cs; curvature_sizing=false)
+            @test isempty(SolidModels.mesh_control_points())
         end
 
         # Checking option access

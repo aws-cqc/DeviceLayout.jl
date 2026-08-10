@@ -34,4 +34,29 @@
         0.0
     )
     @test isempty(SolidModels.mesh_control_points())
+
+    circle_cs = CoordinateSystem("circle_size_fields", nm)
+    render!(circle_cs, Circle(Point(3μm, 4μm), 2μm), SemanticMeta(:circle))
+    render!(circle_cs, Circle(Point(3μm, 4μm), 2μm), SemanticMeta(:circle_copy))
+    preserve_primitives(el; kwargs...) = el
+
+    cp = SolidModels.populate_size_fields!(
+        circle_cs;
+        primitives_of=preserve_primitives,
+        zmap=_ -> 7μm
+    )
+    @test collect(only(cp[(2.0, -1.0)])) == [3.0, 4.0, 7.0]
+
+    primitive_calls = Ref(0)
+    function count_primitives(el; kwargs...)
+        primitive_calls[] += 1
+        return el
+    end
+    SolidModels.populate_size_fields!(
+        circle_cs;
+        primitives_of=count_primitives,
+        curvature_sizing=false
+    )
+    @test primitive_calls[] == 0
+    @test isempty(SolidModels.mesh_control_points())
 end

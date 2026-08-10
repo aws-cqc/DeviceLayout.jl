@@ -756,7 +756,7 @@ same shared orchestrator as [`render!`](@ref); the only differences are:
 
 Accepts all of `render!`'s keyword arguments (`map_meta`, `postrender_ops`,
 `retained_physical_groups`, `zmap`, `gmsh_options`, `skip_postrender`,
-`auto_union`, `skip_unused_layers`, `meshing_parameters`) in addition to:
+`auto_union`, `skip_unused_layers`, `curvature_sizing`, `meshing_parameters`) in addition to:
 
   - `context::ConformalRenderContext`: the edge/curve cache and merge tolerances.
     Pass an explicit context to customize tolerances or inspect cache stats

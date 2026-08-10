@@ -527,7 +527,9 @@ end
         render!(sm, floorplan, target)
         cp_rendered = SolidModels.mesh_control_points()
         @test !isempty(cp_rendered)
-        @test Set(keys(cp_rendered)) == Set(keys(cp_schematic))
+        # Solid-model projections can preserve circular path turns that the default
+        # schematic projection flattens, adding radius-sized curvature buckets.
+        @test issubset(Set(keys(cp_schematic)), Set(keys(cp_rendered)))
 
         @test SolidModels.hasgroup(sm, "substrates", 3)
         @test SolidModels.hasgroup(sm, "vacuum", 3)

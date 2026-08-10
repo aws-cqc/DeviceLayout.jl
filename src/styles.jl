@@ -168,12 +168,12 @@ modification.
 
 Each `MeshSized` entity generates a corresponding set of
 [`DeviceLayout.SolidModels.mesh_control_points`](@ref) during the call to
-[`DeviceLayout.SolidModels.render!`](@ref) along the perimeter of the styled entity.
-Controlling the mesh only at the edges of entities, rather than within the interior, ensures
-that geometric entities are resolved whilst avoiding overrefinement in surface regions which
-can be reasonably achieved through adaptive mesh refinement. Increasing resolution of edges
-of entities can be achieved through reducing the value of `h` on the particular entity or
-``s_g`` to affect all entities globally.
+[`DeviceLayout.SolidModels.render!`](@ref) along the perimeter of the styled entity. Exact
+circular arcs also generate radius-sized points at their curvature centers unless
+`curvature_sizing=false` is passed to `render!`. Keeping the general entity sizing controls
+on boundaries avoids overrefinement in surface regions that can be handled by adaptive mesh
+refinement. Increasing resolution of entity edges can be achieved by reducing `h` on the
+particular entity or ``s_g`` globally.
 
 For the set of all [`DeviceLayout.SolidModels.mesh_control_points`](@ref) computed, a
 corresponding mesh size will be computed, and the resulting mesh size is then the minimum

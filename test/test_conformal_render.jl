@@ -203,8 +203,13 @@
         sm = SolidModel("cvr"; overwrite=true)
         render_conformal!(sm, cs)
         @test hasgroup(sm, "l1", 2)
+        @test length(SolidModels.mesh_control_points()[(5.0, -1.0)]) == 4
         # A rounded rectangle should produce a single surface with curved edges.
         @test length(gmsh.model.occ.getEntities(2)) >= 1
+
+        sm_off = SolidModel("cvr_off"; overwrite=true)
+        render_conformal!(sm_off, cs; curvature_sizing=false)
+        @test isempty(SolidModels.mesh_control_points())
         gmsh.finalize()
     end
 
