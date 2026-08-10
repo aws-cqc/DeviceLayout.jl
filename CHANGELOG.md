@@ -6,6 +6,8 @@ The format of this changelog is based on
 
 ## Unreleased
 
+## 1.17.0 (2026-08-10)
+
 ### Added
 
   - Corner rounding now handles **arc-arc corners** (where two circular arcs meet), in
@@ -37,6 +39,7 @@ The format of this changelog is based on
     (`CurvilinearRegion` with true arcs); for `CoordinateSystem` input, curves already
     present in the layer survive the union exactly when their full discretized footprint
     remains on the result boundary.
+  - Added `SolidModels.ConformalRender` submodule with `ConformalRenderContext` and `render_conformal!(::SolidModel, ...)`, an alternative method for rendering to a `SolidModel` that reuses 1D OCC entities where possible, allowing the global fragment-and-map pass to be skipped if preconditions are met.
 
 ### Changed
 
