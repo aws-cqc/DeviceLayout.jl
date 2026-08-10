@@ -29,7 +29,7 @@ render_conformal!(sm, cs; postrender_ops=..., zmap=..., kwargs...)
 Same kwargs as `render!`, except `_fragment_and_map!` is not called after
 postrender operations (the cache already guarantees conformality on rendered
 geometry if preconditions are met). If your postrender operations create new
-overlapping entities, or preconditions are not met, use `render!` or 
+overlapping entities, or preconditions are not met, use `render!` or
 `render_conformal!(...; fragment_backstop=true)`.
 
 # Design notes
