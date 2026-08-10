@@ -1575,22 +1575,61 @@ function _get_or_add_point!(
 )
     reg =
         SpatialIndexing.Rect((x - atol, y - atol, z - atol), (x + atol, y + atol, z + atol))
-    if isempty(points_tree, reg)
-        tag = k.add_point(x, y, z)
-        insert!(points_tree, SpatialIndexing.Point((x, y, z)), tag)
-        return tag
+    while true
+        pts = SpatialIndexing.contained_in(points_tree, reg)
+        if isempty(pts)
+            tag = k.add_point(x, y, z)
+            insert!(points_tree, SpatialIndexing.Point((x, y, z)), tag)
+            return tag
+        end
+        # If more than one previously-inserted point falls within the
+        # tolerance box (can happen with a coarse `atol` or where two
+        # boundaries land within one nm of each other), pick the closest —
+        # avoids `only()` throwing on multi-candidate collisions and gives a
+        # deterministic tie-break.
+        best_elem = first(pts)
+        best_d2 = _point_d2(x, y, z, best_elem.mbr.low)
+        for pt in pts
+            d2 = _point_d2(x, y, z, pt.mbr.low)
+            if d2 < best_d2
+                best_d2 = d2
+                best_elem = pt
+            end
+        end
+        # Verify the tag is still a live OCC point. `k.cut` (called from
+        # `_add_to_current_solidmodel!(::CurvilinearRegion)`) can retag or
+        # delete points after we inserted them, leaving stale entries in the
+        # tree. If the tag is stale we drop it from the tree and retry — the
+        # retry either finds another live candidate in `reg` or falls through
+        # to a fresh `add_point`. This replaces an O(N) `k.get_entities(0)`
+        # scan on every collision with an O(1) OCC probe.
+        if _is_live_point(k, best_elem.val)
+            return best_elem.val
+        end
+        # Drop the stale entry so future queries don't keep hitting it.
+        # SpatialIndexing takes the MBR (a point-Rect) as the delete key.
+        delete!(points_tree, best_elem.mbr)
     end
-    pts = SpatialIndexing.contained_in(points_tree, reg)
-    tag = only(pts).val
-    current_points = k.get_entities(0)
-    if tag in last.(current_points)
-        return tag
+end
+
+# Squared distance from (x, y, z) to a SpatialIndexing point-Rect (low == high).
+@inline function _point_d2(x, y, z, c)
+    dx = x - c[1]
+    dy = y - c[2]
+    dz = z - c[3]
+    return dx * dx + dy * dy + dz * dz
+end
+
+# O(1) probe: does OCC still have a point with this tag? `getBoundingBox` on
+# a stale tag throws "Unknown OpenCASCADE point with tag N".
+function _is_live_point(k, tag)
+    try
+        k.getBoundingBox(0, tag)
+        return true
+    catch e
+        e isa ErrorException || rethrow(e)
+        return false
     end
-    # point must have gotten relabeled — can happen if you're trying to connect to a point that was on a hole
-    # just add the point again, don't bother with the tree
-    # (for some reason k.get_entities_in_bounding_box may not find the point either, even with a +/- 1nm box)
-    tag = k.add_point(x, y, z)
-    return tag
 end
 
 # Add primitives to solid model

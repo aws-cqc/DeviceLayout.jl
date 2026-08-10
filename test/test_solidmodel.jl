@@ -1920,4 +1920,87 @@ end
         @test length(tags) == nsurf
         @test area ≈ expected rtol = 1e-6
     end
+
+    @testset "_get_or_add_point! multi-candidate resolution" begin
+        # A caller that queries with a large `atol` can catch multiple
+        # previously-inserted points inside its tolerance box. The old
+        # implementation `only(pts)`-errored in that case; the new one
+        # returns the closest of the candidates.
+        import SpatialIndexing
+        sm = SolidModel("get_or_add_point_multi"; overwrite=true)
+        k = SolidModels.kernel(sm)
+        tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        # Insert two points 0.1 µm apart at the tight default tolerance so the
+        # tree stores them as distinct entries.
+        t1 = SolidModels._get_or_add_point!(
+            k,
+            0.0,
+            0.0,
+            0.0,
+            tree;
+            atol=SolidModels.POINT_MERGE_ATOL
+        )
+        t2 = SolidModels._get_or_add_point!(
+            k,
+            0.1,
+            0.0,
+            0.0,
+            tree;
+            atol=SolidModels.POINT_MERGE_ATOL
+        )
+        @test t1 != t2
+        # Query at (0.02, 0, 0) with a wide atol that catches both — expect
+        # the closer one (t1, distance 0.02) rather than t2 (distance 0.08).
+        t_hit = SolidModels._get_or_add_point!(k, 0.02, 0.0, 0.0, tree; atol=1.0)
+        @test t_hit == t1
+        # Query at (0.08, 0, 0) with the same wide atol — expect t2.
+        t_hit2 = SolidModels._get_or_add_point!(k, 0.08, 0.0, 0.0, tree; atol=1.0)
+        @test t_hit2 == t2
+        SolidModels.gmsh.finalize()
+    end
+
+    @testset "_get_or_add_point! recovers from stale RTree tag" begin
+        # `k.cut` can retag or delete points after they were inserted into the
+        # points_tree. A subsequent lookup that finds a stale tag must fall
+        # back to a fresh `add_point` and drop the stale entry from the tree.
+        import SpatialIndexing
+        sm = SolidModel("get_or_add_point_stale"; overwrite=true)
+        k = SolidModels.kernel(sm)
+        tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        stale = SolidModels._get_or_add_point!(
+            k,
+            3.0,
+            4.0,
+            0.0,
+            tree;
+            atol=SolidModels.POINT_MERGE_ATOL
+        )
+        # Simulate `k.cut` removing the point without notifying the tree.
+        k.remove([(0, stale)])
+        # A follow-up query on the same coordinates must NOT return the stale
+        # tag; it must synthesize a fresh point.
+        fresh = SolidModels._get_or_add_point!(
+            k,
+            3.0,
+            4.0,
+            0.0,
+            tree;
+            atol=SolidModels.POINT_MERGE_ATOL
+        )
+        @test fresh != stale
+        # The fresh point should be live (bounding box query succeeds).
+        @test try
+            k.getBoundingBox(0, fresh)
+            true
+        catch
+            false
+        end
+        # And the stale entry should have been dropped from the tree so
+        # future queries don't re-encounter it.
+        reg = SpatialIndexing.Rect((2.9, 3.9, -0.1), (3.1, 4.1, 0.1))
+        remaining = SpatialIndexing.contained_in(tree, reg)
+        @test length(remaining) == 1
+        @test first(remaining).val == fresh
+        SolidModels.gmsh.finalize()
+    end
 end
