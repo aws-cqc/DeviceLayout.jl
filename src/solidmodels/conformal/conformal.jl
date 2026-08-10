@@ -6,17 +6,17 @@ entities** for adjacent faces, producing conformal geometry without relying on
 `_fragment_and_map!` after render.
 
 Motivation: at chip scale (~10⁵ faces), the stock render path creates a distinct
-OCC edge/point per face boundary, then the post-render `_fragment_and_map!` pass
-reconciles coincident entities. That reconciliation is `O(N²)` and, at production
-scale, non-manifold artifacts can survive it.
+OCC edge per face boundary, then the built-in post-render `_fragment_and_map!` pass
+reconciles coincident entities. This is the performance bottleneck for large
+geometries.
 
-`render_conformal!` takes a different path: an in-process **edge/curve cache**
+[`render_conformal!`](@ref) takes a different path: an edge/curve cache
 deduplicates OCC entities as they are created, so two adjacent faces requesting
 the "same" line or arc receive the same OCC tag. The resulting model is conformal
-by construction and `_fragment_and_map!` is skipped.
+by construction (assuming the geometry meets certain preconditions, listed below)
+and `_fragment_and_map!` is skipped.
 
-The stock [`render!`](@ref) is left unchanged; `render_conformal!` is a parallel
-entry point that shares the [`SolidModel`](@ref) type and produces a `SolidModel`
+[`render_conformal!`](@ref) is an alternative to `render!`, producing a `SolidModel`
 that downstream operations (postrender, meshing, save) consume interchangeably.
 
 # Usage
@@ -28,58 +28,21 @@ render_conformal!(sm, cs; postrender_ops=..., zmap=..., kwargs...)
 
 Same kwargs as `render!`, except `_fragment_and_map!` is not called after
 postrender operations (the cache already guarantees conformality on rendered
-geometry). If your postrender operations create new overlapping entities, use
-`render!` instead (or call `_fragment_and_map!` explicitly).
+geometry if preconditions are met). If your postrender operations create new
+overlapping entities, or preconditions are not met, use `render!` or 
+`render_conformal!(...; fragment_backstop=true)`.
 
 # Design notes
 
   - **Two point-merge tolerances**: polygon vertices use a **relaxed** tolerance
-    (default 2 nm) because Clipper's integer-grid output and DeviceLayout's
-    `discretize_curve` float drift can leave the two sides of a shared boundary
-    ~1.5 nm apart. Arc centers and BSpline control points use the strict tolerance
+    (default 2 nm) to support geometries with sliver edges, such as those arising from
+    curve intersections calculated using the default discretization tolerance of 1 nm.
+    Arc centers and BSpline control points use the strict tolerance
     (`POINT_MERGE_ATOL`) — merging those at the relaxed tolerance would corrupt
     geometry.
-  - **Prefer-curve invariant**: when a curve (arc or spline) exists on endpoints
-    `(e1, e2)`, every subsequent request on `(e1, e2)` — line or arc — returns
-    that curve. This is the "curve wins" rule that makes adjacent faces resolve
-    to one OCC entity even when one side computed a line and the other an arc.
-  - **Per-render cache**: the cache lives on a `ConformalRenderContext` struct
+  - **Per-render cache**: the cache lives on a [`ConformalRenderContext`](@ref) struct
     passed through calls. There is no global mutable state — one render, one
     context.
-
-# Preconditions
-
-For the cache to produce correct geometry:
-
- 1. **Shared endpoints ⟹ shared curve geometry.** If two faces share a
-    boundary, the CurvilinearPolygon points on both sides must resolve to the
-    same OCC point tags AND the curves spanning those tags must be the same
-    geometric curve. Callers can meet this by having both faces reference the
-    same `Paths.Segment` object (the "coordinated recovery" pattern used in
-    e.g. `union2d_curved`), or by an upstream mutual-noding pass. To catch
-    accidental violations, the cache verifies a midpoint sample matches the
-    cached curve before reusing an entity, so a genuinely-different curve
-    spanning the same endpoints will fall through to a fresh OCC edge rather
-    than silently collapsing.
- 2. **No distinct co-endpoint edges.** Even with the midpoint check, geometry
-    that has two curves crossing at both endpoints and at their midpoint (e.g.
-    a lens shape, or a self-crossing offset curve where both branches happen
-    to be mirror-symmetric across the endpoint chord) can defeat the check.
-    Ensure your input geometry does not contain such shapes.
- 3. **Relaxed vertex merge is safe iff features > 500× the merge tolerance.**
-    The default 2 nm merge is 500× smaller than a 1 µm minimum feature. If
-    you have features ~10× smaller, use
-    `ConformalRenderContext(; vertex_merge_atol=…)` to tighten.
- 4. **No overlapping areas at the same z within or across map_meta groups.**
-    The cache builds curve loops face-by-face; overlaps between faces at the
-    same z (whether within one physical group or across two) are not detected
-    or resolved. If your rendering can produce co-planar overlap, run with
-    `fragment_backstop=true` so the stock `_fragment_and_map!` pass runs
-    after postrender and reconciles the overlaps.
-
-`fragment_backstop=true` helps only with precondition (4). It does not
-recover from violations of (1)–(3): a wrongly-fused edge is already in the
-model before `_fragment_and_map!` runs.
 """
 module ConformalRender
 
@@ -134,9 +97,8 @@ end
 Per-render cache and settings for a `render_conformal!` call.
 
   - `vertex_merge_atol` (µm): tolerance for merging polygon-vertex OCC points.
-    Default `2e-3` µm = 2 nm, chosen to absorb Clipper integer-grid + float-drift
-    divergence between the two sides of a shared boundary (~1.5 nm observed) while
-    staying 500× below typical minimum feature size (1 µm). Also used as the
+    Default `2e-3` µm = 2 nm, chosen to absorb chord errors from curve intersections
+    calculated using the default discretization tolerance of 1 nm. Also used as the
     tolerance for the curve-midpoint geometric check.
   - `center_merge_atol` (µm): tolerance for merging arc centers and BSpline control
     points. Kept strict (`POINT_MERGE_ATOL` = 1e-9 µm = 1 pm) because relaxing here
@@ -227,7 +189,7 @@ end
 # Add a line, dedup on unordered endpoint pair. A cached curve on the same
 # endpoints (arc or spline) is reused ONLY if its stored midpoint matches the
 # line's midpoint at `vertex_merge_atol` — this prevents fusing genuinely
-# different curves that happen to share endpoints (see precondition 2).
+# different curves that happen to share endpoints (see preconditions 2-3).
 function _cached_add_line!(k, ctx::ConformalRenderContext, p1::Integer, p2::Integer)
     p1 == p2 && error("degenerate edge: p1 == p2 == $p1")
     lo, hi = minmax(p1, p2)
@@ -790,7 +752,7 @@ same shared orchestrator as [`render!`](@ref); the only differences are:
   - OCC entities are emitted via the cached `_add_conformal!` path, so shared
     boundaries between adjacent faces resolve to a single OCC edge.
   - The post-render `_fragment_and_map!` pass is skipped by default because
-    the cache already guarantees conformality on rendered geometry.
+    the cache already guarantees conformality on rendered geometry if preconditions are met (see below).
 
 Accepts all of `render!`'s keyword arguments (`map_meta`, `postrender_ops`,
 `retained_physical_groups`, `zmap`, `gmsh_options`, `skip_postrender`,
@@ -800,11 +762,37 @@ Accepts all of `render!`'s keyword arguments (`map_meta`, `postrender_ops`,
     Pass an explicit context to customize tolerances or inspect cache stats
     after the render.
   - `fragment_backstop::Bool=false`: run the stock 3-pass `_fragment_and_map!`
-    after postrender operations. Enable when your input violates precondition 4
-    (overlapping areas at the same z), which the cache does not resolve on its
-    own. Does not recover from violations of preconditions 1–3.
+    after postrender operations. Enable when your input violates preconditions 1-3
+    (overlapping areas at the same z, overlapping edges, or intersecting edges),
+    which the cache does not resolve on its own, or when postrender operations create
+    non-conformal geometry.
 
 Not supported on `GmshNative` kernel.
+
+# Preconditions
+
+To produce correct, conformal geometry:
+
+ 1. **No overlapping areas in the same plane.**
+    The cache builds curve loops face-by-face; overlaps between faces at the
+    same z height (whether within one physical group or across two) are not detected
+    or resolved.
+ 2. **Shared boundaries share endpoints.**
+    In other words, there should be no partially overlapping edges.
+    If two faces share a boundary, the boundary should resolve to the same geometric curve with
+    the same endpoints (or the reversed curve).
+ 3. **Boundaries intersect only at endpoints.**
+    Curves with interior intersections will not produce conformal geometry.
+    Additionally, if two distinct edges share endpoints and a midpoint,
+    the cache will not distinguish them and they will collapse to a single curve.
+ 4. **Relaxed vertex merge is safe.**
+    If you have small features such that merging vertices within 2nm meaningfully
+    affects the geometry, use `ConformalRenderContext(; vertex_merge_atol=…)` to tighten
+    the merge tolerance.
+
+`fragment_backstop=true` helps with preconditions (1), (2), and non-midpoint
+intersections in (3). It does not recover from distinct curves with the same endpoints
+and midpoint being collapsed, or corruption of geometry by the relaxed vertex merge.
 """
 function render_conformal!(
     sm::SolidModel,
