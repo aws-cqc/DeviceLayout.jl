@@ -1975,10 +1975,19 @@ end
             tree;
             atol=SolidModels.POINT_MERGE_ATOL
         )
-        # Simulate `k.cut` removing the point without notifying the tree.
+        # Simulate `k.cut` removing the point without notifying the tree —
+        # the RTree still holds the (now-stale) mapping to `stale`.
         k.remove([(0, stale)])
-        # A follow-up query on the same coordinates must NOT return the stale
-        # tag; it must synthesize a fresh point.
+        @test try
+            k.getBoundingBox(0, stale)
+            false
+        catch
+            true
+        end
+        # A follow-up query on the same coordinates must return a LIVE tag —
+        # `_get_or_add_point!` should detect that the cached candidate is
+        # stale and synthesize a fresh point. (OCC may recycle the freed tag
+        # value, so we assert liveness rather than tag inequality.)
         fresh = SolidModels._get_or_add_point!(
             k,
             3.0,
@@ -1987,20 +1996,18 @@ end
             tree;
             atol=SolidModels.POINT_MERGE_ATOL
         )
-        @test fresh != stale
-        # The fresh point should be live (bounding box query succeeds).
         @test try
             k.getBoundingBox(0, fresh)
             true
         catch
             false
         end
-        # And the stale entry should have been dropped from the tree so
-        # future queries don't re-encounter it.
+        # And the tree should now hold exactly one entry for this coordinate,
+        # pointing at the live tag (the stale entry was dropped and replaced).
         reg = SpatialIndexing.Rect((2.9, 3.9, -0.1), (3.1, 4.1, 0.1))
-        remaining = SpatialIndexing.contained_in(tree, reg)
+        remaining = collect(SpatialIndexing.contained_in(tree, reg))
         @test length(remaining) == 1
-        @test first(remaining).val == fresh
+        @test remaining[1].val == fresh
         SolidModels.gmsh.finalize()
     end
 end
