@@ -227,9 +227,7 @@
         straight!(keepout_path, 10μm, Paths.SimpleNoRender(10μm, virtual=true))
         keepout_cs = CoordinateSystem(uniquename("keepout"), μm)
         place!(keepout_cs, keepout_path, SemanticMeta(:keepout))
-        keepout = elements(
-            flatten(Cell(halo(keepout_cs, 5μm), map_meta=(_) -> GDSMeta()))
-        )
+        keepout = elements(flatten(Cell(halo(keepout_cs, 5μm), map_meta=(_) -> GDSMeta())))
         @test only(gridpoints_in_polygon(keepout, [5μm], [0μm]))
 
         # A compound style is haloed substyle by substyle, so one starting with a
