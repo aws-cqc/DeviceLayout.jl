@@ -1604,7 +1604,8 @@ function halo(
         SimpleCPW,
         TraceTermination,
         CPWOpenTermination,
-        CPWShortTermination
+        CPWShortTermination,
+        SimpleNoRender
     },
     outer_delta,
     inner_delta=nothing;
@@ -1624,10 +1625,6 @@ function halo(sty::Style, outer_delta, inner_delta=nothing; kwargs...)
         t -> 2 * (extent(sty, t) + inner_delta),
         t -> outer_delta - inner_delta
     )
-end
-
-function halo(sty::SimpleNoRender, outer_delta, inner_delta=nothing; kwargs...)
-    return Paths.SimpleNoRender(sty.width + outer_delta) # Change extent for attachments
 end
 
 function halo(

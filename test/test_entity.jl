@@ -216,9 +216,21 @@
             end
         end
 
-        # NoRender halos
-        @test Paths.extent(halo(Paths.SimpleNoRender(5μm), 5μm)) == 5μm
+        # SimpleNoRender suppresses source geometry but its finite extent still represents
+        # a keepout. Its halo must therefore render, unlike the zero-extent NoRender styles.
+        simple_norender_halo = halo(Paths.SimpleNoRender(5μm), 5μm)
+        @test simple_norender_halo isa Paths.Trace
+        @test Paths.extent(simple_norender_halo, 0μm) == 7.5μm
         @test Paths.extent(halo(Paths.NoRender(), 5μm), 0μm) == 0μm
+
+        keepout_path = Path(μm)
+        straight!(keepout_path, 10μm, Paths.SimpleNoRender(10μm, virtual=true))
+        keepout_cs = CoordinateSystem(uniquename("keepout"), μm)
+        place!(keepout_cs, keepout_path, SemanticMeta(:keepout))
+        keepout = elements(
+            flatten(Cell(halo(keepout_cs, 5μm), map_meta=(_) -> GDSMeta()))
+        )
+        @test only(gridpoints_in_polygon(keepout, [5μm], [0μm]))
 
         # A compound style is haloed substyle by substyle, so one starting with a
         # zero-extent substyle still gets a halo for its remaining substyles. Both
