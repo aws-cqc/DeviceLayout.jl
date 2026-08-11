@@ -16,8 +16,7 @@ The format of this changelog is based on
   - OpenCascade SolidModel rendering adds radius-sized mesh control points at the centers of
     exact circular arcs by default, locally capping rounded-corner and path-turn mesh sizes
     at the radius when `mesh_scale() <= 1`, without refining their entire enclosing entities.
-    Pass `curvature_sizing=false` to
-    `render!` or `render_conformal!` to retain perimeter-only sizing.
+    Pass `curvature_sizing=false` to `render!` or `render_conformal!` to retain perimeter-only sizing.
 
 ### Fixed
 

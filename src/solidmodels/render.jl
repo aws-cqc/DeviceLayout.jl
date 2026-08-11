@@ -605,10 +605,10 @@ _stp_float(x::Real) = Float64(x)
 # `add_mesh_size_point` additions and `α` changes can interleave first.
 
 """
-    _collect_mesh_control_points!(prims, h, α, z)
+    _collect_mesh_control_points!(prims, h, α, z; curvature_sizing=true, curvature_seen=nothing)
 
 Append mesh-size control points for `prims` (a primitive or vector of
-primitives from [`to_primitives`](@ref)) under `(h, α)`, sampling each
+primitives from [`to_primitives`](@ref)) under `(h, α)` when `h > 0`, sampling each
 primitive's boundary at `⌈L / h⌉` evenly-spaced arc-length intervals at
 height `z`. When `curvature_sizing=true`, exact circular primitives also add a
 radius-sized control point at their center, including when `h <= 0`. Does NOT
@@ -705,23 +705,6 @@ _sample_meshsize!(::Any, ::Float64, ::Float64, ::Float64) = nothing
 # point at its center with h=R contributes exactly R on the arc when mesh_scale() <= 1,
 # independently of the grading exponent.
 function _sample_curvature_meshsize!(
-    prims::Union{
-        AbstractVector,
-        CurvilinearPolygon,
-        CurvilinearRegion,
-        Ellipse,
-        Paths.Segment
-    },
-    z::Float64
-)
-    seen = Set{NTuple{4, Float64}}()
-    _sample_curvature_meshsize!(prims, z, seen)
-    return nothing
-end
-
-_sample_curvature_meshsize!(::Any, ::Float64) = nothing
-
-function _sample_curvature_meshsize!(
     prims::AbstractVector,
     z::Float64,
     seen::Set{NTuple{4, Float64}}
@@ -776,6 +759,7 @@ end
 
 _sample_curvature_meshsize!(::Any, ::Float64, ::Set{NTuple{4, Float64}}) = nothing
 
+# CompoundSegment in a CurvilinearPolygon is possible by manual construction
 function _sample_segment_curvature_meshsize!(
     seg::Paths.CompoundSegment,
     z::Float64,
@@ -930,7 +914,7 @@ function populate_size_fields!(
     curvature_seen = Set{NTuple{4, Float64}}()
     for (el, meta) in zip(elements(flat), element_metadata(flat))
         h, α = sizeandgrading(el; kwargs...)
-        h > 0 || curvature_sizing || continue
+        h > 0 || (curvature_sizing && _carries_curves(el)) || continue
         _collect_mesh_control_points!(
             primitives_of(el; kwargs...),
             h,
