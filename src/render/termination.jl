@@ -23,52 +23,54 @@
 # corresponding to 2 and 5.
 
 function __poly(f::Paths.Straight{T}, s::Paths.CPWOpenTermination) where {T}
-    g = cpw_points(f, s)
-
     t0, tr, t1 = zero(T), s.rounding, pathlength(f)
+    c0 = _cpw_corners(f, s, t0)
+    c1 = _cpw_corners(f, s, t1)
     if iszero(tr)
         pts = if s.initial
             [
-                g(t1, -1, 1),  # start at corner 1 (see diagram)
-                g(t1, -1, -1),
-                g(t1, 1, -1),  # omitting corners 3, 4
-                g(t1, 1, 1),
-                g(t0, 1, 1),
-                g(t0, -1, 1)
+                c1[1], # start at corner 1 (see diagram)
+                c1[2],
+                c1[3], # omitting corners 3, 4
+                c1[4],
+                c0[4],
+                c0[1]
             ]
         else
             [
-                g(t0, 1, 1),   # start at corner 1 (see diagram)
-                g(t0, 1, -1),
-                g(t0, -1, -1), # omitting corners 3, 4
-                g(t0, -1, 1),
-                g(t1, -1, 1),
-                g(t1, 1, 1)
+                c0[4], # start at corner 1 (see diagram)
+                c0[3],
+                c0[2], # omitting corners 3, 4
+                c0[1],
+                c1[1],
+                c1[4]
             ]
         end
         return Polygon(pts)
     else
+        ctr_initial = _cpw_corners(f, s, t1 - tr)
+        ctr_final = _cpw_corners(f, s, tr)
         pts = if s.initial
             [
-                g(t1, -1, 1),  # start at corner 1 (see diagram)
-                g(t1, -1, -1),
-                g(t1 - tr, -1, -1),
-                g(t1 - tr, 1, -1),
-                g(t1, 1, -1),
-                g(t1, 1, 1),
-                g(t0, 1, 1),
-                g(t0, -1, 1)
+                c1[1], # start at corner 1 (see diagram)
+                c1[2],
+                ctr_initial[2],
+                ctr_initial[3],
+                c1[3],
+                c1[4],
+                c0[4],
+                c0[1]
             ]
         else
             [
-                g(t0, 1, 1),   # start at corner 1 (see diagram)
-                g(t0, 1, -1),
-                g(tr, 1, -1),
-                g(tr, -1, -1),
-                g(t0, -1, -1),
-                g(t0, -1, 1),
-                g(t1, -1, 1),
-                g(t1, 1, 1)
+                c0[4], # start at corner 1 (see diagram)
+                c0[3],
+                ctr_final[3],
+                ctr_final[2],
+                c0[2],
+                c0[1],
+                c1[1],
+                c1[4]
             ]
         end
 
@@ -112,21 +114,21 @@ end
 # 5--------6
 
 function __poly(f::Paths.Straight{T}, s::Paths.CPWShortTermination) where {T}
-    g = cpw_points(f, s)
-
     t0, tr, t1 = zero(T), s.rounding, pathlength(f)
     if !isapprox(tr, t1)
         throw(ArgumentError("Termination rounding ≠ termination path length."))
     end
 
+    c0 = _cpw_corners(f, s, t0)
+    c1 = _cpw_corners(f, s, t1)
     poly1 = Polygon([
-        g(t0, 1, -1),   # for path with α=0°, start at corner 1 (see diagram)
-        g(t1, 1, -1),
-        g(t1, 1, 1),
-        g(t0, 1, 1)
+        c0[3],
+        c1[3],
+        c1[4],
+        c0[4] # for path with α=0°, start at corner 1 (see diagram)
     ])
 
-    poly2 = Polygon([g(t0, -1, 1), g(t1, -1, 1), g(t1, -1, -1), g(t0, -1, -1)])
+    poly2 = Polygon([c0[1], c1[1], c1[2], c0[2]])
     iszero(tr) && return [poly1, poly2]
     round_idx = s.initial ? [1, 4] : [2, 3]
     round1 = Polygons.Rounded(tr; p0=points(poly1)[round_idx], min_side_len=zero(T))

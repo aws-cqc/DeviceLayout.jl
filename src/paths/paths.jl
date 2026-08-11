@@ -1630,7 +1630,12 @@ function halo(sty::SimpleNoRender, outer_delta, inner_delta=nothing; kwargs...)
     return Paths.SimpleNoRender(sty.width + outer_delta) # Change extent for attachments
 end
 
-function halo(sty::Union{NoRender, NoRenderContinuous, NoRenderDiscrete}, outer_delta, inner_delta=nothing; kwargs...)
+function halo(
+    sty::Union{NoRender, NoRenderContinuous, NoRenderDiscrete},
+    outer_delta,
+    inner_delta=nothing;
+    kwargs...
+)
     return Paths.NoRender()
 end
 

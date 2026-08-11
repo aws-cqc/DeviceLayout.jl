@@ -1,33 +1,21 @@
-"""
-    cpw_points(f, s, scaler=identity)
-
-Return an anonymous function of `(t, sgn1, sgn2)` that returns points in the cross-section
-of the CPW defined by curve `f` and style `s`. `sgn1` and `sgn2` must be 1 or -1 and
-determine which point is returned.
-
-From left to right facing the direction of the curve, you can return the points defining
-the cross section as `f(t, 1, 1), f(t, 1, -1), f(t, -1, -1), f(t, -1, 1)`.
-"""
-function cpw_points(f, s, scaler=identity)
-    return (t, sgn1::Int, sgn2::Int) -> begin
-        if !(abs2(sgn1) == abs2(sgn2) == 1)
-            throw(ArgumentError("sgn1 and sgn2 must be 1 or -1"))
-        end
-        tng = Paths.ForwardDiff.derivative(f, t)
-        perp = sgn1 * Point(-tng.y, tng.x)
-
-        tt = scaler(t)
-        offset = (Paths.gap(s, tt) + Paths.trace(s, tt)) / 2
-        return f(t) + perp * ((sgn2 * Paths.gap(s, tt) / 2 + offset) / norm(perp))
-    end
+# Return the four corners of a straight CPW cross section in the order
+# right outer, right inner, left inner, left outer.
+function _cpw_corners(f::Paths.Straight, s, t)
+    center = f(t)
+    normal = Point(-sin(Paths.α0(f)), cos(Paths.α0(f)))
+    inner = Paths.trace(s) / 2
+    outer = inner + Paths.gap(s)
+    return [
+        center - outer * normal,
+        center - inner * normal,
+        center + inner * normal,
+        center + outer * normal
+    ]
 end
 
 function to_polygons(f::Paths.Straight{T}, s::Paths.SimpleCPW; kwargs...) where {T}
-    g = cpw_points(f, s)
+    c0 = _cpw_corners(f, s, zero(T))
+    c1 = _cpw_corners(f, s, pathlength(f))
 
-    t = StaticArrays.@SVector [zero(T), pathlength(f)]
-    ppts = [g.(t, 1, -1); @view g.(t, 1, 1)[end:-1:1]]
-    mpts = [g.(t, -1, 1); @view g.(t, -1, -1)[end:-1:1]]
-
-    return [Polygon(ppts), Polygon(mpts)]
+    return [Polygon([c0[3], c1[3], c1[4], c0[4]]), Polygon([c0[1], c1[1], c1[2], c0[2]])]
 end
