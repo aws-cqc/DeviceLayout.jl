@@ -216,6 +216,10 @@
             end
         end
 
+        # NoRender halos
+        @test Paths.extent(halo(Paths.SimpleNoRender(5μm), 5μm)) == 5μm
+        @test Paths.extent(halo(Paths.NoRender(), 5μm), 0μm) == 0μm
+
         # A compound style is haloed substyle by substyle, so one starting with a
         # zero-extent substyle still gets a halo for its remaining substyles. Both
         # `AbstractCompoundStyle` subtypes must agree: `PeriodicStyle` here, and the

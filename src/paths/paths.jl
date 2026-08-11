@@ -1626,6 +1626,14 @@ function halo(sty::Style, outer_delta, inner_delta=nothing; kwargs...)
     )
 end
 
+function halo(sty::SimpleNoRender, outer_delta, inner_delta=nothing; kwargs...)
+    return Paths.SimpleNoRender(sty.width + outer_delta) # Change extent for attachments
+end
+
+function halo(sty::Union{NoRender, NoRenderContinuous, NoRenderDiscrete}, outer_delta, inner_delta=nothing; kwargs...)
+    return Paths.NoRender()
+end
+
 # All compound styles should be taken style-by-style rather than falling back to generic
 function halo(sty::AbstractCompoundStyle, outer_delta, inner_delta=nothing; kwargs...)
     newsty = copy(sty)
