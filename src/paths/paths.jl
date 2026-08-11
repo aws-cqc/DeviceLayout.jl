@@ -1599,7 +1599,13 @@ function halo(sty::Union{TaperTrace, TaperCPW}, outer_delta, inner_delta=nothing
 end
 
 function halo(
-    sty::Union{SimpleTrace, SimpleCPW},
+    sty::Union{
+        SimpleTrace,
+        SimpleCPW,
+        TraceTermination,
+        CPWOpenTermination,
+        CPWShortTermination
+    },
     outer_delta,
     inner_delta=nothing;
     kwargs...

@@ -72,6 +72,7 @@ function single_transmon(;
         jj_template=ExampleSimpleJunction(),
         name="qubit",
         cap_length,
+        island_rounding=1μm,
         cap_gap,
         cap_width
     )

@@ -6,6 +6,11 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Fixed
+
+  - Path termination halos now use constant-offset edges instead of the generic
+    functional-offset fallback.
+
 ## 1.17.0 (2026-08-10)
 
 ### Added
