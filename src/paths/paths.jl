@@ -1599,7 +1599,14 @@ function halo(sty::Union{TaperTrace, TaperCPW}, outer_delta, inner_delta=nothing
 end
 
 function halo(
-    sty::Union{SimpleTrace, SimpleCPW},
+    sty::Union{
+        SimpleTrace,
+        SimpleCPW,
+        TraceTermination,
+        CPWOpenTermination,
+        CPWShortTermination,
+        SimpleNoRender
+    },
     outer_delta,
     inner_delta=nothing;
     kwargs...
@@ -1619,6 +1626,13 @@ function halo(sty::Style, outer_delta, inner_delta=nothing; kwargs...)
         t -> outer_delta - inner_delta
     )
 end
+
+halo(
+    sty::Union{NoRender, NoRenderContinuous, NoRenderDiscrete},
+    outer_delta,
+    inner_delta=nothing;
+    kwargs...
+) = sty
 
 # All compound styles should be taken style-by-style rather than falling back to generic
 function halo(sty::AbstractCompoundStyle, outer_delta, inner_delta=nothing; kwargs...)

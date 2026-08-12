@@ -155,6 +155,81 @@
         @test halo(pth[1].sty, 20μm, 10μm) ==
               Paths.TaperCPW{typeof(1.0μm)}(30μm, 10μm, 40μm, 10μm, 10μm)
 
+        # Terminations have constant extent and should use the same simple halo styles as
+        # SimpleTrace/SimpleCPW rather than functional styles with general offsets.
+        termination_styles = (
+            Paths.TraceTermination(10μm, 2μm),
+            Paths.CPWOpenTermination(10μm, 6μm, 2μm),
+            Paths.CPWShortTermination(10μm, 6μm, 2μm)
+        )
+        outer_delta = 3μm
+        inner_delta = 1μm
+        for sty in termination_styles
+            ext = Paths.extent(sty)
+            @test halo(sty, outer_delta) == Paths.SimpleTrace(2 * (ext + outer_delta))
+            @test halo(sty, outer_delta, inner_delta) ==
+                  Paths.SimpleCPW(2 * (ext + inner_delta), outer_delta - inner_delta)
+        end
+
+        # On curved initial/final, open/short terminations, simple halo styles produce
+        # exact constant-offset edges. Endpoint extension remains path-level behavior.
+        for initial in (true, false), gap in (6μm, 0μm)
+            terminated_turn = Path(nm)
+            turn!(terminated_turn, 90°, 50μm, Paths.CPW(10μm, 6μm))
+            terminate!(terminated_turn; rounding=2μm, gap, initial)
+            termination_type =
+                iszero(gap) ? Paths.CPWShortTermination : Paths.CPWOpenTermination
+            termination_node = initial ? terminated_turn[1] : terminated_turn[end]
+            @test style(termination_node) isa termination_type
+
+            for inner in (nothing, inner_delta)
+                terminated_halo = if isnothing(inner)
+                    halo(terminated_turn, outer_delta)
+                else
+                    halo(terminated_turn, outer_delta, inner)
+                end
+                termination_halo_node =
+                    initial ? terminated_halo[2] : terminated_halo[end - 1]
+                expected_style = isnothing(inner) ? Paths.SimpleTrace : Paths.SimpleCPW
+                @test style(termination_halo_node) isa expected_style
+
+                initial_direction = Paths.α0(terminated_turn)
+                final_direction = Paths.α1(terminated_turn)
+                @test Paths.p0(terminated_halo) ≈
+                      Paths.p0(terminated_turn) -
+                      outer_delta * Point(cos(initial_direction), sin(initial_direction))
+                @test Paths.p1(terminated_halo) ≈
+                      Paths.p1(terminated_turn) +
+                      outer_delta * Point(cos(final_direction), sin(final_direction))
+
+                termination_halo_polys = pathtopolys(termination_halo_node)
+                halo_curves = reduce(
+                    vcat,
+                    [
+                        poly.curves for
+                        poly in termination_halo_polys if hasproperty(poly, :curves)
+                    ]
+                )
+                @test !isempty(halo_curves)
+                @test all(curve -> curve isa Paths.ConstantOffset, halo_curves)
+                @test !any(curve -> curve isa Paths.GeneralOffset, halo_curves)
+            end
+        end
+
+        # SimpleNoRender suppresses source geometry but its finite extent still represents
+        # a keepout. Its halo must therefore render, unlike the zero-extent NoRender styles.
+        simple_norender_halo = halo(Paths.SimpleNoRender(5μm), 5μm)
+        @test simple_norender_halo isa Paths.Trace
+        @test Paths.extent(simple_norender_halo, 0μm) == 7.5μm
+        @test Paths.extent(halo(Paths.NoRender(), 5μm), 0μm) == 0μm
+
+        keepout_path = Path(μm)
+        straight!(keepout_path, 10μm, Paths.SimpleNoRender(10μm, virtual=true))
+        keepout_cs = CoordinateSystem(uniquename("keepout"), μm)
+        place!(keepout_cs, keepout_path, SemanticMeta(:keepout))
+        keepout = elements(flatten(Cell(halo(keepout_cs, 5μm), map_meta=(_) -> GDSMeta())))
+        @test only(gridpoints_in_polygon(keepout, [5μm], [0μm]))
+
         # A compound style is haloed substyle by substyle, so one starting with a
         # zero-extent substyle still gets a halo for its remaining substyles. Both
         # `AbstractCompoundStyle` subtypes must agree: `PeriodicStyle` here, and the
