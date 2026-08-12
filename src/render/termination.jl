@@ -48,9 +48,8 @@ function __poly(f::Paths.Straight{T}, s::Paths.CPWOpenTermination) where {T}
         end
         return Polygon(pts)
     else
-        ctr_initial = _cpw_corners(f, s, t1 - tr)
-        ctr_final = _cpw_corners(f, s, tr)
         pts = if s.initial
+            ctr_initial = _cpw_corners(f, s, t1 - tr)
             [
                 c1[1], # start at corner 1 (see diagram)
                 c1[2],
@@ -62,6 +61,7 @@ function __poly(f::Paths.Straight{T}, s::Paths.CPWOpenTermination) where {T}
                 c0[1]
             ]
         else
+            ctr_final = _cpw_corners(f, s, tr)
             [
                 c0[4], # start at corner 1 (see diagram)
                 c0[3],
@@ -122,10 +122,10 @@ function __poly(f::Paths.Straight{T}, s::Paths.CPWShortTermination) where {T}
     c0 = _cpw_corners(f, s, t0)
     c1 = _cpw_corners(f, s, t1)
     poly1 = Polygon([
-        c0[3],
+        c0[3], # for path with α=0°, start at corner 1 (see diagram)
         c1[3],
         c1[4],
-        c0[4] # for path with α=0°, start at corner 1 (see diagram)
+        c0[4]
     ])
 
     poly2 = Polygon([c0[1], c1[1], c1[2], c0[2]])

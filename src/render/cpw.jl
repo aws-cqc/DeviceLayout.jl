@@ -5,12 +5,12 @@ function _cpw_corners(f::Paths.Straight, s, t)
     normal = Point(-sin(Paths.α0(f)), cos(Paths.α0(f)))
     inner = Paths.trace(s) / 2
     outer = inner + Paths.gap(s)
-    return [
+    return (
         center - outer * normal,
         center - inner * normal,
         center + inner * normal,
         center + outer * normal
-    ]
+    )
 end
 
 function to_polygons(f::Paths.Straight{T}, s::Paths.SimpleCPW; kwargs...) where {T}

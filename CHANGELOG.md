@@ -8,8 +8,9 @@ The format of this changelog is based on
 
 ### Fixed
 
-  - Path termination halos now use constant-offset edges instead of the generic
-    functional-offset fallback.
+  - Path termination and `SimpleNoRender` halos now use constant-offset edges instead of the generic
+    functional-offset fallback. The rendered discretization of these halos on curves may change but 
+    will be geometrically equivalent within tolerance.
 
 ## 1.17.0 (2026-08-10)
 
