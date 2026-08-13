@@ -47,6 +47,20 @@
     )
     @test collect(only(cp[(2.0, -1.0)])) == [3.0, 4.0, 7.0]
 
+    plain_cs = CoordinateSystem("custom_primitives", nm)
+    render!(plain_cs, Rectangle(10μm, 10μm), SemanticMeta(:plain))
+    custom_calls = Ref(0)
+    function circle_from_plain(el; kwargs...)
+        custom_calls[] += 1
+        return Circle(Point(3μm, 4μm), 2μm)
+    end
+    custom_cp = SolidModels.populate_size_fields!(
+        plain_cs;
+        primitives_of=circle_from_plain
+    )
+    @test custom_calls[] == 1
+    @test collect(only(custom_cp[(2.0, -1.0)])) == [3.0, 4.0, 0.0]
+
     primitive_calls = Ref(0)
     function count_primitives(el; kwargs...)
         primitive_calls[] += 1

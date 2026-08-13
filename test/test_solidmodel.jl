@@ -1612,6 +1612,48 @@
             @test isempty(SolidModels.mesh_control_points())
         end
 
+        @testset "Postrender curvature sizing follows final geometry" begin
+            moved_cs = CoordinateSystem("translated_circle", nm)
+            render!(
+                moved_cs,
+                Circle(Point(0μm, 0μm), 2μm),
+                SemanticMeta(:circle)
+            )
+            moved_sm = SolidModel("translated_circle", overwrite=true)
+            render!(
+                moved_sm,
+                moved_cs;
+                postrender_ops=[(
+                    "moved",
+                    SolidModels.translate!,
+                    ("circle", 100μm, 0μm, 0μm),
+                    :copy => false
+                )]
+            )
+            moved_cps = SolidModels.mesh_control_points()
+            @test only(moved_cps[(2.0, -1.0)]) ≈ SVector(100.0, 0.0, 0.0)
+
+            extruded_cs = CoordinateSystem("extruded_rounding", nm)
+            render!(
+                extruded_cs,
+                Polygons.Rounded(2μm)(Rectangle(10μm, 10μm)),
+                SemanticMeta(:rounded)
+            )
+            extruded_sm = SolidModel("extruded_rounding", overwrite=true)
+            render!(
+                extruded_sm,
+                extruded_cs;
+                postrender_ops=[(
+                    "volume",
+                    SolidModels.extrude_z!,
+                    ("rounded", 100μm)
+                )]
+            )
+            extruded_cps = SolidModels.mesh_control_points()[(2.0, -1.0)]
+            @test count(p -> p[3] ≈ 0.0, extruded_cps) == 4
+            @test count(p -> p[3] ≈ 100.0, extruded_cps) == 4
+        end
+
         # Checking option access
         SolidModels.set_gmsh_option("Mesh.ElementOrder", 3)
         SolidModels.set_gmsh_option("Geometry.OCCTargetUnit", "M")
