@@ -1612,42 +1612,103 @@
             @test isempty(SolidModels.mesh_control_points())
         end
 
-        @testset "Curvature extrusion ladder" begin
+        @testset "Mesh-size extrusion ladder" begin
             SolidModels.clear_mesh_control_points!()
-            seen = Set{NTuple{4, Float64}}()
-            source_points = Set{NTuple{4, Float64}}()
-            SolidModels._add_curvature_mesh_size_point!(
+            seen = Set{NTuple{5, Float64}}()
+            source_points = Set{NTuple{5, Float64}}()
+            SolidModels._add_composable_mesh_size_point!(
                 0.0,
                 0.0,
-                2.0,
                 5.0,
+                2.0,
+                0.8,
                 seen,
                 source_points
             )
             points_by_group = Dict(("curve", 1) => source_points)
 
-            @test SolidModels._compose_curvature_meshsize!(
+            @test SolidModels._compose_meshsize!(
                 points_by_group,
                 SolidModels.extrude_z!,
                 ("curve", -5μm, 1),
+                (),
                 seen
             )
-            z_levels = sort([p[3] for p in SolidModels.mesh_control_points()[(2.0, -1.0)]])
+            z_levels = sort([p[3] for p in SolidModels.mesh_control_points()[(2.0, 0.8)]])
             @test first(z_levels) ≈ 0.0
             @test last(z_levels) ≈ 5.0
             @test maximum(diff(z_levels)) <= 2.0
-            @test !SolidModels._compose_curvature_meshsize!(
+            @test !SolidModels._compose_meshsize!(
                 points_by_group,
                 SolidModels.extrude_z!,
                 ("curve", 1μm, 2),
+                (),
                 seen
             )
-            @test !SolidModels._compose_curvature_meshsize!(
+            @test !SolidModels._compose_meshsize!(
                 points_by_group,
                 SolidModels.extrude_z!,
                 ("curve", 0μm, 1),
+                (),
                 seen
             )
+
+            SolidModels.clear_mesh_control_points!()
+            empty!(seen)
+            empty!(source_points)
+            SolidModels._add_composable_mesh_size_point!(
+                0.0,
+                0.0,
+                0.0,
+                2.0,
+                0.8,
+                seen,
+                source_points
+            )
+            @test SolidModels._compose_meshsize!(
+                points_by_group,
+                SolidModels.extrude_z!,
+                ("curve", 10μm, 1),
+                (:num_elements => [2, 1], :heights => [0.4, 1.0]),
+                seen
+            )
+            z_levels = sort([p[3] for p in SolidModels.mesh_control_points()[(2.0, 0.8)]])
+            @test z_levels ≈ [0.0, 2.0, 4.0, 10.0]
+        end
+
+        @testset "Mesh sizing composes with extrusion" begin
+            sized_cs = CoordinateSystem("extruded_mesh_sizing", nm)
+            render!(
+                sized_cs,
+                styled(Rectangle(4μm, 4μm), MeshSized(2μm, 0.8)),
+                SemanticMeta(:sized)
+            )
+            render!(
+                sized_cs,
+                styled(
+                    Rectangle(Point(10μm, 10μm), Point(14μm, 14μm)),
+                    MeshSized(2μm, 0.8)
+                ),
+                SemanticMeta(:unextruded)
+            )
+            sized_sm = SolidModel("extruded_mesh_sizing", overwrite=true)
+            render!(
+                sized_sm,
+                sized_cs;
+                curvature_sizing=false,
+                postrender_ops=[(
+                    "volume",
+                    SolidModels.extrude_z!,
+                    ("sized", 5μm),
+                    :num_elements => [2, 1],
+                    :heights => [0.4, 1.0]
+                )]
+            )
+            sized_cps = SolidModels.mesh_control_points()[(2.0, 0.8)]
+            z_levels = sort(unique(p[3] for p in sized_cps))
+            @test z_levels ≈ [0.0, 1.0, 2.0, 5.0]
+            @test count(p -> p[3] ≈ 0.0, sized_cps) == 16
+            @test all(z -> count(p -> p[3] ≈ z, sized_cps) == 8, z_levels[2:end])
         end
 
         @testset "Curvature sizing composes with extrusion" begin

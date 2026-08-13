@@ -54,10 +54,7 @@
         custom_calls[] += 1
         return Circle(Point(3μm, 4μm), 2μm)
     end
-    custom_cp = SolidModels.populate_size_fields!(
-        plain_cs;
-        primitives_of=circle_from_plain
-    )
+    custom_cp = SolidModels.populate_size_fields!(plain_cs; primitives_of=circle_from_plain)
     @test custom_calls[] == 1
     @test collect(only(custom_cp[(2.0, -1.0)])) == [3.0, 4.0, 0.0]
 
