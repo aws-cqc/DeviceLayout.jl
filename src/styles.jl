@@ -170,8 +170,10 @@ Each `MeshSized` entity generates a corresponding set of
 [`DeviceLayout.SolidModels.mesh_control_points`](@ref) during the call to
 [`DeviceLayout.SolidModels.render!`](@ref) along the perimeter of the styled entity. Exact
 circular arcs also generate radius-sized points at their curvature centers unless
-`curvature_sizing=false` is passed to `render!`. Keeping the general entity sizing controls
-on boundaries avoids overrefinement in surface regions that can be handled by adaptive mesh
+`curvature_sizing=false` is passed to `render!`. When curved geometry is extruded with a
+postrender `extrude_z!` operation, those points are repeated along the extrusion at intervals
+no larger than the radius. Keeping the general entity sizing controls on boundaries avoids
+overrefinement in surface regions that can be handled by adaptive mesh
 refinement. Increasing resolution of entity edges can be achieved by reducing `h` on the
 particular entity or ``s_g`` globally.
 

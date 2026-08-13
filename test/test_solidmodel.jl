@@ -1612,46 +1612,65 @@
             @test isempty(SolidModels.mesh_control_points())
         end
 
-        @testset "Postrender curvature sizing follows final geometry" begin
-            moved_cs = CoordinateSystem("translated_circle", nm)
-            render!(
-                moved_cs,
-                Circle(Point(0μm, 0μm), 2μm),
-                SemanticMeta(:circle)
+        @testset "Curvature extrusion ladder" begin
+            SolidModels.clear_mesh_control_points!()
+            seen = Set{NTuple{4, Float64}}()
+            source_points = Set{NTuple{4, Float64}}()
+            SolidModels._add_curvature_mesh_size_point!(
+                0.0,
+                0.0,
+                2.0,
+                5.0,
+                seen,
+                source_points
             )
-            moved_sm = SolidModel("translated_circle", overwrite=true)
-            render!(
-                moved_sm,
-                moved_cs;
-                postrender_ops=[(
-                    "moved",
-                    SolidModels.translate!,
-                    ("circle", 100μm, 0μm, 0μm),
-                    :copy => false
-                )]
-            )
-            moved_cps = SolidModels.mesh_control_points()
-            @test only(moved_cps[(2.0, -1.0)]) ≈ SVector(100.0, 0.0, 0.0)
+            points_by_group = Dict(("curve", 1) => source_points)
 
+            @test SolidModels._compose_curvature_meshsize!(
+                points_by_group,
+                SolidModels.extrude_z!,
+                ("curve", -5μm, 1),
+                seen
+            )
+            z_levels = sort([p[3] for p in SolidModels.mesh_control_points()[(2.0, -1.0)]])
+            @test first(z_levels) ≈ 0.0
+            @test last(z_levels) ≈ 5.0
+            @test maximum(diff(z_levels)) <= 2.0
+            @test !SolidModels._compose_curvature_meshsize!(
+                points_by_group,
+                SolidModels.extrude_z!,
+                ("curve", 1μm, 2),
+                seen
+            )
+            @test !SolidModels._compose_curvature_meshsize!(
+                points_by_group,
+                SolidModels.extrude_z!,
+                ("curve", 0μm, 1),
+                seen
+            )
+        end
+
+        @testset "Curvature sizing composes with extrusion" begin
             extruded_cs = CoordinateSystem("extruded_rounding", nm)
             render!(
                 extruded_cs,
                 Polygons.Rounded(2μm)(Rectangle(10μm, 10μm)),
                 SemanticMeta(:rounded)
             )
+            render!(extruded_cs, Circle(Point(30μm, 30μm), 2μm), SemanticMeta(:unextruded))
             extruded_sm = SolidModel("extruded_rounding", overwrite=true)
             render!(
                 extruded_sm,
                 extruded_cs;
-                postrender_ops=[(
-                    "volume",
-                    SolidModels.extrude_z!,
-                    ("rounded", 100μm)
-                )]
+                postrender_ops=[("volume", SolidModels.extrude_z!, ("rounded", 100μm))]
             )
             extruded_cps = SolidModels.mesh_control_points()[(2.0, -1.0)]
-            @test count(p -> p[3] ≈ 0.0, extruded_cps) == 4
-            @test count(p -> p[3] ≈ 100.0, extruded_cps) == 4
+            z_levels = sort(unique(p[3] for p in extruded_cps))
+            @test first(z_levels) ≈ 0.0
+            @test last(z_levels) ≈ 100.0
+            @test maximum(diff(z_levels)) <= 2.0
+            @test count(p -> p[3] ≈ first(z_levels), extruded_cps) == 5
+            @test all(z -> count(p -> p[3] ≈ z, extruded_cps) == 4, z_levels[2:end])
         end
 
         # Checking option access

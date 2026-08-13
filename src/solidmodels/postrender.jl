@@ -1,9 +1,27 @@
 ######## Postrendering
-function _postrender!(sm::SolidModel, operations)
+function _postrender!(
+    sm::SolidModel,
+    operations;
+    curvature_points_by_group=nothing,
+    curvature_seen=nothing
+)
+    changed_curvature = false
     # Operations
     for (destination, op, args, kwargs...) in operations
-        sm[destination] = op(sm, args...; kwargs...)
+        result = op(sm, args...; kwargs...)
+        sm[destination] = result
+        if !isempty(result) &&
+           !isnothing(curvature_points_by_group) &&
+           !isnothing(curvature_seen)
+            changed_curvature |= _compose_curvature_meshsize!(
+                curvature_points_by_group,
+                op,
+                args,
+                curvature_seen
+            )
+        end
     end
+    return changed_curvature
 end
 
 function _fuse!(k, object, tool; tag=-1, remove_object=true, remove_tool=true)
