@@ -4,7 +4,15 @@ import Unitful: Length, inch, ustrip
 import Cairo
 
 import DeviceLayout:
-    bounds, datatype, default_meta_map, element_metadata, gdslayer, load, save, to_polygons
+    bounds,
+    datatype,
+    default_meta_map,
+    element_metadata,
+    gdslayer,
+    load,
+    refs,
+    save,
+    to_polygons
 import DeviceLayout: CoordinateSystem, GeometryEntity
 using ..Points
 using ..Transformations
@@ -74,17 +82,59 @@ lcolor(l) = lcolor(l, get_color_scheme())
 # Initialize layercolors with the preferred scheme
 const layercolors = Dict([(i => lcolor(i)) for i = 0:255]...)
 
-function fillcolor(options, layer)
-    haskey(options, :layercolors) &&
-        haskey(options[:layercolors], layer) &&
-        return options[:layercolors][layer]
-    haskey(layercolors, layer) && return layercolors[layer]
-    return (0.0, 0.0, 0.0, 0.5)
+function fillcolor(options, meta)
+    layer = gdslayer(meta)
+    if haskey(options, :layercolors)
+        colors = options[:layercolors]
+        haskey(colors, meta) && return colors[meta]
+        haskey(colors, layer) && return colors[layer]
+    end
+    color_index = mod(layer + 31 * datatype(meta), length(layercolors))
+    return layercolors[color_index]
 end
 
-lscale(x::Length)  = round(NoUnits((x |> inch) * 72 / inch))
-lscale(x::Integer) = x
-lscale(x::Real)    = Int(round(x))
+lscale(x::Length, dpi)  = round(Int, NoUnits((x |> inch) * dpi / inch))
+lscale(x::Integer, dpi) = x
+lscale(x::Real, dpi)    = Int(round(x))
+
+function canvas_size(options, w, h)
+    dpi = get(options, :dpi, 72)
+    dpi isa Real && dpi > 0 || throw(ArgumentError("dpi must be a positive number"))
+    has_width = haskey(options, :width)
+    has_height = haskey(options, :height)
+    default_size = lscale(4inch, dpi)
+    if has_width && has_height
+        return lscale(options[:width], dpi), lscale(options[:height], dpi)
+    elseif has_width
+        w1 = lscale(options[:width], dpi)
+        return w1, iszero(w) || iszero(h) ? w1 : Int(ceil(w1 * h / w))
+    elseif has_height
+        h1 = lscale(options[:height], dpi)
+        return iszero(w) || iszero(h) ? h1 : Int(ceil(h1 * w / h)), h1
+    end
+    return (
+        default_size,
+        iszero(w) || iszero(h) ? default_size : Int(ceil(default_size * h / w))
+    )
+end
+
+function background_color(background)
+    isnothing(background) && return (0.0, 0.0, 0.0, 0.0)
+    background === :transparent && return (0.0, 0.0, 0.0, 0.0)
+    background === :white && return (1.0, 1.0, 1.0, 1.0)
+    background === :black && return (0.0, 0.0, 0.0, 1.0)
+    if background isa Tuple && length(background) in (3, 4)
+        all(x -> x isa Real && 0 <= x <= 1, background) ||
+            throw(ArgumentError("background color components must be between 0 and 1"))
+        length(background) == 3 && return (background..., 1.0)
+        return background
+    end
+    throw(
+        ArgumentError(
+            "background must be :transparent, :white, :black, nothing, or an RGB(A) tuple"
+        )
+    )
+end
 
 MIMETypes = Union{
     MIME"image/png",
@@ -98,15 +148,20 @@ function Base.show(
     geom::Union{Cell{T}, CoordinateSystem{T}};
     options...
 ) where {T}
-    c0 = flatten(geom)
     opt = Dict{Symbol, Any}(options)
-    bnd = bounds(c0)
+    c0 = flatten(geom; metadata_filter=get(opt, :metadata_filter, nothing))
+    viewport = get(opt, :bbox, nothing)
+    if !isnothing(viewport) && !(viewport isa Rectangle)
+        throw(ArgumentError("bbox must be a Rectangle or nothing"))
+    end
+    bnd = isnothing(viewport) ? bounds(c0) : convert(Rectangle{T}, viewport)
     w, h = width(ustrip(bnd)), height(ustrip(bnd))
-    w1 = haskey(opt, :width) ? lscale(opt[:width]) : 4 * 72
-    h1 =
-        haskey(opt, :height) ? lscale(opt[:height]) :
-        (iszero(w) ? 4 * 72 : min(4 * 72, Int(ceil(w1 * h / w))))
-    bboxes = haskey(opt, :bboxes) ? opt[:bboxes] : false
+    !isnothing(viewport) &&
+        (w <= 0 || h <= 0) &&
+        throw(ArgumentError("bbox must have positive width and height"))
+    w1, h1 = canvas_size(opt, w, h)
+    w1 > 0 && h1 > 0 || throw(ArgumentError("render dimensions must be positive"))
+    bboxes = get(opt, :bboxes, false)
 
     surf = if mime isa MIME"image/png"
         Cairo.CairoARGBSurface(w1, h1)
@@ -121,23 +176,21 @@ function Base.show(
     end
 
     ctx = Cairo.CairoContext(surf)
-    if mime isa MIME"image/png"
-        # Transparent background
-        Cairo.set_source_rgba(ctx, 0.0, 0.0, 0.0, 0.0)
-        Cairo.rectangle(ctx, 0, 0, w1, h1)
-        Cairo.fill(ctx)
-    end
+    Cairo.set_source_rgba(ctx, background_color(get(opt, :background, :transparent))...)
+    Cairo.rectangle(ctx, 0, 0, w1, h1)
+    Cairo.fill(ctx)
 
-    ly = collect(gdslayers(c0))
+    metas = default_meta_map.(element_metadata(c0))
+    unique_metas = sort(unique(metas), by=meta -> (gdslayer(meta), datatype(meta)))
     trans = Translation(-bnd.ll.x, bnd.ur.y) ∘ XReflection()
 
-    sf = min(w1 / w, h1 / h)
+    sf = iszero(w) || iszero(h) ? 1.0 : min(w1 / w, h1 / h)
     Cairo.scale(ctx, sf, sf)
 
-    for l in sort(ly)
+    for meta in unique_metas
         Cairo.save(ctx)
-        Cairo.set_source_rgba(ctx, fillcolor(options, l)...)
-        for el in c0.elements[gdslayer.(default_meta_map.(element_metadata(c0))) .== l]
+        Cairo.set_source_rgba(ctx, fillcolor(opt, meta)...)
+        for el in c0.elements[metas .== meta]
             tel = trans(el)
             poly!(ctx, tel)
             render_text!(ctx, tel, sf)
@@ -149,7 +202,7 @@ function Base.show(
     if c0 isa Cell
         Cairo.save(ctx)
         for (t, meta) in zip(c0.texts, c0.text_metadata)
-            Cairo.set_source_rgba(ctx, fillcolor(options, gdslayer(meta))...)
+            Cairo.set_source_rgba(ctx, fillcolor(opt, default_meta_map(meta))...)
             render_text!(ctx, trans(t), sf)
         end
         Cairo.fill(ctx)
@@ -157,19 +210,15 @@ function Base.show(
     end
 
     if bboxes
-        for ref in c0.refs
+        for ref in refs(geom)
             Cairo.save(ctx)
             r = convert(Rectangle{T}, bounds(ref))
             Cairo.set_line_width(ctx, 0.5)
             Cairo.set_source_rgb(ctx, 1, 1, 0)
             Cairo.set_dash(ctx, [1.0, 1.0])
-            Cairo.rectangle(
-                ctx,
-                trans(ustrip(r.ll)).x,
-                trans(ustrip(r.ur)).y,
-                ustrip(width(r)),
-                ustrip(height(r))
-            )
+            ll = ustrip(trans(r.ll))
+            ur = ustrip(trans(r.ur))
+            Cairo.rectangle(ctx, ll.x, ur.y, ustrip(width(r)), ustrip(height(r)))
             Cairo.stroke(ctx)
             Cairo.restore(ctx)
         end

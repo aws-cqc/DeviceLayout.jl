@@ -1156,6 +1156,91 @@ end
         save(path, s1, width=72 * 4)
         rm(path, force=true)
 
+        png_dimensions(path) = begin
+            bytes = read(path)
+            bigendian_uint32(range) =
+                foldl(range; init=UInt32(0)) do value, byte
+                    return (value << 8) | byte
+                end
+            return Int(bigendian_uint32(bytes[17:20])), Int(bigendian_uint32(bytes[21:24]))
+        end
+
+        wide = Cell("wide", nm)
+        render!(wide, Rectangle(20μm, 10μm), GDSMeta(1, 0))
+        path = joinpath(tdir, "wide.png")
+        save(path, wide; width=800)
+        @test png_dimensions(path) == (800, 400)
+        save(path, wide; height=100)
+        @test png_dimensions(path) == (200, 100)
+        save(path, wide; dpi=144)
+        @test png_dimensions(path) == (576, 288)
+        save(path, wide; width=100, bbox=Rectangle(10μm, 10μm))
+        @test png_dimensions(path) == (100, 100)
+        path = joinpath(tdir, "cross_unit_bbox.svg")
+        save(
+            path,
+            wide;
+            width=100,
+            bbox=Rectangle(10μm, 10μm),
+            layercolors=Dict(1 => (1.0, 0.0, 0.0, 1.0))
+        )
+        @test occursin("rgb(100%, 0%, 0%)", read(path, String))
+        rm(path, force=true)
+
+        layered = Cell("layered", nm)
+        render!(layered, Rectangle(10μm, 10μm), GDSMeta(1, 0))
+        render!(layered, Rectangle(Point(20μm, 0μm), Point(30μm, 10μm)), GDSMeta(2, 0))
+        path = joinpath(tdir, "filtered.svg")
+        save(
+            path,
+            layered;
+            width=100,
+            metadata_filter=layer_inclusion(GDSMeta(2, 0), []),
+            layercolors=Dict(
+                GDSMeta(1, 0) => (1.0, 0.0, 0.0, 1.0),
+                GDSMeta(2, 0) => (0.0, 1.0, 0.0, 1.0)
+            )
+        )
+        filtered_svg = read(path, String)
+        @test occursin("rgb(0%, 100%, 0%)", filtered_svg)
+        @test !occursin("rgb(100%, 0%, 0%)", filtered_svg)
+
+        save(
+            path,
+            layered;
+            width=100,
+            bbox=Rectangle(Point(-10μm, -10μm), Point(40μm, 20μm)),
+            background=:white
+        )
+        @test occursin("fill=\"rgb(100%, 100%, 100%)\"", read(path, String))
+
+        referenced = Cell("referenced", nm)
+        addref!(referenced, s1, Point(0μm, 0μm))
+        save(path, referenced; width=100, bboxes=true)
+        @test occursin("stroke=\"rgb(100%, 100%, 0%)\"", read(path, String))
+        rm(path, force=true)
+
+        @test DeviceLayout.Graphics.fillcolor(Dict{Symbol, Any}(), GDSMeta(300, 0)) !=
+              (0.0, 0.0, 0.0, 0.5)
+        @test DeviceLayout.Graphics.fillcolor(Dict{Symbol, Any}(), GDSMeta(1, 0)) !=
+              DeviceLayout.Graphics.fillcolor(Dict{Symbol, Any}(), GDSMeta(1, 1))
+        @test DeviceLayout.Graphics.fillcolor(
+            Dict{Symbol, Any}(:layercolors => Dict(GDSMeta(300, 2) => (1, 0, 0, 1))),
+            GDSMeta(300, 2)
+        ) == (1, 0, 0, 1)
+        @test_throws ArgumentError DeviceLayout.Graphics.canvas_size(
+            Dict{Symbol, Any}(:dpi => 0),
+            1,
+            1
+        )
+        @test_throws ArgumentError DeviceLayout.Graphics.background_color(:blue)
+        @test_throws ArgumentError show(
+            IOBuffer(),
+            MIME"image/svg+xml"(),
+            layered;
+            bbox=Rectangle(0μm, 10μm)
+        )
+
         # Non-Cell straight to graphics
         cs1 = CoordinateSystem("test", nm)
         r1 = Rectangle(10μm, 10μm)

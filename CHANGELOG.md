@@ -19,6 +19,15 @@ The format of this changelog is based on
 
   - Mesh control-point sets that resolve to the same `(h, α)` no longer overwrite one another
     when the default grading parameter is applied.
+  - Cairo graphics export accepts a layout-coordinate `bbox` viewport, a `metadata_filter` passed
+    through to `flatten`, configurable `dpi`, and transparent, white, black, or RGB(A) backgrounds.
+    `layercolors` may use exact `GDSMeta` keys to distinguish datatypes on the same GDS layer.
+
+### Fixed
+
+  - Graphics export now preserves aspect ratio when only `width` or `height` is supplied, rather than
+    capping width-only output at 288 pixels high. Reference bounding boxes render again, and GDS layers
+    above 255 receive palette colors instead of all falling back to black.
   - Path termination and `SimpleNoRender` halos now use constant-offset edges instead of the generic
     functional-offset fallback. The rendered discretization of these halos on curves may change but 
     will be geometrically equivalent within tolerance.
