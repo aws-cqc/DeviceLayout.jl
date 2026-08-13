@@ -623,10 +623,10 @@ function _collect_mesh_control_points!(
     curvature_seen::Union{Nothing, Set{NTuple{4, Float64}}}=nothing
 )
     h > 0 && _sample_meshsize!(prims, Float64(h), Float64(α), Float64(z))
-    if curvature_sizing
-        seen = isnothing(curvature_seen) ? Set{NTuple{4, Float64}}() : curvature_seen
-        _sample_curvature_meshsize!(prims, Float64(z), seen)
-    end
+    # if curvature_sizing
+    #     seen = isnothing(curvature_seen) ? Set{NTuple{4, Float64}}() : curvature_seen
+    #     _sample_curvature_meshsize!(prims, Float64(z), seen)
+    # end
     return nothing
 end
 
@@ -914,7 +914,7 @@ function populate_size_fields!(
     curvature_seen = Set{NTuple{4, Float64}}()
     for (el, meta) in zip(elements(flat), element_metadata(flat))
         h, α = sizeandgrading(el; kwargs...)
-        h > 0 || (curvature_sizing && _carries_curves(el)) || continue
+        h > 0 || curvature_sizing || continue
         _collect_mesh_control_points!(
             primitives_of(el; kwargs...),
             h,
