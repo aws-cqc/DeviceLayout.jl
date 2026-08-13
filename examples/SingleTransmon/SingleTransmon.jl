@@ -44,7 +44,7 @@ function single_transmon(;
     hanger_length=500μm,
     bend_radius=50μm,
     wave_ports::Bool=false,
-    save_mesh::Bool=true,
+    save_mesh::Bool=false,
     save_gds::Bool=false,
     mesh_order=2
 )
@@ -71,7 +71,6 @@ function single_transmon(;
     qubit = ExampleRectangleTransmon(;
         jj_template=ExampleSimpleJunction(),
         name="qubit",
-        island_rounding=1μm,
         cap_length,
         cap_gap,
         cap_width

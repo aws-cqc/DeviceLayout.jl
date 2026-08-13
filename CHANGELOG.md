@@ -6,11 +6,6 @@ The format of this changelog is based on
 
 ## Unreleased
 
-### Fixed
-
-  - Path termination and `SimpleNoRender` halos now use constant-offset edges instead of the generic
-    functional-offset fallback. The rendered discretization of these halos on curves may change but 
-    will be geometrically equivalent within tolerance.
 ### Added
 
   - OpenCascade SolidModel rendering adds radius-sized mesh control points at the centers of
@@ -24,6 +19,9 @@ The format of this changelog is based on
 
   - Mesh control-point sets that resolve to the same `(h, α)` no longer overwrite one another
     when the default grading parameter is applied.
+  - Path termination and `SimpleNoRender` halos now use constant-offset edges instead of the generic
+    functional-offset fallback. The rendered discretization of these halos on curves may change but 
+    will be geometrically equivalent within tolerance.
 
 ## 1.17.0 (2026-08-10)
 

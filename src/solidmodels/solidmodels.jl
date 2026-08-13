@@ -84,7 +84,7 @@ import DeviceLayout.Polygons:
     r2,
     radius
 import DeviceLayout.Curvilinear:
-    islinear, round_to_curvilinearpolygon, to_curvilinear, styled_loop, _carries_curves
+    islinear, round_to_curvilinearpolygon, to_curvilinear, styled_loop
 import Unitful: μm, mm, ustrip, °, uconvert, Length
 import FileIO: File
 

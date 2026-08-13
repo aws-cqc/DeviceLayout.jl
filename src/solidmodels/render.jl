@@ -636,7 +636,7 @@ function _collect_mesh_control_points!(
         first_new = record_points ? length(get(mesh_control_points(), key, ())) + 1 : 1
         _sample_meshsize!(prims, h_float, α_float, Float64(z))
         if record_points
-            for point in Iterators.drop(get(mesh_control_points(), key, ()), first_new - 1)
+            for point in (@view mesh_control_points()[key][first_new:end])
                 record = (point[1], point[2], point[3], h_float, α_float)
                 !isnothing(mesh_seen) && push!(mesh_seen, record)
                 !isnothing(mesh_points) && push!(mesh_points, record)
