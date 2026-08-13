@@ -20,6 +20,7 @@ The format of this changelog is based on
   - Mesh control-point sets that resolve to the same `(h, α)` no longer overwrite one another
     when the default grading parameter is applied.
   - Cairo graphics export accepts a layout-coordinate `bbox` viewport, a `metadata_filter` passed
+  - Graphics export accepts a layout-coordinate `bbox` viewport, a `metadata_filter` passed
     through to `flatten`, configurable `dpi`, and transparent, white, black, or RGB(A) backgrounds.
     `layercolors` may use exact `GDSMeta` keys to distinguish datatypes on the same GDS layer.
 

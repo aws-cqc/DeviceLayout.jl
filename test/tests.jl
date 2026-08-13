@@ -1213,6 +1213,14 @@ end
             background=:white
         )
         @test occursin("fill=\"rgb(100%, 100%, 100%)\"", read(path, String))
+        save(
+            path,
+            layered;
+            width=100,
+            bbox=Rectangle(Point(-10μm, -10μm), Point(40μm, 20μm)),
+            background=(0.5, 0.5, 0.5, 1.0)
+        )
+        @test occursin("fill=\"rgb(50%, 50%, 50%)\"", read(path, String))
 
         referenced = Cell("referenced", nm)
         addref!(referenced, s1, Point(0μm, 0μm))
@@ -1228,6 +1236,9 @@ end
             Dict{Symbol, Any}(:layercolors => Dict(GDSMeta(300, 2) => (1, 0, 0, 1))),
             GDSMeta(300, 2)
         ) == (1, 0, 0, 1)
+        @test eltype(
+            DeviceLayout.Graphics.canvas_size(Dict(:width => 4.6, :height => 4.6), 1, 1)
+        ) <: Integer
         @test_throws ArgumentError DeviceLayout.Graphics.canvas_size(
             Dict{Symbol, Any}(:dpi => 0),
             1,
@@ -1239,6 +1250,12 @@ end
             MIME"image/svg+xml"(),
             layered;
             bbox=Rectangle(0μm, 10μm)
+        )
+        @test_throws ArgumentError show(
+            IOBuffer(),
+            MIME"image/svg+xml"(),
+            layered;
+            bbox=(0μm, 10μm)
         )
 
         # Non-Cell straight to graphics
