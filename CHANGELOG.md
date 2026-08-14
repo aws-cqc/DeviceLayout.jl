@@ -6,8 +6,19 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - OpenCascade SolidModel rendering adds radius-sized mesh control points at the centers of
+    exact circular arcs by default, locally capping rounded-corner and path-turn mesh sizes
+    at the radius when `mesh_scale() <= 1`, without refining their entire enclosing entities.
+    For `extrude_z!` postrender operations, generated perimeter and curvature controls are
+    repeated along the extrusion.
+    Pass `curvature_sizing=false` to `render!` or `render_conformal!` to retain perimeter-only sizing.
+
 ### Fixed
 
+  - Mesh control-point sets that resolve to the same `(h, α)` no longer overwrite one another
+    when the default grading parameter is applied.
   - Path termination and `SimpleNoRender` halos now use constant-offset edges instead of the generic
     functional-offset fallback. The rendered discretization of these halos on curves may change but 
     will be geometrically equivalent within tolerance.

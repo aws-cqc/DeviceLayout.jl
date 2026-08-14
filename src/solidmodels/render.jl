@@ -525,12 +525,16 @@ function finalize_size_fields!()
         Tuple{Float64, Float64},
         KDTree{SVector{3, Float64}, Euclidean, Float64, SVector{3, Float64}}
     }()
-    for (h, α) in keys(MESHSIZE_PARAMS[:cp])
+    normalized_points = Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}()
+    for ((h, α), points) in MESHSIZE_PARAMS[:cp]
         # Substitute any negative grading value for the global default. Delaying this
         # substitution allows for modifying the size field after rendering, without needing
         # to recompute the locations of all control points.
-        MESHSIZE_PARAMS[:ct][(h, α < 0 ? MESHSIZE_PARAMS[:global_α] : α)] =
-            KDTree(MESHSIZE_PARAMS[:cp][(h, α)])
+        key = (h, α < 0 ? MESHSIZE_PARAMS[:global_α] : α)
+        append!(get!(normalized_points, key, SVector{3, Float64}[]), points)
+    end
+    for (key, points) in normalized_points
+        MESHSIZE_PARAMS[:ct][key] = KDTree(points)
     end
     return nothing
 end
@@ -585,6 +589,9 @@ end
 _stp_float(x::Length) = Float64(ustrip(STP_UNIT, x))
 _stp_float(x::Real) = Float64(x)
 
+const _MeshControlPointRecord = NTuple{5, Float64} # (x, y, z, h, α)
+const _MeshControlPointOwners = Dict{Tuple{String, Int}, Set{_MeshControlPointRecord}}
+
 # ─── Kernel-independent mesh-size control-point sampling ──────────────────────
 #
 # These tools compute mesh-size control points directly from rendered geometry
@@ -601,17 +608,45 @@ _stp_float(x::Real) = Float64(x)
 # `add_mesh_size_point` additions and `α` changes can interleave first.
 
 """
-    _collect_mesh_control_points!(prims, h, α, z)
+    _collect_mesh_control_points!(prims, h, α, z;
+        curvature_sizing=true, mesh_seen=nothing, mesh_points=nothing)
 
 Append mesh-size control points for `prims` (a primitive or vector of
-primitives from [`to_primitives`](@ref)) under `(h, α)`, sampling each
+primitives from [`to_primitives`](@ref)) under `(h, α)` when `h > 0`, sampling each
 primitive's boundary at `⌈L / h⌉` evenly-spaced arc-length intervals at
-height `z`. No-op when `h <= 0` (background-sized entities). Does NOT
-finalize the size field.
+height `z`. When `curvature_sizing=true`, exact circular primitives also add a
+radius-sized control point at their center, including when `h <= 0`. If
+`mesh_points` is provided, all generated controls are also recorded for composition with
+postrender extrusions. Does NOT finalize the size field.
 """
-function _collect_mesh_control_points!(prims, h::Real, α::Real, z::Real)
-    h > 0 || return nothing
-    _sample_meshsize!(prims, Float64(h), Float64(α), Float64(z))
+function _collect_mesh_control_points!(
+    prims,
+    h::Real,
+    α::Real,
+    z::Real;
+    curvature_sizing::Bool=true,
+    mesh_seen::Union{Nothing, Set{_MeshControlPointRecord}}=nothing,
+    mesh_points::Union{Nothing, Set{_MeshControlPointRecord}}=nothing
+)
+    if h > 0
+        h_float = Float64(h)
+        α_float = Float64(α < 0 ? -1 : α)
+        key = (h_float, α_float)
+        record_points = !isnothing(mesh_seen) || !isnothing(mesh_points)
+        first_new = record_points ? length(get(mesh_control_points(), key, ())) + 1 : 1
+        _sample_meshsize!(prims, h_float, α_float, Float64(z))
+        if record_points
+            for point in (@view mesh_control_points()[key][first_new:end])
+                record = (point[1], point[2], point[3], h_float, α_float)
+                !isnothing(mesh_seen) && push!(mesh_seen, record)
+                !isnothing(mesh_points) && push!(mesh_points, record)
+            end
+        end
+    end
+    if curvature_sizing
+        seen = isnothing(mesh_seen) ? Set{_MeshControlPointRecord}() : mesh_seen
+        _sample_curvature_meshsize!(prims, Float64(z), seen, mesh_points)
+    end
     return nothing
 end
 
@@ -685,6 +720,214 @@ end
 # Fallback: any primitive without a specific sampler contributes no points.
 _sample_meshsize!(::Any, ::Float64, ::Float64, ::Float64) = nothing
 
+# Curvature sizing is a separate primitive walk because otherwise-unsized curved entities
+# still need a geometric resolution cap. For an exact circular arc of radius R, a control
+# point at its center with h=R contributes exactly R on the arc when mesh_scale() <= 1,
+# independently of the grading exponent.
+function _sample_curvature_meshsize!(
+    prims::AbstractVector,
+    z::Float64,
+    seen::Set{_MeshControlPointRecord},
+    points::Union{Nothing, Set{_MeshControlPointRecord}}
+)
+    for prim in prims
+        _sample_curvature_meshsize!(prim, z, seen, points)
+    end
+    return nothing
+end
+
+function _sample_curvature_meshsize!(
+    cp::CurvilinearPolygon,
+    z::Float64,
+    seen::Set{_MeshControlPointRecord},
+    points::Union{Nothing, Set{_MeshControlPointRecord}}
+)
+    for seg in cp.curves
+        _sample_segment_curvature_meshsize!(seg, z, seen, points)
+    end
+    return nothing
+end
+
+function _sample_curvature_meshsize!(
+    cr::CurvilinearRegion,
+    z::Float64,
+    seen::Set{_MeshControlPointRecord},
+    points::Union{Nothing, Set{_MeshControlPointRecord}}
+)
+    _sample_curvature_meshsize!(cr.exterior, z, seen, points)
+    for hole in cr.holes
+        _sample_curvature_meshsize!(hole, z, seen, points)
+    end
+    return nothing
+end
+
+function _sample_curvature_meshsize!(
+    e::Ellipse,
+    z::Float64,
+    seen::Set{_MeshControlPointRecord},
+    points::Union{Nothing, Set{_MeshControlPointRecord}}
+)
+    iscircle(e) || return nothing
+    return _add_curvature_mesh_size_point!(
+        _stp_float(e.center.x),
+        _stp_float(e.center.y),
+        abs(_stp_float(e.radii[1])),
+        z,
+        seen,
+        points
+    )
+end
+
+function _sample_curvature_meshsize!(
+    seg::Paths.Segment,
+    z::Float64,
+    seen::Set{_MeshControlPointRecord},
+    points::Union{Nothing, Set{_MeshControlPointRecord}}
+)
+    return _sample_segment_curvature_meshsize!(seg, z, seen, points)
+end
+
+_sample_curvature_meshsize!(
+    ::Any,
+    ::Float64,
+    ::Set{_MeshControlPointRecord},
+    ::Union{Nothing, Set{_MeshControlPointRecord}}
+) = nothing
+
+# CompoundSegment in a CurvilinearPolygon is possible by manual construction
+function _sample_segment_curvature_meshsize!(
+    seg::Paths.CompoundSegment,
+    z::Float64,
+    seen::Set{_MeshControlPointRecord},
+    points::Union{Nothing, Set{_MeshControlPointRecord}}
+)
+    for subsegment in seg.segments
+        _sample_segment_curvature_meshsize!(subsegment, z, seen, points)
+    end
+    return nothing
+end
+
+function _sample_segment_curvature_meshsize!(
+    seg::Paths.ConstantOffset{T, S},
+    z::Float64,
+    seen::Set{_MeshControlPointRecord},
+    points::Union{Nothing, Set{_MeshControlPointRecord}}
+) where {T, S <: Paths.Turn{T}}
+    return _sample_segment_curvature_meshsize!(Paths.resolve_offset(seg), z, seen, points)
+end
+
+function _sample_segment_curvature_meshsize!(
+    seg::Paths.Turn{T},
+    z::Float64,
+    seen::Set{_MeshControlPointRecord},
+    points::Union{Nothing, Set{_MeshControlPointRecord}}
+) where {T}
+    center = Paths.curvaturecenter(seg)
+    radius = abs(_stp_float(Paths.curvatureradius(seg, zero(T))))
+    return _add_curvature_mesh_size_point!(
+        _stp_float(center.x),
+        _stp_float(center.y),
+        radius,
+        z,
+        seen,
+        points
+    )
+end
+
+_sample_segment_curvature_meshsize!(
+    ::Paths.Segment,
+    ::Float64,
+    ::Set{_MeshControlPointRecord},
+    ::Union{Nothing, Set{_MeshControlPointRecord}}
+) = nothing
+
+function _add_composable_mesh_size_point!(
+    x::Float64,
+    y::Float64,
+    z::Float64,
+    h::Float64,
+    α::Float64,
+    seen::Set{_MeshControlPointRecord},
+    points::Union{Nothing, Set{_MeshControlPointRecord}}=nothing
+)
+    all(isfinite, (x, y, z, h, α)) && h > 0 || return false
+    record = (x, y, z, h, α < 0 ? -1.0 : α)
+    !isnothing(points) && push!(points, record)
+    record in seen && return false
+    push!(seen, record)
+    add_mesh_size_point(Float64[x, y, z]; h=h, α=α)
+    return true
+end
+
+function _add_curvature_mesh_size_point!(
+    x::Float64,
+    y::Float64,
+    radius::Float64,
+    z::Float64,
+    seen::Set{_MeshControlPointRecord},
+    points::Union{Nothing, Set{_MeshControlPointRecord}}=nothing
+)
+    return _add_composable_mesh_size_point!(x, y, z, radius, -1.0, seen, points)
+end
+
+function _extrusion_z_offsets(dz::Float64, h::Float64, kwargs)
+    # Explicit extrusion layers determine where the mesh needs controls. Without them, use
+    # enough uniform intervals to keep every sidewall point within h of another control.
+    options = (; kwargs...)
+    num_elements = get(options, :num_elements, ())
+    heights = get(options, :heights, ())
+    if isempty(num_elements)
+        intervals = max(1, ceil(Int, abs(dz) / h))
+        return range(0.0, dz; length=intervals + 1)[2:end]
+    end
+
+    total_elements = sum(num_elements)
+    total_elements > 0 || return Float64[]
+    if isempty(heights)
+        return range(0.0, dz; length=total_elements + 1)[2:end]
+    end
+
+    length(heights) == length(num_elements) ||
+        throw(ArgumentError("heights and num_elements must have the same length"))
+    normalized_offsets = Float64[]
+    layer_start = 0.0
+    for (elements, layer_end) in zip(num_elements, heights)
+        elements > 0 || throw(ArgumentError("num_elements entries must be positive"))
+        append!(
+            normalized_offsets,
+            range(layer_start, Float64(layer_end); length=elements + 1)[2:end]
+        )
+        layer_start = Float64(layer_end)
+    end
+    return dz .* normalized_offsets
+end
+
+function _compose_meshsize!(
+    points_by_group::_MeshControlPointOwners,
+    op,
+    args,
+    kwargs,
+    seen::Set{_MeshControlPointRecord}
+)
+    # Only the built-in extrusion has the known point transformation needed here; arbitrary
+    # postrender operations retain the existing primitive-coordinate sizing behavior.
+    op === extrude_z! || return false
+    length(args) >= 2 || return false
+    groupdim = length(args) >= 3 ? Int(args[3]) : 2
+    source_points = get(points_by_group, (string(args[1]), groupdim), nothing)
+    isnothing(source_points) && return false
+    dz = _stp_float(args[2])
+    iszero(dz) && return false
+
+    changed = false
+    for (x, y, z, h, α) in source_points
+        for z_offset in _extrusion_z_offsets(dz, h, kwargs)
+            changed |= _add_composable_mesh_size_point!(x, y, z + z_offset, h, α, seen)
+        end
+    end
+    return changed
+end
+
 # Generic `Paths.Segment` sampler. Every concrete `Paths.Segment` (Straight,
 # Turn, BSpline, ConstantOffset, …) supports `pathlength(seg)` and `seg(s)`
 # with `s` an arc-length parameter, so one uniform-in-s sampler at
@@ -753,12 +996,13 @@ _default_size_primitives(node::Paths.Node; kwargs...) = to_polygons(node; kwargs
 _default_size_primitives(el; kwargs...) = to_polygons(el; kwargs...)
 
 """
-    populate_size_fields!(cs::AbstractCoordinateSystem; kwargs...) -> mesh_control_points()
+    populate_size_fields!(cs::AbstractCoordinateSystem; curvature_sizing=true, kwargs...) -> mesh_control_points()
 
 Build the mesh-size control-point dictionary (`MESHSIZE_PARAMS[:cp]`) and its KDTrees
-from `cs`, without querying a geometry kernel. For every flattened element with a finite
+from `cs`, without querying a geometry kernel. For every flattened element with a positive
 mesh size, rendered primitive boundaries are sampled at `⌈L / h⌉` arc-length intervals
-and stored under `(h, α)`.
+and stored under `(h, α)`. Exact circular primitives can also contribute curvature-center
+points independently of their entity mesh size.
 
 This constructs the same data used by `render!`'s mesh-size callback, but can be called on
 a coordinate system before rendering to a `SolidModel`.
@@ -768,24 +1012,31 @@ Keywords:
   - `primitives_of = _default_size_primitives`: element-to-primitives function. `render!`
     uses `el -> to_primitives(sm, el)` so the sampled primitive form matches the model.
   - `zmap = (_) -> 0.0`: metadata-to-height function for the generated control points.
+  - `curvature_sizing = true`: add radius-sized control points at the centers of exact
+    circular primitives when `primitives_of` preserves them. Disable to retain perimeter-only
+    sizing.
   - remaining keywords are forwarded to `sizeandgrading` and `primitives_of`.
 """
 function populate_size_fields!(
     cs::AbstractCoordinateSystem;
     primitives_of=_default_size_primitives,
     zmap=(_) -> 0.0,
+    curvature_sizing=true,
     kwargs...
 )
     flat = flatten(cs)
     clear_mesh_control_points!()
+    mesh_seen = Set{_MeshControlPointRecord}()
     for (el, meta) in zip(elements(flat), element_metadata(flat))
         h, α = sizeandgrading(el; kwargs...)
-        h > 0 || continue
+        h > 0 || curvature_sizing || continue
         _collect_mesh_control_points!(
             primitives_of(el; kwargs...),
             h,
             α,
-            _stp_float(zmap(meta))
+            _stp_float(zmap(meta));
+            curvature_sizing,
+            mesh_seen
         )
     end
     finalize_size_fields!()
@@ -854,7 +1105,7 @@ end
 """
     render!(sm::SolidModel, cs::AbstractCoordinateSystem{T}; map_meta=layer,
     postrender_ops=[], zmap=(_) -> zero(T), gmsh_options = Dict(), skip_postrender = false,
-    auto_union=false, skip_unused_layers=false, kwargs...) where {T}
+    auto_union=false, skip_unused_layers=false, curvature_sizing=true, kwargs...) where {T}
 
 Render `cs` to `sm`.
 
@@ -893,6 +1144,11 @@ Render `cs` to `sm`.
     its mapped name or its base layer name (from `layer(meta)`) appears in the referenced set.
     This keeps indexed and levelwise variants (e.g. `"port_1"`) when the base layer (`"port"`)
     is referenced. Default is `false`.
+  - `curvature_sizing`: If `true`, add radius-sized mesh control points at the centers of exact
+    circular primitives preserved by the rendering backend. For `extrude_z!` postrender
+    operations, generated perimeter and curvature controls are repeated at requested extrusion
+    mesh layers, or at intervals no larger than each control's target size when no layers are
+    specified. Default is `true`.
 
 Available postrendering operations include [`translate!`](@ref), [`extrude_z!`](@ref), [`revolve!`](@ref),
 [`union_geom!`](@ref), [`intersect_geom!`](@ref), [`difference_geom!`](@ref), [`fragment_geom!`](@ref), and [`box_selection`](@ref).
@@ -914,6 +1170,7 @@ function render!(
     skip_postrender=false,
     auto_union=false,
     skip_unused_layers=false,
+    curvature_sizing=true,
     kwargs...
 ) where {T}
     return _render_orchestrator!(
@@ -938,6 +1195,7 @@ function render!(
         skip_postrender=skip_postrender,
         auto_union=auto_union,
         skip_unused_layers=skip_unused_layers,
+        curvature_sizing=curvature_sizing,
         kwargs...
     )
 end
@@ -975,6 +1233,7 @@ function _render_orchestrator!(
     skip_postrender=false,
     auto_union=false,
     skip_unused_layers=false,
+    curvature_sizing=true,
     kwargs...
 ) where {T}
     gmsh.model.set_current(name(sm))
@@ -996,6 +1255,8 @@ function _render_orchestrator!(
     flat = flatten(cs)
 
     clear_mesh_control_points!()
+    mesh_seen = Set{_MeshControlPointRecord}()
+    mesh_points_by_group = _MeshControlPointOwners()
 
     # Create RTree for avoiding duplicating points
     points_tree = RTree{Float64, 3}(Int32)
@@ -1037,8 +1298,29 @@ function _render_orchestrator!(
 
         # Sample mesh size control points from the same primitive form added to the model.
         z_of_meta = _stp_float(zmap(meta))
-        for (prims, (h, α)) in zip(els, meshsizes)
-            _collect_mesh_control_points!(prims, h, α, z_of_meta)
+        for (prims, (h, α), dts) in zip(els, meshsizes, group_dimtags_unflattened)
+            mesh_points = Set{_MeshControlPointRecord}()
+            _collect_mesh_control_points!(
+                prims,
+                h,
+                α,
+                z_of_meta;
+                curvature_sizing,
+                mesh_seen,
+                mesh_points
+            )
+            isempty(mesh_points) && continue
+            primitive_dimtags = dts isa Vector ? dts : [dts]
+            for dim in unique(first.(primitive_dimtags))
+                union!(
+                    get!(
+                        mesh_points_by_group,
+                        (string(mapped_name), Int(dim)),
+                        Set{_MeshControlPointRecord}()
+                    ),
+                    mesh_points
+                )
+            end
         end
     end
     # Synchronize the entities to the model.
@@ -1059,10 +1341,13 @@ function _render_orchestrator!(
         _postrender!(sm, auto_union_ops)
         _synchronize!(sm)
     end
-    _postrender!(sm, postrender_ops)
+    meshsize_composed = _postrender!(sm, postrender_ops; mesh_points_by_group, mesh_seen)
     _synchronize!(sm)
     # Get rid of redundant entities and update groups accordingly.
     fragment!(sm)
+
+    # Rebuild KDTrees to include mesh-size controls composed with extrusions.
+    meshsize_composed && finalize_size_fields!()
 
     # Pass in call back function for meshing against the vertices found previously.
     gmsh.model.mesh.setSizeCallback(gmsh_meshsize)

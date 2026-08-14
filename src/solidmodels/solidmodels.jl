@@ -76,6 +76,7 @@ import DeviceLayout.Polygons:
     orientation,
     StyleDict,
     cornerindices,
+    iscircle,
     perimeter,
     center,
     angle,

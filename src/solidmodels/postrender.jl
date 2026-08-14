@@ -1,9 +1,21 @@
 ######## Postrendering
-function _postrender!(sm::SolidModel, operations)
+function _postrender!(
+    sm::SolidModel,
+    operations;
+    mesh_points_by_group=nothing,
+    mesh_seen=nothing
+)
+    changed_meshsize = false
     # Operations
     for (destination, op, args, kwargs...) in operations
-        sm[destination] = op(sm, args...; kwargs...)
+        result = op(sm, args...; kwargs...)
+        sm[destination] = result
+        if !isempty(result) && !isnothing(mesh_points_by_group) && !isnothing(mesh_seen)
+            changed_meshsize |=
+                _compose_meshsize!(mesh_points_by_group, op, args, kwargs, mesh_seen)
+        end
     end
+    return changed_meshsize
 end
 
 function _fuse!(k, object, tool; tag=-1, remove_object=true, remove_tool=true)

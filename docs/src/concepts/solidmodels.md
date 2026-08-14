@@ -130,6 +130,17 @@ incorporate this information back into the `MeshSized` style used on the origina
     Additionally, to generate a new mesh `SolidModels.gmsh.model.mesh.clear()` must be called
     otherwise `gmsh` will return only any previously generated mesh.
 
+### Mesh control points
+
+**Default mesh sizing is subject to change within major versions.**
+
+Currently, control points are generated for the following:
+
+  - `MeshSized` entities: control points are placed at intervals along each boundary.
+  - Path segments with CPW and trace styles: control points placed along trace and gap boundaries with `h = 2*min(trace, gap)` (or just `h = 2*trace` for trace styles). For variable-trace/gap styles, the minimum along the segment is used for `trace` and `gap`.
+  - Circular arcs, including on curved paths and in rounded polygons: a control point is generated at the circle's center with `h` equal to the radius. This can be disabled with the `curvature_sizing=false` keyword in `render!`.
+  - Extruded entities: any of the above control points are copied along the `z` axis in `extrude_z!` postrender operations. New control points are generated on the far extruded face, with intermediate control points spaced in `z` by at most `h`.
+
 ## Example
 
 Below, we create a 3D model of a meandered CPW on a chip, restricting the model to a small

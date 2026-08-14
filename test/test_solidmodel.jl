@@ -1439,6 +1439,24 @@
         SolidModels.finalize_size_fields!()
         @test all(sort(collect(keys(SolidModels.mesh_control_trees()))) .== [(0.5, 0.75)])
 
+        # Explicit and default grading can normalize to the same tree key. Both point sets
+        # must survive finalization.
+        SolidModels.clear_mesh_control_points!()
+        SolidModels.add_mesh_size_point([0.0, 0.0, 0.0]; h=0.5, α=-1)
+        SolidModels.add_mesh_size_point([10.0, 0.0, 0.0]; h=0.5, α=0.75)
+        SolidModels.finalize_size_fields!()
+        @test collect(keys(SolidModels.mesh_control_trees())) == [(0.5, 0.75)]
+        for x in (0.0, 10.0)
+            @test SolidModels.gmsh_meshsize(
+                Cint(0),
+                Cint(0),
+                Cdouble(x),
+                Cdouble(0.0),
+                Cdouble(0.0),
+                Cdouble(0.0)
+            ) == 0.5
+        end
+
         # Check that the KDTree implementation matches a brute force search
         import Random: seed!, default_rng, rand
         rng = seed!(default_rng(), 111)
@@ -1516,6 +1534,204 @@
             cps = first(values(SolidModels.mesh_control_points()))
             @test !isempty(cps)
             @test all(p -> p[3] == 5.0, cps)
+        end
+
+        @testset "Curvature-center control points" begin
+            turn = Paths.Turn(90°, 2.0μm; p0=Point(0.0μm, 0.0μm), α0=0°)
+
+            SolidModels.clear_mesh_control_points!()
+            SolidModels._collect_mesh_control_points!(turn, 0.0, -1.0, 5.0)
+            cps = SolidModels.mesh_control_points()
+            @test collect(keys(cps)) == [(2.0, -1.0)]
+            @test only(cps[(2.0, -1.0)]) ≈ SVector(0.0, 2.0, 5.0)
+
+            SolidModels.finalize_size_fields!()
+            for s in range(zero(pathlength(turn)), pathlength(turn), length=3)
+                p = turn(s)
+                @test SolidModels.gmsh_meshsize(
+                    Cint(0),
+                    Cint(0),
+                    Cdouble(ustrip(STP_UNIT, p.x)),
+                    Cdouble(ustrip(STP_UNIT, p.y)),
+                    Cdouble(5.0),
+                    Cdouble(0.0)
+                ) ≈ 2.0
+            end
+
+            SolidModels.clear_mesh_control_points!()
+            offset_turn = Paths.offset(turn, 0.5μm)
+            SolidModels._collect_mesh_control_points!(offset_turn, 0.0, -1.0, 3.0)
+            cps = SolidModels.mesh_control_points()
+            @test collect(keys(cps)) == [(1.5, -1.0)]
+            @test only(cps[(1.5, -1.0)]) ≈ SVector(0.0, 2.0, 3.0)
+
+            circle = Circle(Point(3μm, 4μm), 2μm)
+            SolidModels.clear_mesh_control_points!()
+            SolidModels._collect_mesh_control_points!(circle, 0.0, -1.0, 7.0)
+            cps = SolidModels.mesh_control_points()
+            @test collect(keys(cps)) == [(2.0, -1.0)]
+            @test only(cps[(2.0, -1.0)]) ≈ SVector(3.0, 4.0, 7.0)
+
+            SolidModels.clear_mesh_control_points!()
+            SolidModels._collect_mesh_control_points!(
+                CurvilinearPolygon(circle),
+                0.0,
+                -1.0,
+                7.0
+            )
+            @test length(only(values(SolidModels.mesh_control_points()))) == 1
+
+            SolidModels.clear_mesh_control_points!()
+            ellipse = Ellipse(Point(3μm, 4μm), (2μm, 1μm), 0°)
+            SolidModels._collect_mesh_control_points!(ellipse, 0.0, -1.0, 7.0)
+            @test isempty(SolidModels.mesh_control_points())
+
+            SolidModels.clear_mesh_control_points!()
+            SolidModels._collect_mesh_control_points!(
+                turn,
+                0.0,
+                -1.0,
+                5.0;
+                curvature_sizing=false
+            )
+            @test isempty(SolidModels.mesh_control_points())
+        end
+
+        @testset "Rounded geometry curvature sizing" begin
+            cs = CoordinateSystem("curvature_sizing", nm)
+            render!(cs, Polygons.Rounded(2μm)(Rectangle(10μm, 10μm)), SemanticMeta(:curved))
+
+            sm_curved = SolidModel("curvature_sizing_on", overwrite=true)
+            render!(sm_curved, cs)
+            cps = SolidModels.mesh_control_points()
+            @test haskey(cps, (2.0, -1.0))
+            @test length(cps[(2.0, -1.0)]) == 4
+
+            sm_uncontrolled = SolidModel("curvature_sizing_off", overwrite=true)
+            render!(sm_uncontrolled, cs; curvature_sizing=false)
+            @test isempty(SolidModels.mesh_control_points())
+        end
+
+        @testset "Mesh-size extrusion ladder" begin
+            SolidModels.clear_mesh_control_points!()
+            seen = Set{NTuple{5, Float64}}()
+            source_points = Set{NTuple{5, Float64}}()
+            SolidModels._add_composable_mesh_size_point!(
+                0.0,
+                0.0,
+                5.0,
+                2.0,
+                0.8,
+                seen,
+                source_points
+            )
+            points_by_group = Dict(("curve", 1) => source_points)
+
+            @test SolidModels._compose_meshsize!(
+                points_by_group,
+                SolidModels.extrude_z!,
+                ("curve", -5μm, 1),
+                (),
+                seen
+            )
+            z_levels = sort([p[3] for p in SolidModels.mesh_control_points()[(2.0, 0.8)]])
+            @test first(z_levels) ≈ 0.0
+            @test last(z_levels) ≈ 5.0
+            @test maximum(diff(z_levels)) <= 2.0
+            @test !SolidModels._compose_meshsize!(
+                points_by_group,
+                SolidModels.extrude_z!,
+                ("curve", 1μm, 2),
+                (),
+                seen
+            )
+            @test !SolidModels._compose_meshsize!(
+                points_by_group,
+                SolidModels.extrude_z!,
+                ("curve", 0μm, 1),
+                (),
+                seen
+            )
+
+            SolidModels.clear_mesh_control_points!()
+            empty!(seen)
+            empty!(source_points)
+            SolidModels._add_composable_mesh_size_point!(
+                0.0,
+                0.0,
+                0.0,
+                2.0,
+                0.8,
+                seen,
+                source_points
+            )
+            @test SolidModels._compose_meshsize!(
+                points_by_group,
+                SolidModels.extrude_z!,
+                ("curve", 10μm, 1),
+                (:num_elements => [2, 1], :heights => [0.4, 1.0]),
+                seen
+            )
+            z_levels = sort([p[3] for p in SolidModels.mesh_control_points()[(2.0, 0.8)]])
+            @test z_levels ≈ [0.0, 2.0, 4.0, 10.0]
+        end
+
+        @testset "Mesh sizing composes with extrusion" begin
+            sized_cs = CoordinateSystem("extruded_mesh_sizing", nm)
+            render!(
+                sized_cs,
+                styled(Rectangle(4μm, 4μm), MeshSized(2μm, 0.8)),
+                SemanticMeta(:sized)
+            )
+            render!(
+                sized_cs,
+                styled(
+                    Rectangle(Point(10μm, 10μm), Point(14μm, 14μm)),
+                    MeshSized(2μm, 0.8)
+                ),
+                SemanticMeta(:unextruded)
+            )
+            sized_sm = SolidModel("extruded_mesh_sizing", overwrite=true)
+            render!(
+                sized_sm,
+                sized_cs;
+                curvature_sizing=false,
+                postrender_ops=[(
+                    "volume",
+                    SolidModels.extrude_z!,
+                    ("sized", 5μm),
+                    :num_elements => [2, 1],
+                    :heights => [0.4, 1.0]
+                )]
+            )
+            sized_cps = SolidModels.mesh_control_points()[(2.0, 0.8)]
+            z_levels = sort(unique(p[3] for p in sized_cps))
+            @test z_levels ≈ [0.0, 1.0, 2.0, 5.0]
+            @test count(p -> p[3] ≈ 0.0, sized_cps) == 16
+            @test all(z -> count(p -> p[3] ≈ z, sized_cps) == 8, z_levels[2:end])
+        end
+
+        @testset "Curvature sizing composes with extrusion" begin
+            extruded_cs = CoordinateSystem("extruded_rounding", nm)
+            render!(
+                extruded_cs,
+                Polygons.Rounded(2μm)(Rectangle(10μm, 10μm)),
+                SemanticMeta(:rounded)
+            )
+            render!(extruded_cs, Circle(Point(30μm, 30μm), 2μm), SemanticMeta(:unextruded))
+            extruded_sm = SolidModel("extruded_rounding", overwrite=true)
+            render!(
+                extruded_sm,
+                extruded_cs;
+                postrender_ops=[("volume", SolidModels.extrude_z!, ("rounded", 100μm))]
+            )
+            extruded_cps = SolidModels.mesh_control_points()[(2.0, -1.0)]
+            z_levels = sort(unique(p[3] for p in extruded_cps))
+            @test first(z_levels) ≈ 0.0
+            @test last(z_levels) ≈ 100.0
+            @test maximum(diff(z_levels)) <= 2.0
+            @test count(p -> p[3] ≈ first(z_levels), extruded_cps) == 5
+            @test all(z -> count(p -> p[3] ≈ z, extruded_cps) == 4, z_levels[2:end])
         end
 
         # Checking option access
