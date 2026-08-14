@@ -85,13 +85,36 @@ cells into SVG, PDF, and EPS vector graphics formats, or into the PNG raster gra
 format. This enables patterns to be displayed in web browsers, publications, presentations,
 and so on. You can save a cell to a graphics file by, e.g. `save("/path/to/file.svg", mycell)`. Possible keyword arguments include:
 
-  - `width`: Specifies the width parameter. A unitless number will give the width in pixels,
-    72dpi. You can also give a length in any unit using a `Unitful.Quantity`, e.g. `u"4inch"` if
-    you had previously done `using Unitful`.
-  - `height`: Specifies the height parameter. A unitless number will give the width in pixels,
-    72dpi. You can also give a length in any unit using a `Unitful.Quantity`. The aspect ratio
-    of the output is always preserved so specify either `width` or `height`.
-  - `layercolors`: Should be a dictionary with `Int` keys for layers and RGBA tuples as values.
-    For example, (1.0, 0.0, 0.0, 0.5) is red with 50% opacity.
-  - `bboxes`: Specifies whether to draw bounding boxes around the bounds of cell arrays or
-    cell references (true/false).
+  - `width`: Output width. A unitless number gives pixels. A `Unitful.Quantity`, such as
+    `u"4inch"`, is converted to pixels using `dpi`. If `height` is omitted, it is chosen to
+    preserve the rendered region's aspect ratio.
+  - `height`: Output height, with the same unitless-pixel or physical-length behavior as
+    `width`. If `width` is omitted, it is chosen to preserve the aspect ratio. Supplying both
+    dimensions uses them exactly.
+  - `dpi`: Resolution used to convert physical `width` and `height` values to pixels, including
+    the default four-inch maximum dimension. It does not rescale unitless pixel dimensions. The default is 72. For vector outputs, physical dimensions are scaled.
+  - `bbox`: A [`Rectangle`](@ref) in layout coordinates to use as the viewport. Geometry outside
+    the rectangle is clipped by the graphics surface.
+  - `metadata_filter`: A predicate passed to [`flatten`](@ref) to select metadata before
+    drawing. For example, `layer_inclusion([GDSMeta(1, 0)], [])` renders only that GDS layer
+    and datatype.
+  - `layercolors`: A dictionary mapping either exact `GDSMeta` values or integer GDS layer
+    numbers to RGBA tuples. Exact metadata keys allow datatypes on one layer to have different
+    colors. For example, `(1.0, 0.0, 0.0, 0.5)` is red with 50% opacity.
+  - `background`: `:transparent` (the default), `:white`, `:black`, `nothing`, or an RGB(A)
+    tuple with components between zero and one.
+  - `bboxes`: Whether to draw yellow bounding boxes around top-level cell arrays or cell
+    references (`true`/`false`).
+
+For example, this produces a high-resolution white-background crop containing only one layer:
+
+```julia
+save(
+    "junction_crop.png",
+    cell;
+    width=1200,
+    bbox=Rectangle(Point(400μm, 200μm), Point(500μm, 300μm)),
+    metadata_filter=layer_inclusion(GDSMeta(5, 0), []),
+    background=:white
+)
+```
