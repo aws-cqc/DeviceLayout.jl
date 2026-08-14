@@ -91,9 +91,8 @@ and so on. You can save a cell to a graphics file by, e.g. `save("/path/to/file.
   - `height`: Output height, with the same unitless-pixel or physical-length behavior as
     `width`. If `width` is omitted, it is chosen to preserve the aspect ratio. Supplying both
     dimensions uses them exactly.
-  - `dpi`: Resolution used to convert physical `width` and `height` values to pixels, and for
-    the default four-inch width. It does not rescale unitless pixel dimensions. The default is
-    72.
+  - `dpi`: Resolution used to convert physical `width` and `height` values to pixels, including
+    the default four-inch maximum dimension. It does not rescale unitless pixel dimensions. The default is 72. For vector outputs, physical dimensions are scaled.
   - `bbox`: A [`Rectangle`](@ref) in layout coordinates to use as the viewport. Geometry outside
     the rectangle is clipped by the graphics surface.
   - `metadata_filter`: A predicate passed to [`flatten`](@ref) to select metadata before

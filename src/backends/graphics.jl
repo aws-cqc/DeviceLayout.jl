@@ -7,7 +7,9 @@ import DeviceLayout:
     bounds,
     datatype,
     default_meta_map,
+    elements,
     element_metadata,
+    findbox,
     gdslayer,
     load,
     refs,
@@ -90,7 +92,7 @@ function fillcolor(options, meta)
         haskey(colors, layer) && return colors[layer]
     end
     color_index = mod(layer + 31 * datatype(meta), length(layercolors))
-    return layercolors[color_index]
+    return get(layercolors, color_index, (0.0, 0.0, 0.0, 0.5)) # Fallback in case `layercolors` was given non-consecutive keys
 end
 
 lscale(x::Length, dpi)  = round(Int, NoUnits((x |> inch) * dpi / inch))
@@ -112,9 +114,16 @@ function canvas_size(options, w, h)
         h1 = lscale(options[:height], dpi)
         return iszero(w) || iszero(h) ? h1 : Int(ceil(h1 * w / h)), h1
     end
+    # Fallback to default with max dimension capped at default_size, preserving aspect ratio
+    if w > h
+        return (
+            default_size,
+            iszero(w) || iszero(h) ? default_size : Int(ceil(default_size * h / w))
+        )
+    end
     return (
-        default_size,
-        iszero(w) || iszero(h) ? default_size : Int(ceil(default_size * h / w))
+        iszero(w) || iszero(h) ? default_size : Int(ceil(default_size * w / h)),
+        default_size
     )
 end
 
@@ -180,17 +189,19 @@ function Base.show(
     Cairo.rectangle(ctx, 0, 0, w1, h1)
     Cairo.fill(ctx)
 
-    metas = default_meta_map.(element_metadata(c0))
-    unique_metas = sort(unique(metas), by=meta -> (gdslayer(meta), datatype(meta)))
     trans = Translation(-bnd.ll.x, bnd.ur.y) ∘ XReflection()
 
     sf = iszero(w) || iszero(h) ? 1.0 : min(w1 / w, h1 / h)
     Cairo.scale(ctx, sf, sf)
 
+    view_idx = findbox(bnd, elements(c0); intersects=true)
+    view_elements = elements(c0)[view_idx]
+    view_metas = default_meta_map.(element_metadata(c0)[view_idx])
+    unique_metas = sort(unique(view_metas), by=meta -> (gdslayer(meta), datatype(meta)))
     for meta in unique_metas
         Cairo.save(ctx)
         Cairo.set_source_rgba(ctx, fillcolor(opt, meta)...)
-        for el in c0.elements[metas .== meta]
+        for el in view_elements[view_metas .== meta]
             tel = trans(el)
             poly!(ctx, tel)
             render_text!(ctx, tel, sf)

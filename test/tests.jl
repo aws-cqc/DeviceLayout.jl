@@ -1187,6 +1187,12 @@ end
         @test occursin("rgb(100%, 0%, 0%)", read(path, String))
         rm(path, force=true)
 
+        tall = Cell("tall", nm)
+        render!(tall, Rectangle(10μm, 20μm), GDSMeta(1, 0))
+        path = joinpath(tdir, "tall.png")
+        save(path, tall; dpi=144)
+        @test png_dimensions(path) == (288, 576)
+
         layered = Cell("layered", nm)
         render!(layered, Rectangle(10μm, 10μm), GDSMeta(1, 0))
         render!(layered, Rectangle(Point(20μm, 0μm), Point(30μm, 10μm)), GDSMeta(2, 0))

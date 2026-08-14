@@ -27,7 +27,7 @@ The format of this changelog is based on
 ### Fixed
 
   - Graphics export now preserves aspect ratio when only `width` or `height` is supplied, rather than
-    capping width-only output at 288 pixels high. Reference bounding boxes render again, and GDS layers
+    capping width-only output at 288 pixels high. If neither is supplied, the maximum dimension is capped at 4 inches. Reference bounding boxes render again, and GDS layers
     above 255 receive palette colors instead of all falling back to black.
   - Path termination and `SimpleNoRender` halos now use constant-offset edges instead of the generic
     functional-offset fallback. The rendered discretization of these halos on curves may change but 
