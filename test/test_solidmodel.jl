@@ -1922,16 +1922,11 @@ end
     end
 
     @testset "_get_or_add_point! multi-candidate resolution" begin
-        # A caller that queries with a large `atol` can catch multiple
-        # previously-inserted points inside its tolerance box. The old
-        # implementation `only(pts)`-errored in that case; the new one
-        # returns the closest of the candidates.
+        # With multiple candidates in the tolerance box, return the closest.
         import SpatialIndexing
         sm = SolidModel("get_or_add_point_multi"; overwrite=true)
         k = SolidModels.kernel(sm)
         tree = SpatialIndexing.RTree{Float64, 3}(Int32)
-        # Insert two points 0.1 µm apart at the tight default tolerance so the
-        # tree stores them as distinct entries.
         t1 = SolidModels._get_or_add_point!(
             k,
             0.0,
@@ -1949,13 +1944,42 @@ end
             atol=SolidModels.POINT_MERGE_ATOL
         )
         @test t1 != t2
-        # Query at (0.02, 0, 0) with a wide atol that catches both — expect
-        # the closer one (t1, distance 0.02) rather than t2 (distance 0.08).
-        t_hit = SolidModels._get_or_add_point!(k, 0.02, 0.0, 0.0, tree; atol=1.0)
-        @test t_hit == t1
-        # Query at (0.08, 0, 0) with the same wide atol — expect t2.
-        t_hit2 = SolidModels._get_or_add_point!(k, 0.08, 0.0, 0.0, tree; atol=1.0)
-        @test t_hit2 == t2
+        # (0.02, 0, 0) with wide atol catches both; closer is t1.
+        @test SolidModels._get_or_add_point!(k, 0.02, 0.0, 0.0, tree; atol=1.0) == t1
+        # (0.08, 0, 0) with the same wide atol — closer is t2.
+        @test SolidModels._get_or_add_point!(k, 0.08, 0.0, 0.0, tree; atol=1.0) == t2
+        SolidModels.gmsh.finalize()
+    end
+
+    @testset "_get_or_add_point! equidistant tie-break by lower tag" begin
+        # If two inserted points are exactly equidistant from the query,
+        # R-tree iteration order is not guaranteed deterministic — the
+        # returned tag must be the lower one.
+        import SpatialIndexing
+        sm = SolidModel("get_or_add_point_tie"; overwrite=true)
+        k = SolidModels.kernel(sm)
+        tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        # Symmetric pair around the origin.
+        t_neg = SolidModels._get_or_add_point!(
+            k,
+            -0.1,
+            0.0,
+            0.0,
+            tree;
+            atol=SolidModels.POINT_MERGE_ATOL
+        )
+        t_pos = SolidModels._get_or_add_point!(
+            k,
+            0.1,
+            0.0,
+            0.0,
+            tree;
+            atol=SolidModels.POINT_MERGE_ATOL
+        )
+        @test t_neg < t_pos  # insertion order gives ascending tags
+        # Query at exact midpoint — both candidates equidistant. Must
+        # return the lower tag deterministically.
+        @test SolidModels._get_or_add_point!(k, 0.0, 0.0, 0.0, tree; atol=1.0) == t_neg
         SolidModels.gmsh.finalize()
     end
 
@@ -1975,9 +1999,12 @@ end
             tree;
             atol=SolidModels.POINT_MERGE_ATOL
         )
-        # Simulate `k.cut` removing the point without notifying the tree —
-        # the RTree still holds the (now-stale) mapping to `stale`.
+        # Simulate `k.cut` removing the point — the RTree still holds the
+        # (now-stale) mapping to `stale`, and the live-point snapshot is
+        # marked stale exactly the way `_add_to_current_solidmodel!` does
+        # after a real `k.cut`.
         k.remove([(0, stale)])
+        SolidModels._mark_points_stale!()
         @test try
             k.getBoundingBox(0, stale)
             false

@@ -1237,6 +1237,8 @@ function _render_orchestrator!(
     kwargs...
 ) where {T}
     gmsh.model.set_current(name(sm))
+    # Fresh model → previous render's live-point snapshot is stale.
+    _mark_points_stale!()
 
     if !isnothing(meshing_parameters)
         Base.depwarn("Using `MeshingParameters` is deprecated!", :render!, force=true)
@@ -1580,34 +1582,28 @@ function _get_or_add_point!(
         if isempty(pts)
             tag = k.add_point(x, y, z)
             insert!(points_tree, SpatialIndexing.Point((x, y, z)), tag)
+            push!(POINT_MERGE_LIVE, tag)
             return tag
         end
-        # If more than one previously-inserted point falls within the
-        # tolerance box (can happen with a coarse `atol` or where two
-        # boundaries land within one nm of each other), pick the closest —
-        # avoids `only()` throwing on multi-candidate collisions and gives a
-        # deterministic tie-break.
+        # If multiple candidate points fall in the tolerance box, tie-break
+        # deterministically by (distance, tag) — R-tree iteration order is
+        # not guaranteed deterministic across builds/versions, so we can't
+        # rely on `first(pts)` alone.
         best_elem = first(pts)
         best_d2 = _point_d2(x, y, z, best_elem.mbr.low)
         for pt in pts
             d2 = _point_d2(x, y, z, pt.mbr.low)
-            if d2 < best_d2
+            if (d2 < best_d2) || (d2 == best_d2 && pt.val < best_elem.val)
                 best_d2 = d2
                 best_elem = pt
             end
         end
-        # Verify the tag is still a live OCC point. `k.cut` (called from
-        # `_add_to_current_solidmodel!(::CurvilinearRegion)`) can retag or
-        # delete points after we inserted them, leaving stale entries in the
-        # tree. If the tag is stale we drop it from the tree and retry — the
-        # retry either finds another live candidate in `reg` or falls through
-        # to a fresh `add_point`. This replaces an O(N) `k.get_entities(0)`
-        # scan on every collision with an O(1) OCC probe.
+        # Verify the tag still refers to a live OpenCASCADE dim-0 entity.
+        # Boolean ops (e.g. `k.cut`) can retag or delete entities after we
+        # inserted them; if the tag is stale we drop it and retry.
         if _is_live_point(k, best_elem.val)
             return best_elem.val
         end
-        # Drop the stale entry so future queries don't keep hitting it.
-        # SpatialIndexing takes the MBR (a point-Rect) as the delete key.
         delete!(points_tree, best_elem.mbr)
     end
 end
@@ -1620,16 +1616,28 @@ end
     return dx * dx + dy * dy + dz * dz
 end
 
-# O(1) probe: does OCC still have a point with this tag? `getBoundingBox` on
-# a stale tag throws "Unknown OpenCASCADE point with tag N".
+# Snapshot of OpenCASCADE dim-0 entity tags known to be live. Populated on
+# every `_get_or_add_point!` insert. Marked stale by any boolean op that can
+# delete/retag entities (currently `k.cut` in `_add_to_current_solidmodel!`);
+# a subsequent `_is_live_point` call refreshes from `k.get_entities(0)`.
+const POINT_MERGE_LIVE = Set{Int32}()
+const POINT_MERGE_STALE = Base.RefValue(true)
+
+function _refresh_live_points!(k)
+    empty!(POINT_MERGE_LIVE)
+    union!(POINT_MERGE_LIVE, Iterators.map(last, k.get_entities(0)))
+    POINT_MERGE_STALE[] = false
+    return nothing
+end
+
+function _mark_points_stale!()
+    POINT_MERGE_STALE[] = true
+    return nothing
+end
+
 function _is_live_point(k, tag)
-    try
-        k.getBoundingBox(0, tag)
-        return true
-    catch e
-        e isa ErrorException || rethrow(e)
-        return false
-    end
+    POINT_MERGE_STALE[] && _refresh_live_points!(k)
+    return tag in POINT_MERGE_LIVE
 end
 
 # Add primitives to solid model
@@ -1679,6 +1687,9 @@ function _add_to_current_solidmodel!(
         holes = [k.add_plane_surface([h]) for h ∈ hole_loops]
         out_dim_tags, _ = k.cut([(2, surftag)], [(2, x) for x ∈ holes])
         surftag = out_dim_tags[1][2]
+        # `k.cut` may have retagged or deleted dim-0 entities referenced by
+        # `points_tree`; force the next liveness probe to refresh.
+        _mark_points_stale!()
     end
     return (Int32(2), surftag)
 end
