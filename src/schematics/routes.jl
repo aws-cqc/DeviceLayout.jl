@@ -285,8 +285,9 @@ end
 # Only when planning
 function _update_with_plan!(rule::Paths.AutoChannelRouting{T}, route_node, sch) where {T}
     pin_idx = length(rule.router.pins) + 1
-    push!(rule.router.pins, hooks(route_node.component).p0)
-    push!(rule.router.pins, hooks(route_node.component).p1)
+    route_hooks = hooks(route_node.component)
+    push!(rule.router.pins, PointHook{T}(route_hooks.p0.p, route_hooks.p0.in_direction))
+    push!(rule.router.pins, PointHook{T}(route_hooks.p1.p, route_hooks.p1.in_direction))
     push!(rule.router.net_pins, (pin_idx, pin_idx + 1))
     # If all paths have been added, go ahead and run autorouting
     if length(rule.router.net_pins) == length(rule.router.net_wires)

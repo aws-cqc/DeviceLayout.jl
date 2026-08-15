@@ -22,7 +22,8 @@ import Graphs:
     maximal_cliques,
     dijkstra_shortest_paths,
     enumerate_paths,
-    topological_sort_by_dfs
+    topological_sort_by_dfs,
+    is_cyclic
 import SparseArrays: sparse
 import BipartiteMatching
 
@@ -199,7 +200,6 @@ function unsorted_interval(ar::AbstractChannelProblem, ws::TrackWireSegment; use
     start_channel, stop_channel = bounding_channels(ws)
     channel_idx = running_channel(ws)
 
-    start_channel, stop_channel = bounding_channels(ws)
     s1 = pathlength_at_intersection(ar, channel_idx, start_channel)
     s2 = pathlength_at_intersection(ar, channel_idx, stop_channel)
     (!use_track || is_pin(ar, channel_idx)) && return _swap(s1, s2)
@@ -208,7 +208,6 @@ function unsorted_interval(ar::AbstractChannelProblem, ws::TrackWireSegment; use
     # Offset sign needs to take into account relative directions of segments in channels
     s_start = pathlength_at_intersection(ar, start_channel, channel_idx)
     s_stop = pathlength_at_intersection(ar, stop_channel, channel_idx)
-    pt, nt = prev_next_tendency(ar, ws)
     start_dir = direction_at_intersection(ar, start_channel, channel_idx)
     dir1 = direction_at_intersection(ar, channel_idx, start_channel)
     dir2 = direction_at_intersection(ar, channel_idx, stop_channel)
@@ -216,11 +215,12 @@ function unsorted_interval(ar::AbstractChannelProblem, ws::TrackWireSegment; use
     # Offset also depends neighbor track offsets
     α_ixn_start = (dir1 - start_dir)
     α_ixn_stop = (stop_dir - dir2)
+    sin_start = _transverse_sine(α_ixn_start, channel_idx, start_channel)
+    sin_stop = _transverse_sine(α_ixn_stop, channel_idx, stop_channel)
     prev_offset_proj =
-        segment_offset(ar, prev(ar, ws), s_start; use_wire_direction=false) /
-        sin(α_ixn_start)
+        segment_offset(ar, prev(ar, ws), s_start; use_wire_direction=false) / sin_start
     next_offset_proj =
-        segment_offset(ar, next(ar, ws), s_stop; use_wire_direction=false) / sin(α_ixn_stop)
+        segment_offset(ar, next(ar, ws), s_stop; use_wire_direction=false) / sin_stop
     # Offset *also* depends on this wire segment's offset at a non-90° intersection
     start_offset_proj =
         -segment_offset(ar, ws, s_start; use_wire_direction=false) / tan(α_ixn_start)
@@ -229,6 +229,16 @@ function unsorted_interval(ar::AbstractChannelProblem, ws::TrackWireSegment; use
     # This is approximate on bending or tapered tracks
     return s1 + (prev_offset_proj + start_offset_proj),
     s2 - (next_offset_proj + stop_offset_proj)
+end
+
+function _transverse_sine(α, channel, bounding_vertex)
+    sinα = sin(α)
+    abs(sinα) <= sqrt(eps(Float64)) && throw(
+        ArgumentError(
+            "Channel $channel and bounding vertex $bounding_vertex intersect at a near-parallel angle; track-offset projection is undefined."
+        )
+    )
+    return sinα
 end
 
 # ──── Tendency computation ───────────────────────────────────────────────────
@@ -434,13 +444,14 @@ Does not currently take congestion, crossings, or channel capacity into account.
 """
 function assign_channels!(
     ar::AbstractChannelProblem;
-    net_indices=eachindex(ar.net_pins),
+    net_indices=1:num_nets(ar),
     fixed_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}()
 )
+    _validate_fixed_paths(fixed_paths)
     aux = build_auxiliary_graph(ar)
-    for (idx_net, net) in zip(net_indices, ar.net_pins[net_indices])
-        p0, p1 = net
-        path = if idx_net in keys(fixed_paths)
+    for idx_net in net_indices
+        p0, p1 = net_pins(ar, idx_net)
+        path = if haskey(fixed_paths, idx_net)
             [
                 pin_to_graphidx(ar, p0)
                 fixed_paths[idx_net]
@@ -459,6 +470,17 @@ function assign_channels!(
     end
 end
 
+function _validate_fixed_paths(fixed_paths)
+    for (net_idx, path) in fixed_paths
+        allunique(path) || throw(
+            ArgumentError(
+                "Fixed channel path for net $net_idx revisits a channel: $path. Each channel may appear at most once."
+            )
+        )
+    end
+    return nothing
+end
+
 # ──── Track assignment ───────────────────────────────────────────────────────
 
 """
@@ -470,6 +492,9 @@ Track assignment operates on **all** channels, not a subset. Re-running after mo
 a single net will reassign tracks globally in every channel that contains wire segments.
 """
 function assign_tracks!(ar::AbstractChannelProblem)
+    for channel = 1:num_channels(ar)
+        empty!(channel_tracks(ar, channel))
+    end
     # Order of channels will change results
     # Generally you want early channels to be those with more pins adjoining them
     # Or fewer non-pinned segments
@@ -499,7 +524,6 @@ end
 
 function assign_tracks_matching!(ar, channel)
     # Yoshimura and Kuh Algorithm #2
-    # We will not check whether there are cycles in the vertical constraint graph, just assume
     vcg, zone_ig = channel_problem_graphs(ar, channel)
     zones = maximal_cliques(zone_ig)
     isempty(zones) && return
@@ -547,7 +571,7 @@ function assign_tracks_matching!(ar, channel)
         # Remove all edges in merging graph, start fresh this iteration
         merging_graph = SimpleGraph(length(wiresegs_ascending))
         # Add edges between left and right when they can be merged
-        high_to_low = topological_sort_by_dfs(vcg)
+        high_to_low = _topological_order(vcg, channel, wiresegs_ascending)
         dists_from_r = Dict(r => dag_shortest_paths(vcg, high_to_low, r) for r in R)
         for l in L
             # Only use rightmost in any merged group
@@ -569,7 +593,7 @@ function assign_tracks_matching!(ar, channel)
     # At the end of this process, segments are merged into layers in the VCG
     # The longest directed path gives a representative of each merged group where track height is max
     # But VCG may be a partial order so use topological sort
-    high_to_low = topological_sort_by_dfs(vcg) # If vcg was acyclic to begin with, it is still acyclic
+    high_to_low = _topological_order(vcg, channel, wiresegs_ascending)
     for v = 1:nv(vcg)
         if !haskey(merged_groups, v)
             merged_groups[v] = [v]
@@ -582,6 +606,18 @@ function assign_tracks_matching!(ar, channel)
         push!(tracks, wiresegs_ascending[merged_groups[v]])
         append!(assigned, merged_groups[v])
     end
+end
+
+function _topological_order(vcg, channel, wiresegs)
+    if is_cyclic(vcg)
+        nets = sort!(unique(net_index.(wiresegs)))
+        throw(
+            ArgumentError(
+                "Vertical constraint graph for channel $channel contains a cycle. Nets routed in this channel: $nets."
+            )
+        )
+    end
+    return topological_sort_by_dfs(vcg)
 end
 
 function best_matching!(merging_graph, vcg, L, R)
@@ -714,9 +750,6 @@ function channel_problem_graphs(ar::AbstractChannelProblem, channel)
             # Now check if crossing is unavoidable
             pt1, nt1 = prev_next_tendency(ar, seg1)
             pt2, nt2 = prev_next_tendency(ar, seg2)
-            # If seg1 and seg2 enter and exit at the same place with same tendency, then crossing
-            # may be avoidable, but this channel can't say which goes on top yet
-            (low1 == high1 && low2 == high2 && pt1 == pt2 && nt1 == nt2) && break
             low1_tend, high1_tend = against_channel(ar, seg1) ? (nt1, pt1) : (pt1, nt1)
             low2_tend, high2_tend = against_channel(ar, seg2) ? (nt2, pt2) : (pt2, nt2)
             avoidable = is_avoidable(
@@ -774,7 +807,7 @@ function _delete_segment!(ar, ws; reset_tracks=true, from_net=true)
 end
 
 """
-    reset_nets!(ar; net_indices=eachindex(ar.net_pins), reset_tracks=true)
+    reset_nets!(ar; net_indices=1:num_nets(ar), reset_tracks=true)
 
 Resets the nets with `net_indices` to their unrouted state.
 
@@ -783,8 +816,9 @@ that contained a deleted segment are cleared — not just the tracks for the del
 This affects other nets sharing those channels. This is intentional: track assignment must be
 globally consistent within a channel.
 """
-function reset_nets!(ar; net_indices=eachindex(ar.net_pins), reset_tracks=true)
-    for segs in net_wire.(ar, net_indices)
+function reset_nets!(ar; net_indices=1:num_nets(ar), reset_tracks=true)
+    for idx in net_indices
+        segs = net_wire(ar, idx)
         for ws in segs
             # delete segment from the router
             # don't delete it from net yet, we'll do that after this loop
@@ -810,8 +844,20 @@ function reroute_nets!(
     net_indices;
     fixed_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}()
 )
-    # Identify all nets sharing channels with the target nets (for caller awareness)
+    _validate_fixed_paths(fixed_paths)
+
+    # Identify all nets sharing old or new channels with the target nets
     affected_nets = Set{Int}(net_indices)
+    _collect_affected_nets!(affected_nets, ar, net_indices)
+
+    reset_nets!(ar; net_indices=net_indices, reset_tracks=true)
+    assign_channels!(ar; net_indices=net_indices, fixed_paths)
+    _collect_affected_nets!(affected_nets, ar, net_indices)
+    assign_tracks!(ar)
+    return affected_nets
+end
+
+function _collect_affected_nets!(affected_nets, ar, net_indices)
     for idx in net_indices
         for ws in net_wire(ar, idx)
             for other_ws in channel_segments(ar, running_channel(ws))
@@ -819,10 +865,6 @@ function reroute_nets!(
             end
         end
     end
-
-    reset_nets!(ar; net_indices=net_indices, reset_tracks=true)
-    assign_channels!(ar; net_indices=net_indices, fixed_paths)
-    assign_tracks!(ar)
     return affected_nets
 end
 
