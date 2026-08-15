@@ -137,8 +137,11 @@ schematic to find their global coordinates. Channels must be provided to the aut
     path, or the pin points the wrong way, graph construction fails.
   - Channels are assumed not to self-intersect; self-intersections are ignored with an
     `@info` message.
-  - Two channels may intersect at most once. Re-entering the same channel pair is not
-    supported.
+  - Two channels may intersect at most once and must cross transversely. Re-entering the
+    same channel pair and tangent or near-tangent intersections are not supported.
+  - Fixed channel paths may not revisit a channel.
+  - Cyclic vertical constraint graphs are not supported. If track constraints form a
+    cycle, track assignment reports the channel and nets involved.
   - Every net in a single `AutoChannelRouting` rule must start at a distinct pin. Nets
     that share a source pin should be split into separate rules (or merged upstream).
   - Track assignment does not care about proximity of slightly misaligned tracks

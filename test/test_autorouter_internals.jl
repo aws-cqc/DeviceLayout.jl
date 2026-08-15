@@ -18,6 +18,47 @@
     bpin(x, y) = PointHook(Point(float(x), float(y)), 270°)
     tpin(x, y) = PointHook(Point(float(x), float(y)), 90°)
 
+    import Graphs
+
+    struct InterfaceOnlyProblem <: Paths.AbstractChannelProblem{Float64}
+        graph::Graphs.SimpleGraph{Int}
+        pin_pairs::Vector{Tuple{Int, Int}}
+        wires::Vector{Paths.NetWire}
+        segments::Vector{Vector{Paths.TrackWireSegment}}
+        tracks::Vector{Vector{Paths.Track}}
+    end
+
+    Paths.channel_graph(prob::InterfaceOnlyProblem) = prob.graph
+    Paths.num_channels(::InterfaceOnlyProblem) = 1
+    Paths.num_nets(prob::InterfaceOnlyProblem) = length(prob.pin_pairs)
+    Paths.num_pins(::InterfaceOnlyProblem) = 2
+    Paths.net_pins(prob::InterfaceOnlyProblem, net) = prob.pin_pairs[net]
+    Paths.net_wire(prob::InterfaceOnlyProblem, net) = prob.wires[net]
+    Paths.channel_segments(prob::InterfaceOnlyProblem, channel) = prob.segments[channel]
+    Paths.channel_tracks(prob::InterfaceOnlyProblem, channel) = prob.tracks[channel]
+    Paths.num_tracks(prob::InterfaceOnlyProblem, channel) = length(prob.tracks[channel])
+    function Paths.pathlength_at_intersection(
+        ::InterfaceOnlyProblem,
+        channel,
+        bounding_vertex
+    )
+        channel == 1 || return 0.0
+        return bounding_vertex == 2 ? 0.0 : 10.0
+    end
+
+    function interface_only_problem()
+        graph = Graphs.SimpleGraph(3)
+        Graphs.add_edge!(graph, 1, 2)
+        Graphs.add_edge!(graph, 1, 3)
+        return InterfaceOnlyProblem(
+            graph,
+            [(1, 2)],
+            [Paths.NetWire()],
+            [Paths.TrackWireSegment[]],
+            [Paths.Track[]]
+        )
+    end
+
     """
     Build a ChannelRouter and run channel assignment only (no track assignment).
     """
@@ -25,6 +66,54 @@
         ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
         Paths.assign_channels!(ar)
         return ar
+    end
+
+    @testset "AbstractChannelProblem interface" begin
+        prob = interface_only_problem()
+        Paths.assign_channels!(prob)
+        @test length(Paths.net_wire(prob, 1)) == 1
+        Paths.reset_nets!(prob)
+        @test isempty(Paths.net_wire(prob, 1))
+        @test isempty(Paths.channel_segments(prob, 1))
+    end
+
+    @testset "contextual graph and geometry errors" begin
+        vcg = Graphs.SimpleDiGraph(3)
+        Graphs.add_edge!(vcg, 1, 2)
+        Graphs.add_edge!(vcg, 2, 1)
+        wiresegs = [
+            Paths.TrackWireSegment(3, 1, 2, 3),
+            Paths.TrackWireSegment(7, 1, 4, 5),
+            Paths.TrackWireSegment(9, 1, 6, 7)
+        ]
+        cycle_error = try
+            Paths._topological_order(vcg, 4, wiresegs)
+            nothing
+        catch err
+            err
+        end
+        @test cycle_error isa ArgumentError
+        @test occursin("channel 4", lowercase(sprint(showerror, cycle_error)))
+        @test occursin(
+            "Nets routed in this channel: [3, 7, 9]",
+            sprint(showerror, cycle_error)
+        )
+
+        angle_error = try
+            Paths._transverse_sine(0.0, 2, 5)
+            nothing
+        catch err
+            err
+        end
+        @test angle_error isa ArgumentError
+        @test occursin("Channel 2", sprint(showerror, angle_error))
+        @test occursin("bounding vertex 5", sprint(showerror, angle_error))
+
+        tol = sqrt(eps(Float64))
+        @test_throws ArgumentError Paths._transverse_sine(tol / 2, 2, 5)
+        @test_throws ArgumentError Paths._transverse_sine(π - tol / 2, 2, 5)
+        @test Paths._transverse_sine(2tol, 2, 5) ≈ sin(2tol)
+        @test Paths._transverse_sine(π - 2tol, 2, 5) ≈ sin(π - 2tol)
     end
 
     # ── is_avoidable ─────────────────────────────────────────────────────────────
@@ -222,6 +311,47 @@
         # Track assignments should still be valid
         new_tracks_net1 = [Paths.segment_track(ar, ws) for ws in Paths.net_wire(ar, 1)]
         @test all(!isnothing, new_tracks_net1)
+
+        original_wires = deepcopy(ar.net_wires)
+        original_tracks = deepcopy(ar.channel_tracks)
+        @test_throws ArgumentError Paths.reroute_nets!(
+            ar,
+            [1];
+            fixed_paths=Dict(1 => [2, 1, 2])
+        )
+        @test ar.net_wires == original_wires
+        @test ar.channel_tracks == original_tracks
+    end
+
+    @testset "partial reroute rebuilds every channel's tracks" begin
+        channels = [
+            vchannel(0, -1, 9),
+            vchannel(10, -1, 9),
+            hchannel(-1, 11, 0),
+            hchannel(-1, 11, 4),
+            hchannel(-1, 11, 8)
+        ]
+        hooks = [
+            lpin(-0.5, 0),
+            lpin(-0.5, 4),
+            lpin(-0.5, 8),
+            rpin(10.5, 0),
+            rpin(10.5, 4),
+            rpin(10.5, 8)
+        ]
+        ar = ChannelRouter([(1, 4), (2, 5), (3, 6)], hooks, RouteChannel.(channels))
+        autoroute!(ar, Paths.StraightAnd90(0.1), 0.1)
+        original_track_counts = length.(ar.channel_tracks)
+
+        Paths.reroute_nets!(ar, [1]; fixed_paths=Dict(1 => [1, 3, 2]))
+
+        @test length.(ar.channel_tracks) == original_track_counts
+        for channel in eachindex(ar.channel_segments)
+            assigned =
+                reduce(vcat, ar.channel_tracks[channel]; init=Paths.TrackWireSegment[])
+            @test Set(assigned) == Set(ar.channel_segments[channel])
+            @test length(assigned) == length(unique(assigned))
+        end
     end
 
     # ── best_matching! bipartite shape ───────────────────────────────────────

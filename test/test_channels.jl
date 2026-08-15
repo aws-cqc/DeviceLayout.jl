@@ -180,6 +180,41 @@
             end
         end
     end
+    @testset "B-spline channel-section endpoint clamping" begin
+        channel = Path(0.0μm, 0.0μm)
+        bspline!(
+            channel,
+            [Point(0.5, 0.5)mm, Point(1.0mm, 0.0μm)],
+            0°,
+            Paths.Trace(100μm),
+            auto_speed=true,
+            auto_curvature=true
+        )
+        ch = RouteChannel(channel)
+        L = pathlength(ch.node.seg)
+        start = L / 4
+
+        section = Paths.segment_channel_section(ch, start, L + 1μm, 0μm, 0μm)
+        @test p0(section.seg) ≈ ch.node.seg(start) atol = 1nm
+        @test p1(section.seg) ≈ p1(ch.node.seg) atol = 1nm
+
+        reversed_section = Paths.segment_channel_section(ch, L + 1μm, start, 0μm, 0μm)
+        @test p0(reversed_section.seg) ≈ p1(ch.node.seg) atol = 1nm
+        @test p1(reversed_section.seg) ≈ ch.node.seg(start) atol = 1nm
+
+        for (wireseg_start, wireseg_stop, expected_point) in (
+            (-2μm, -1μm, p0(ch.node.seg)),
+            (-1μm, -2μm, p0(ch.node.seg)),
+            (L + 1μm, L + 2μm, p1(ch.node.seg)),
+            (L + 2μm, L + 1μm, p1(ch.node.seg))
+        )
+            clamped_section =
+                Paths.segment_channel_section(ch, wireseg_start, wireseg_stop, 0μm, 0μm)
+            @test iszero(pathlength(clamped_section.seg))
+            @test p0(clamped_section.seg) ≈ expected_point atol = 1nm
+        end
+    end
+
     # Channel too short
     pa = Path(0.0nm, 0.0nm)
     straight!(pa, 100nm, Paths.Trace(0.1mm))
@@ -339,6 +374,14 @@ end
 
         Paths.assign_channels!(ar)
         Paths.assign_tracks!(ar)
+
+        @test all(!isempty, ar.net_wires)
+        for channel in eachindex(ar.channel_segments)
+            assigned =
+                reduce(vcat, ar.channel_tracks[channel]; init=Paths.TrackWireSegment[])
+            @test Set(assigned) == Set(ar.channel_segments[channel])
+            @test length(assigned) == length(unique(assigned))
+        end
 
         c = Paths.visualize_router_state(ar)
         return c
