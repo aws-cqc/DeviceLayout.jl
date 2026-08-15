@@ -154,6 +154,23 @@
     # The knock-knee relaxation (strict < instead of <=) should NOT apply when
     # segments at a shared endpoint face the same direction.
 
+    @testset "merged track groups respect all VCG constraints" begin
+        vcg = Graphs.SimpleDiGraph(6)
+        Graphs.add_edge!(vcg, 6, 5)
+        group_a = [1, 6]
+        group_b = [2, 5]
+        merged_groups =
+            Dict(1 => group_a, 6 => group_a, 2 => group_b, 5 => group_b, 3 => [3], 4 => [4])
+        wiresegs = [Paths.TrackWireSegment(i, 1, 2, 3) for i = 1:6]
+
+        groups = Paths._merged_group_topological_order(vcg, merged_groups, 1, wiresegs)
+        position_a = findfirst(==(group_a), groups)
+        position_b = findfirst(==(group_b), groups)
+
+        @test position_a < position_b
+        @test sort!(reduce(vcat, groups)) == collect(1:6)
+    end
+
     @testset "segments_overlap boundary" begin
         # Crossing setup: 2H + 1V, two nets that cross in the vertical channel.
         # v_mid assigned first so its track offsets propagate.
