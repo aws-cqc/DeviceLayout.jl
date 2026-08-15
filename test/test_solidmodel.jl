@@ -1926,13 +1926,13 @@ end
         import SpatialIndexing
         sm = SolidModel("get_or_add_point_multi"; overwrite=true)
         k = SolidModels.kernel(sm)
-        tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        cache = SolidModels.PointsCache()
         t1 = SolidModels._get_or_add_point!(
             k,
             0.0,
             0.0,
             0.0,
-            tree;
+            cache;
             atol=SolidModels.POINT_MERGE_ATOL
         )
         t2 = SolidModels._get_or_add_point!(
@@ -1940,14 +1940,14 @@ end
             0.1,
             0.0,
             0.0,
-            tree;
+            cache;
             atol=SolidModels.POINT_MERGE_ATOL
         )
         @test t1 != t2
         # (0.02, 0, 0) with wide atol catches both; closer is t1.
-        @test SolidModels._get_or_add_point!(k, 0.02, 0.0, 0.0, tree; atol=1.0) == t1
+        @test SolidModels._get_or_add_point!(k, 0.02, 0.0, 0.0, cache; atol=1.0) == t1
         # (0.08, 0, 0) with the same wide atol — closer is t2.
-        @test SolidModels._get_or_add_point!(k, 0.08, 0.0, 0.0, tree; atol=1.0) == t2
+        @test SolidModels._get_or_add_point!(k, 0.08, 0.0, 0.0, cache; atol=1.0) == t2
         SolidModels.gmsh.finalize()
     end
 
@@ -1958,14 +1958,14 @@ end
         import SpatialIndexing
         sm = SolidModel("get_or_add_point_tie"; overwrite=true)
         k = SolidModels.kernel(sm)
-        tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        cache = SolidModels.PointsCache()
         # Symmetric pair around the origin.
         t_neg = SolidModels._get_or_add_point!(
             k,
             -0.1,
             0.0,
             0.0,
-            tree;
+            cache;
             atol=SolidModels.POINT_MERGE_ATOL
         )
         t_pos = SolidModels._get_or_add_point!(
@@ -1973,30 +1973,30 @@ end
             0.1,
             0.0,
             0.0,
-            tree;
+            cache;
             atol=SolidModels.POINT_MERGE_ATOL
         )
         @test t_neg < t_pos  # insertion order gives ascending tags
         # Query at exact midpoint — both candidates equidistant. Must
         # return the lower tag deterministically.
-        @test SolidModels._get_or_add_point!(k, 0.0, 0.0, 0.0, tree; atol=1.0) == t_neg
+        @test SolidModels._get_or_add_point!(k, 0.0, 0.0, 0.0, cache; atol=1.0) == t_neg
         SolidModels.gmsh.finalize()
     end
 
     @testset "_get_or_add_point! recovers from stale RTree tag" begin
         # `k.cut` can retag or delete points after they were inserted into the
-        # points_tree. A subsequent lookup that finds a stale tag must fall
+        # points_cache. A subsequent lookup that finds a stale tag must fall
         # back to a fresh `add_point` and drop the stale entry from the tree.
         import SpatialIndexing
         sm = SolidModel("get_or_add_point_stale"; overwrite=true)
         k = SolidModels.kernel(sm)
-        tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        cache = SolidModels.PointsCache()
         stale = SolidModels._get_or_add_point!(
             k,
             3.0,
             4.0,
             0.0,
-            tree;
+            cache;
             atol=SolidModels.POINT_MERGE_ATOL
         )
         # Simulate `k.cut` removing the point — the RTree still holds the
@@ -2004,7 +2004,7 @@ end
         # marked stale exactly the way `_add_to_current_solidmodel!` does
         # after a real `k.cut`.
         k.remove([(0, stale)])
-        SolidModels._mark_points_stale!()
+        SolidModels._mark_points_stale!(cache)
         @test try
             k.getBoundingBox(0, stale)
             false
@@ -2020,7 +2020,7 @@ end
             3.0,
             4.0,
             0.0,
-            tree;
+            cache;
             atol=SolidModels.POINT_MERGE_ATOL
         )
         @test try
@@ -2032,7 +2032,7 @@ end
         # And the tree should now hold exactly one entry for this coordinate,
         # pointing at the live tag (the stale entry was dropped and replaced).
         reg = SpatialIndexing.Rect((2.9, 3.9, -0.1), (3.1, 4.1, 0.1))
-        remaining = collect(SpatialIndexing.contained_in(tree, reg))
+        remaining = collect(SpatialIndexing.contained_in(cache.tree, reg))
         @test length(remaining) == 1
         @test remaining[1].val == fresh
         SolidModels.gmsh.finalize()
