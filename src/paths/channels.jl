@@ -24,6 +24,24 @@ function RouteChannel(pa::Path{T}) where {T}
 end
 
 # Return a node corresponding to the section of the channel that the segment actually runs through
+function _channel_section(node::Node{T}, start, stop) where {T}
+    L = pathlength(node.seg)
+    start = clamp(start, zero(T), L)
+    stop = clamp(stop, zero(T), L)
+    start <= stop || throw(ArgumentError("Channel-section bounds must be ordered."))
+
+    if start == stop
+        return Node(
+            Straight(zero(T); p0=node.seg(start), α0=direction(node.seg, start)),
+            SimpleTrace(width(node.sty, start))
+        )
+    end
+    iszero(start) && stop == L && return node
+    iszero(start) && return split(node, stop)[1]
+    stop == L && return split(node, start)[2]
+    return split(node, [start, stop])[2]
+end
+
 function segment_channel_section(
     ch::RouteChannel{T},
     wireseg_start,
@@ -37,7 +55,8 @@ function segment_channel_section(
     if abs(d) <= 2 * margin + prev_width / 2 + next_width / 2
         # handle case where margin consumes entire segment
         # Just have a zero length Straight at the midpoint
-        track_mid = (wireseg_start + wireseg_stop) / 2
+        track_mid =
+            clamp((wireseg_start + wireseg_stop) / 2, zero(T), pathlength(ch.node.seg))
         midpoint = ch.node.seg(track_mid)
         middir = direction(ch.node.seg, track_mid)
         channel_section = Node(
@@ -45,22 +64,18 @@ function segment_channel_section(
             SimpleTrace(width(ch.node.sty, track_mid))
         )
     elseif d > zero(d) # segment is along channel direction
-        channel_section = split(
+        channel_section = _channel_section(
             ch.node,
-            [
-                max(zero(T), wireseg_start + margin + prev_width / 2),
-                min(pathlength(ch.node.seg), wireseg_stop - margin - next_width / 2)
-            ]
-        )[2]
+            wireseg_start + margin + prev_width / 2,
+            wireseg_stop - margin - next_width / 2
+        )
     elseif d < zero(d) # segment is counter to channel direction
         channel_section = reverse(
-            split(
+            _channel_section(
                 ch.node,
-                [
-                    max(zero(T), wireseg_stop + margin + next_width / 2)
-                    min(pathlength(ch.node.seg), wireseg_start - margin - prev_width / 2)
-                ]
-            )[2]
+                wireseg_stop + margin + next_width / 2,
+                wireseg_start - margin - prev_width / 2
+            )
         )
     end
     return channel_section

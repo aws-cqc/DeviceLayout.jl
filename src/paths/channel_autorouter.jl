@@ -263,12 +263,13 @@ end
 """
     autoroute!(ar::ChannelRouter, transition_rule, margin; net_indices, fixed_channel_paths, verbose)
 
-Perform channel and track assigment, then make routes.
+Perform channel and track assignment, then make routes.
 
 Routes only the nets in `net_indices`. If the net is already routed, it is reset. A route
 for a net can be specified in `fixed_channel_paths` by the indices of the channels the route
-takes. For example, `fixed_channel_paths=Dict(1 => [2, 4, 1, 5])` will force net 1 to be
-routed from its source pin, through channels 2, 4, 1, 5 in order, then to its destination pin.
+takes. Each channel may appear at most once in a fixed path. For example,
+`fixed_channel_paths=Dict(1 => [2, 4, 1, 5])` will force net 1 to be routed from its source
+pin, through channels 2, 4, 1, 5 in order, then to its destination pin.
 
 If `verbose=true`, prints a summary of routing results including net count and track usage.
 """
@@ -276,11 +277,11 @@ function autoroute!(
     ar::ChannelRouter,
     transition_rule,
     margin;
-    net_indices=eachindex(ar.net_pins),
+    net_indices=1:num_nets(ar),
     fixed_channel_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}(),
     verbose=false
 )
-    affected_nets = reroute_nets!(ar, net_indices; fixed_paths=fixed_channel_paths)
+    reroute_nets!(ar, net_indices; fixed_paths=fixed_channel_paths)
     rule = AutoChannelRouting(ar, transition_rule, margin)
     routes = make_routes!(ar, rule)
 
@@ -306,9 +307,9 @@ end
 ######## Route construction
 
 """
-    make_routes!(ar::ChannelRouter, rule; net_indices=eachindex(ar.net_pins))
+    make_routes!(ar::ChannelRouter, rule)
 
-Using channel and track assignments, create `Route`s for the nets in `net_indices`.
+Using channel and track assignments, create a `Route` for every net.
 """
 function make_routes!(ar::ChannelRouter{T}, rule) where {T}
     empty!(ar.net_routes)
