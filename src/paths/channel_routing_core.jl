@@ -590,22 +590,64 @@ function assign_tracks_matching!(ar, channel)
     end
     # Assign merged groups to tracks according to VCG
     tracks = channel_tracks(ar, channel)
-    # At the end of this process, segments are merged into layers in the VCG
-    # The longest directed path gives a representative of each merged group where track height is max
-    # But VCG may be a partial order so use topological sort
-    high_to_low = _topological_order(vcg, channel, wiresegs_ascending)
     for v = 1:nv(vcg)
         if !haskey(merged_groups, v)
             merged_groups[v] = [v]
         end
     end
-    assigned = Int[]
-    for v in high_to_low # high in vcg => low track index
-        # Create a track with `v` and all others merged with it
-        v in assigned && continue
-        push!(tracks, wiresegs_ascending[merged_groups[v]])
-        append!(assigned, merged_groups[v])
+    for group in
+        _merged_group_topological_order(vcg, merged_groups, channel, wiresegs_ascending)
+        push!(tracks, wiresegs_ascending[group])
     end
+end
+
+function _merged_group_topological_order(vcg, merged_groups, channel, wiresegs)
+    groups = Vector{Vector{Int}}()
+    group_for_vertex = zeros(Int, nv(vcg))
+    for v = 1:nv(vcg)
+        !iszero(group_for_vertex[v]) && continue
+        group = merged_groups[v]
+        push!(groups, group)
+        group_idx = length(groups)
+        for member in group
+            group_for_vertex[member] = group_idx
+        end
+    end
+
+    # Tracks correspond to merged groups, not individual VCG vertices. Sorting vertices
+    # and taking the first member of each group can violate a constraint between later
+    # members, so sort the quotient graph whose vertices are the merged groups.
+    group_vcg = SimpleDiGraph(length(groups))
+    for edge in edges(vcg)
+        source_group = group_for_vertex[edge.src]
+        destination_group = group_for_vertex[edge.dst]
+        source_group == destination_group && throw(
+            ArgumentError(
+                "Merged track group in channel $channel contains a vertical constraint."
+            )
+        )
+        add_edge!(group_vcg, source_group, destination_group)
+    end
+    group_wiresegs = [wiresegs[first(group)] for group in groups]
+    is_cyclic(group_vcg) && _topological_order(group_vcg, channel, group_wiresegs)
+
+    # Preserve interval order when the VCG leaves groups incomparable instead of
+    # inheriting DFS traversal order as an arbitrary track-order tie-break.
+    indegrees = length.(inneighbors.(Ref(group_vcg), 1:nv(group_vcg)))
+    available = findall(iszero, indegrees)
+    high_to_low = Int[]
+    while !isempty(available)
+        group_idx = popfirst!(available)
+        push!(high_to_low, group_idx)
+        for child in outneighbors(group_vcg, group_idx)
+            indegrees[child] -= 1
+            if iszero(indegrees[child])
+                push!(available, child)
+                sort!(available)
+            end
+        end
+    end
+    return groups[high_to_low]
 end
 
 function _topological_order(vcg, channel, wiresegs)
