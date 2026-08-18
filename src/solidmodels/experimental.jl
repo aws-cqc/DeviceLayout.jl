@@ -11,7 +11,7 @@ import ..SolidModels: SolidModel
 
 import DeviceLayout: datatype, gdslayer, layer, layerindex, name, render!
 
-include("experimental/types.jl")
+include("experimental/entitymeta.jl")
 include("experimental/stack.jl")
 include("experimental/registry.jl")
 include("experimental/compiler.jl")
