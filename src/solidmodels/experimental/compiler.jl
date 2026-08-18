@@ -193,21 +193,21 @@ function _compile_extrude!(
     new_records = PGRecord[]
 
     # Helper: register `bnd_pg` (the full boundary of an interior solid produced by a
-    # `keep_interior=false` extrusion) under the synthetic _EXTBND_MISC_LAYER layer.
+    # `keep_interior=false` extrusion) under the synthetic `:EXTBND_MISC` layer.
     # After the interior solid is subtracted from surrounding volumes by
-    # `_flush_interior_solids!`,
-    # this boundary becomes an exterior boundary of the final mesh. Tagging it via
-    # _EXTBND_MISC_LAYER lets `_deduplicate_2d_pgs!` split off any sub-PG whose faces are
+    # `_flush_interior_solids!`, this boundary becomes an exterior boundary of the final
+    # mesh. Tagging it via `:EXTBND_MISC` lets `_deduplicate_2d_pgs!` split off any sub-PG
+    # whose faces are
     # exterior-only (or shared with another layer) from sub-PGs whose faces are
     # purely interior interfaces, avoiding the "mixed boundary attribute" warning
     # that Palace emits for PGs containing both kinds of faces.
     function _register_extbnd_misc!(bnd_pg, entity_meta)
-        if !haskey(registry, _EXTBND_MISC_LAYER)
-            registry[_EXTBND_MISC_LAYER] = LayerState(PGRecord[], 2)
+        if !haskey(registry, :EXTBND_MISC)
+            registry[:EXTBND_MISC] = LayerState(PGRecord[], 2)
         end
         return push!(
-            registry[_EXTBND_MISC_LAYER].pgs,
-            PGRecord(bnd_pg, _EXTBND_MISC_LAYER, entity_meta)
+            registry[:EXTBND_MISC].pgs,
+            PGRecord(bnd_pg, :EXTBND_MISC, entity_meta)
         )
     end
 
