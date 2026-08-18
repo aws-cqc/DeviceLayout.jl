@@ -376,7 +376,7 @@ function find_terminals(
     for (idx, cc) in enumerate(ccs)
         cc_str = join(sort(["$(d),$(t)" for (d, t) in cc]), "&")
         digest = sha1(cc_str)
-        cc_name = string(_METAL_CC_LAYER) * "__" * bytes2hex(digest)[1:16]
+        cc_name = string(:METAL_CC) * "__" * bytes2hex(digest)[1:16]
         cc_names[idx] = cc_name
         sm[cc_name] = cc
         cc_locators[cc_name] = String[]
@@ -735,7 +735,7 @@ function remap_to_visualization_pgs!(sm::SolidModel, visualization_metadata::Abs
 
     # Pass 1: layers (skip METAL_CC and 3D layers).
     for (layer_name, layer_data) in layers
-        layer_name == string(_METAL_CC_LAYER) && continue
+        layer_name == string(:METAL_CC) && continue
         get(layer_data, "dim", 2) == 2 || continue
         pg_names = get(layer_data, "pgs", String[])
         entity_tags = _union_entity_tags(pg_names)

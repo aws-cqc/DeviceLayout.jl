@@ -248,8 +248,6 @@ function _validate_layer_operation(operation, operation_idx::Integer)
     return nothing
 end
 
-const _EXTBND_MISC_LAYER = :EXTBND_MISC
-const _METAL_CC_LAYER = :METAL_CC
 const _EXTERIOR_BOUNDARY_LAYERS = Dict(
     ("X", "min") => :EXTBND_XMIN,
     ("X", "max") => :EXTBND_XMAX,

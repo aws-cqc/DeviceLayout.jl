@@ -302,10 +302,10 @@ function render!(
                 keys(terminal_result.terminals),
                 terminal_result.ground
             ))
-                push!(cc_records, PGRecord(cc_name, _METAL_CC_LAYER, nothing))
+                push!(cc_records, PGRecord(cc_name, :METAL_CC, nothing))
             end
             isempty(cc_records) ||
-                (final_registry[_METAL_CC_LAYER] = LayerState(cc_records, 2))
+                (final_registry[:METAL_CC] = LayerState(cc_records, 2))
 
             tag_records, cc_entity_tags, interface_layer_parents =
                 _capture_finalization_inputs(
