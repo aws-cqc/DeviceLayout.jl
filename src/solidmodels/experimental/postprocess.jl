@@ -627,51 +627,85 @@ function _resolve_entity_pgs(
 end
 
 """
-    _split_shared_cc_pgs!(sm, cc_entity_tags)
+    _split_shared_cc_pgs!(sm, registry, split_results, cc_entity_tags)
 
-Split any 2D PG that contains entities from multiple CCs into per-CC sub-PGs.
+Split any 2D PG containing entities from multiple CCs into content-addressed sub-PGs and
+update the registry and prior layer-partition results to reference them.
 """
-function _split_shared_cc_pgs!(sm::SolidModel, cc_entity_tags::Dict{String, Vector{Int32}})
-    # Build entity → CC name map
-    entity_to_cc = Dict{Int32, String}()
-    for (cc_name, tags) in cc_entity_tags
-        for t in tags
-            entity_to_cc[t] = cc_name
-        end
-    end
+function _split_shared_cc_pgs!(
+    sm::SolidModel,
+    registry::Registry,
+    split_results::AbstractDict,
+    cc_entity_tags::Dict{String, Vector{Int32}}
+)
+    entity_to_cc = Dict{Int32, String}(
+        tag => cc_name for (cc_name, tags) in cc_entity_tags for tag in tags
+    )
+    Signature = Tuple{Vararg{Symbol}}
 
-    # Find PGs that contain entities from multiple CCs
     for (pg_name, pg) in collect(SolidModels.dimgroupdict(sm, 2))
-        pg_tags = SolidModels.entitytags(pg)
-        # Group this PG's entities by which CC they belong to
         cc_groups = Dict{String, Vector{Int32}}()
         non_cc_tags = Int32[]
-        for t in pg_tags
-            cc_name = get(entity_to_cc, t, nothing)
-            if !isnothing(cc_name)
-                push!(get!(Vector{Int32}, cc_groups, cc_name), t)
+        for tag in SolidModels.entitytags(pg)
+            cc_name = get(entity_to_cc, tag, nothing)
+            if isnothing(cc_name)
+                push!(non_cc_tags, tag)
             else
-                push!(non_cc_tags, t)
+                push!(get!(Vector{Int32}, cc_groups, cc_name), tag)
+            end
+        end
+        length(cc_groups) <= 1 && continue
+
+        cc_names = sort!(collect(keys(cc_groups)))
+        tag_groups = [vcat(non_cc_tags, cc_groups[first(cc_names)])]
+        append!(tag_groups, [cc_groups[cc_name] for cc_name in cc_names[2:end]])
+
+        sub_names = String[]
+        for tags in tag_groups
+            dimtags_str = join(sort(["2,$tag" for tag in tags]), "&")
+            sub_name = "__" * bytes2hex(sha1(dimtags_str))[1:16]
+            sm[sub_name] = Tuple{Int32, Int32}[(Int32(2), tag) for tag in tags]
+            push!(sub_names, sub_name)
+        end
+
+        registered_layers = Symbol[]
+        for (layer_name, state) in registry
+            state.dim == 2 || continue
+            matching_records = filter(record -> record.name == pg_name, state.pgs)
+            isempty(matching_records) && continue
+            push!(registered_layers, layer_name)
+            filter!(record -> record.name != pg_name, state.pgs)
+
+            entity_meta = first(matching_records).entity_meta
+            for sub_name in sub_names
+                any(record -> record.name == sub_name, state.pgs) && continue
+                push!(state.pgs, PGRecord(sub_name, layer_name, entity_meta))
             end
         end
 
-        # If entities from 2+ CCs are in this PG, split it
-        length(cc_groups) <= 1 && continue
-
-        # Keep non-CC entities + first CC's entities in the original PG
-        cc_names_sorted = sort(collect(keys(cc_groups)))
-        keep_cc = cc_names_sorted[1]
-        keep_tags = vcat(non_cc_tags, cc_groups[keep_cc])
-        sm[pg_name] = Tuple{Int32, Int32}[(Int32(2), t) for t in keep_tags]
-
-        # Create new sub-PGs for remaining CCs
-        for cc_name in cc_names_sorted[2:end]
-            tags = cc_groups[cc_name]
-            dimtags_str = join(sort(["2,$(t)" for t in tags]), "&")
-            digest = sha1(dimtags_str)
-            sub_name = "__" * bytes2hex(digest)[1:16]
-            sm[sub_name] = Tuple{Int32, Int32}[(Int32(2), t) for t in tags]
+        replaced_in_split_results = false
+        for original_name in collect(keys(split_results))
+            sub_pgs = split_results[original_name]
+            updated_sub_pgs = similar(sub_pgs, 0)
+            for (sub_name, signature) in sub_pgs
+                if sub_name == pg_name
+                    append!(updated_sub_pgs, [(name, signature) for name in sub_names])
+                    replaced_in_split_results = true
+                else
+                    push!(updated_sub_pgs, (sub_name, signature))
+                end
+            end
+            split_results[original_name] = unique(updated_sub_pgs)
         end
+        if !replaced_in_split_results
+            signature = Tuple(sort!(unique(registered_layers)))
+            split_results[pg_name] =
+                Tuple{String, Signature}[(sub_name, signature) for sub_name in sub_names]
+        end
+
+        grouptag = sm[pg_name, 2].grouptag
+        SolidModels.gmsh.model.removePhysicalGroups([(2, grouptag)])
+        delete!(SolidModels.dimgroupdict(sm, 2), pg_name)
     end
     return nothing
 end
