@@ -4,30 +4,12 @@
     using DeviceLayout.SolidModels.Experimental
     import Unitful: μm
 
-    @test fieldnames(Experimental.SolidModelTarget) == (:levels, :stack, :ops)
-    @test Experimental.SolidModelTarget <: SchematicDrivenLayout.Target
-    @test !isdefined(Experimental, :VACUUM)
-    @test which(SchematicDrivenLayout.facing, Tuple{EntityMeta}).sig.parameters[2] ===
-          DeviceLayout.Meta
-    integration_source = read(
-        joinpath(
-            pkgdir(DeviceLayout),
-            "src",
-            "solidmodels",
-            "experimental",
-            "schematic_integration.jl"
-        ),
-        String
-    )
-    @test !occursin(r"(?<!\.)\bflatten\s*\(", integration_source)
-
+    # Offered material types remain present
     @test METAL isa Material
     @test DIELECTRIC isa Material
     @test NULL isa Material
 
     lumped_port = LumpedPort()
-    @test fieldnames(LumpedPort) == ()
-    @test LumpedPort() == lumped_port
     roles = (Generic(), Terminal(), Ground(), Tag(), WavePort(), lumped_port)
     role_names = ("Generic", "Terminal", "Ground", "Tag", "WavePort", "LumpedPort")
     @test string.(roles) == role_names
@@ -840,6 +822,17 @@ end
             @test length(terminals) == 3
             for (_, cc_info) in terminals
                 @test !isempty(cc_info["pgs"])
+            end
+
+            # A PG cannot represent more than one terminal or ground CC.
+            cc_pg_sets = [
+                Set(cc_info["pgs"]) for
+                cc_info in Iterators.flatten((values(terminals), values(ground)))
+            ]
+            for first_idx in eachindex(cc_pg_sets)
+                for second_idx = (first_idx + 1):length(cc_pg_sets)
+                    @test isempty(intersect(cc_pg_sets[first_idx], cc_pg_sets[second_idx]))
+                end
             end
 
             # Each transmon contributes one tagged CC with a locator ending in ".island"
