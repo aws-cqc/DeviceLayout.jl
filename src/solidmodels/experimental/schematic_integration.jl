@@ -315,7 +315,7 @@ function render!(
                     terminal_result
                 )
             split_results = _deduplicate_2d_pgs!(sm, final_registry)
-            _split_shared_cc_pgs!(sm, cc_entity_tags)
+            _split_shared_cc_pgs!(sm, final_registry, split_results, cc_entity_tags)
 
             return serialize_metadata(
                 final_registry,
