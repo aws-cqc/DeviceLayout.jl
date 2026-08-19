@@ -1176,13 +1176,13 @@ function render!(
     return _render_orchestrator!(
         sm,
         cs;
-        (emit!)=(els, meta, k; zmap, points_tree, kwargs...) ->
+        (emit!)=(els, meta, k; zmap, points_cache, kwargs...) ->
             _add_to_current_solidmodel!(
                 els,
                 meta,
                 k;
                 zmap=zmap,
-                points_tree=points_tree,
+                points_cache=points_cache,
                 kwargs...
             ),
         (fragment!)=_fragment_three_pass!,
@@ -1211,7 +1211,7 @@ end
 
 # Shared orchestrator body called by both `render!` and `render_conformal!`.
 # The two entry points differ only in:
-#   - `emit!(els, meta, k; zmap, points_tree, kwargs...)`: how OCC entities are
+#   - `emit!(els, meta, k; zmap, points_cache, kwargs...)`: how OCC entities are
 #     added for a metadata group. Stock uses `_add_to_current_solidmodel!`;
 #     conformal wraps `_add_conformal!` closing over the caller's context.
 #   - `fragment!(sm)`: post-postrender fragment pass. Stock always runs the
@@ -1258,8 +1258,9 @@ function _render_orchestrator!(
     mesh_seen = Set{_MeshControlPointRecord}()
     mesh_points_by_group = _MeshControlPointOwners()
 
-    # Create RTree for avoiding duplicating points
-    points_tree = RTree{Float64, 3}(Int32)
+    # Point-dedup cache: R-tree of previously inserted OCC dim-0 entities,
+    # plus a set of live tags kept in sync with OCC's set via a stale flag.
+    points_cache = PointsCache()
 
     # Build set of used layer names for skip_unused_layers optimization
     used_names = if skip_unused_layers
@@ -1283,7 +1284,7 @@ function _render_orchestrator!(
 
         # Add to model using kernel via the strategy-specific emit function.
         group_dimtags_unflattened =
-            emit!(els, meta, kernel(sm); zmap=zmap, points_tree=points_tree, kwargs...)
+            emit!(els, meta, kernel(sm); zmap=zmap, points_cache=points_cache, kwargs...)
 
         group_dimtags = reduce(vcat, group_dimtags_unflattened, init=Tuple{Int32, Int32}[])
         # If group already exists, add to it
@@ -1514,13 +1515,41 @@ function _get_boundary_points(dts)
 end
 
 const POINT_MERGE_ATOL = 1e-9 # in STP_UNIT, i.e. atol=1e-6nm
-function _get_or_add_points!(k, pts_xy, z, points_tree; atol=POINT_MERGE_ATOL)
+
+"""
+    PointsCache
+
+Orchestrator-local state for point deduplication during a `render!` /
+`render_conformal!` pass. Bundles together:
+
+  - `tree` — an `RTree` of previously inserted OpenCASCADE dim-0 entities,
+    keyed by coordinate.
+  - `live` — the set of dim-0 tags known to still be live in OCC. Populated
+    on every insert.
+  - `stale` — set to `true` after any boolean op that can retag or delete
+    dim-0 entities (currently only `k.cut` inside
+    `_add_to_current_solidmodel!(::CurvilinearRegion)`), and reset to
+    `false` by `_refresh_live_points!` the next time a liveness check
+    needs to know.
+
+`_render_orchestrator!` creates one `PointsCache` per pass and threads it
+through the emit-callback into `_add_to_current_solidmodel!` /
+`_add_conformal!`.
+"""
+mutable struct PointsCache
+    tree::RTree{Float64, 3, SpatialIndexing.SpatialElem{Float64, 3, Nothing, Int32}}
+    live::Set{Int32}
+    stale::Bool
+end
+PointsCache() = PointsCache(RTree{Float64, 3}(Int32), Set{Int32}(), true)
+
+function _get_or_add_points!(k, pts_xy, z, points_cache; atol=POINT_MERGE_ATOL)
     return _get_or_add_point!.(
         k,
         getx.(pts_xy),
         gety.(pts_xy),
         z,
-        Ref(points_tree);
+        Ref(points_cache);
         atol=atol
     )
 end
@@ -1530,7 +1559,7 @@ function _get_or_add_point!(
     x::Length,
     y::Length,
     z::Length,
-    points_tree;
+    points_cache;
     atol=POINT_MERGE_ATOL
 )
     return _get_or_add_point!(
@@ -1538,7 +1567,7 @@ function _get_or_add_point!(
         float(ustrip(STP_UNIT, x)),
         float(ustrip(STP_UNIT, y)),
         float(ustrip(STP_UNIT, z)),
-        points_tree,
+        points_cache,
         atol=atol
     )
 end
@@ -1548,7 +1577,7 @@ function _get_or_add_point!(
     x::Float64,
     y::Float64,
     z::Float64,
-    points_tree::Nothing;
+    points_cache::Nothing;
     atol=POINT_MERGE_ATOL
 )
     return k.add_point(x, y, z)
@@ -1559,7 +1588,7 @@ function _get_or_add_point!(
     x::Float64,
     y::Float64,
     z::Float64,
-    points_tree::RTree;
+    points_cache::PointsCache;
     atol=POINT_MERGE_ATOL
 )
     return k.add_point(x, y, z)
@@ -1570,27 +1599,69 @@ function _get_or_add_point!(
     x::Float64,
     y::Float64,
     z::Float64,
-    points_tree::RTree;
+    points_cache::PointsCache;
     atol=POINT_MERGE_ATOL
 )
     reg =
         SpatialIndexing.Rect((x - atol, y - atol, z - atol), (x + atol, y + atol, z + atol))
-    if isempty(points_tree, reg)
-        tag = k.add_point(x, y, z)
-        insert!(points_tree, SpatialIndexing.Point((x, y, z)), tag)
-        return tag
+    while true
+        pts = SpatialIndexing.contained_in(points_cache.tree, reg)
+        if isempty(pts)
+            tag = k.add_point(x, y, z)
+            insert!(points_cache.tree, SpatialIndexing.Point((x, y, z)), tag)
+            push!(points_cache.live, tag)
+            return tag
+        end
+        # If multiple candidate points fall in the tolerance box, tie-break
+        # deterministically by (distance, tag) — R-tree iteration order is
+        # not guaranteed deterministic across builds/versions, so we can't
+        # rely on `first(pts)` alone.
+        E = eltype(pts)
+        best_elem = nothing
+        best_d2 = Inf
+        for pt::E in pts
+            if isnothing(best_elem)
+                best_elem = pt
+                best_d2 = _point_d2(x, y, z, best_elem.mbr.low)
+                continue
+            end
+            d2 = _point_d2(x, y, z, pt.mbr.low)
+            if (d2 < best_d2) || (d2 == best_d2 && pt.val < best_elem.val)
+                best_d2 = d2
+                best_elem = pt
+            end
+        end
+        # Verify the tag still refers to a live OpenCASCADE dim-0 entity.
+        # Boolean ops (e.g. `k.cut`) can retag or delete entities after we
+        # inserted them; if the tag is stale we drop it and retry.
+        if _is_live_point(k, points_cache, best_elem.val)
+            return best_elem.val
+        end
+        delete!(points_cache.tree, best_elem.mbr)
     end
-    pts = SpatialIndexing.contained_in(points_tree, reg)
-    tag = only(pts).val
-    current_points = k.get_entities(0)
-    if tag in last.(current_points)
-        return tag
-    end
-    # point must have gotten relabeled — can happen if you're trying to connect to a point that was on a hole
-    # just add the point again, don't bother with the tree
-    # (for some reason k.get_entities_in_bounding_box may not find the point either, even with a +/- 1nm box)
-    tag = k.add_point(x, y, z)
-    return tag
+end
+
+# Squared distance from (x, y, z) to a SpatialIndexing point-Rect (low == high).
+@inline function _point_d2(x, y, z, c)
+    dx = x - c[1]
+    dy = y - c[2]
+    dz = z - c[3]
+    return dx * dx + dy * dy + dz * dz
+end
+
+function _refresh_live_points!(k, cache::PointsCache)
+    empty!(cache.live)
+    union!(cache.live, Iterators.map(last, k.get_entities(0)))
+    cache.stale = false
+    return nothing
+end
+
+_mark_points_stale!(cache::PointsCache) = (cache.stale = true; nothing)
+_mark_points_stale!(::Nothing) = nothing
+
+function _is_live_point(k, cache::PointsCache, tag)
+    cache.stale && _refresh_live_points!(k, cache)
+    return tag in cache.live
 end
 
 # Add primitives to solid model
@@ -1599,13 +1670,13 @@ function _add_to_current_solidmodel!(
     m::Meta,
     k;
     zmap=(_) -> zero(T),
-    points_tree=nothing,
+    points_cache=nothing,
     atol=DeviceLayout.onenanometer(T),
     kwargs...
 ) where {T}
     z = zmap(m) # map from m using kwargs
     # Add as curve loop to get point deduplication
-    loop = _add_loop!(CurvilinearPolygon(points(poly)), k, z; points_tree, atol)
+    loop = _add_loop!(CurvilinearPolygon(points(poly)), k, z; points_cache, atol)
     surf = k.add_plane_surface([loop])
 
     return (Int32(2), surf)
@@ -1616,9 +1687,9 @@ _add_to_current_solidmodel!(
     m::Meta,
     k;
     zmap=(_) -> zero(T),
-    points_tree=nothing,
+    points_cache=nothing,
     kwargs...
-) = _add_to_current_solidmodel!(CurvilinearRegion(x), m, k; zmap, points_tree, kwargs...)
+) = _add_to_current_solidmodel!(CurvilinearRegion(x), m, k; zmap, points_cache, kwargs...)
 
 # GmshNative flattens curvilinear primitives in `to_primitives`, so this sink is
 # OpenCascade-only in normal rendering.
@@ -1627,19 +1698,22 @@ function _add_to_current_solidmodel!(
     m::Meta,
     k;
     zmap=(_) -> zero(T),
-    points_tree=nothing,
+    points_cache=nothing,
     atol=DeviceLayout.onenanometer(T),
     kwargs...
 ) where {T}
     z = zmap(m) # map from m using kwargs
-    outer_loop = _add_loop!(surf.exterior, k, z; points_tree, atol)
-    hole_loops = _add_loop!.(surf.holes, k, z; points_tree, atol)
+    outer_loop = _add_loop!(surf.exterior, k, z; points_cache, atol)
+    hole_loops = _add_loop!.(surf.holes, k, z; points_cache, atol)
 
     surftag = k.add_plane_surface([outer_loop])
     if !isempty(hole_loops)
         holes = [k.add_plane_surface([h]) for h ∈ hole_loops]
         out_dim_tags, _ = k.cut([(2, surftag)], [(2, x) for x ∈ holes])
         surftag = out_dim_tags[1][2]
+        # `k.cut` may have retagged or deleted dim-0 entities referenced by
+        # `points_cache`; force the next liveness probe to refresh.
+        _mark_points_stale!(points_cache)
     end
     return (Int32(2), surftag)
 end
@@ -1649,13 +1723,13 @@ function _add_to_current_solidmodel!(
     m::Meta,
     k;
     zmap=(_) -> zero(T),
-    points_tree=nothing,
+    points_cache=nothing,
     atol=DeviceLayout.onenanometer(T),
     kwargs...
 ) where {T}
     z = zmap(m)
-    p0 = _get_or_add_point!(k, getx(line.p0), gety(line.p0), z, points_tree)
-    p1 = _get_or_add_point!(k, getx(line.p1), gety(line.p1), z, points_tree)
+    p0 = _get_or_add_point!(k, getx(line.p0), gety(line.p0), z, points_cache)
+    p1 = _get_or_add_point!(k, getx(line.p1), gety(line.p1), z, points_cache)
     linetag = k.add_line(p0, p1)
     return (Int32(1), linetag)
 end
@@ -1665,10 +1739,10 @@ function _add_loop!(
     cl::CurvilinearPolygon,
     k,
     z;
-    points_tree=nothing,
+    points_cache=nothing,
     atol=DeviceLayout.onenanometer(coordinatetype(cl))
 )
-    pts = _get_or_add_points!(k, points(cl), z, points_tree)
+    pts = _get_or_add_points!(k, points(cl), z, points_cache)
     endpoint_pairs = zip(pts, circshift(pts, -1))
     curves = map(enumerate(endpoint_pairs)) do (i, endpoints)
         curve_idx = findfirst(isequal(i), cl.curve_start_idx)

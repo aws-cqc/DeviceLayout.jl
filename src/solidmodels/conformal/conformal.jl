@@ -155,11 +155,11 @@ function _cached_point_relaxed!(
     x::Float64,
     y::Float64,
     z::Float64,
-    points_tree
+    points_cache
 )
     tag =
-        isnothing(points_tree) ? k.add_point(x, y, z) :
-        _get_or_add_point!(k, x, y, z, points_tree; atol=ctx.vertex_merge_atol)
+        isnothing(points_cache) ? k.add_point(x, y, z) :
+        _get_or_add_point!(k, x, y, z, points_cache; atol=ctx.vertex_merge_atol)
     # Record coords for later midpoint computation; the tag returned by
     # `_get_or_add_point!` may correspond to a previously-inserted nearby point,
     # so `get!` preserves the first-writer coords rather than overwriting.
@@ -175,11 +175,11 @@ function _cached_point_strict!(
     x::Float64,
     y::Float64,
     z::Float64,
-    points_tree
+    points_cache
 )
     tag =
-        isnothing(points_tree) ? k.add_point(x, y, z) :
-        _get_or_add_point!(k, x, y, z, points_tree; atol=ctx.center_merge_atol)
+        isnothing(points_cache) ? k.add_point(x, y, z) :
+        _get_or_add_point!(k, x, y, z, points_cache; atol=ctx.center_merge_atol)
     get!(ctx.point_coords, tag, (x, y, z))
     return tag
 end
@@ -392,7 +392,7 @@ _add_conformal!(
     m::Meta,
     k;
     zmap=(_) -> zero(coordinatetype(x)),
-    points_tree=nothing,
+    points_cache=nothing,
     kwargs...
 ) = _add_conformal!(
     ctx,
@@ -400,7 +400,7 @@ _add_conformal!(
     m,
     k;
     zmap=zmap,
-    points_tree=points_tree,
+    points_cache=points_cache,
     kwargs...
 )
 
@@ -414,13 +414,13 @@ function _add_conformal!(
     m::Meta,
     k::OpenCascade;
     zmap=(_) -> zero(T),
-    points_tree=nothing,
+    points_cache=nothing,
     atol=onenanometer(T),
     kwargs...
 ) where {T}
     z = zmap(m)
-    outer_loop = _add_conformal_loop!(ctx, surf.exterior, k, z; points_tree, atol)
-    hole_loops = _add_conformal_loop!.(Ref(ctx), surf.holes, k, z; points_tree, atol)
+    outer_loop = _add_conformal_loop!(ctx, surf.exterior, k, z; points_cache, atol)
+    hole_loops = _add_conformal_loop!.(Ref(ctx), surf.holes, k, z; points_cache, atol)
     surftag = k.add_plane_surface([outer_loop; hole_loops...])
     return (Int32(2), surftag)
 end
@@ -432,13 +432,19 @@ function _add_conformal!(
     m::Meta,
     k::OpenCascade;
     zmap=(_) -> zero(T),
-    points_tree=nothing,
+    points_cache=nothing,
     atol=onenanometer(T),
     kwargs...
 ) where {T}
     z = zmap(m)
-    loop =
-        _add_conformal_loop!(ctx, CurvilinearPolygon(points(poly)), k, z; points_tree, atol)
+    loop = _add_conformal_loop!(
+        ctx,
+        CurvilinearPolygon(points(poly)),
+        k,
+        z;
+        points_cache,
+        atol
+    )
     surf = k.add_plane_surface([loop])
     return (Int32(2), surf)
 end
@@ -450,7 +456,7 @@ function _add_conformal!(
     m::Meta,
     k::OpenCascade;
     zmap=(_) -> zero(T),
-    points_tree=nothing,
+    points_cache=nothing,
     atol=onenanometer(T),
     kwargs...
 ) where {T}
@@ -461,7 +467,7 @@ function _add_conformal!(
         Float64(ustrip(STP_UNIT, getx(line.p0))),
         Float64(ustrip(STP_UNIT, gety(line.p0))),
         Float64(ustrip(STP_UNIT, z)),
-        points_tree
+        points_cache
     )
     p1 = _cached_point_relaxed!(
         k,
@@ -469,7 +475,7 @@ function _add_conformal!(
         Float64(ustrip(STP_UNIT, getx(line.p1))),
         Float64(ustrip(STP_UNIT, gety(line.p1))),
         Float64(ustrip(STP_UNIT, z)),
-        points_tree
+        points_cache
     )
     linetag = _cached_add_line!(k, ctx, p0, p1)
     return (Int32(1), linetag)
@@ -485,7 +491,7 @@ _add_conformal!(ctx::ConformalRenderContext, els::AbstractVector, m::Meta, k; kw
 
 """
     add_conformal_loop!(ctx::ConformalRenderContext, cl::CurvilinearPolygon,
-        k::OpenCascade, z; points_tree=nothing, atol=onenanometer(...))
+        k::OpenCascade, z; points_cache=nothing, atol=onenanometer(...))
 
 Build an OCC curve loop for `cl` using the conformal edge/curve cache.
 
@@ -494,10 +500,10 @@ than using [`render_conformal!`](@ref)'s orchestrator). Typical usage:
 
 ```julia
 ctx = ConformalRenderContext()
-points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+points_cache = SpatialIndexing.RTree{Float64, 3}(Int32)
 for region in regions
-    outer = add_conformal_loop!(ctx, region.exterior, k, z; points_tree)
-    holes = [add_conformal_loop!(ctx, h, k, z; points_tree) for h in region.holes]
+    outer = add_conformal_loop!(ctx, region.exterior, k, z; points_cache)
+    holes = [add_conformal_loop!(ctx, h, k, z; points_cache) for h in region.holes]
     k.add_plane_surface([outer; holes...])
 end
 ```
@@ -510,10 +516,10 @@ function add_conformal_loop!(
     cl::CurvilinearPolygon,
     k::OpenCascade,
     z;
-    points_tree=nothing,
+    points_cache=nothing,
     atol=onenanometer(coordinatetype(cl))
 )
-    return _add_conformal_loop!(ctx, cl, k, z; points_tree, atol)
+    return _add_conformal_loop!(ctx, cl, k, z; points_cache, atol)
 end
 
 function _add_conformal_loop!(
@@ -521,7 +527,7 @@ function _add_conformal_loop!(
     cl::CurvilinearPolygon,
     k::OpenCascade,
     z;
-    points_tree=nothing,
+    points_cache=nothing,
     atol=onenanometer(coordinatetype(cl))
 )
     poly_pts = points(cl)
@@ -532,7 +538,7 @@ function _add_conformal_loop!(
             Float64(ustrip(STP_UNIT, getx(p))),
             Float64(ustrip(STP_UNIT, gety(p))),
             Float64(ustrip(STP_UNIT, z)),
-            points_tree
+            points_cache
         ) for p in poly_pts
     ]
     n = length(pts)
@@ -549,7 +555,7 @@ function _add_conformal_loop!(
                 cl.curves[curve_idx],
                 k,
                 z,
-                points_tree;
+                points_cache;
                 atol
             )
             if result isa AbstractVector
@@ -579,7 +585,7 @@ function _add_conformal_curve!(
     seg::Paths.Turn,
     k::OpenCascade,
     z,
-    points_tree;
+    points_cache;
     kwargs...
 )
     center_pt =
@@ -591,7 +597,7 @@ function _add_conformal_curve!(
         Float64(ustrip(STP_UNIT, getx(center_pt))),
         Float64(ustrip(STP_UNIT, gety(center_pt))),
         Float64(ustrip(STP_UNIT, z)),
-        points_tree
+        points_cache
     )
 
     if abs(seg.α) >= 180°
@@ -606,7 +612,7 @@ function _add_conformal_curve!(
                 Float64(ustrip(STP_UNIT, getx(mp))),
                 Float64(ustrip(STP_UNIT, gety(mp))),
                 Float64(ustrip(STP_UNIT, z)),
-                points_tree
+                points_cache
             ) for mp in middle_pts
         ]
         tags = [endpoints[1]; middle_tags; endpoints[2]]
@@ -635,7 +641,7 @@ function _add_conformal_curve!(
     seg::Paths.BSpline,
     k::OpenCascade,
     z,
-    points_tree;
+    points_cache;
     kwargs...
 )
     midpts = [
@@ -645,7 +651,7 @@ function _add_conformal_curve!(
             Float64(ustrip(STP_UNIT, getx(p))),
             Float64(ustrip(STP_UNIT, gety(p))),
             Float64(ustrip(STP_UNIT, z)),
-            points_tree
+            points_cache
         ) for p in seg.p[2:(end - 1)]
     ]
     pts = [endpoints[1], midpts..., endpoints[2]]
@@ -670,7 +676,7 @@ function _add_conformal_curve!(
     seg::Paths.OffsetSegment,
     k::OpenCascade,
     z,
-    points_tree;
+    points_cache;
     kwargs...
 )
     base = seg.seg
@@ -683,7 +689,15 @@ function _add_conformal_curve!(
             base.p0 + Point(-sin(base.α0), cos(base.α0)) * off,
             base.α0
         )
-        return _add_conformal_curve!(ctx, endpoints, off_turn, k, z, points_tree; kwargs...)
+        return _add_conformal_curve!(
+            ctx,
+            endpoints,
+            off_turn,
+            k,
+            z,
+            points_cache;
+            kwargs...
+        )
     end
     # General case (offset BSpline / variable offset). `bspline_approximation`
     # is NOT direction-symmetric: calling it on `seg` and on `Paths.reverse(seg)`
@@ -699,14 +713,14 @@ function _add_conformal_curve!(
             Float64(ustrip(STP_UNIT, getx(p))),
             Float64(ustrip(STP_UNIT, gety(p))),
             Float64(ustrip(STP_UNIT, z)),
-            points_tree
+            points_cache
         ) for p in newstarts
     ]
     starts = [endpoints[1], newpts...]
     stops = [newpts..., endpoints[2]]
     tags = Int32[]
     for (ep, sub) in zip([[s, e] for (s, e) in zip(starts, stops)], approx.segments)
-        t = _add_conformal_curve!(ctx, ep, sub, k, z, points_tree; kwargs...)
+        t = _add_conformal_curve!(ctx, ep, sub, k, z, points_cache; kwargs...)
         if t isa AbstractVector
             append!(tags, t)
         else
@@ -729,7 +743,7 @@ _add_conformal_curve!(
     seg::Paths.Segment,
     k::OpenCascade,
     z,
-    points_tree;
+    points_cache;
     kwargs...
 ) = throw(
     ArgumentError(
@@ -808,13 +822,13 @@ function render_conformal!(
     return _render_orchestrator!(
         sm,
         cs;
-        (emit!)=(els, meta, k; zmap, points_tree, kwargs...) -> _add_conformal!(
+        (emit!)=(els, meta, k; zmap, points_cache, kwargs...) -> _add_conformal!(
             context,
             els,
             meta,
             k;
             zmap=zmap,
-            points_tree=points_tree,
+            points_cache=points_cache,
             kwargs...
         ),
         (fragment!)=fragment_backstop ? _fragment_three_pass! : (_) -> nothing,

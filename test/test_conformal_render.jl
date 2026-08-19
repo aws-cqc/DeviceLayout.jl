@@ -49,7 +49,7 @@
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
-        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        points_cache = SolidModels.PointsCache()
 
         # Left rect: (0,0) → (10,0) → (10,10) → (0,10)
         left = CurvilinearPolygon(
@@ -70,8 +70,8 @@
             ]
         )
 
-        loop1 = add_conformal_loop!(ctx, left, k, 0.0μm; points_tree)
-        loop2 = add_conformal_loop!(ctx, right, k, 0.0μm; points_tree)
+        loop1 = add_conformal_loop!(ctx, left, k, 0.0μm; points_cache)
+        loop2 = add_conformal_loop!(ctx, right, k, 0.0μm; points_cache)
 
         # After the second loop, we should see at least one cache hit — the
         # shared edge (10,0)→(10,10) should reuse the tag from the first loop.
@@ -140,13 +140,13 @@
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
-        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        points_cache = SolidModels.PointsCache()
 
         R = 100.0μm
         pp = [Point(0.0μm, 0.0μm), Point(R, 0.0μm), Point(0.0μm, R)]
         turn = Paths.Turn(90°, R, α0=90°, p0=pp[2])
         cp = CurvilinearPolygon(pp, [turn], [2])
-        loop = add_conformal_loop!(ctx, cp, k, 0.0μm; points_tree)
+        loop = add_conformal_loop!(ctx, cp, k, 0.0μm; points_cache)
         @test loop isa Integer
         gmsh.finalize()
     end
@@ -157,13 +157,13 @@
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
-        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        points_cache = SolidModels.PointsCache()
 
         R = 50.0μm
         pp = [Point(0.0μm, 0.0μm), Point(R, 0.0μm), Point(-R, 0.0μm)]
         turn = Paths.Turn(180°, R, α0=90°, p0=pp[2])
         cp = CurvilinearPolygon(pp, [turn], [2])
-        loop = add_conformal_loop!(ctx, cp, k, 0.0μm; points_tree)
+        loop = add_conformal_loop!(ctx, cp, k, 0.0μm; points_cache)
         @test loop isa Integer
         gmsh.finalize()
     end
@@ -174,7 +174,7 @@
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
-        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        points_cache = SolidModels.PointsCache()
 
         pp = [
             Point(0.0μm, 0.0μm),
@@ -187,7 +187,7 @@
         t1 = Point(-1.0μm, 0.0μm)
         seg = Paths.BSpline(spline_pts, t0, t1)
         cp = CurvilinearPolygon(pp, [seg], [2])
-        loop = add_conformal_loop!(ctx, cp, k, 0.0μm; points_tree)
+        loop = add_conformal_loop!(ctx, cp, k, 0.0μm; points_cache)
         @test loop isa Integer
         gmsh.finalize()
     end
@@ -272,19 +272,19 @@
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
-        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        points_cache = SolidModels.PointsCache()
 
         R = 100.0μm
         pp = [Point(0.0μm, 0.0μm), Point(R, 0.0μm), Point(0.0μm, R)]
         turn = Paths.Turn(90°, R, α0=90°, p0=pp[2])
         cp_arc = CurvilinearPolygon(pp, [turn], [2])
-        add_conformal_loop!(ctx, cp_arc, k, 0.0μm; points_tree)
+        add_conformal_loop!(ctx, cp_arc, k, 0.0μm; points_cache)
 
         # Straight-edge polygon that shares the (pp[2], pp[3]) endpoints. It
         # would ordinarily be a chord, but the cache should return the arc tag.
         hits_before = ctx.stats[:hits]
         line_cp = CurvilinearPolygon(pp)  # no curve — pure line loop
-        add_conformal_loop!(ctx, line_cp, k, 0.0μm; points_tree)
+        add_conformal_loop!(ctx, line_cp, k, 0.0μm; points_cache)
         @test ctx.stats[:hits] > hits_before  # arc was reused for a line request
         gmsh.finalize()
     end
@@ -294,7 +294,7 @@
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
-        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        points_cache = SolidModels.PointsCache()
 
         pp = [
             Point(0.0μm, 0.0μm),
@@ -305,11 +305,11 @@
         spline_pts = [pp[2], Point(150.0μm, 50.0μm), pp[3]]
         seg = Paths.BSpline(spline_pts, Point(1.0μm, 0.0μm), Point(-1.0μm, 0.0μm))
         cp_spline = CurvilinearPolygon(pp, [seg], [2])
-        add_conformal_loop!(ctx, cp_spline, k, 0.0μm; points_tree)
+        add_conformal_loop!(ctx, cp_spline, k, 0.0μm; points_cache)
 
         hits_before = ctx.stats[:hits]
         line_cp = CurvilinearPolygon(pp)  # straight (pp[2], pp[3])
-        add_conformal_loop!(ctx, line_cp, k, 0.0μm; points_tree)
+        add_conformal_loop!(ctx, line_cp, k, 0.0μm; points_cache)
         # If the spline registered itself in endpoint_curve_index, the later
         # line request hits — otherwise a duplicate straight edge is created
         # and the shared boundary is non-conformal.
@@ -341,7 +341,7 @@
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
-        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        points_cache = SolidModels.PointsCache()
 
         R = 100.0μm
         pp = [Point(0.0μm, 0.0μm), Point(R, 0.0μm), Point(0.0μm, R)]
@@ -351,9 +351,9 @@
 
         misses_before = ctx.stats[:misses]
         arcs_before = ctx.stats[:arcs]
-        add_conformal_loop!(ctx, cp1, k, 0.0μm; points_tree)
+        add_conformal_loop!(ctx, cp1, k, 0.0μm; points_cache)
         arcs_after_first = ctx.stats[:arcs]
-        add_conformal_loop!(ctx, cp2, k, 0.0μm; points_tree)
+        add_conformal_loop!(ctx, cp2, k, 0.0μm; points_cache)
         # Second render created zero new arcs (all hits from the cache).
         @test ctx.stats[:arcs] == arcs_after_first
         # And at least one exact-key hit was recorded.
@@ -366,7 +366,7 @@
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
-        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        points_cache = SolidModels.PointsCache()
 
         pp = [
             Point(0.0μm, 0.0μm),
@@ -382,9 +382,9 @@
         cp1 = CurvilinearPolygon(pp, [seg], [2])
         cp2 = CurvilinearPolygon(pp, [seg], [2])
 
-        add_conformal_loop!(ctx, cp1, k, 0.0μm; points_tree)
+        add_conformal_loop!(ctx, cp1, k, 0.0μm; points_cache)
         splines_after_first = ctx.stats[:splines]
-        add_conformal_loop!(ctx, cp2, k, 0.0μm; points_tree)
+        add_conformal_loop!(ctx, cp2, k, 0.0μm; points_cache)
         @test ctx.stats[:splines] == splines_after_first
         @test ctx.stats[:hits] >= 1
         gmsh.finalize()
@@ -404,7 +404,7 @@
         ctx = ConformalRenderContext()
         import SpatialIndexing
         SolidModels = DeviceLayout.SolidModels
-        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        points_cache = SolidModels.PointsCache()
 
         # Endpoints on the x axis; centers above and below.
         p1 = SolidModels.ConformalRender._cached_point_relaxed!(
@@ -413,7 +413,7 @@
             -50.0,
             0.0,
             0.0,
-            points_tree
+            points_cache
         )
         p2 = SolidModels.ConformalRender._cached_point_relaxed!(
             k,
@@ -421,7 +421,7 @@
             50.0,
             0.0,
             0.0,
-            points_tree
+            points_cache
         )
         # Center above chord: bulges downward → midpoint below chord.
         c_above = SolidModels.ConformalRender._cached_point_strict!(
@@ -430,7 +430,7 @@
             0.0,
             80.0,
             0.0,
-            points_tree
+            points_cache
         )
         # Center below chord: bulges upward → midpoint above chord.
         c_below = SolidModels.ConformalRender._cached_point_strict!(
@@ -439,7 +439,7 @@
             0.0,
             -80.0,
             0.0,
-            points_tree
+            points_cache
         )
 
         rej_before = ctx.stats[:midpoint_rejections]
@@ -461,7 +461,7 @@
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
-        points_tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+        points_cache = SolidModels.PointsCache()
 
         a = Point(0.0μm, 0.0μm)
         b = Point(10.0μm, 0.0μm)
@@ -469,7 +469,7 @@
         # which would normally not appear here — just to hit the fallback.
         straight = Paths.Straight(10.0μm, a, 0.0°)
         cp = CurvilinearPolygon([a, b], [straight], [1])
-        @test_throws ArgumentError add_conformal_loop!(ctx, cp, k, 0.0μm; points_tree)
+        @test_throws ArgumentError add_conformal_loop!(ctx, cp, k, 0.0μm; points_cache)
         gmsh.finalize()
     end
 
