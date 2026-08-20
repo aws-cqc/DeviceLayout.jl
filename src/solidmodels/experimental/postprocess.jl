@@ -274,12 +274,12 @@ struct LocatorRecord
 end
 
 """
-    _extract_locator_positions(cs, stack, levels) -> Vector{LocatorRecord}
+    _extract_locator_positions(cs, stack) -> Vector{LocatorRecord}
 
 Extract one locator record per transformed reference occurrence without flattening `cs`.
 Locator geometry is excluded from the mesh but remains visible to this discovery pass.
 """
-function _extract_locator_positions(cs, stack::SourceStack, levels::StackLevels)
+function _extract_locator_positions(cs, stack::SourceStack)
     records = LocatorRecord[]
     for (subcs, trans) in DeviceLayout.traversal(cs)
         for (entity_meta, element) in zip(element_metadata(subcs), elements(subcs))
@@ -289,15 +289,13 @@ function _extract_locator_positions(cs, stack::SourceStack, levels::StackLevels)
             entity_meta.role isa Tag &&
                 isempty(entity_meta.name) &&
                 throw(ArgumentError("Tag locators must have a nonempty name"))
-            source_layer = _require_source_layer(stack, entity_meta; context="locator")
+            source_layer = sourcelayer(entity_meta, stack)
             source_layer.solidmodel || continue
             global_element = trans(element)
             ctr = center(bounds(global_element))
-            cx = _micron_value(getx(ctr))
-            cy = _micron_value(gety(ctr))
-            z = _micron_value(
-                _stack_z(levels[first_level(source_layer)], first_height(source_layer))
-            )
+            cx = SolidModels._stp_float(getx(ctr))
+            cy = SolidModels._stp_float(gety(ctr))
+            z = SolidModels._stp_float(layer_z(entity_meta.layer, stack))
             push!(
                 records,
                 LocatorRecord(
@@ -345,8 +343,8 @@ function find_terminals(
     # are real mesh entities; only Terminal/Ground locators are excluded)
     metal_pg_names = String[]
     for (layer_name, state) in registry
-        !haskey(stack, layer_name) && continue
-        source_layer = stack[layer_name]
+        !haskey(stack.layers, layer_name) && continue
+        source_layer = stack.layers[layer_name]
         source_layer.material != METAL && continue
         state.dim != 2 && continue
         for record in state.pgs
@@ -849,38 +847,32 @@ function remap_to_visualization_pgs!(sm::SolidModel, visualization_metadata::Abs
 end
 
 """
-    _warn_potential_overlaps(registry::Registry, stack::SourceStack, levels::StackLevels)
+    _warn_potential_overlaps(registry::Registry, stack::SourceStack)
 
 Emit warnings for 3D source layers with non-NULL material that remain in the final
 registry and have overlapping z-ranges. This pattern often leads to overlapping volumes
 that crash the OCC kernel during fragmentation.
 """
-function _warn_potential_overlaps(
-    registry::Registry,
-    stack::SourceStack,
-    levels::StackLevels
-)
+function _warn_potential_overlaps(registry::Registry, stack::SourceStack)
     # Collect all 3D source layers with material in the final registry
     extruded_source_layers = Set{Symbol}()
     for (layer_name, state) in registry
         state.dim == 3 || continue
-        haskey(stack, layer_name) || continue
-        stack[layer_name].material == NULL && continue
+        haskey(stack.layers, layer_name) || continue
+        stack.layers[layer_name].material == NULL && continue
         push!(extruded_source_layers, layer_name)
     end
 
     length(extruded_source_layers) < 2 && return nothing
 
-    # Compute actual z-ranges using resolve_thickness (handles level-pair syntax)
+    # Compute actual z-ranges using pair-derived thickness when needed.
     layer_z_ranges = Dict{Symbol, Tuple{Float64, Float64}}()
     for layer_name in extruded_source_layers
-        source_layer = stack[layer_name]
-        z_base = _micron_value(
-            _stack_z(levels[first_level(source_layer)], first_height(source_layer))
-        )
-        thickness = _micron_value(resolve_thickness(source_layer, levels))
-        z_min = min(z_base, z_base + thickness)
-        z_max = max(z_base, z_base + thickness)
+        source_layer = stack.layers[layer_name]
+        z_base = SolidModels._stp_float(layer_z(layer_name, stack))
+        dz = SolidModels._stp_float(thickness(source_layer, stack))
+        z_min = min(z_base, z_base + dz)
+        z_max = max(z_base, z_base + dz)
         layer_z_ranges[layer_name] = (z_min, z_max)
     end
 

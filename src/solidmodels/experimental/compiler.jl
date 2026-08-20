@@ -18,8 +18,7 @@ Returns:
 function compile_layer_ops(
     layer_ops::AbstractVector,
     stack::SourceStack,
-    initial_registry::Registry;
-    levels::Union{StackLevels, Nothing}=nothing
+    initial_registry::Registry
 )
     registry = deepcopy(initial_registry)
     pg_ops = Tuple[]
@@ -50,8 +49,7 @@ function compile_layer_ops(
             deferred_interfaces,
             interior_solids,
             stack,
-            operation;
-            levels=levels
+            operation
         )
     end
 
@@ -70,8 +68,7 @@ function _compile_one_op!(
     deferred_interfaces::Vector{DeferredInterface},
     interior_solids::Dict{Symbol, Vector{String}},
     stack::SourceStack,
-    op::Tuple;
-    levels::Union{StackLevels, Nothing}=nothing
+    op::Tuple
 )
     dest = op[1]
     op_fn = op[2]
@@ -79,7 +76,7 @@ function _compile_one_op!(
     kwargs = op[4:end]
 
     return if op_fn == SolidModels.extrude_z!
-        _compile_extrude!(pg_ops, registry, interior_solids, stack, dest; levels=levels)
+        _compile_extrude!(pg_ops, registry, interior_solids, stack, dest)
     elseif op_fn == SolidModels.difference_geom!
         _compile_difference!(pg_ops, registry, dest, args, kwargs)
     elseif op_fn == SolidModels.union_geom!
@@ -169,8 +166,7 @@ function _compile_extrude!(
     registry::Registry,
     interior_solids::Dict{Symbol, Vector{String}},
     stack::SourceStack,
-    layer_name::Symbol;
-    levels::Union{StackLevels, Nothing}=nothing
+    layer_name::Symbol
 )
     !haskey(registry, layer_name) && throw(
         ArgumentError(
@@ -178,16 +174,15 @@ function _compile_extrude!(
             "compiler registry"
         )
     )
-    !haskey(stack, layer_name) && throw(
+    !haskey(stack.layers, layer_name) && throw(
         ArgumentError(
             "Cannot extrude generated layer :$layer_name because extrusion requires " *
             "a SourceStack entry"
         )
     )
-    source_layer = stack[layer_name]
-    thickness =
-        isnothing(levels) ? source_layer.thickness : resolve_thickness(source_layer, levels)
-    iszero(thickness) && return nothing
+    source_layer = stack.layers[layer_name]
+    dz = thickness(source_layer, stack)
+    iszero(dz) && return nothing
 
     state = registry[layer_name]
     new_records = PGRecord[]
@@ -218,13 +213,13 @@ function _compile_extrude!(
             ctr_pg = pg * "__CTR"
             ext_pg = pg * "__CTREXT"
             push!(pg_ops, (ctr_pg, SolidModels.get_boundary, (pg, 2), :oriented => false))
-            push!(pg_ops, (ext_pg, SolidModels.extrude_z!, (ctr_pg, thickness, 1)))
+            push!(pg_ops, (ext_pg, SolidModels.extrude_z!, (ctr_pg, dz, 1)))
             push!(pg_ops, ("_rm", SolidModels.remove_group!, (ctr_pg, 1)))
             if !source_layer.keep_interior
                 # Also extrude the 2D surface into a solid for interior subtraction
                 int_pg = pg * "__INT"
                 intbnd_pg = pg * "__INTBND"
-                push!(pg_ops, (int_pg, SolidModels.extrude_z!, (pg, thickness, 2)))
+                push!(pg_ops, (int_pg, SolidModels.extrude_z!, (pg, dz, 2)))
                 push!(
                     pg_ops,
                     (intbnd_pg, SolidModels.get_boundary, (int_pg, 3), :oriented => false)
@@ -241,7 +236,7 @@ function _compile_extrude!(
             # The solid is registered for auto-subtraction from surrounding volumes.
             ext_pg = pg * "__EXN"
             bnd_pg = pg * "__EXTBND"
-            push!(pg_ops, (ext_pg, SolidModels.extrude_z!, (pg, thickness, 2)))
+            push!(pg_ops, (ext_pg, SolidModels.extrude_z!, (pg, dz, 2)))
             push!(
                 pg_ops,
                 (bnd_pg, SolidModels.get_boundary, (ext_pg, 3), :oriented => false)
@@ -253,7 +248,7 @@ function _compile_extrude!(
         else
             # Standard extrusion: 2D surface → 3D volume
             ext_pg = pg * "__EXN"
-            push!(pg_ops, (ext_pg, SolidModels.extrude_z!, (pg, thickness, 2)))
+            push!(pg_ops, (ext_pg, SolidModels.extrude_z!, (pg, dz, 2)))
             push!(pg_ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
             push!(new_records, PGRecord(ext_pg, layer_name, record.entity_meta))
         end

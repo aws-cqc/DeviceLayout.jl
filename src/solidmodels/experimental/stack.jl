@@ -5,7 +5,7 @@
 
 Describes one symbol-keyed source layer. `isnothing(gds_meta)` hides the layer only
 from artwork; `solidmodel=false` hides it only from solid-model geometry and metadata.
-A paired level derives its effective thickness from [`StackLevels`](@ref).
+A paired level derives its effective thickness from its [`SourceStack`](@ref).
 """
 struct SourceLayer{T <: Coordinate}
     material::Material
@@ -49,118 +49,123 @@ function SourceLayer(
 end
 
 """
-    first_level(sl::SourceLayer)
+    SourceStack(layer_pairs...; levels)
 
-Return the first assembly level referenced by `sl`.
+Collection of source layers and assembly-level z coordinates. Layer heights, explicit
+thicknesses, and level coordinates are converted to one common coordinate type `T`.
+Unitful and unitless coordinates cannot be mixed in the same stack.
 """
-first_level(sl::SourceLayer) = sl.level isa Pair ? first(sl.level) : sl.level
-
-"""
-    first_height(sl::SourceLayer)
-
-Return the height associated with [`first_level`](@ref) for `sl`.
-"""
-first_height(sl::SourceLayer) = sl.height isa Tuple ? first(sl.height) : sl.height
-_referenced_levels(sl::SourceLayer) =
-    sl.level isa Pair ? (first(sl.level), last(sl.level)) : (sl.level,)
-
-"""
-    SourceStack()
-    SourceStack(pairs::Pair{Symbol, <:SourceLayer}...)
-
-Mapping from plain layer symbols to source-layer records.
-"""
-struct SourceStack
-    layers::Dict{Symbol, SourceLayer}
-end
-SourceStack() = SourceStack(Dict{Symbol, SourceLayer}())
-function SourceStack(pairs::Pair{Symbol, <:SourceLayer}...)
-    return SourceStack(Dict{Symbol, SourceLayer}(pairs))
-end
-
-Base.getindex(s::SourceStack, k::Symbol) = s.layers[k]
-Base.haskey(s::SourceStack, k::Symbol) = haskey(s.layers, k)
-Base.keys(s::SourceStack) = keys(s.layers)
-Base.values(s::SourceStack) = values(s.layers)
-Base.length(s::SourceStack) = length(s.layers)
-Base.iterate(s::SourceStack, state...) = iterate(s.layers, state...)
-
-"""
-    StackLevels(pairs::Pair{Int}...)
-
-Mapping from assembly level indices to z coordinates.
-"""
-struct StackLevels{T <: Coordinate}
+struct SourceStack{T <: Coordinate}
+    layers::Dict{Symbol, SourceLayer{T}}
     levels::Dict{Int, T}
 end
-function StackLevels(pairs::Pair{Int}...)
-    isempty(pairs) && return StackLevels(Dict{Int, Int}())
-    T = promote_type(typeof.(last.(pairs))...)
-    return StackLevels(Dict{Int, T}(k => convert(T, v) for (k, v) in pairs))
+
+function SourceStack(layer_pairs::Pair{Symbol, <:SourceLayer}...; levels)
+    level_dict = levels isa AbstractDict ? levels : Dict(levels)
+    return SourceStack(Dict{Symbol, SourceLayer}(layer_pairs), level_dict)
 end
 
-Base.getindex(s::StackLevels, k::Int) = s.levels[k]
-Base.haskey(s::StackLevels, k::Int) = haskey(s.levels, k)
-Base.keys(s::StackLevels) = keys(s.levels)
-Base.length(s::StackLevels) = length(s.levels)
-Base.iterate(s::StackLevels, state...) = iterate(s.levels, state...)
-
-# SolidModels interprets unitless coordinates in STP units (microns). Keep that public
-# Coordinate behavior when serializing metadata and evaluating locator positions.
-_micron_value(value::Real) = Float64(value)
-_micron_value(value) = Float64(ustrip(μm, value))
-
-_stack_z(level_value::Real, height::Real) = level_value + height
-_stack_z(level_value::Real, height) = level_value + _micron_value(height)
-_stack_z(level_value, height::Real) = level_value + height * μm
-_stack_z(level_value, height) = level_value + height
-_subtract_height(delta::Real, height::Real) = delta - height
-_subtract_height(delta::Real, height) = delta - _micron_value(height)
-_subtract_height(delta, height::Real) = delta - height * μm
-_subtract_height(delta, height) = delta - height
-
-"""
-    resolve_thickness(sl::SourceLayer, levels::StackLevels)
-
-Resolve a source layer's explicit or level-pair-derived extrusion thickness.
-"""
-function resolve_thickness(sl::SourceLayer, levels::StackLevels)
-    if sl.level isa Pair
-        source_level, destination_level = first(sl.level), last(sl.level)
-        if sl.height isa Tuple
-            source_height, destination_height = sl.height
-            return _stack_z(levels[destination_level], destination_height) -
-                   _stack_z(levels[source_level], source_height)
+function SourceStack(
+    layers::AbstractDict{<:Symbol, <:SourceLayer},
+    levels::AbstractDict{<:Integer}
+)
+    coordinates = Any[]
+    for source_layer in values(layers)
+        if source_layer.height isa Tuple
+            append!(coordinates, source_layer.height)
+        else
+            push!(coordinates, source_layer.height)
         end
-        return _subtract_height(levels[destination_level] - levels[source_level], sl.height)
+        push!(coordinates, source_layer.thickness)
     end
-    return sl.thickness
+    append!(coordinates, values(levels))
+    isempty(coordinates) && throw(ArgumentError("SourceStack requires coordinate values"))
+
+    all_unitless = all(coordinate -> coordinate isa Real, coordinates)
+    all_unitful = all(coordinate -> !(coordinate isa Real), coordinates)
+    (all_unitless || all_unitful) ||
+        throw(ArgumentError("SourceStack cannot mix unitful and unitless coordinates"))
+
+    T = promote_type(typeof.(coordinates)...)
+
+    converted_layers = Dict{Symbol, SourceLayer{T}}()
+    for (layer_name, source_layer) in layers
+        converted_height = if source_layer.height isa Tuple
+            convert.(T, source_layer.height)
+        else
+            convert(T, source_layer.height)
+        end
+        converted_layers[layer_name] = SourceLayer{T}(
+            source_layer.material,
+            source_layer.level,
+            converted_height,
+            convert(T, source_layer.thickness),
+            source_layer.contour_only,
+            source_layer.keep_interior,
+            source_layer.gds_meta,
+            source_layer.solidmodel
+        )
+    end
+    converted_levels = Dict{Int, T}(level => convert(T, z) for (level, z) in levels)
+    return SourceStack{T}(converted_layers, converted_levels)
 end
 
-function _validate_source_layer(layer_name::Symbol, sl::SourceLayer, levels::StackLevels)
-    for idx in _referenced_levels(sl)
-        haskey(levels, idx) || throw(
+"""
+    sourcelayer(layer, stack::SourceStack)
+
+Return the source layer identified by an `EntityMeta`, layer name, or source layer.
+"""
+function sourcelayer(layer::Symbol, stack::SourceStack)
+    haskey(stack.layers, layer) ||
+        throw(ArgumentError("layer $layer does not exist in SourceStack"))
+    return stack.layers[layer]
+end
+sourcelayer(m::EntityMeta, stack::SourceStack) = sourcelayer(m.layer, stack)
+
+"""
+    layer_z(layer, stack::SourceStack)
+
+Return the source z coordinate for a layer name or source layer.
+"""
+function layer_z(source_layer::SourceLayer{T}, stack::SourceStack{T}) where {T}
+    return stack.levels[first(source_layer.level)] + first(source_layer.height)
+end
+layer_z(layer::Symbol, stack::SourceStack) = layer_z(sourcelayer(layer, stack), stack)
+
+"""
+    thickness(source_layer::SourceLayer, stack::SourceStack)
+
+Return a source layer's explicit or level-pair-derived extrusion thickness.
+"""
+function thickness(source_layer::SourceLayer{T}, stack::SourceStack{T}) where {T}
+    source_layer.level isa Pair || return source_layer.thickness
+
+    source_z = stack.levels[first(source_layer.level)] + first(source_layer.height)
+    destination_z = stack.levels[last(source_layer.level)]
+    if source_layer.height isa Tuple
+        destination_z += last(source_layer.height)
+    end
+    return destination_z - source_z
+end
+
+function _validate_source_layer(
+    layer_name::Symbol,
+    source_layer::SourceLayer,
+    stack::SourceStack
+)
+    for level in (first(source_layer.level), last(source_layer.level))
+        haskey(stack.levels, level) || throw(
             ArgumentError(
-                "Source layer :$layer_name references missing assembly level $idx"
+                "Source layer :$layer_name references missing assembly level $level"
             )
         )
     end
     return nothing
 end
 
-function _validate_stack(stack::SourceStack, levels::StackLevels)
-    for (layer_name, source_layer) in stack
-        _validate_source_layer(layer_name, source_layer, levels)
+function _validate_stack(stack::SourceStack)
+    for (layer_name, source_layer) in stack.layers
+        _validate_source_layer(layer_name, source_layer, stack)
     end
     return nothing
-end
-
-function _require_source_layer(stack::SourceStack, m::EntityMeta; context="entity")
-    haskey(stack, m.layer) || throw(
-        ArgumentError(
-            "$context references layer :$(m.layer), which is absent from SourceStack " *
-            "(entity name=$(repr(m.name)), index=$(m.index))"
-        )
-    )
-    return stack[m.layer]
 end

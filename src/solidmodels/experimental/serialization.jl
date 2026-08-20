@@ -3,7 +3,7 @@
 """
     serialize_metadata(
         registry, terminal_result, tag_records, split_results,
-        cc_entity_tags, interface_layer_parents, stack, levels, sm,
+        cc_entity_tags, interface_layer_parents, stack, sm,
         lumped_port_directions
     ) -> Dict{String, Any}
 
@@ -17,7 +17,6 @@ function serialize_metadata(
     cc_entity_tags::Dict{String, Vector{Int32}},
     interface_layer_parents::Dict{Symbol, Vector{String}},
     stack::SourceStack,
-    levels::StackLevels,
     sm::SolidModel,
     lumped_port_directions::Dict{String, Vector{Float64}}
 )
@@ -25,7 +24,9 @@ function serialize_metadata(
         "schema_version" => "1.0.0",
         "length_units" => "um",
         "assembly" => Dict{String, Any}(
-            "levels" => Dict(string(k) => _micron_value(v) for (k, v) in levels.levels)
+            "levels" => Dict(
+                string(level) => SolidModels._stp_float(z) for (level, z) in stack.levels
+            )
         )
     )
 
@@ -80,13 +81,13 @@ function serialize_metadata(
         isempty(pg_names) && continue
 
         layer_entry = Dict{String, Any}("pgs" => pg_names, "dim" => state.dim)
-        if haskey(stack, layer_name)
-            source_layer = stack[layer_name]
+        if haskey(stack.layers, layer_name)
+            source_layer = stack.layers[layer_name]
             layer_entry["type"] = "source"
-            layer_entry["level"] = first_level(source_layer)
-            layer_entry["height"] = _micron_value(first_height(source_layer))
+            layer_entry["level"] = first(source_layer.level)
+            layer_entry["height"] = SolidModels._stp_float(first(source_layer.height))
             layer_entry["thickness"] =
-                _micron_value(resolve_thickness(source_layer, levels))
+                SolidModels._stp_float(thickness(source_layer, stack))
         else
             layer_entry["type"] = "generated"
         end

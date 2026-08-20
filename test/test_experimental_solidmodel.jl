@@ -2,20 +2,19 @@
     using DeviceLayout
     using DeviceLayout.SchematicDrivenLayout
     using DeviceLayout.SolidModels.Experimental
-    import Unitful: μm
+    # import Unitful: μm
+    using DeviceLayout.PreferredUnits
 
     # Offered material types remain present
     @test METAL isa Material
     @test DIELECTRIC isa Material
     @test NULL isa Material
 
-    lumped_port = LumpedPort()
-    roles = (Generic(), Terminal(), Ground(), Tag(), WavePort(), lumped_port)
-    role_names = ("Generic", "Terminal", "Ground", "Tag", "WavePort", "LumpedPort")
-    @test string.(roles) == role_names
-    @test [
-        physical_group_name(EntityMeta(:metal; name="role", role=role)) for role in roles
-    ] == ["metal__role__i1__r$name" for name in role_names]
+    # Some consumers may take PG as contract
+    for role in [Generic(), Terminal(), Ground(), Tag(), WavePort(), LumpedPort()]
+        @test physical_group_name(EntityMeta(:metal; name="name", role=role)) ==
+              "metal__name__i1__r$role"
+    end
 
     instance_role_meta = EntityMeta(:metal; role=Terminal())
     type_role_meta = EntityMeta(:metal; name="island", index=3, role=Terminal)
@@ -24,32 +23,39 @@
     @test_throws TypeError EntityMeta(:metal; role="Terminal")
     @test layer(type_role_meta) == :metal
     @test layerindex(type_role_meta) == 3
-    @test level(type_role_meta) == 1
+    @test level(type_role_meta) == 1 # DeviceLayout.Meta interface
     @test name(type_role_meta) == "island"
     @test physical_group_name(type_role_meta) == "metal__island__i3__rTerminal"
     @test Experimental.map_meta(type_role_meta) == physical_group_name(type_role_meta)
 
-    levels = StackLevels(1 => 0μm, 2 => 500μm)
     pair_layer =
         SourceLayer(DIELECTRIC; level=1 => 2, height=(10μm, -10μm), gds_meta=GDSMeta(8, 2))
-    @test first_level(pair_layer) == 1
-    @test first_height(pair_layer) == 10μm
-    @test resolve_thickness(pair_layer, levels) == 480μm
+    @test first(pair_layer.level) == 1
+    @test last(pair_layer.level) == 2
+    @test first(pair_layer.height) == 10μm
+    @test last(pair_layer.height) == -10μm
+    stack = SourceStack(:substrate => pair_layer; levels=(1 => 0μm, 2 => 500μm))
+    @test thickness(stack.layers[:substrate], stack) == 480μm
+    @test layer_z(:substrate, stack) == 10μm
+    @test layer_z(stack.layers[:substrate], stack) == 10μm
+    @test sourcelayer(:substrate, stack) === stack.layers[:substrate]
+    @test sourcelayer(EntityMeta(:substrate), stack) === stack.layers[:substrate]
+    @test stack.levels[1] == 0μm
+    @test stack.levels[2] == 500μm
+    @test typeof(stack.layers[:substrate]).parameters[1] == typeof(stack.levels[1])
+    # Inconsistent length types (mixed unitful and unitless)
+    @test_throws ArgumentError SourceStack(:substrate => pair_layer; levels=(1 => 0.0,))
+    # Mixed length types (all unitful)
+    layer = SourceLayer(NULL; level=1 => 2, height=(10μm, -5.4μm))
+    stack = SourceStack(:substrate => layer; levels=(1 => 0μm, 2 => 500000.3nm))
 
-    stack = SourceStack(:substrate => pair_layer)
-    @test haskey(stack, :substrate)
-    @test length(stack) == 1
-
-    missing_level_stack =
-        SourceStack(:bad => SourceLayer(NULL; level=3, gds_meta=GDSMeta(1, 0)))
+    missing_level_stack = SourceStack(
+        :bad => SourceLayer(NULL; level=3, gds_meta=GDSMeta(1, 0));
+        levels=(1 => 0μm, 2 => 500μm)
+    )
     bad_cs = CoordinateSystem("bad", μm)
     place!(bad_cs, Rectangle(1μm, 1μm), EntityMeta(:bad; name="bad_level"))
-    @test_throws ArgumentError Experimental._preflight(
-        bad_cs,
-        missing_level_stack,
-        levels,
-        Tuple[]
-    )
+    @test_throws ArgumentError Experimental._preflight(bad_cs, missing_level_stack, Tuple[])
 end
 
 @testitem "Experimental artwork visibility and offsets" begin
@@ -61,7 +67,8 @@ end
         :art_only =>
             SourceLayer(NULL; level=1, gds_meta=GDSMeta(10, 5), solidmodel=false),
         :second => SourceLayer(METAL; level=2, gds_meta=GDSMeta(20, 7)),
-        :mesh_only => SourceLayer(METAL; level=1, gds_meta=nothing)
+        :mesh_only => SourceLayer(METAL; level=1, gds_meta=nothing);
+        levels=(1 => 0μm, 2 => 500μm)
     )
     cs = CoordinateSystem("art", μm)
     place!(cs, Rectangle(1μm, 1μm), EntityMeta(:art_only; index=99))
@@ -87,8 +94,10 @@ end
     using DeviceLayout.SolidModels.Experimental: PGRecord, LayerState, Registry
     import Unitful: μm
 
-    stack = SourceStack(:metal => SourceLayer(METAL; level=1, thickness=2μm))
-    levels = StackLevels(1 => 0μm)
+    stack = SourceStack(
+        :metal => SourceLayer(METAL; level=1, thickness=2μm);
+        levels=(1 => 0μm,)
+    )
     registry = Registry(
         :metal => LayerState(
             [PGRecord("metal__a__i1__rGeneric", :metal, EntityMeta(:metal; name="a"))],
@@ -96,7 +105,7 @@ end
         )
     )
     pg_ops, final_registry, interfaces, deferred =
-        compile_layer_ops([(:metal, SolidModels.extrude_z!, ())], stack, registry; levels)
+        compile_layer_ops([(:metal, SolidModels.extrude_z!, ())], stack, registry)
     @test final_registry[:metal].dim == 3
     @test length(pg_ops) == 2
     @test isempty(interfaces)
@@ -105,24 +114,18 @@ end
     @test_throws ArgumentError compile_layer_ops(
         [(:new_layer, SolidModels.difference_geom!, (:missing, :metal))],
         stack,
-        registry;
-        levels
+        registry
     )
 
-    boundary_ops, boundary_registry, _, _ = compile_layer_ops(
-        [(:edge, SolidModels.get_boundary, (:metal,))],
-        stack,
-        registry;
-        levels
-    )
+    boundary_ops, boundary_registry, _, _ =
+        compile_layer_ops([(:edge, SolidModels.get_boundary, (:metal,))], stack, registry)
     @test boundary_registry[:edge].dim == 1
     @test only(boundary_ops)[2] == SolidModels.get_boundary
 
     translate_ops, translate_registry, _, _ = compile_layer_ops(
         [(:shifted, SolidModels.translate!, (:metal, 1μm, 0μm, 0μm), :copy => true)],
         stack,
-        registry;
-        levels
+        registry
     )
     @test haskey(translate_registry, :metal)
     @test translate_registry[:shifted].dim == 2
@@ -135,8 +138,7 @@ end
             (:shifted, SolidModels.translate!, (:metal, 2μm, 0μm, 0μm), :copy => true)
         ],
         stack,
-        registry;
-        levels
+        registry
     )
     shifted_names = getfield.(two_translate_registry[:shifted].pgs, :name)
     @test length(shifted_names) == 2
@@ -179,7 +181,7 @@ end
     ]
     for operation in malformed_operations
         err = try
-            compile_layer_ops([operation], stack, registry; levels)
+            compile_layer_ops([operation], stack, registry)
             nothing
         catch caught
             caught
@@ -195,8 +197,7 @@ end
     append_ops, union_registry, _, _ = compile_layer_ops(
         [(:combined, SolidModels.union_geom!, (:metal,))],
         stack,
-        append_registry;
-        levels
+        append_registry
     )
     @test length(union_registry[:combined].pgs) == 2
     @test any(record -> record.name == "combined__existing", union_registry[:combined].pgs)
@@ -210,15 +211,13 @@ end
     @test_throws ArgumentError compile_layer_ops(
         [(:shifted, SolidModels.translate!, (:metal, 1μm, 0μm, 0μm), :copy => true)],
         stack,
-        wrong_dimension_registry;
-        levels
+        wrong_dimension_registry
     )
 
     interface_ops, interface_registry, interfaces, deferred = compile_layer_ops(
         [(:interface, SolidModels.intersect_geom!, (:metal, :metal))],
         stack,
-        registry;
-        levels
+        registry
     )
     @test isempty(interface_ops)
     @test interface_registry[:interface].dim == 1
@@ -291,16 +290,17 @@ end
     root = CoordinateSystem("root", μm)
     addref!(root, locator_geometry, Point(10μm, 0μm))
     addref!(root, locator_geometry, Point(-10μm, 5μm))
-    stack = SourceStack(:metal => SourceLayer(METAL; level=1))
-    locators = Experimental._extract_locator_positions(root, stack, StackLevels(1 => 0μm))
+    stack = SourceStack(:metal => SourceLayer(METAL; level=1); levels=(1 => 0μm,))
+    locators = Experimental._extract_locator_positions(root, stack)
     @test length(locators) == 2
     @test sort([locator.center_x for locator in locators]) == [-10.0, 10.0]
     @test sort([locator.center_y for locator in locators]) == [0.0, 5.0]
 
-    hidden_stack = SourceStack(:metal => SourceLayer(METAL; level=1, solidmodel=false))
-    @test isempty(
-        Experimental._extract_locator_positions(root, hidden_stack, StackLevels(1 => 0μm))
+    hidden_stack = SourceStack(
+        :metal => SourceLayer(METAL; level=1, solidmodel=false);
+        levels=(1 => 0μm,)
     )
+    @test isempty(Experimental._extract_locator_positions(root, hidden_stack))
 end
 
 @testitem "Experimental LumpedPort directions" begin
@@ -423,10 +423,10 @@ end
     sch = plan(graph; log_dir=nothing)
     check!(sch)
     target = Experimental.SolidModelTarget(
-        StackLevels(1 => 0μm),
         SourceStack(
             :surface => SourceLayer(NULL; level=1, gds_meta=GDSMeta(4, 0)),
-            :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(5, 0))
+            :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(5, 0));
+            levels=(1 => 0μm,)
         )
     )
 
@@ -491,8 +491,10 @@ end
     add_node!(unitless_graph, BasicComponent(unitless_geometry); base_id="q1")
     unitless_sch = plan(unitless_graph; log_dir=nothing) |> check!
     unitless_target = Experimental.SolidModelTarget(
-        StackLevels(1 => 2.0),
-        SourceStack(:surface => SourceLayer(NULL; level=1, height=3.0, thickness=0.0))
+        SourceStack(
+            :surface => SourceLayer(NULL; level=1, height=3.0, thickness=0.0);
+            levels=(1 => 2.0,)
+        )
     )
     unitless_sm = SolidModel("experimental_unitless"; overwrite=true)
     unitless_metadata = render!(unitless_sm, unitless_sch, unitless_target)
@@ -508,8 +510,7 @@ end
     )
     unitless_locators = Experimental._extract_locator_positions(
         unitless_locator_geometry,
-        unitless_target.stack,
-        unitless_target.levels
+        unitless_target.stack
     )
     @test only(unitless_locators).center_x == 5.0
     @test only(unitless_locators).center_y == 7.0
@@ -522,8 +523,10 @@ end
     log_dir = mktempdir()
     warning_sch = plan(warning_graph; log_dir=log_dir) |> check!
     warning_target = Experimental.SolidModelTarget(
-        StackLevels(1 => 0.0),
-        SourceStack(:metal => SourceLayer(METAL; level=1))
+        SourceStack(
+            :metal => SourceLayer(METAL; level=1, height=0.0, thickness=0.0);
+            levels=(1 => 0.0,)
+        )
     )
     strict_sm = SolidModel("experimental_strict_warning"; overwrite=true)
     @test_throws ErrorException render!(
@@ -680,10 +683,9 @@ end
                 level=0 => 1,
                 height=(-500μm, 500μm),
                 gds_meta=nothing
-            )
+            );
+            levels=(0 => -500.0μm, 1 => 0.0μm)
         )
-
-        levels = StackLevels(0 => -500.0μm, 1 => 0.0μm)
 
         ops = Tuple[
             (
@@ -714,7 +716,7 @@ end
             )
         ]
 
-        target = Experimental.SolidModelTarget(levels, stack, ops)
+        target = Experimental.SolidModelTarget(stack, ops)
 
         # Build schematic with two MockTransmons fused via coupler hooks.
         # The coupler arms meet at the fuse point, creating a galvanic connection
