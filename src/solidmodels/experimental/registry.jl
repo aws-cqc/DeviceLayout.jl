@@ -267,18 +267,6 @@ function _entity_metas(cs)
     return metas
 end
 
-function _preflight(cs, stack::SourceStack, ops::Vector{Tuple})
-    for entity_meta in _entity_metas(cs)
-        sourcelayer(entity_meta, stack)
-    end
-    # Validate operation syntax before Gmsh. Registry-aware source-layer validation happens
-    # during compilation, where previously generated destination layers are available.
-    for (operation_idx, operation) in enumerate(ops)
-        _validate_layer_operation(operation, operation_idx)
-    end
-    return nothing
-end
-
 function _map_meta_for_stack(stack::SourceStack, m::EntityMeta)
     sl = sourcelayer(m, stack)
     (!sl.solidmodel || m.role isa Locator) && return nothing
