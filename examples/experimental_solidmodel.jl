@@ -23,12 +23,12 @@ add_node!(graph, component; base_id="q1")
 schematic = plan(graph; log_dir=build_dir)
 check!(schematic)
 
-levels = StackLevels(1 => 0μm)
 stack = SourceStack(
     :metal => SourceLayer(NULL; level=1, gds_meta=GDSMeta(10, 0)),
-    :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(11, 0))
+    :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(11, 0));
+    levels=(1 => 0μm,)
 )
-target = Experimental.SolidModelTarget(levels, stack)
+target = Experimental.SolidModelTarget(stack)
 
 solid_model = SolidModel("experimental_solidmodel"; overwrite=true)
 metadata = render!(solid_model, schematic, target)
