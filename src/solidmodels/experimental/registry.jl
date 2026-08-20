@@ -267,10 +267,10 @@ function _entity_metas(cs)
     return metas
 end
 
-function _preflight(cs, stack::SourceStack, levels::StackLevels, ops::Vector{Tuple})
-    _validate_stack(stack, levels)
+function _preflight(cs, stack::SourceStack, ops::Vector{Tuple})
+    _validate_stack(stack)
     for entity_meta in _entity_metas(cs)
-        _require_source_layer(stack, entity_meta; context="placed EntityMeta")
+        sourcelayer(entity_meta, stack)
     end
     # Validate operation syntax before Gmsh. Registry-aware source-layer validation happens
     # during compilation, where previously generated destination layers are available.
@@ -280,13 +280,8 @@ function _preflight(cs, stack::SourceStack, levels::StackLevels, ops::Vector{Tup
     return nothing
 end
 
-function _meta_z(stack::SourceStack, levels::StackLevels, m::EntityMeta)
-    sl = _require_source_layer(stack, m)
-    return _stack_z(levels[first_level(sl)], first_height(sl))
-end
-
 function _map_meta_for_stack(stack::SourceStack, m::EntityMeta)
-    sl = _require_source_layer(stack, m)
+    sl = sourcelayer(m, stack)
     (!sl.solidmodel || m.role isa Locator) && return nothing
     return physical_group_name(m)
 end
@@ -295,7 +290,7 @@ _map_meta_for_stack(::SourceStack, ::DeviceLayout.Meta) = nothing
 function _build_initial_registry(cs, stack::SourceStack)
     registry = Registry()
     for entity_meta in unique(_entity_metas(cs))
-        source_layer = _require_source_layer(stack, entity_meta)
+        source_layer = sourcelayer(entity_meta, stack)
         (!source_layer.solidmodel || entity_meta.role isa Locator) && continue
         record = PGRecord(physical_group_name(entity_meta), entity_meta.layer, entity_meta)
         state = get!(registry, entity_meta.layer) do
@@ -306,11 +301,11 @@ function _build_initial_registry(cs, stack::SourceStack)
     return registry
 end
 
-function _schedule_extrusions(stack::SourceStack, reg::Registry, levels::StackLevels)
+function _schedule_extrusions(stack::SourceStack, reg::Registry)
     operations = Tuple[]
-    for (layer_name, source_layer) in stack
+    for (layer_name, source_layer) in stack.layers
         haskey(reg, layer_name) || continue
-        iszero(resolve_thickness(source_layer, levels)) && continue
+        iszero(thickness(source_layer, stack)) && continue
         push!(operations, (layer_name, SolidModels.extrude_z!, ()))
     end
     return operations
