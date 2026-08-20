@@ -39,7 +39,6 @@ z position, material class, extrusion, and output visibility:
 ```julia
 using Unitful: μm
 
-levels = StackLevels(1 => 0μm, 2 => 500μm)
 stack = SourceStack(
     :metal => SourceLayer(METAL; level=1, gds_meta=GDSMeta(10, 0)),
     :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(11, 0)),
@@ -48,12 +47,13 @@ stack = SourceStack(
         level=1,
         thickness=-500μm,
         gds_meta=nothing
-    )
+    );
+    levels=(1 => 0μm, 2 => 500μm)
 )
 ```
 
 Every placed `EntityMeta` layer must exist in the stack, and every level referenced by a
-source layer must exist in `StackLevels`. Validation happens before Gmsh is invoked.
+source layer must exist in `stack.levels`. Validation happens before Gmsh is invoked.
 `solidmodel=false` hides a layer from mesh geometry and returned metadata while leaving it
 eligible for GDS. Conversely, `gds_meta=nothing` hides only artwork. Locator roles
 (`Terminal`, `Ground`, and `Tag`) are excluded from mesh geometry and retained for
@@ -64,12 +64,12 @@ chip must explicitly map to that chip's layer symbol.
 
 ## Rendering
 
-The target stores exactly the stack, assembly levels, and layer-level operations:
+The target stores exactly the stack and layer-level operations:
 
 ```julia
 const Experimental = DeviceLayout.SolidModels.Experimental
 
-target = Experimental.SolidModelTarget(levels, stack, Tuple[])
+target = Experimental.SolidModelTarget(stack, Tuple[])
 metadata = render!(solid_model, checked_schematic, target)
 ```
 
@@ -90,7 +90,7 @@ ops = Tuple[
     ),
     (:shifted_port, SolidModels.translate!, (:port, 10μm, 0μm, 0μm), :copy => true)
 ]
-target = Experimental.SolidModelTarget(levels, stack, ops)
+target = Experimental.SolidModelTarget(stack, ops)
 ```
 
 The public operation grammar is:
@@ -158,7 +158,7 @@ position. `EntityMeta.index` does not alter the datatype.
 
 Migration is not a target substitution. Components must first replace `SemanticMeta` with
 `EntityMeta`, explicitly map opposite-chip variants to layer symbols, and supply a complete
-`SourceStack` and `StackLevels`. The legacy technology and targets remain supported and are
+`SourceStack`. The legacy technology and targets remain supported and are
 not deprecated by this feature.
 
 See `examples/experimental_solidmodel.jl` for a small end-to-end example.

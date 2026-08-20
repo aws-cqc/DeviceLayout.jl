@@ -6,34 +6,27 @@ import DeviceLayout.SchematicDrivenLayout:
     Schematic, build!, close_logfile, max_level_logged, reopen_logfile
 
 """
-    struct SolidModelTarget <: SchematicDrivenLayout.Target
-        levels::StackLevels
-        stack::SourceStack
+    struct SolidModelTarget{T <: Coordinate} <: SchematicDrivenLayout.Target
+        stack::SourceStack{T}
         ops::Vector{Tuple}
     end
 
-    SolidModelTarget(levels::StackLevels, stack::SourceStack)
-    SolidModelTarget(
-        levels::StackLevels,
-        stack::SourceStack,
-        ops::AbstractVector{<:Tuple}
-    )
+    SolidModelTarget(stack::SourceStack)
+    SolidModelTarget(stack::SourceStack, ops::AbstractVector{<:Tuple})
 
 Opt-in schematic target for the simulation-agnostic solid-model pipeline.
 
-The target stores the assembly `levels`, source `stack`, and layer-level operations `ops`.
-Rendering behavior is supplied by `render!` keywords.
+The target stores the source `stack` and layer-level operations `ops`. Rendering behavior
+is supplied by `render!` keywords.
 """
-struct SolidModelTarget <: SchematicDrivenLayout.Target
-    levels::StackLevels
-    stack::SourceStack
+struct SolidModelTarget{T <: Coordinate} <: SchematicDrivenLayout.Target
+    stack::SourceStack{T}
     ops::Vector{Tuple}
 end
 
-SolidModelTarget(levels::StackLevels, stack::SourceStack) =
-    SolidModelTarget(levels, stack, Tuple[])
-SolidModelTarget(levels::StackLevels, stack::SourceStack, ops::AbstractVector{<:Tuple}) =
-    SolidModelTarget(levels, stack, Tuple[ops...])
+SolidModelTarget(stack::SourceStack{T}) where {T} = SolidModelTarget{T}(stack, Tuple[])
+SolidModelTarget(stack::SourceStack{T}, ops::AbstractVector{<:Tuple}) where {T} =
+    SolidModelTarget{T}(stack, Tuple[ops...])
 
 function _prefixed_meta(m::EntityMeta, prefix::String)
     isempty(m.name) && return m
@@ -241,30 +234,20 @@ function render!(
         _prefix_placement_names!(working_sch)
         lumped_port_directions =
             _extract_lumped_port_directions(working_sch.coordinate_system)
-        _preflight(working_sch.coordinate_system, target.stack, target.levels, target.ops)
+        _preflight(working_sch.coordinate_system, target.stack, target.ops)
 
-        locators = _extract_locator_positions(
-            working_sch.coordinate_system,
-            target.stack,
-            target.levels
-        )
+        locators = _extract_locator_positions(working_sch.coordinate_system, target.stack)
         initial_registry =
             _build_initial_registry(working_sch.coordinate_system, target.stack)
-        layer_operations = vcat(
-            _schedule_extrusions(target.stack, initial_registry, target.levels),
-            target.ops
-        )
-        pg_operations, final_registry, interfaces, deferred_interfaces = compile_layer_ops(
-            layer_operations,
-            target.stack,
-            initial_registry;
-            levels=target.levels
-        )
+        layer_operations =
+            vcat(_schedule_extrusions(target.stack, initial_registry), target.ops)
+        pg_operations, final_registry, interfaces, deferred_interfaces =
+            compile_layer_ops(layer_operations, target.stack, initial_registry)
         retained_groups = _retained_physical_groups(final_registry, deferred_interfaces)
 
         reopen_logfile(working_sch, :render_solidmodel)
         metadata = with_logger(working_sch.logger) do
-            _warn_potential_overlaps(final_registry, target.stack, target.levels)
+            _warn_potential_overlaps(final_registry, target.stack)
             try
                 SolidModels.render!(
                     sm,
@@ -272,7 +255,7 @@ function render!(
                     map_meta=meta -> _map_meta_for_stack(target.stack, meta),
                     postrender_ops=pg_operations,
                     retained_physical_groups=retained_groups,
-                    zmap=meta -> _meta_z(target.stack, target.levels, meta),
+                    zmap=meta -> layer_z(meta.layer, target.stack),
                     kwargs...
                 )
             catch e
@@ -325,7 +308,6 @@ function render!(
                 cc_entity_tags,
                 interface_layer_parents,
                 target.stack,
-                target.levels,
                 sm,
                 lumped_port_directions
             )
