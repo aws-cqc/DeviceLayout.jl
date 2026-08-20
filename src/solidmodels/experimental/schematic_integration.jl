@@ -6,8 +6,8 @@ import DeviceLayout.SchematicDrivenLayout:
     Schematic, build!, close_logfile, max_level_logged, reopen_logfile
 
 """
-    struct SolidModelTarget{T <: Coordinate} <: SchematicDrivenLayout.Target
-        stack::SourceStack{T}
+    struct SolidModelTarget{L <: SourceLayer, T <: Coordinate} <: SchematicDrivenLayout.Target
+        stack::SourceStack{L, T}
         ops::Vector{Tuple}
     end
 
@@ -19,14 +19,15 @@ Opt-in schematic target for the simulation-agnostic solid-model pipeline.
 The target stores the source `stack` and layer-level operations `ops`. Rendering behavior
 is supplied by `render!` keywords.
 """
-struct SolidModelTarget{T <: Coordinate} <: SchematicDrivenLayout.Target
-    stack::SourceStack{T}
+struct SolidModelTarget{L <: SourceLayer, T <: Coordinate} <: SchematicDrivenLayout.Target
+    stack::SourceStack{L, T}
     ops::Vector{Tuple}
 end
 
-SolidModelTarget(stack::SourceStack{T}) where {T} = SolidModelTarget{T}(stack, Tuple[])
-SolidModelTarget(stack::SourceStack{T}, ops::AbstractVector{<:Tuple}) where {T} =
-    SolidModelTarget{T}(stack, Tuple[ops...])
+SolidModelTarget(stack::SourceStack{L, T}) where {L, T} =
+    SolidModelTarget{L, T}(stack, Tuple[])
+SolidModelTarget(stack::SourceStack{L, T}, ops::AbstractVector{<:Tuple}) where {L, T} =
+    SolidModelTarget{L, T}(stack, Tuple[ops...])
 
 function _prefixed_meta(m::EntityMeta, prefix::String)
     isempty(m.name) && return m
