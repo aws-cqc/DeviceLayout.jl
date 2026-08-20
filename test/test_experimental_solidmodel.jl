@@ -1,4 +1,4 @@
-@testitem "Experimental SolidModel types and stack" begin
+@testitem "EntityMeta and SourceStack" begin
     using DeviceLayout
     using DeviceLayout.SchematicDrivenLayout
     using DeviceLayout.SolidModels.Experimental
@@ -28,13 +28,22 @@
     @test physical_group_name(type_role_meta) == "metal__island__i3__rTerminal"
     @test Experimental.map_meta(type_role_meta) == physical_group_name(type_role_meta)
 
-    pair_layer =
+    simple_layer = SourceLayer(NULL; thickness=10.0nm)
+    offset_layer = SourceLayer(NULL; thickness=15μm, height=5μm)
+    stack = SourceStack(:a => simple_layer, :b => offset_layer; levels=(1 => 0.0nm))
+    @test simple_layer.level == 1
+    @test thickness(simple_layer, stack) == 10.0nm
+    @test thickness(offset_layer, stack) == 15μm # offset shouldn't change thickness
+
+    pair_layer = SourceLayer(NULL; level=1 => 2)
+    offset_pair_layer =
         SourceLayer(DIELECTRIC; level=1 => 2, height=(10μm, -10μm), gds_meta=GDSMeta(8, 2))
-    @test first(pair_layer.level) == 1
-    @test last(pair_layer.level) == 2
-    @test first(pair_layer.height) == 10μm
-    @test last(pair_layer.height) == -10μm
-    stack = SourceStack(:substrate => pair_layer; levels=(1 => 0μm, 2 => 500μm))
+    @test first(offset_pair_layer.level) == 1
+    @test last(offset_pair_layer.level) == 2
+    @test first(offset_pair_layer.height) == 10μm
+    @test last(offset_pair_layer.height) == -10μm
+    stack = SourceStack(:substrate => offset_pair_layer; levels=(1 => 0μm, 2 => 500μm))
+    @test thickness(pair_layer, stack) == 500μm
     @test thickness(stack.layers[:substrate], stack) == 480μm
     @test layer_z(:substrate, stack) == 10μm
     @test layer_z(stack.layers[:substrate], stack) == 10μm
@@ -44,18 +53,28 @@
     @test stack.levels[2] == 500μm
     @test typeof(stack.layers[:substrate]).parameters[1] == typeof(stack.levels[1])
     # Inconsistent length types (mixed unitful and unitless)
-    @test_throws ArgumentError SourceStack(:substrate => pair_layer; levels=(1 => 0.0,))
+    @test_throws ArgumentError SourceStack(
+        :substrate => offset_pair_layer;
+        levels=(1 => 0.0,)
+    )
     # Mixed length types (all unitful)
     layer = SourceLayer(NULL; level=1 => 2, height=(10μm, -5.4μm))
     stack = SourceStack(:substrate => layer; levels=(1 => 0μm, 2 => 500000.3nm))
 
-    missing_level_stack = SourceStack(
+    mixed_types_stack = SourceStack(
+        :integer => SourceLayer(NULL),
+        :floating => SourceLayer(NULL; height=0.0μm, thickness=0.0μm);
+        levels=(1 => 0.0μm,)
+    )
+    @test typeof(mixed_types_stack).parameters[1] === SourceLayer
+    @test typeof(mixed_types_stack).parameters[2] == typeof(mixed_types_stack.levels[1])
+    @test layer_z(:integer, mixed_types_stack) == 0.0μm
+
+    # Referenced level does not exist
+    @test_throws ArgumentError SourceStack(
         :bad => SourceLayer(NULL; level=3, gds_meta=GDSMeta(1, 0));
         levels=(1 => 0μm, 2 => 500μm)
     )
-    bad_cs = CoordinateSystem("bad", μm)
-    place!(bad_cs, Rectangle(1μm, 1μm), EntityMeta(:bad; name="bad_level"))
-    @test_throws ArgumentError Experimental._preflight(bad_cs, missing_level_stack, Tuple[])
 end
 
 @testitem "Experimental artwork visibility and offsets" begin
