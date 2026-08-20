@@ -21,8 +21,8 @@ include("experimental/artwork.jl")
 
 export Material, METAL, DIELECTRIC, NULL
 export Role, Generic, Locator, Terminal, Ground, Tag, Port, WavePort, LumpedPort
-export SourceLayer, SourceStack, StackLevels, EntityMeta
-export first_level, first_height, resolve_thickness
+export SourceLayer, SourceStack, EntityMeta
+export sourcelayer, layer_z, thickness
 export physical_group_name, compile_layer_ops, exnboundaries
 export serialize_metadata, write_metadata
 
