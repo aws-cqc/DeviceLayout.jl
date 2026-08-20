@@ -51,63 +51,49 @@ end
 """
     SourceStack(layer_pairs...; levels)
 
-Collection of source layers and assembly-level z coordinates. Layer heights, explicit
-thicknesses, and level coordinates are converted to one common coordinate type `T`.
-Unitful and unitless coordinates cannot be mixed in the same stack.
+Collection of source layers and assembly-level z coordinates. Length coordinates must be
+either all unitful or all unitless.
 """
-struct SourceStack{T <: Coordinate}
-    layers::Dict{Symbol, SourceLayer{T}}
+struct SourceStack{L <: SourceLayer, T <: Coordinate}
+    layers::Dict{Symbol, L}
     levels::Dict{Int, T}
+
+    function SourceStack(
+        layers::Dict{Symbol, L},
+        levels::Dict{Int, T}
+    ) where {L <: SourceLayer, T <: Coordinate}
+
+        # Check that all fields representing lengths are either all unitless or all unitful
+        coordinates = Any[]
+        for source_layer in values(layers)
+            push!(coordinates, source_layer.height...)
+            push!(coordinates, source_layer.thickness)
+        end
+        append!(coordinates, values(levels))
+        all_unitless = all(c -> c isa Real, coordinates)
+        all_unitful = all(c -> c isa Unitful.Quantity, coordinates)
+        (all_unitless || all_unitful) ||
+            throw(ArgumentError("SourceStack cannot mix unitful and unitless coordinates"))
+
+        # Check all referenced levels exist
+        for (name, layer) in layers
+            for l in layer.level
+                if !haskey(levels, l)
+                    throw(
+                        ArgumentError(
+                            "Source layer $name references missing assembly level $l"
+                        )
+                    )
+                end
+            end
+        end
+
+        return new{L, T}(layers, levels)
+    end
 end
 
 function SourceStack(layer_pairs::Pair{Symbol, <:SourceLayer}...; levels)
-    level_dict = levels isa AbstractDict ? levels : Dict(levels)
-    return SourceStack(Dict{Symbol, SourceLayer}(layer_pairs), level_dict)
-end
-
-function SourceStack(
-    layers::AbstractDict{<:Symbol, <:SourceLayer},
-    levels::AbstractDict{<:Integer}
-)
-    coordinates = Any[]
-    for source_layer in values(layers)
-        if source_layer.height isa Tuple
-            append!(coordinates, source_layer.height)
-        else
-            push!(coordinates, source_layer.height)
-        end
-        push!(coordinates, source_layer.thickness)
-    end
-    append!(coordinates, values(levels))
-    isempty(coordinates) && throw(ArgumentError("SourceStack requires coordinate values"))
-
-    all_unitless = all(coordinate -> coordinate isa Real, coordinates)
-    all_unitful = all(coordinate -> !(coordinate isa Real), coordinates)
-    (all_unitless || all_unitful) ||
-        throw(ArgumentError("SourceStack cannot mix unitful and unitless coordinates"))
-
-    T = promote_type(typeof.(coordinates)...)
-
-    converted_layers = Dict{Symbol, SourceLayer{T}}()
-    for (layer_name, source_layer) in layers
-        converted_height = if source_layer.height isa Tuple
-            convert.(T, source_layer.height)
-        else
-            convert(T, source_layer.height)
-        end
-        converted_layers[layer_name] = SourceLayer{T}(
-            source_layer.material,
-            source_layer.level,
-            converted_height,
-            convert(T, source_layer.thickness),
-            source_layer.contour_only,
-            source_layer.keep_interior,
-            source_layer.gds_meta,
-            source_layer.solidmodel
-        )
-    end
-    converted_levels = Dict{Int, T}(level => convert(T, z) for (level, z) in levels)
-    return SourceStack{T}(converted_layers, converted_levels)
+    return SourceStack(Dict(layer_pairs), Dict(levels))
 end
 
 """
@@ -127,45 +113,19 @@ sourcelayer(m::EntityMeta, stack::SourceStack) = sourcelayer(m.layer, stack)
 
 Return the source z coordinate for a layer name or source layer.
 """
-function layer_z(source_layer::SourceLayer{T}, stack::SourceStack{T}) where {T}
-    return stack.levels[first(source_layer.level)] + first(source_layer.height)
+function layer_z(layer::SourceLayer, stack::SourceStack)
+    return stack.levels[first(layer.level)] + first(layer.height)
 end
 layer_z(layer::Symbol, stack::SourceStack) = layer_z(sourcelayer(layer, stack), stack)
 
 """
-    thickness(source_layer::SourceLayer, stack::SourceStack)
+    thickness(sl::SourceLayer, stack::SourceStack)
 
 Return a source layer's explicit or level-pair-derived extrusion thickness.
 """
-function thickness(source_layer::SourceLayer{T}, stack::SourceStack{T}) where {T}
-    source_layer.level isa Pair || return source_layer.thickness
-
-    source_z = stack.levels[first(source_layer.level)] + first(source_layer.height)
-    destination_z = stack.levels[last(source_layer.level)]
-    if source_layer.height isa Tuple
-        destination_z += last(source_layer.height)
-    end
+function thickness(layer::SourceLayer, stack::SourceStack)
+    layer.level isa Pair || return layer.thickness
+    source_z = stack.levels[first(layer.level)] + first(layer.height)
+    destination_z = stack.levels[last(layer.level)] + last(layer.height)
     return destination_z - source_z
-end
-
-function _validate_source_layer(
-    layer_name::Symbol,
-    source_layer::SourceLayer,
-    stack::SourceStack
-)
-    for level in (first(source_layer.level), last(source_layer.level))
-        haskey(stack.levels, level) || throw(
-            ArgumentError(
-                "Source layer :$layer_name references missing assembly level $level"
-            )
-        )
-    end
-    return nothing
-end
-
-function _validate_stack(stack::SourceStack)
-    for (layer_name, source_layer) in stack.layers
-        _validate_source_layer(layer_name, source_layer, stack)
-    end
-    return nothing
 end
