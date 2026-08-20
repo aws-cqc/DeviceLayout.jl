@@ -4,9 +4,9 @@ function _map_artwork_meta(
     level_increment::GDSMeta,
     m::EntityMeta
 )
-    sl = _require_source_layer(stack, m; context="artwork EntityMeta")
+    sl = sourcelayer(m, stack)
     isnothing(sl.gds_meta) && return nothing
-    source_level = first_level(sl)
+    source_level = first(sl.level)
     idx = findfirst(==(source_level), levels)
     isnothing(idx) && return nothing
 
@@ -48,7 +48,7 @@ function render!(
     isempty(selected_levels) &&
         throw(ArgumentError("levels must contain at least one level"))
     for entity_meta in _entity_metas(cs)
-        _require_source_layer(stack, entity_meta; context="artwork EntityMeta")
+        sourcelayer(entity_meta, stack)
     end
     mapper =
         entity_meta ->
