@@ -268,7 +268,6 @@ function _entity_metas(cs)
 end
 
 function _preflight(cs, stack::SourceStack, ops::Vector{Tuple})
-    _validate_stack(stack)
     for entity_meta in _entity_metas(cs)
         sourcelayer(entity_meta, stack)
     end
