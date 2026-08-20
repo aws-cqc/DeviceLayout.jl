@@ -209,7 +209,6 @@ end
         @test occursin("Layer operation 1", sprint(showerror, err))
         @test occursin(":bad", sprint(showerror, err))
     end
-
     append_registry = deepcopy(registry)
     append_registry[:combined] =
         LayerState([PGRecord("combined__existing", :combined, nothing)], 2)
