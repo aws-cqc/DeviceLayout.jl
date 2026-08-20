@@ -519,4 +519,357 @@
         @test hasgroup(sm, "l1", 2)
         gmsh.finalize()
     end
+
+    # ─── mutual_node! (all-pairs symmetric noding) ─────────────────────────
+
+    @testset "mutual_node! makes two adjacent groups symmetric on a shared edge" begin
+        # Group A: rectangle (0,0)-(10,10). Its right edge is (10,0)→(10,10),
+        # one segment with no interior vertex.
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[
+                    Point(0.0μm, 0.0μm),
+                    Point(10.0μm, 0.0μm),
+                    Point(10.0μm, 10.0μm),
+                    Point(0.0μm, 10.0μm)
+                ]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        # Group B: rectangle (10,0)-(20,10) with an extra vertex at (10,5) on
+        # its left edge — a T-junction against A's right edge.
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[
+                    Point(10.0μm, 0.0μm),
+                    Point(20.0μm, 0.0μm),
+                    Point(20.0μm, 10.0μm),
+                    Point(10.0μm, 10.0μm),
+                    Point(10.0μm, 5.0μm)  # foreign vertex on A's right edge
+                ]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        groups = Dict(:a => [A], :b => [B])
+        n = SolidModels.mutual_node!(groups)
+        # A gains (10,5) on its right edge; B already had it, so exactly one
+        # injection (into A).
+        @test n == 1
+        a_pts = points(groups[:a][1].exterior)
+        @test any(p -> p ≈ Point(10.0μm, 5.0μm), a_pts)
+        @test length(a_pts) == 5  # was 4, +1 injected
+        # Symmetric: both groups now visit (10,5) on the shared boundary.
+        b_pts = points(groups[:b][1].exterior)
+        @test any(p -> p ≈ Point(10.0μm, 5.0μm), b_pts)
+    end
+
+    @testset "mutual_node! is idempotent" begin
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[
+                    Point(0.0μm, 0.0μm),
+                    Point(10.0μm, 0.0μm),
+                    Point(10.0μm, 10.0μm),
+                    Point(0.0μm, 10.0μm)
+                ]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[
+                    Point(10.0μm, 0.0μm),
+                    Point(20.0μm, 0.0μm),
+                    Point(20.0μm, 10.0μm),
+                    Point(10.0μm, 10.0μm),
+                    Point(10.0μm, 5.0μm)
+                ]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        groups = Dict(:a => [A], :b => [B])
+        @test SolidModels.mutual_node!(groups) == 1
+        # Second pass: both sides already carry (10,5); nothing new to inject.
+        @test SolidModels.mutual_node!(groups) == 0
+    end
+
+    @testset "mutual_node! no-op when groups don't touch" begin
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[
+                    Point(0.0μm, 0.0μm),
+                    Point(10.0μm, 0.0μm),
+                    Point(10.0μm, 10.0μm),
+                    Point(0.0μm, 10.0μm)
+                ]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        # Far away, no shared boundary.
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[
+                    Point(100.0μm, 100.0μm),
+                    Point(110.0μm, 100.0μm),
+                    Point(110.0μm, 110.0μm),
+                    Point(100.0μm, 110.0μm)
+                ]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        groups = Dict(:a => [A], :b => [B])
+        @test SolidModels.mutual_node!(groups) == 0
+    end
+
+    @testset "mutual_node! splits a Turn at a foreign vertex on the arc" begin
+        # Group A has a quarter-arc from (10,0) to (0,10) centered at origin.
+        R = 10.0μm
+        turn = Paths.Turn(90°, R, α0=90°, p0=Point(R, 0.0μm))
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[Point(R, 0.0μm), Point(0.0μm, R), Point(R, R)],
+                [turn],
+                [1]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        # Group B has a vertex at 45° on that arc — a T-junction on the curve.
+        mid = Point(R * cos(π / 4), R * sin(π / 4))
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[mid, Point(20.0μm, 20.0μm), Point(20.0μm, 0.0μm)]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        groups = Dict(:a => [A], :b => [B])
+        n = SolidModels.mutual_node!(groups)
+        @test n >= 1
+        # A's arc is now split into >=2 sub-Turns, still native curves.
+        @test length(groups[:a][1].exterior.curves) >= 2
+        @test all(c -> c isa Paths.Turn, groups[:a][1].exterior.curves)
+    end
+
+    @testset "mutual_node! injects across three groups meeting at a boundary" begin
+        # Three stacked rectangles sharing horizontal boundaries; the middle
+        # one has a vertex the outer two don't, and vice versa.
+        bottom = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[
+                    Point(0.0μm, 0.0μm),
+                    Point(10.0μm, 0.0μm),
+                    Point(10.0μm, 10.0μm),
+                    Point(5.0μm, 10.0μm),  # vertex on shared edge with middle
+                    Point(0.0μm, 10.0μm)
+                ]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        middle = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[
+                    Point(0.0μm, 10.0μm),
+                    Point(10.0μm, 10.0μm),
+                    Point(10.0μm, 20.0μm),
+                    Point(0.0μm, 20.0μm)
+                ]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        groups = Dict(:bottom => [bottom], :middle => [middle])
+        n = SolidModels.mutual_node!(groups)
+        # middle's bottom edge (0,10)→(10,10) gains (5,10) from bottom.
+        @test n == 1
+        @test any(p -> p ≈ Point(5.0μm, 10.0μm), points(groups[:middle][1].exterior))
+    end
+
+    @testset "mutual_node! empty groups is a no-op" begin
+        groups = Dict{Symbol, Vector{CurvilinearRegion{typeof(1.0μm)}}}()
+        @test SolidModels.mutual_node!(groups) == 0
+        groups2 = Dict(:a => CurvilinearRegion{typeof(1.0μm)}[])
+        @test SolidModels.mutual_node!(groups2) == 0
+    end
+
+    @testset "mutual_node! node_tol is unit-safe (nm regardless of input unit)" begin
+        # `node_tol` is documented in nm and must mean the same *physical*
+        # distance whether the input Points carry µm or nm units. Build the
+        # SAME geometry both ways and check the injection is identical. The
+        # foreign vertex B[5] sits 1 nm off A's right edge (x = 10 µm + 1 nm),
+        # inside the default 2 nm tolerance — so it injects regardless of unit.
+        # `u` is the point unit (nm or μm); `x_off` is the perpendicular
+        # offset of the foreign vertex from A's right edge, in that same unit.
+        function build_pair(u, x_off)
+            A = CurvilinearRegion(
+                CurvilinearPolygon(
+                    Point{typeof(1.0u)}[
+                        Point(0.0u, 0.0u),
+                        Point(10000.0u, 0.0u),
+                        Point(10000.0u, 10000.0u),
+                        Point(0.0u, 10000.0u)
+                    ]
+                ),
+                CurvilinearPolygon{typeof(1.0u)}[]
+            )
+            B = CurvilinearRegion(
+                CurvilinearPolygon(
+                    Point{typeof(1.0u)}[
+                        Point(10000.0u, 0.0u),
+                        Point(20000.0u, 0.0u),
+                        Point(20000.0u, 10000.0u),
+                        Point(10000.0u, 10000.0u),
+                        Point((10000.0 + x_off)u, 5000.0u)  # off A's edge by x_off·u
+                    ]
+                ),
+                CurvilinearPolygon{typeof(1.0u)}[]
+            )
+            return Dict(:a => [A], :b => [B])
+        end
+        # 1 nm off the edge: within 2 nm tolerance → injects, in both units.
+        @test SolidModels.mutual_node!(build_pair(nm, 1.0)) == 1
+        @test SolidModels.mutual_node!(build_pair(μm, 0.001)) == 1  # 0.001 µm = 1 nm
+        # 5 nm off the edge: outside tolerance → no injection, in both units.
+        @test SolidModels.mutual_node!(build_pair(nm, 5.0)) == 0
+        @test SolidModels.mutual_node!(build_pair(μm, 0.005)) == 0  # 0.005 µm = 5 nm
+    end
+
+    @testset "mutual_node! dedups near-coincident foreign vertices on an edge" begin
+        # Group A: unit square; its bottom edge (0,0)→(10000,0) is one segment.
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0nm)}[
+                    Point(0.0nm, 0.0nm),
+                    Point(10000.0nm, 0.0nm),
+                    Point(10000.0nm, 10000.0nm),
+                    Point(0.0nm, 10000.0nm)
+                ]
+            ),
+            CurvilinearPolygon{typeof(1.0nm)}[]
+        )
+        # Group B has two vertices 1 nm apart on A's bottom edge — within the
+        # 2 nm node tolerance of each other. Only one should be injected.
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0nm)}[
+                    Point(0.0nm, -10000.0nm),
+                    Point(10000.0nm, -10000.0nm),
+                    Point(10000.0nm, 0.0nm),
+                    Point(5001.0nm, 0.0nm),
+                    Point(5000.0nm, 0.0nm),
+                    Point(0.0nm, 0.0nm)
+                ]
+            ),
+            CurvilinearPolygon{typeof(1.0nm)}[]
+        )
+        groups = Dict(:a => [A], :b => [B])
+        # A's bottom edge gains one vertex, not two (the 1-nm-apart pair
+        # collapses to a single injection).
+        @test SolidModels.mutual_node!(groups) == 1
+    end
+
+    @testset "mutual_node! keeps two well-separated foreign vertices on one edge" begin
+        # Complement to the dedup test: two foreign vertices FAR apart (5 µm)
+        # along the same target edge must BOTH be injected (the dedup only drops
+        # sub-tolerance neighbours).
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[
+                    Point(0.0μm, 0.0μm),
+                    Point(20.0μm, 0.0μm),      # bottom edge is one long segment
+                    Point(20.0μm, 20.0μm),
+                    Point(0.0μm, 20.0μm)
+                ]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        # Group B contributes two well-separated on-edge vertices at x=5 and x=15.
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[
+                    Point(0.0μm, -20.0μm),
+                    Point(20.0μm, -20.0μm),
+                    Point(20.0μm, 0.0μm),
+                    Point(15.0μm, 0.0μm),  # on A's bottom edge
+                    Point(5.0μm, 0.0μm),   # on A's bottom edge
+                    Point(0.0μm, 0.0μm)
+                ]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        groups = Dict(:a => [A], :b => [B])
+        @test SolidModels.mutual_node!(groups) == 2  # both kept, not deduped
+        a_pts = points(groups[:a][1].exterior)
+        @test any(p -> p ≈ Point(5.0μm, 0.0μm), a_pts)
+        @test any(p -> p ≈ Point(15.0μm, 0.0μm), a_pts)
+    end
+
+    @testset "mutual_node! injects a foreign vertex into a hole edge" begin
+        # A group region with a HOLE: a foreign vertex from another group lands
+        # on the hole's edge and must be injected there (exercises hole indexing
+        # and the hole-noding branch of mutual_node!).
+        ext = CurvilinearPolygon(
+            Point{typeof(1.0μm)}[
+                Point(0.0μm, 0.0μm),
+                Point(30.0μm, 0.0μm),
+                Point(30.0μm, 30.0μm),
+                Point(0.0μm, 30.0μm)
+            ]
+        )
+        # Square hole from (10,10) to (20,20); its right edge is x=20, y∈[10,20].
+        hole = CurvilinearPolygon(
+            Point{typeof(1.0μm)}[
+                Point(10.0μm, 10.0μm),
+                Point(10.0μm, 20.0μm),
+                Point(20.0μm, 20.0μm),
+                Point(20.0μm, 10.0μm)
+            ]
+        )
+        A = CurvilinearRegion(ext, [hole])
+        # Group B has a vertex at (20,15) — on the hole's right edge interior.
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[
+                    Point(20.0μm, 15.0μm),  # on A's hole edge
+                    Point(25.0μm, 12.0μm),
+                    Point(25.0μm, 18.0μm)
+                ]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        groups = Dict(:a => [A], :b => [B])
+        n = SolidModels.mutual_node!(groups)
+        @test n >= 1
+        # The injected vertex shows up on the hole, not the exterior.
+        hole_pts = points(groups[:a][1].holes[1])
+        @test any(p -> p ≈ Point(20.0μm, 15.0μm), hole_pts)
+    end
+
+    @testset "mutual_node! leaves an untouched curve intact (no foreign split)" begin
+        # A group with a Turn arc that no other group touches: the curve must be
+        # carried through unchanged (the isempty(splits) branch of _node_contour!).
+        R = 10.0μm
+        turn = Paths.Turn(90°, R, α0=90°, p0=Point(R, 0.0μm))
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[Point(R, 0.0μm), Point(0.0μm, R), Point(R, R)],
+                [turn],
+                [1]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        # Group B is far away and shares no boundary.
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{typeof(1.0μm)}[
+                    Point(100.0μm, 100.0μm),
+                    Point(110.0μm, 100.0μm),
+                    Point(110.0μm, 110.0μm)
+                ]
+            ),
+            CurvilinearPolygon{typeof(1.0μm)}[]
+        )
+        groups = Dict(:a => [A], :b => [B])
+        @test SolidModels.mutual_node!(groups) == 0
+        # The arc survives as a single native Turn, unmodified.
+        @test length(groups[:a][1].exterior.curves) == 1
+        @test groups[:a][1].exterior.curves[1] isa Paths.Turn
+    end
 end

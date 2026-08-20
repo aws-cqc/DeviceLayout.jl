@@ -78,6 +78,10 @@ import SpatialIndexing
 import SpatialIndexing: RTree
 
 export render_conformal!, ConformalRenderContext, add_conformal_loop!
+export mutual_node!
+
+# Geometry preprocessing that makes adjacent groups conformal before render.
+include("noding.jl")
 
 """
 Entry in `endpoint_curve_index`: the signed OCC tag of the curve, plus a
