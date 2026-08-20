@@ -235,7 +235,9 @@ function render!(
         _prefix_placement_names!(working_sch)
         lumped_port_directions =
             _extract_lumped_port_directions(working_sch.coordinate_system)
-        _preflight(working_sch.coordinate_system, target.stack, target.ops)
+        for entity_meta in _entity_metas(working_sch.coordinate_system)
+            sourcelayer(entity_meta, target.stack)
+        end
 
         locators = _extract_locator_positions(working_sch.coordinate_system, target.stack)
         initial_registry =
