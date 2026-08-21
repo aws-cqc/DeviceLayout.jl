@@ -1919,6 +1919,33 @@
         )
         @test !SolidModels.hasgroup(sm2, "unused", 2)
 
+        sm3 = SolidModel("test_skip_materials", overwrite=true)
+        render!(
+            sm3,
+            cs;
+            skip_unused_layers=true,
+            material_precedence=[("used", 2), ("intermediate", 2)]
+        )
+        @test SolidModels.hasgroup(sm3, "used", 2)
+        @test SolidModels.hasgroup(sm3, "intermediate", 2)
+        @test !SolidModels.hasgroup(sm3, "unused", 2)
+
+        # A layer referenced only by a post-fragment operation is still rendered
+        sm4 = SolidModel("test_skip_post_fragment", overwrite=true)
+        render!(
+            sm4,
+            cs;
+            skip_unused_layers=true,
+            post_fragment_ops=[(
+                "kept",
+                (sm, g) -> SolidModels.dimtags(sm[g, 2]),
+                ("unused",)
+            )]
+        )
+        @test SolidModels.hasgroup(sm4, "unused", 2)
+        @test SolidModels.hasgroup(sm4, "kept", 2)
+        @test !SolidModels.hasgroup(sm4, "used", 2)
+
         # Indexed layers: "port_1" kept when base layer "port" is referenced
         cs3 = CoordinateSystem("test_skip_indexed", nm)
         place!(cs3, Rectangle(Point(0μm, 0μm), Point(1μm, 1μm)), SemanticMeta(:metal))
@@ -1971,7 +1998,7 @@
             ("base", SolidModels.difference_geom!, ("writeable_area", "base_negative"))
         ]
         retained = [("vacuum", 3), ("substrate", 3)]
-        names = DeviceLayout.SolidModels._used_group_names(ops, retained)
+        names = DeviceLayout.SolidModels._used_group_names(ops, retained, [("chip", 3)])
         @test "metal" ∈ names
         @test "metal_negative" ∈ names
         @test "base" ∈ names
@@ -1979,6 +2006,7 @@
         @test "base_negative" ∈ names
         @test "vacuum" ∈ names
         @test "substrate" ∈ names
+        @test "chip" ∈ names
 
         # Verify transitive deps: intermediate names referenced by ops are included
         ops2 =
