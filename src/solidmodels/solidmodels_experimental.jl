@@ -1,3 +1,23 @@
+module SolidModelsExperimental
+
+using SHA
+import Graphs
+using Logging
+import MetaGraphs
+using Unitful
+using DeviceLayout
+using DeviceLayout: Coordinate, GDSMeta, μm, ustrip
+using ..SolidModels
+import ..SolidModels: SolidModel
+
+import DeviceLayout: datatype, gdslayer, layer, layerindex, name, render!
+
+include("experimental/entitymeta.jl")
+include("experimental/stack.jl")
+include("experimental/compiler.jl")
+include("experimental/locators.jl")
+include("experimental/postprocess.jl")
+include("experimental/serialization.jl")
 using DeviceLayout.SchematicDrivenLayout
 using Logging: with_logger
 
@@ -614,8 +634,8 @@ end
     ) -> Dict{String, Any}
 
 Build and render a private working copy of `sch`, finalize post-fragmentation discovery,
-and return schema-v1 metadata. This method performs no metadata or model artifact I/O; call
-`write_metadata` explicitly when persistence is desired.
+and return schema-v1 metadata. This method performs no metadata or model artifact I/O;
+write the returned dictionary explicitly when persistence is desired.
 """
 function render!(
     sm::SolidModel,
@@ -627,7 +647,7 @@ function render!(
     sch.checked[] || error("Cannot render an unchecked Schematic. Run check!(sch) first.")
     haskey(kwargs, :output_dir) && throw(
         ArgumentError(
-            "Experimental.render! has no output_dir keyword; use write_metadata(path, metadata) explicitly"
+            "SolidModelsExperimental.render! has no output_dir keyword; write the returned metadata explicitly"
         )
     )
 
@@ -725,3 +745,10 @@ function render!(
 end
 
 export SolidModelTarget
+
+export METAL, DIELECTRIC, NULL
+export Generic, Terminal, Ground, Tag, WavePort, LumpedPort
+export SourceLayer, SourceStack, EntityMeta
+export exterior_boundaries, serialize_metadata
+
+end # module SolidModelsExperimental
