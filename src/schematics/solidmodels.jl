@@ -8,6 +8,7 @@
         wave_port_layers::Vector{Symbol}
         ignored_layers::Vector{Symbol}
         retained_physical_groups::Vector{Tuple{String, Int}}
+        material_precedence::Vector{Tuple{String, Int}}
         rendering_options
         postrenderer
     end
@@ -45,6 +46,8 @@ The `rendering_options` include any keyword arguments to be passed down to the l
   - `wave_port_layers`: A list of layer `Symbol`s for layers that are 1D line segments extruded to define wave port boundary conditions.
   - `ignored_layers`: A list of layer `Symbol`s for layers that should be ignored during rendering (mapped to `nothing`). This provides an alternative to using `NORENDER_META` for layers that should be conditionally ignored in solid model rendering but may be needed for other rendering targets.
   - `retained_physical_groups`: Vector of `(name, dimension)` tuples specifying which physical groups to keep after rendering. All other groups are removed.
+  - `material_precedence`: Material groups ordered from highest to lowest priority. After
+    fragmentation, each entity is kept only in its highest-priority listed group.
 
 The `postrenderer` is a list of geometry kernel commands that create new named groups of
 entities from other groups, for example by geometric Boolean operations like intersection.
@@ -60,6 +63,7 @@ struct SolidModelTarget <: Target
     wave_port_layers::Vector{Symbol}
     ignored_layers::Vector{Symbol}
     retained_physical_groups::Vector{Tuple{String, Int}}
+    material_precedence::Vector{Tuple{String, Int}}
     rendering_options
     postrenderer
 end
@@ -74,6 +78,7 @@ SolidModelTarget(
     ignored_layers=[],
     postrender_ops=[],
     retained_physical_groups=[],
+    material_precedence=[],
     kwargs...
 ) = SolidModelTarget(
     tech,
@@ -84,6 +89,7 @@ SolidModelTarget(
     wave_port_layers,
     ignored_layers,
     retained_physical_groups,
+    material_precedence,
     (; solidmodel=true, retained_physical_groups=retained_physical_groups, kwargs...),
     postrender_ops
 )
@@ -134,6 +140,185 @@ function intersection_ops(t::SolidModelTarget, sch::Schematic)
             ) for i = 1:length(wave_ports)
         ]...
     ]
+end
+
+"""
+    SolidModelRenderContext
+
+Context for generating SolidModel operations for one placed component.
+"""
+struct SolidModelRenderContext{TT, TF, TP}
+    target::TT
+    transformation::TF
+    path::TP
+end
+
+"""
+    solidmodel_ops(component, ctx::SolidModelRenderContext)
+
+Return postrender operations contributed by a placed component.
+"""
+solidmodel_ops(::AbstractComponent, ::SolidModelRenderContext) = []
+
+"""
+    SolidModelComponent{T} <: AbstractComponent{T}
+    SolidModelComponent(filename, meta; name=uniquename("solid"), scale=1.0, hooks=compass(),
+                        group_map=identity, fusion=:global, parameters=(;))
+
+An external CAD solid imported into a `SolidModel` at its solved schematic transform and
+the z of layer `meta`.
+
+It emits no 2D geometry and instead contributes an [`import_solid!`](@ref) operation during
+solid-model rendering. `scale` applies a uniform scale, such as for unit conversion.
+
+`hooks` supplies named mate points and defaults to a [`compass`](@ref) at the CAD origin.
+
+`group_map` renames physical groups carried by the file (a `.xao`), see [`import_solid!`](@ref).
+
+`fusion` selects how the part is made conformal with the rest of the model:
+
+  - `:global` imports it before the render's global fragmentation pass, which then fuses
+    everything with everything. Simple, and the right choice for small parts.
+  - `:targeted` imports it after that pass and runs [`targeted_fuse!`](@ref) on it, so only
+    entities near the part are fragmented. Use this for large or already-conformal parts such
+    as a package, where the global pass would be slow or would split solids needlessly.
+  - `:none` imports it after the pass and leaves it as is.
+
+Requires a `SolidModelTarget` using the OpenCascade kernel.
+
+# Example
+
+```julia
+using DeviceLayout, DeviceLayout.SchematicDrivenLayout
+using Unitful: μm, °
+
+chip = SolidModelComponent(
+    "chip.step",
+    SemanticMeta(:chip);
+    hooks=(; mount=PointHook(10μm, 0μm, 180°))
+)
+
+g = SchematicGraph("demo")
+anchor = add_node!(g, Spacer(; p1=Point(100μm, 0μm)))
+fuse!(g, anchor => :p1_east, chip => :mount)
+
+sch = plan(g)
+check!(sch)
+```
+
+Rendering `sch` with a `SolidModelTarget` imports `chip.step` at the solved pose and layer
+height.
+"""
+@compdef struct SolidModelComponent{T} <: AbstractComponent{T}
+    name::String = "solid"
+    filename::String = ""
+    meta::SemanticMeta = SemanticMeta(:solid)
+    scale::Float64 = 1.0
+    hooks::NamedTuple = compass(p0=zero(Point{T}))
+    group_map = identity
+    fusion::Symbol = :global
+    parameters::NamedTuple = (;)
+end
+
+const _SOLIDMODEL_FUSION_MODES = (:global, :targeted, :none)
+
+# Shared by the positional constructor and the render pass. The keyword constructor
+# generated by `@compdef` performs no validation, so a mode is checked again where it is
+# consumed rather than trusted from the field.
+function _check_fusion_mode(fusion::Symbol)
+    fusion in _SOLIDMODEL_FUSION_MODES || throw(
+        ArgumentError(
+            "fusion must be one of $(_SOLIDMODEL_FUSION_MODES), got $(repr(fusion))"
+        )
+    )
+    return fusion
+end
+
+function SolidModelComponent(
+    filename::String,
+    meta::SemanticMeta;
+    name::String=uniquename("solid"),
+    scale=1.0,
+    hooks::Union{Nothing, NamedTuple}=nothing,
+    group_map=identity,
+    fusion::Symbol=:global,
+    parameters::NamedTuple=(;)
+)
+    _check_fusion_mode(fusion)
+    T = typeof(1.0UPREFERRED)
+    hks = isnothing(hooks) ? compass(p0=zero(Point{T})) : hooks
+    return SolidModelComponent{T}(;
+        name,
+        filename,
+        meta,
+        scale=Float64(scale),
+        hooks=hks,
+        group_map,
+        fusion,
+        parameters
+    )
+end
+
+"""
+    solidmodel_fusion(component) -> Symbol
+
+How a component's solid-model operations are fused into the model: `:global` (run before the
+global fragmentation pass, the default), `:targeted` (run after it, then `targeted_fuse!`), or
+`:none` (run after it, unfused).
+"""
+solidmodel_fusion(::AbstractComponent) = :global
+solidmodel_fusion(c::SolidModelComponent) = c.fusion
+
+hooks(c::SolidModelComponent) = c.hooks
+
+function solidmodel_ops(c::SolidModelComponent, ctx::SolidModelRenderContext)
+    dest = string(name(c), "_", join(ctx.path, "_"))
+    z = layer_z(ctx.target.technology, c.meta)
+    return [(
+        dest,
+        SolidModels.import_solid!,
+        (c.filename,),
+        :transform => ctx.transformation,
+        :z => z,
+        :scale => c.scale,
+        :groupname => nothing,
+        :group_map => c.group_map
+    )]
+end
+
+"""
+    component_solidmodel_ops(sch::Schematic, target::Target) -> (; postrender, post_fragment)
+
+Collect SolidModel operations from placed components using their solved global transforms,
+split by when they run (see `solidmodel_fusion`). `:global` components' operations go
+in `postrender`. The rest go in `post_fragment`, all imports first and then one
+[`targeted_fuse!`](@ref) per `:targeted` component, so every part is in place before any is
+fused.
+"""
+function component_solidmodel_ops(sch::Schematic, target::Target)
+    postrender = []
+    post_fragment = []
+    fuse_ops = []
+    for idx in find_components(AbstractComponent, sch)
+        path = idx isa Tuple ? idx : (idx,)
+        node = getpath(sch.graph, path...)[end]
+        ctx = SolidModelRenderContext(target, transformation(sch, path), path)
+        c = component(node)
+        ops = solidmodel_ops(c, ctx)
+        mode = _check_fusion_mode(solidmodel_fusion(c))
+        if mode == :global
+            append!(postrender, ops)
+        else
+            append!(post_fragment, ops)
+            if mode == :targeted
+                for op in ops
+                    dest = first(op)
+                    push!(fuse_ops, (dest, SolidModels.targeted_fuse!, (dest,)))
+                end
+            end
+        end
+    end
+    return (; postrender, post_fragment=vcat(post_fragment, fuse_ops))
 end
 
 bounding_layers(t::SolidModelTarget) = t.bounding_layers
@@ -251,8 +436,14 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
     # Extrusions
     # Target specific actions
     # Intersections with rendered volume
-    postrender_ops =
-        vcat(extrusion_ops(target, sch), target.postrenderer, intersection_ops(target, sch))
+    # Import component solids before target operations that may reference or intersect them.
+    component_ops = component_solidmodel_ops(sch, target)
+    postrender_ops = vcat(
+        extrusion_ops(target, sch),
+        component_ops.postrender,
+        target.postrenderer,
+        intersection_ops(target, sch)
+    )
     reopen_logfile(sch, :render_solidmodel)
     with_logger(sch.logger) do
         return render!(
@@ -260,8 +451,10 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
             sch.coordinate_system;
             zmap=Base.Fix1(layer_z, target),
             postrender_ops=postrender_ops,
+            post_fragment_ops=component_ops.post_fragment,
             map_meta=_map_meta_fn(target),
             retained_physical_groups=target.retained_physical_groups,
+            material_precedence=target.material_precedence,
             kwargs...,
             target.rendering_options...
         )

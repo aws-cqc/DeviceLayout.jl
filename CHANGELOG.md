@@ -6,6 +6,38 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - `SolidModels.import_solid!` imports an external CAD solid (STEP, BREP, IGES, or Gmsh
+    `.xao`) into a `SolidModel`, positioned by an in-plane `ScaledIsometry`, a `z` offset, and
+    an optional uniform `scale`, and registers it as a physical group. A `.xao` file's own
+    physical groups are registered too, renamed through `group_map`, and never collide with
+    groups already in the model. Requires the `OpenCascade` kernel. Can also be used as a
+    postrender operation.
+  - `SolidModelComponent` (exported from `SchematicDrivenLayout`) places an imported CAD solid
+    in a schematic. It emits no 2D geometry; during solid-model rendering it contributes an
+    `import_solid!` operation at its solved transform and the z of its layer. `hooks` supplies
+    named mate points, defaulting to a `compass` at the CAD origin.
+  - `SolidModels.partition_material_groups!` and the `material_precedence` keyword of `render!`
+    and `render_conformal!` make the listed physical groups mutually exclusive by priority
+    after fragmentation, so each entity belongs to exactly one material group.
+    `render_conformal!` requires `fragment_backstop=true` when `material_precedence` is nonempty.
+  - `SolidModels.mesh_respect_lc` makes the mesh-size callback return the smaller of the
+    control-point size and the size gmsh proposes itself, so curvature or boundary sizing
+    applies to geometry without control points, such as imported CAD. Off by default.
+  - `SolidModels.load_mesh_control_points!` loads a parsed control-point document (tiers of
+    `h_um`, `alpha`, `coords_um`) into the mesh-size field, and
+    `SolidModels.set_mesh_size_callback!` installs the size callback for models assembled
+    without `render!`.
+  - `render!` accepts `post_fragment_ops`, postrender operations executed after the global
+    fragmentation pass and before `material_precedence`. `SolidModelComponent` gains
+    `group_map`, forwarded to `import_solid!`, and `fusion`: `:global` (default) imports the
+    part before the global pass as before, `:targeted` imports it afterwards and fuses it
+    locally with `targeted_fuse!`, `:none` imports it unfused.
+  - `SolidModels.targeted_fuse!` makes a dim-3 physical group (e.g. an imported CAD part)
+    conformal with nearby geometry by fragmenting only the entities inside a bounding box,
+    instead of the whole model.
+
 ### Changed
 
   - Deprecation warnings follow a consistent policy (#300): `Base.depwarn` (visible under
@@ -23,6 +55,10 @@ The format of this changelog is based on
     solid-model meshing order was hardcoded to `2`, so passing `mesh_order` had no effect. It
     now calls `SolidModels.mesh_order(mesh_order)`, and the docstring lists the previously
     omitted `mesh_order` and `total_length` keywords.
+  - Assigning a physical group to a `SolidModel` by name now clears any stale entry for that
+    name in gmsh's name registry first. Booleans and synchronization drop group-table entries
+    but keep names registered, and a stale name silently left the re-created group unnamed, so
+    it was written to `.xao` as `G_<dim>_<tag>`.
   - `polytext!` names glyph cells by Unicode codepoint (e.g. `PolyTextSansMono_U0041`) instead
     of by the character itself, so upper- and lowercase glyphs no longer produce cell names that
     collide under the GDS writer's case-insensitive duplicate check, and glyphs for characters
@@ -124,7 +160,7 @@ The format of this changelog is based on
     capping width-only output at 288 pixels high. If neither is supplied, the maximum dimension is capped at 4 inches. Reference bounding boxes render again, and GDS layers
     above 255 receive palette colors instead of all falling back to black.
   - Path termination and `SimpleNoRender` halos now use constant-offset edges instead of the generic
-    functional-offset fallback. The rendered discretization of these halos on curves may change but 
+    functional-offset fallback. The rendered discretization of these halos on curves may change but
     will be geometrically equivalent within tolerance.
   - `SolidModels.revolve!` now accepts unitful axis points and directions, converting point
     coordinates to the solid-model unit and direction components to a common unit. Unitless

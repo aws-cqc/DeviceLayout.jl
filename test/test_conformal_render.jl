@@ -120,12 +120,15 @@
         gmsh.option.setNumber("General.Verbosity", 0)
         render_conformal!(sm1, cs)
         @test hasgroup(sm1, "l1", 2)
+        @test_throws ArgumentError render_conformal!(
+            SolidModel("bs_materials_off"; overwrite=true),
+            cs;
+            material_precedence=[("l1", 2)]
+        )
 
-        # With backstop: same result (backstop runs as no-op when the cache
-        # already produced conformal geometry).
         sm2 = SolidModel("bs_on"; overwrite=true)
         gmsh.option.setNumber("General.Verbosity", 0)
-        render_conformal!(sm2, cs; fragment_backstop=true)
+        render_conformal!(sm2, cs; fragment_backstop=true, material_precedence=[("l1", 2)])
         @test hasgroup(sm2, "l1", 2)
 
         gmsh.finalize()
