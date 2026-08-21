@@ -10,73 +10,64 @@ Handles two cases:
   - Mixed-dimension (for example, 2D∩3D): the interface is the set of lower-dimensional
     entities in one PG that are also boundary faces of entities in the other PG.
 """
-function _execute_deferred_interfaces!(
-    sm::SolidModel,
-    deferred_interfaces::Vector{DeferredInterface}
-)
-    isempty(deferred_interfaces) && return nothing
+function _execute_deferred_interfaces!(sm::SolidModel, interfs::MetaGraphs.MetaDiGraph)
+    Graphs.nv(interfs) == 0 && return nothing
 
-    for deferred_interface in deferred_interfaces
-        obj_dim, tool_dim = deferred_interface.obj_dim, deferred_interface.tool_dim
+    dimtag_cache = Dict{Int, Any}()
+    boundary_cache = Dict{Int, Any}()
+
+    function pg_dimtags(vertex)
+        return get!(dimtag_cache, vertex) do
+            name = MetaGraphs.get_prop(interfs, vertex, :name)
+            dim = MetaGraphs.get_prop(interfs, vertex, :dim)
+            SolidModels.hasgroup(sm, name, dim) || return nothing
+            return SolidModels.dimtags(sm[name, dim])
+        end
+    end
+
+    function pg_boundary_tags(vertex, boundary_dim)
+        boundaries = get!(boundary_cache, vertex) do
+            dimtags = pg_dimtags(vertex)
+            isnothing(dimtags) && return nothing
+            boundary_dimtags =
+                SolidModels.gmsh.model.getBoundary(dimtags, false, false, false)
+            result = Dict{Int, Set{Int32}}()
+            for (dim, tag) in boundary_dimtags
+                push!(get!(Set{Int32}, result, Int(dim)), Int32(abs(tag)))
+            end
+            return result
+        end
+        isnothing(boundaries) && return nothing
+        return get(boundaries, boundary_dim, Set{Int32}())
+    end
+
+    for operation in _interface_vertices(interfs)
+        object, tool = _interface_pgs(interfs, operation)
+        obj_dim = MetaGraphs.get_prop(interfs, object, :dim)
+        tool_dim = MetaGraphs.get_prop(interfs, tool, :dim)
+        dest_name = MetaGraphs.get_prop(interfs, operation, :dest_name)
 
         if obj_dim == tool_dim
-            # Same-dim: shared boundary entities (dim-1) between adjacent groups
-            dim = obj_dim
-            boundary_dim = dim - 1
-            if !SolidModels.hasgroup(sm, deferred_interface.obj_pg_name, dim)
-                continue
-            end
-            if !SolidModels.hasgroup(sm, deferred_interface.tool_pg_name, dim)
-                continue
-            end
-
-            obj_dimtags = SolidModels.dimtags(sm[deferred_interface.obj_pg_name, dim])
-            tool_dimtags = SolidModels.dimtags(sm[deferred_interface.tool_pg_name, dim])
-            obj_boundary_dimtags =
-                SolidModels.gmsh.model.getBoundary(obj_dimtags, false, false, false)
-            tool_boundary_dimtags =
-                SolidModels.gmsh.model.getBoundary(tool_dimtags, false, false, false)
-            obj_boundary_tags =
-                Set(abs(t) for (d, t) in obj_boundary_dimtags if d == boundary_dim)
-            tool_boundary_tags =
-                Set(abs(t) for (d, t) in tool_boundary_dimtags if d == boundary_dim)
-
-            interface_tags = intersect(obj_boundary_tags, tool_boundary_tags)
-            if !isempty(interface_tags)
-                sm[deferred_interface.dest_name] = Tuple{Int32, Int32}[
-                    (Int32(boundary_dim), Int32(t)) for t in interface_tags
-                ]
-            end
+            boundary_dim = obj_dim - 1
+            obj_tags = pg_boundary_tags(object, boundary_dim)
+            tool_tags = pg_boundary_tags(tool, boundary_dim)
+            (isnothing(obj_tags) || isnothing(tool_tags)) && continue
+            interface_tags = intersect(obj_tags, tool_tags)
+            isempty(interface_tags) && continue
+            sm[dest_name] =
+                Tuple{Int32, Int32}[(Int32(boundary_dim), tag) for tag in interface_tags]
         else
-            # Mixed-dim: lo-dim entities that are boundary faces of hi-dim entities
             lo_dim = min(obj_dim, tool_dim)
-            hi_dim = max(obj_dim, tool_dim)
-
-            lo_name =
-                obj_dim <= tool_dim ? deferred_interface.obj_pg_name :
-                deferred_interface.tool_pg_name
-            hi_name =
-                obj_dim <= tool_dim ? deferred_interface.tool_pg_name :
-                deferred_interface.obj_pg_name
-
-            if !SolidModels.hasgroup(sm, lo_name, lo_dim)
-                continue
-            end
-            if !SolidModels.hasgroup(sm, hi_name, hi_dim)
-                continue
-            end
-
-            lo_tags = Set(SolidModels.entitytags(sm[lo_name, lo_dim]))
-            hi_dimtags = SolidModels.dimtags(sm[hi_name, hi_dim])
-            boundary_dimtags =
-                SolidModels.gmsh.model.getBoundary(hi_dimtags, false, false, false)
-            boundary_tags = Set(abs(t) for (d, t) in boundary_dimtags if d == lo_dim)
-
-            interface_tags = intersect(lo_tags, boundary_tags)
-            if !isempty(interface_tags)
-                sm[deferred_interface.dest_name] =
-                    Tuple{Int32, Int32}[(Int32(lo_dim), Int32(t)) for t in interface_tags]
-            end
+            lo = obj_dim <= tool_dim ? object : tool
+            hi = obj_dim <= tool_dim ? tool : object
+            lo_dimtags = pg_dimtags(lo)
+            hi_tags = pg_boundary_tags(hi, lo_dim)
+            (isnothing(lo_dimtags) || isnothing(hi_tags)) && continue
+            lo_tags = Set(Int32(tag) for (_, tag) in lo_dimtags)
+            interface_tags = intersect(lo_tags, hi_tags)
+            isempty(interface_tags) && continue
+            sm[dest_name] =
+                Tuple{Int32, Int32}[(Int32(lo_dim), tag) for tag in interface_tags]
         end
     end
 
@@ -445,7 +436,7 @@ end
 # ─── Tag locator resolution ──────────────────────────────────────────────────
 
 """
-    _resolve_tag_locators!(sm, registry, locators, deferred_interfaces, interfaces)
+    _resolve_tag_locators!(sm, registry, locators, deferred_interfaces)
 
 After fragmentation, resolve Tag locators by finding the 2D surface entity that
 contains each locator's center point and creating a dedicated PG for it. The PG is named
@@ -460,8 +451,7 @@ function _resolve_tag_locators!(
     sm::SolidModel,
     registry::Registry,
     locators::Vector{LocatorRecord},
-    deferred_interfaces::Vector{DeferredInterface},
-    interfaces::Dict{String, Tuple{String, String}}
+    deferred_interfaces::MetaGraphs.MetaDiGraph
 )
     tag_locators = filter(locator -> locator.role isa Tag, locators)
     isempty(tag_locators) && return nothing
@@ -533,36 +523,36 @@ function _resolve_tag_locators!(
         # For each deferred interface that references a parent PG as object,
         # add a parallel entry with the Tag PG as object
         for parent_name in parent_pg_names
-            for deferred_interface in copy(deferred_interfaces)
-                if deferred_interface.obj_pg_name == parent_name
-                    dest_layer = _find_pg_layer(deferred_interface.dest_name, registry)
-                    isnothing(dest_layer) && continue
-                    dest_name = generated_pg_name(
-                        dest_layer,
-                        pg_name,
-                        [deferred_interface.tool_pg_name];
-                        operation=:intersect,
-                        parameters=(
-                            deferred_interface.obj_dim,
-                            deferred_interface.tool_dim
-                        )
-                    )
-                    _generated_record_exists(registry, dest_layer, dest_name) && continue
-                    push!(
-                        deferred_interfaces,
-                        DeferredInterface(
-                            dest_name,
-                            pg_name,
-                            deferred_interface.tool_pg_name,
-                            deferred_interface.obj_dim,
-                            deferred_interface.tool_dim
-                        )
-                    )
-                    # Register in the interface layer
-                    new_record = PGRecord(dest_name, dest_layer, nothing)
-                    push!(registry[dest_layer].pgs, new_record)
-                    interfaces[dest_name] = (pg_name, deferred_interface.tool_pg_name)
-                end
+            parent_key = (:pg, parent_name, 2)
+            haskey(deferred_interfaces, parent_key, :key) || continue
+            parent = deferred_interfaces[parent_key, :key]
+            for operation in collect(Graphs.outneighbors(deferred_interfaces, parent))
+                MetaGraphs.get_prop(deferred_interfaces, operation, :kind) == :interface ||
+                    continue
+                _, tool = _interface_pgs(deferred_interfaces, operation)
+                tool_name = MetaGraphs.get_prop(deferred_interfaces, tool, :name)
+                tool_dim = MetaGraphs.get_prop(deferred_interfaces, tool, :dim)
+                previous_dest =
+                    MetaGraphs.get_prop(deferred_interfaces, operation, :dest_name)
+                dest_layer = _find_pg_layer(previous_dest, registry)
+                isnothing(dest_layer) && continue
+                dest_name = generated_pg_name(
+                    dest_layer,
+                    pg_name,
+                    [tool_name];
+                    operation=:intersect,
+                    parameters=(2, tool_dim)
+                )
+                _generated_record_exists(registry, dest_layer, dest_name) && continue
+                _defer_interface!(
+                    deferred_interfaces,
+                    dest_name,
+                    pg_name,
+                    tool_name,
+                    2,
+                    tool_dim
+                )
+                push!(registry[dest_layer].pgs, PGRecord(dest_name, dest_layer, nothing))
             end
         end
 
