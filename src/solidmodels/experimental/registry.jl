@@ -274,9 +274,12 @@ function _map_meta_for_stack(stack::SourceStack, m::EntityMeta)
 end
 _map_meta_for_stack(::SourceStack, ::DeviceLayout.Meta) = nothing
 
-function _build_initial_registry(cs, stack::SourceStack)
+function _build_initial_registry(
+    entity_metas::AbstractVector{<:EntityMeta},
+    stack::SourceStack
+)
     registry = Registry()
-    for entity_meta in unique(_entity_metas(cs))
+    for entity_meta in unique(entity_metas)
         source_layer = sourcelayer(entity_meta, stack)
         (!source_layer.solidmodel || entity_meta.role isa Locator) && continue
         record = PGRecord(physical_group_name(entity_meta), entity_meta.layer, entity_meta)
