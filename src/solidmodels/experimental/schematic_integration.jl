@@ -68,13 +68,13 @@ function _direction_vector(direction)
 end
 
 """
-    _extract_lumped_port_directions(cs) -> Dict{String, Vector{Float64}}
+    _lumped_port_directions(cs) -> Dict{String, Vector{Float64}}
 
 Resolve the final in-plane direction of every placed lumped-port occurrence without
 flattening the hierarchy. Keys are source physical-group identities, which remain stable
 when compiler operations generate new physical-group names while preserving `entity_meta`.
 """
-function _extract_lumped_port_directions(cs)::Dict{String, Vector{Float64}}
+function _lumped_port_directions(cs)::Dict{String, Vector{Float64}}
     directions = Dict{String, Vector{Float64}}()
     for (subcs, trans) in DeviceLayout.traversal(cs)
         for (ent, meta) in zip(elements(subcs), element_metadata(subcs))
@@ -163,48 +163,6 @@ function _safe_close_logfile!(sch::Schematic)
     return nothing
 end
 
-function _capture_finalization_inputs(
-    sm::SolidModel,
-    registry::Registry,
-    deferred_interfaces::MetaGraphs.MetaDiGraph,
-    terminal_result
-)
-    tag_records = Tuple{String, String, Symbol}[]
-    for (layer_name, state) in registry
-        state.dim == 2 || continue
-        for record in state.pgs
-            isnothing(record.entity_meta) && continue
-            record.entity_meta.role isa Tag || continue
-            push!(tag_records, (record.name, record.entity_meta.name, layer_name))
-        end
-    end
-
-    cc_names = Iterators.flatten((keys(terminal_result.terminals), terminal_result.ground))
-    cc_entity_tags = Dict{String, Vector{Int32}}()
-    for cc_name in cc_names
-        if SolidModels.hasgroup(sm, cc_name, 2)
-            cc_entity_tags[cc_name] = collect(SolidModels.entitytags(sm[cc_name, 2]))
-        end
-    end
-
-    interface_layer_parents = Dict{Symbol, Vector{String}}()
-    for operation in _interface_vertices(deferred_interfaces)
-        interface_name = MetaGraphs.get_prop(deferred_interfaces, operation, :dest_name)
-        interface_layer = _find_pg_layer(interface_name, registry)
-        isnothing(interface_layer) && continue
-        parents = get!(Vector{String}, interface_layer_parents, interface_layer)
-        object, tool = _interface_pgs(deferred_interfaces, operation)
-        for parent in (object, tool)
-            parent_group = MetaGraphs.get_prop(deferred_interfaces, parent, :name)
-            parent_layer = _find_pg_layer(parent_group, registry)
-            isnothing(parent_layer) && continue
-            parent_name = string(parent_layer)
-            parent_name in parents || push!(parents, parent_name)
-        end
-    end
-    return tag_records, cc_entity_tags, interface_layer_parents
-end
-
 """
     render!(
         sm::SolidModel,
@@ -232,25 +190,39 @@ function render!(
         )
     )
 
+    # Build and rename a private schematic so rendering never mutates the caller's
+    # hierarchy or introduces collisions between repeated component placements.
     working_sch = _working_schematic(sch)
     try
         build!(working_sch; strict=strict)
         _prefix_placement_names!(working_sch)
-        lumped_port_directions =
-            _extract_lumped_port_directions(working_sch.coordinate_system)
+        # Collect transformed schematic data once, then compile the declarative layer
+        # operations before invoking Gmsh. Interface intersections remain deferred until
+        # after fragmentation has produced conformal topology.
+        # Resolve transformed in-plane directions for all lumped-port source identities.
+        lumped_port_directions = _lumped_port_directions(working_sch.coordinate_system)
+        # Collect semantic metadata from every entity in the transformed hierarchy.
         entity_metas = _entity_metas(working_sch.coordinate_system)
-        locators = _extract_locator_positions(working_sch.coordinate_system, target.stack)
-        initial_registry = _build_initial_registry(entity_metas, target.stack)
-        layer_operations =
-            vcat(_schedule_extrusions(target.stack, initial_registry), target.ops)
-        pg_operations, final_registry, deferred_interfaces =
-            compile_layer_ops(layer_operations, target.stack, initial_registry)
-        retained_groups = _retained_physical_groups(final_registry)
+        # Record transformed locator positions for post-fragmentation geometric queries.
+        locators = _locators(working_sch.coordinate_system, target.stack)
+        # Seed compiler state with the physical groups produced directly by artwork.
+        registry = _initial_registry(entity_metas, target.stack)
+        # Prepend required source-layer extrusions to the user-supplied operation schedule.
+        layer_ops = vcat(_extrusions(target.stack, registry), target.ops)
+        # Compile layer operations and defer interface discovery until after fragmentation.
+        pg_operations, registry, deferred_interfaces =
+            compile_layer_ops(layer_ops, target.stack, registry)
+        # Preserve every compiled physical group needed by later finalization passes.
+        retained_groups = _retained_physical_groups(registry)
 
+        # Route both geometry construction and postprocessing diagnostics through the
+        # render stage so the final strictness check sees the complete operation.
         reopen_logfile(working_sch, :render_solidmodel)
         metadata = with_logger(working_sch.logger) do
-            _warn_potential_overlaps(final_registry, target.stack)
+            _warn_potential_overlaps(registry, target.stack)
             try
+                # The legacy renderer creates and fragments the geometry, then applies
+                # the non-interface physical-group operations produced by the compiler.
                 SolidModels.render!(
                     sm,
                     working_sch.coordinate_system;
@@ -270,45 +242,39 @@ function render!(
                 rethrow()
             end
 
-            # Required post-fragmentation ordering. Keep finalization under the render
-            # logger so strict=:warn also observes discovery/finalization warnings.
-            _resolve_tag_locators!(sm, final_registry, locators, deferred_interfaces)
+            # Resolve Tags first because they remove tagged surfaces from their parent
+            # PGs and add Tag-specific deferred interfaces. Execute all interfaces next,
+            # then discover connected metal components from the resulting surface model.
+            tag_records =
+                _resolve_tag_locators!(sm, registry, locators, deferred_interfaces)
             _execute_deferred_interfaces!(sm, deferred_interfaces)
-            terminal_result =
-                find_terminals!(sm, final_registry, target.stack, locators)
+            terminal_result = find_terminals!(sm, registry, target.stack, locators)
 
-            cc_records = PGRecord[]
-            for cc_name in Iterators.flatten((
-                keys(terminal_result.terminals),
-                terminal_result.ground
-            ))
-                push!(cc_records, PGRecord(cc_name, :METAL_CC, nothing))
-            end
-            isempty(cc_records) ||
-                (final_registry[:METAL_CC] = LayerState(cc_records, 2))
+            # First partition PGs by identical layer-membership signatures, then split
+            # any remaining PG that spans multiple metal connected components. Keeping
+            # these passes separate makes each transformation and its bookkeeping clear.
+            split_results = _deduplicate_2d_pgs!(sm, registry)
+            _split_shared_cc_pgs!(
+                sm,
+                registry,
+                split_results,
+                terminal_result.cc_entity_tags
+            )
 
-            tag_records, cc_entity_tags, interface_layer_parents =
-                _capture_finalization_inputs(
-                    sm,
-                    final_registry,
-                    deferred_interfaces,
-                    terminal_result
-                )
-            split_results = _deduplicate_2d_pgs!(sm, final_registry)
-            _split_shared_cc_pgs!(sm, final_registry, split_results, cc_entity_tags)
-
+            # All geometry and registry mutation is complete; serialization only reads
+            # the finalized model and graph metadata.
             return serialize_metadata(
-                final_registry,
+                registry,
                 terminal_result,
                 tag_records,
                 split_results,
-                cc_entity_tags,
-                interface_layer_parents,
+                deferred_interfaces,
                 target.stack,
                 sm,
                 lumped_port_directions
             )
         end
+        # Apply strictness only after all render and finalization warnings are logged.
         _check_render_strict(working_sch, strict)
         return metadata
     finally
