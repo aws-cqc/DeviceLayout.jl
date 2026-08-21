@@ -1,8 +1,10 @@
 module Experimental
 
 using SHA
+import Graphs
 import JSON
 using Logging
+import MetaGraphs
 using Unitful
 using DeviceLayout
 using DeviceLayout: Coordinate, GDSMeta, μm, ustrip
