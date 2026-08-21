@@ -12,6 +12,7 @@ const MESHSIZE_PARAMS = Dict{
     Union{
         Float64,
         Int64,
+        Bool,
         Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}},
         Dict{
             Tuple{Float64, Float64},
@@ -22,6 +23,7 @@ const MESHSIZE_PARAMS = Dict{
     :mesh_scale => 1.0,
     :mesh_order => 1,
     :global_α => 0.75,
+    :respect_lc => false,
     :cp => Dict{Tuple{Float64, Float64}, Vector{SVector{3, Float64}}}(),
     :ct => Dict{
         Tuple{Float64, Float64},
@@ -375,9 +377,18 @@ function Base.setindex!(sm::SolidModel, dimtags, groupname::String)
             pg = sm[groupname, dim]
             gmsh.model.remove_physical_groups([(dim, pg.grouptag)])
         end
+        # gmsh keeps physical names in a registry that outlives the group table: booleans and
+        # synchronization drop groups but not their names, and a stale name silently leaves a
+        # re-created group unnamed. Clear it first; the loop below re-names other dimensions.
+        gmsh.model.removePhysicalName(groupname)
         tag = gmsh.model.addPhysicalGroup(dim, tags, -1, groupname)
         dimgroupdict(sm, dim)[groupname] = PhysicalGroup(groupname, sm, dim, tag)
         gmsh.model.setPhysicalName(dim, tag, groupname)
+        for d = 0:3
+            d == dim && continue
+            hasgroup(sm, groupname, d) &&
+                gmsh.model.setPhysicalName(d, sm[groupname, d].grouptag, groupname)
+        end
     end
 end
 Base.setindex!(sm::SolidModel, dimtags, name::Symbol) = setindex!(sm, dimtags, string(name))
@@ -504,6 +515,7 @@ end
 
 include("render.jl")
 include("postrender.jl")
+include("import.jl")
 include("conformal/conformal.jl")
 
 using .ConformalRender: render_conformal!, ConformalRenderContext, add_conformal_loop!
