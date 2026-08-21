@@ -1,19 +1,20 @@
 @testitem "EntityMeta and SourceStack" begin
     using DeviceLayout
     using DeviceLayout.SchematicDrivenLayout
-    using DeviceLayout.SolidModels.Experimental
+    using DeviceLayout.SolidModelsExperimental
     # import Unitful: μm
     using DeviceLayout.PreferredUnits
 
     # Offered material types remain present
-    @test METAL isa Material
-    @test DIELECTRIC isa Material
-    @test NULL isa Material
+    @test METAL isa SolidModelsExperimental.Material
+    @test DIELECTRIC isa SolidModelsExperimental.Material
+    @test NULL isa SolidModelsExperimental.Material
 
     # Some consumers may take PG as contract
     for role in [Generic(), Terminal(), Ground(), Tag(), WavePort(), LumpedPort()]
-        @test physical_group_name(EntityMeta(:metal; name="name", role=role)) ==
-              "metal__name__i1__r$role"
+        @test SolidModelsExperimental.physical_group_name(
+            EntityMeta(:metal; name="name", role=role)
+        ) == "metal__name__i1__r$role"
     end
 
     instance_role_meta = EntityMeta(:metal; role=Terminal())
@@ -25,15 +26,17 @@
     @test layerindex(type_role_meta) == 3
     @test level(type_role_meta) == 1 # DeviceLayout.Meta interface
     @test name(type_role_meta) == "island"
-    @test physical_group_name(type_role_meta) == "metal__island__i3__rTerminal"
-    @test Experimental.map_meta(type_role_meta) == physical_group_name(type_role_meta)
+    @test SolidModelsExperimental.physical_group_name(type_role_meta) ==
+          "metal__island__i3__rTerminal"
+    @test SolidModelsExperimental.map_meta(type_role_meta) ==
+          SolidModelsExperimental.physical_group_name(type_role_meta)
 
     simple_layer = SourceLayer(NULL; thickness=10.0nm)
     offset_layer = SourceLayer(NULL; thickness=15μm, height=5μm)
     stack = SourceStack(:a => simple_layer, :b => offset_layer; levels=(1 => 0.0nm))
     @test simple_layer.level == 1
-    @test thickness(simple_layer, stack) == 10.0nm
-    @test thickness(offset_layer, stack) == 15μm # offset shouldn't change thickness
+    @test SolidModelsExperimental.thickness(simple_layer, stack) == 10.0nm
+    @test SolidModelsExperimental.thickness(offset_layer, stack) == 15μm # offset shouldn't change thickness
 
     pair_layer = SourceLayer(NULL; level=1 => 2)
     offset_pair_layer =
@@ -43,12 +46,14 @@
     @test first(offset_pair_layer.height) == 10μm
     @test last(offset_pair_layer.height) == -10μm
     stack = SourceStack(:substrate => offset_pair_layer; levels=(1 => 0μm, 2 => 500μm))
-    @test thickness(pair_layer, stack) == 500μm
-    @test thickness(stack.layers[:substrate], stack) == 480μm
-    @test layer_z(:substrate, stack) == 10μm
-    @test layer_z(stack.layers[:substrate], stack) == 10μm
-    @test sourcelayer(:substrate, stack) === stack.layers[:substrate]
-    @test sourcelayer(EntityMeta(:substrate), stack) === stack.layers[:substrate]
+    @test SolidModelsExperimental.thickness(pair_layer, stack) == 500μm
+    @test SolidModelsExperimental.thickness(stack.layers[:substrate], stack) == 480μm
+    @test SolidModelsExperimental.layer_z(:substrate, stack) == 10μm
+    @test SolidModelsExperimental.layer_z(stack.layers[:substrate], stack) == 10μm
+    @test SolidModelsExperimental.sourcelayer(:substrate, stack) ===
+          stack.layers[:substrate]
+    @test SolidModelsExperimental.sourcelayer(EntityMeta(:substrate), stack) ===
+          stack.layers[:substrate]
     @test stack.levels[1] == 0μm
     @test stack.levels[2] == 500μm
     @test typeof(stack.layers[:substrate]).parameters[1] == typeof(stack.levels[1])
@@ -68,7 +73,7 @@
     )
     @test typeof(mixed_types_stack).parameters[1] === SourceLayer
     @test typeof(mixed_types_stack).parameters[2] == typeof(mixed_types_stack.levels[1])
-    @test layer_z(:integer, mixed_types_stack) == 0.0μm
+    @test SolidModelsExperimental.layer_z(:integer, mixed_types_stack) == 0.0μm
 
     # Referenced level does not exist
     @test_throws ArgumentError SourceStack(
@@ -79,7 +84,7 @@ end
 
 @testitem "Artwork visibility and offsets" begin
     using DeviceLayout
-    using DeviceLayout.SolidModels.Experimental
+    using DeviceLayout.SolidModelsExperimental
     import Unitful: μm
 
     stack = SourceStack(
@@ -101,7 +106,10 @@ end
     missing = CoordinateSystem("missing", μm)
     place!(missing, Rectangle(1μm, 1μm), EntityMeta(:unknown; name="bad", index=4))
     @test_throws ArgumentError render!(Cell("missing", μm), missing, stack)
-    registry = Experimental.initial_registry(Experimental._entity_metas(cs), stack)
+    registry = SolidModelsExperimental.initial_registry(
+        SolidModelsExperimental._entity_metas(cs),
+        stack
+    )
     @test !haskey(registry, :art_only)
     @test haskey(registry, :second)
 end
@@ -109,8 +117,8 @@ end
 @testitem "Compiler and validation" begin
     using DeviceLayout
     using DeviceLayout.SolidModels
-    using DeviceLayout.SolidModels.Experimental
-    using DeviceLayout.SolidModels.Experimental: PGRecord, LayerState, LayerRegistry
+    using DeviceLayout.SolidModelsExperimental
+    using DeviceLayout.SolidModelsExperimental: PGRecord, LayerState, LayerRegistry
     import Unitful: μm
 
     stack = SourceStack(
@@ -123,24 +131,30 @@ end
             2
         )
     )
-    pg_ops, final_registry, deferred =
-        compile_layer_ops([(:metal, SolidModels.extrude_z!, ())], stack, registry)
+    pg_ops, final_registry, deferred = SolidModelsExperimental.compile_layer_ops(
+        [(:metal, SolidModels.extrude_z!, ())],
+        stack,
+        registry
+    )
     @test final_registry[:metal].dim == 3
     @test length(pg_ops) == 2
-    @test isempty(Experimental.interface_vertices(deferred))
+    @test isempty(SolidModelsExperimental.interface_vertices(deferred))
 
-    @test_throws ArgumentError compile_layer_ops(
+    @test_throws ArgumentError SolidModelsExperimental.compile_layer_ops(
         [(:new_layer, SolidModels.difference_geom!, (:missing, :metal))],
         stack,
         registry
     )
 
-    boundary_ops, boundary_registry, _ =
-        compile_layer_ops([(:edge, SolidModels.get_boundary, (:metal,))], stack, registry)
+    boundary_ops, boundary_registry, _ = SolidModelsExperimental.compile_layer_ops(
+        [(:edge, SolidModels.get_boundary, (:metal,))],
+        stack,
+        registry
+    )
     @test boundary_registry[:edge].dim == 1
     @test only(boundary_ops)[2] == SolidModels.get_boundary
 
-    translate_ops, translate_registry, _ = compile_layer_ops(
+    translate_ops, translate_registry, _ = SolidModelsExperimental.compile_layer_ops(
         [(:shifted, SolidModels.translate!, (:metal, 1μm, 0μm, 0μm), :copy => true)],
         stack,
         registry
@@ -149,25 +163,26 @@ end
     @test translate_registry[:shifted].dim == 2
     @test only(translate_ops)[2] == SolidModels.translate!
 
-    two_translate_ops, two_translate_registry, _ = compile_layer_ops(
-        [
-            (:shifted, SolidModels.translate!, (:metal, 1μm, 0μm, 0μm), :copy => true),
-            (:shifted, SolidModels.translate!, (:metal, 2μm, 0μm, 0μm), :copy => true),
-            (:shifted, SolidModels.translate!, (:metal, 2μm, 0μm, 0μm), :copy => true)
-        ],
-        stack,
-        registry
-    )
+    two_translate_ops, two_translate_registry, _ =
+        SolidModelsExperimental.compile_layer_ops(
+            [
+                (:shifted, SolidModels.translate!, (:metal, 1μm, 0μm, 0μm), :copy => true),
+                (:shifted, SolidModels.translate!, (:metal, 2μm, 0μm, 0μm), :copy => true),
+                (:shifted, SolidModels.translate!, (:metal, 2μm, 0μm, 0μm), :copy => true)
+            ],
+            stack,
+            registry
+        )
     shifted_names = getfield.(two_translate_registry[:shifted].pgs, :name)
     @test length(shifted_names) == 2
     @test allunique(shifted_names)
     @test count(operation -> operation[2] == SolidModels.translate!, two_translate_ops) == 2
-    @test Experimental.generated_pg_name(
+    @test SolidModelsExperimental.generated_pg_name(
         :generated,
         "object",
         ["tool"];
         operation=:difference
-    ) != Experimental.generated_pg_name(
+    ) != SolidModelsExperimental.generated_pg_name(
         :generated,
         "object",
         ["tool"];
@@ -199,7 +214,7 @@ end
     ]
     for operation in malformed_operations
         err = try
-            compile_layer_ops([operation], stack, registry)
+            SolidModelsExperimental.compile_layer_ops([operation], stack, registry)
             nothing
         catch caught
             caught
@@ -211,7 +226,7 @@ end
     append_registry = deepcopy(registry)
     append_registry[:combined] =
         LayerState([PGRecord("combined__existing", :combined, nothing)], 2)
-    append_ops, union_registry, _ = compile_layer_ops(
+    append_ops, union_registry, _ = SolidModelsExperimental.compile_layer_ops(
         [(:combined, SolidModels.union_geom!, (:metal,))],
         stack,
         append_registry
@@ -225,31 +240,33 @@ end
     wrong_dimension_registry = deepcopy(registry)
     wrong_dimension_registry[:shifted] =
         LayerState([PGRecord("shifted__volume", :shifted, nothing)], 3)
-    @test_throws ArgumentError compile_layer_ops(
+    @test_throws ArgumentError SolidModelsExperimental.compile_layer_ops(
         [(:shifted, SolidModels.translate!, (:metal, 1μm, 0μm, 0μm), :copy => true)],
         stack,
         wrong_dimension_registry
     )
 
-    interface_ops, interface_registry, deferred = compile_layer_ops(
+    interface_ops, interface_registry, deferred = SolidModelsExperimental.compile_layer_ops(
         [(:interface, SolidModels.intersect_geom!, (:metal, :metal))],
         stack,
         registry
     )
     @test isempty(interface_ops)
     @test interface_registry[:interface].dim == 1
-    interface_operation = only(Experimental.interface_vertices(deferred))
-    @test Experimental.MetaGraphs.get_prop(deferred, interface_operation, :dest_layer) ==
-          :interface
-    @test Experimental.MetaGraphs.get_prop(deferred, interface_operation, :parent_layers) ==
-          (:metal, :metal)
+    interface_operation = only(SolidModelsExperimental.interface_vertices(deferred))
+    @test SolidModelsExperimental.MetaGraphs.get_prop(
+        deferred,
+        interface_operation,
+        :dest_layer
+    ) == :interface
+    @test SolidModelsExperimental.MetaGraphs.get_prop(
+        deferred,
+        interface_operation,
+        :parent_layers
+    ) == (:metal, :metal)
 
-    interface_graph = Experimental._deferred_interface_graph()
-    Experimental.defer_interface!(interface_graph, "ab", "a", "b", 2, 3, :interface, :a, :b)
-    Experimental.defer_interface!(interface_graph, "ac", "a", "c", 2, 3, :interface, :a, :c)
-    @test Experimental.Graphs.nv(interface_graph) == 5 # 3 PGs + 2 operations
-    @test length(Experimental.interface_vertices(interface_graph)) == 2
-    @test_throws ArgumentError Experimental.defer_interface!(
+    interface_graph = SolidModelsExperimental._deferred_interface_graph()
+    SolidModelsExperimental.defer_interface!(
         interface_graph,
         "ab",
         "a",
@@ -260,7 +277,31 @@ end
         :a,
         :b
     )
-    @test_throws ArgumentError Experimental.defer_interface!(
+    SolidModelsExperimental.defer_interface!(
+        interface_graph,
+        "ac",
+        "a",
+        "c",
+        2,
+        3,
+        :interface,
+        :a,
+        :c
+    )
+    @test SolidModelsExperimental.Graphs.nv(interface_graph) == 5 # 3 PGs + 2 operations
+    @test length(SolidModelsExperimental.interface_vertices(interface_graph)) == 2
+    @test_throws ArgumentError SolidModelsExperimental.defer_interface!(
+        interface_graph,
+        "ab",
+        "a",
+        "b",
+        2,
+        3,
+        :interface,
+        :a,
+        :b
+    )
+    @test_throws ArgumentError SolidModelsExperimental.defer_interface!(
         interface_graph,
         "ab",
         "new_a",
@@ -271,7 +312,7 @@ end
         :new_a,
         :new_b
     )
-    @test Experimental.Graphs.nv(interface_graph) == 5 # no orphan PGs after rejection
+    @test SolidModelsExperimental.Graphs.nv(interface_graph) == 5 # no orphan PGs after rejection
 
     @test length(exterior_boundaries(:volume)) == 6
 end
@@ -279,7 +320,7 @@ end
 @testitem "Placement prefix copies and transformed locators" begin
     using DeviceLayout
     using DeviceLayout.SchematicDrivenLayout
-    using DeviceLayout.SolidModels.Experimental
+    using DeviceLayout.SolidModelsExperimental
     import Unitful: μm
 
     geometry = CoordinateSystem("shared", μm)
@@ -300,9 +341,9 @@ end
     check!(sch)
 
     original_metadata = deepcopy(element_metadata(component.geometry))
-    working = Experimental._working_schematic(sch)
+    working = SolidModelsExperimental._working_schematic(sch)
     build!(working)
-    Experimental._prefix_placement_names!(working)
+    SolidModelsExperimental._prefix_placement_names!(working)
 
     names_by_node = Dict{String, Vector{String}}()
     for (node, ref) in working.ref_dict
@@ -341,7 +382,7 @@ end
     addref!(root, locator_geometry, Point(10μm, 0μm))
     addref!(root, locator_geometry, Point(-10μm, 5μm))
     stack = SourceStack(:metal => SourceLayer(METAL; level=1); levels=(1 => 0μm,))
-    locators = Experimental.find_locators(root, stack)
+    locators = SolidModelsExperimental.find_locators(root, stack)
     @test length(locators) == 2
     @test sort([locator.position[1] for locator in locators]) == [-10.0, 10.0]
     @test sort([locator.position[2] for locator in locators]) == [0.0, 5.0]
@@ -350,15 +391,15 @@ end
         :metal => SourceLayer(METAL; level=1, solidmodel=false);
         levels=(1 => 0μm,)
     )
-    @test isempty(Experimental.find_locators(root, hidden_stack))
+    @test isempty(SolidModelsExperimental.find_locators(root, hidden_stack))
 end
 
 @testitem "LumpedPort directions" begin
     using DeviceLayout
-    using DeviceLayout.SolidModels.Experimental
+    using DeviceLayout.SolidModelsExperimental
     import Unitful: μm, °
 
-    const direction_map = Experimental._lumped_port_directions
+    const direction_map = SolidModelsExperimental._lumped_port_directions
 
     local_cs = CoordinateSystem("local_port", μm)
     nested_port = meshsized_entity(
@@ -367,17 +408,19 @@ end
     )
     local_meta = EntityMeta(:port; name="local", role=LumpedPort)
     place!(local_cs, nested_port, local_meta)
-    @test direction_map(local_cs)[physical_group_name(local_meta)] ≈
+    @test direction_map(local_cs)[SolidModelsExperimental.physical_group_name(local_meta)] ≈
           [cospi(1 / 6), 0.5, 0.0]
 
     transformed = CoordinateSystem("transformed_ports", μm)
     addref!(transformed, local_cs; rot=90°)
-    rotated = direction_map(transformed)[physical_group_name(local_meta)]
+    rotated =
+        direction_map(transformed)[SolidModelsExperimental.physical_group_name(local_meta)]
     @test rotated ≈ [-0.5, cospi(1 / 6), 0.0]
 
     reflected = CoordinateSystem("reflected_ports", μm)
     addref!(reflected, local_cs; rot=90°, xrefl=true)
-    reflected_direction = direction_map(reflected)[physical_group_name(local_meta)]
+    reflected_direction =
+        direction_map(reflected)[SolidModelsExperimental.physical_group_name(local_meta)]
     @test reflected_direction ≈ [0.5, cospi(1 / 6), 0.0]
 
     missing = CoordinateSystem("missing_direction", μm)
@@ -399,7 +442,9 @@ end
     identical = CoordinateSystem("identical_directions", μm)
     addref!(identical, shared, Point(0μm, 0μm))
     addref!(identical, shared, Point(2μm, 0μm))
-    @test direction_map(identical)[physical_group_name(shared_meta)] == [1.0, 0.0, 0.0]
+    @test direction_map(identical)[SolidModelsExperimental.physical_group_name(
+        shared_meta
+    )] == [1.0, 0.0, 0.0]
 
     conflicting = CoordinateSystem("conflicting_directions", μm)
     addref!(conflicting, shared)
@@ -420,8 +465,8 @@ end
 @testitem "Tag resolution stays within its declared layer" begin
     using DeviceLayout
     using DeviceLayout.SolidModels
-    using DeviceLayout.SolidModels.Experimental
-    using DeviceLayout.SolidModels.Experimental: PGRecord, LayerState, LayerRegistry
+    using DeviceLayout.SolidModelsExperimental
+    using DeviceLayout.SolidModelsExperimental: PGRecord, LayerState, LayerRegistry
 
     sm = SolidModel("tag_layer"; overwrite=true)
     first_tag = SolidModels.gmsh.model.occ.addRectangle(0.0, 0.0, 0.0, 10.0, 10.0)
@@ -434,9 +479,9 @@ end
         :b => LayerState([PGRecord("layer_b", :b, EntityMeta(:b))], 2),
         :interface => LayerState([PGRecord("interface_ab", :interface, nothing)], 1)
     )
-    locator = Experimental.LocatorRecord("tag", 1, Tag(), :a, (5.0, 5.0, 0.0))
-    deferred = Experimental._deferred_interface_graph()
-    Experimental.defer_interface!(
+    locator = SolidModelsExperimental.LocatorRecord("tag", 1, Tag(), :a, (5.0, 5.0, 0.0))
+    deferred = SolidModelsExperimental._deferred_interface_graph()
+    SolidModelsExperimental.defer_interface!(
         deferred,
         "interface_ab",
         "layer_a",
@@ -447,16 +492,17 @@ end
         :a,
         :b
     )
-    tag_records = Experimental.add_tagged_pgs!(sm, registry, [locator], deferred)
-    tag_name = physical_group_name(EntityMeta(:a; name="tag", role=Tag()))
+    tag_records = SolidModelsExperimental.add_tagged_pgs!(sm, registry, [locator], deferred)
+    tag_name =
+        SolidModelsExperimental.physical_group_name(EntityMeta(:a; name="tag", role=Tag()))
     @test tag_records == [(tag_name, "tag", :a)]
     @test SolidModels.hasgroup(sm, tag_name, 2)
     @test SolidModels.entitytags(sm[tag_name, 2]) == [Int32(first_tag)]
-    @test length(Experimental.interface_vertices(deferred)) == 2
-    @test any(Experimental.interface_vertices(deferred)) do operation
-        object, tool = Experimental.operation_pgs(deferred, operation)
-        object_name = Experimental.MetaGraphs.get_prop(deferred, object, :name)
-        tool_name = Experimental.MetaGraphs.get_prop(deferred, tool, :name)
+    @test length(SolidModelsExperimental.interface_vertices(deferred)) == 2
+    @test any(SolidModelsExperimental.interface_vertices(deferred)) do operation
+        object, tool = SolidModelsExperimental.operation_pgs(deferred, operation)
+        object_name = SolidModelsExperimental.MetaGraphs.get_prop(deferred, object, :name)
+        tool_name = SolidModelsExperimental.MetaGraphs.get_prop(deferred, tool, :name)
         return (object_name, tool_name) == (tag_name, "layer_b")
     end
 end
@@ -464,7 +510,7 @@ end
 @testitem "Deferred interface graph execution" begin
     using DeviceLayout
     using DeviceLayout.SolidModels
-    using DeviceLayout.SolidModels.Experimental
+    using DeviceLayout.SolidModelsExperimental
 
     sm = SolidModel("deferred_graph"; overwrite=true)
     obj_tag = SolidModels.gmsh.model.occ.addBox(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
@@ -474,8 +520,8 @@ end
     sm["tool"] = [(Int32(3), Int32(tool_tag))]
     SolidModels._fragment_three_pass!(sm)
 
-    same_dim = Experimental._deferred_interface_graph()
-    Experimental.defer_interface!(
+    same_dim = SolidModelsExperimental._deferred_interface_graph()
+    SolidModelsExperimental.defer_interface!(
         same_dim,
         "interface_1",
         "object",
@@ -486,7 +532,7 @@ end
         :object,
         :tool
     )
-    Experimental.defer_interface!(
+    SolidModelsExperimental.defer_interface!(
         same_dim,
         "interface_2",
         "object",
@@ -497,7 +543,7 @@ end
         :object,
         :tool
     )
-    Experimental.defer_interface!(
+    SolidModelsExperimental.defer_interface!(
         same_dim,
         "self_interface",
         "object",
@@ -508,7 +554,7 @@ end
         :object,
         :object
     )
-    Experimental.execute_deferred_interfaces!(sm, same_dim)
+    SolidModelsExperimental.execute_deferred_interfaces!(sm, same_dim)
 
     interface_tags = SolidModels.entitytags(sm["interface_1", 2])
     @test !isempty(interface_tags)
@@ -516,8 +562,8 @@ end
     @test !isempty(SolidModels.entitytags(sm["self_interface", 2]))
 
     sm["lower"] = [(Int32(2), tag) for tag in interface_tags]
-    mixed_dim = Experimental._deferred_interface_graph()
-    Experimental.defer_interface!(
+    mixed_dim = SolidModelsExperimental._deferred_interface_graph()
+    SolidModelsExperimental.defer_interface!(
         mixed_dim,
         "lower_first",
         "lower",
@@ -528,7 +574,7 @@ end
         :lower,
         :tool
     )
-    Experimental.defer_interface!(
+    SolidModelsExperimental.defer_interface!(
         mixed_dim,
         "higher_first",
         "tool",
@@ -539,7 +585,7 @@ end
         :tool,
         :lower
     )
-    Experimental.execute_deferred_interfaces!(sm, mixed_dim)
+    SolidModelsExperimental.execute_deferred_interfaces!(sm, mixed_dim)
     @test SolidModels.entitytags(sm["lower_first", 2]) == interface_tags
     @test SolidModels.entitytags(sm["higher_first", 2]) == interface_tags
 end
@@ -548,7 +594,7 @@ end
     using DeviceLayout
     using DeviceLayout.SchematicDrivenLayout
     using DeviceLayout.SolidModels
-    using DeviceLayout.SolidModels.Experimental
+    using DeviceLayout.SolidModelsExperimental
     import JSON
     using JSONSchema
     import Unitful: μm, °
@@ -574,7 +620,7 @@ end
     add_node!(graph, BasicComponent(geometry); base_id="q1")
     sch = plan(graph; log_dir=nothing)
     check!(sch)
-    target = Experimental.SolidModelTarget(
+    target = SolidModelsExperimental.SolidModelTarget(
         SourceStack(
             :surface => SourceLayer(NULL; level=1, gds_meta=GDSMeta(4, 0)),
             :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(5, 0));
@@ -623,7 +669,9 @@ end
     @test element_metadata(geometry)[1].name == "pad"
 
     json_path = joinpath(output_dir, "metadata.json")
-    write_metadata(json_path, metadata)
+    open(json_path, "w") do io
+        return JSON.print(io, metadata, 4)
+    end
     @test JSON.parsefile(json_path) == metadata
     @test_throws ArgumentError begin
         sm = SolidModel("no_output_dir"; overwrite=true)
@@ -635,14 +683,14 @@ end
     using DeviceLayout
     using DeviceLayout.SchematicDrivenLayout
     using DeviceLayout.SolidModels
-    using DeviceLayout.SolidModels.Experimental
+    using DeviceLayout.SolidModelsExperimental
 
     unitless_geometry = CoordinateSystem{Float64}("unitless")
     place!(unitless_geometry, Rectangle(10.0, 5.0), EntityMeta(:surface; name="shape"))
     unitless_graph = SchematicGraph("unitless_render")
     add_node!(unitless_graph, BasicComponent(unitless_geometry); base_id="q1")
     unitless_sch = plan(unitless_graph; log_dir=nothing) |> check!
-    unitless_target = Experimental.SolidModelTarget(
+    unitless_target = SolidModelsExperimental.SolidModelTarget(
         SourceStack(
             :surface => SourceLayer(NULL; level=1, height=3.0, thickness=0.0);
             levels=(1 => 2.0,)
@@ -660,8 +708,10 @@ end
         Rectangle(Point(4.0, 6.0), Point(6.0, 8.0)),
         EntityMeta(:surface; name="locator", role=Terminal())
     )
-    unitlesslocators =
-        Experimental.find_locators(unitless_locator_geometry, unitless_target.stack)
+    unitlesslocators = SolidModelsExperimental.find_locators(
+        unitless_locator_geometry,
+        unitless_target.stack
+    )
     @test only(unitlesslocators).position == (5.0, 7.0, 5.0)
 
     warning_geometry = CoordinateSystem{Float64}("warning_surface")
@@ -670,7 +720,7 @@ end
     add_node!(warning_graph, BasicComponent(warning_geometry); base_id="q1")
     log_dir = mktempdir()
     warning_sch = plan(warning_graph; log_dir=log_dir) |> check!
-    warning_target = Experimental.SolidModelTarget(
+    warning_target = SolidModelsExperimental.SolidModelTarget(
         SourceStack(
             :metal => SourceLayer(METAL; level=1, height=0.0, thickness=0.0);
             levels=(1 => 0.0,)
@@ -695,7 +745,7 @@ end
     using DeviceLayout
     using DeviceLayout.SchematicDrivenLayout
     using DeviceLayout.SolidModels
-    using DeviceLayout.SolidModels.Experimental
+    using DeviceLayout.SolidModelsExperimental
     using FileIO: save
     import JSON
     using JSONSchema
@@ -864,7 +914,7 @@ end
             )
         ]
 
-        target = Experimental.SolidModelTarget(stack, ops)
+        target = SolidModelsExperimental.SolidModelTarget(stack, ops)
 
         # Build schematic with two MockTransmons fused via coupler hooks.
         # The coupler arms meet at the fuse point, creating a galvanic connection
@@ -900,7 +950,9 @@ end
         solid_model = SolidModel("e2e_test"; overwrite=true)
         SolidModels.gmsh.option.setNumber("General.Verbosity", 2) # errors and warnings only
         solid_model_metadata = render!(solid_model, schematic, target)
-        write_metadata(joinpath(output_dir, "sm_metadata.json"), solid_model_metadata)
+        open(joinpath(output_dir, "sm_metadata.json"), "w") do io
+            return JSON.print(io, solid_model_metadata, 4)
+        end
         schema_path = joinpath(pkgdir(DeviceLayout), "schemas", "sm_metadata.schema.json")
         schema =
             JSONSchema.Schema(JSON.parsefile(schema_path); parent_dir=dirname(schema_path))
@@ -1125,7 +1177,10 @@ end
 
         # Visualization-only mesh (run last; mutates `solid_model`'s 2D PGs)
 
-        Experimental.remap_to_visualization_pgs!(solid_model, solid_model_metadata)
+        SolidModelsExperimental.remap_to_visualization_pgs!(
+            solid_model,
+            solid_model_metadata
+        )
         visualization_path = joinpath(output_dir, "e2e_test.viz.msh2")
         SolidModels.save(visualization_path, solid_model)
         @test isfile(visualization_path)
