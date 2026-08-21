@@ -28,6 +28,9 @@ The format of this changelog is based on
   - Path termination and `SimpleNoRender` halos now use constant-offset edges instead of the generic
     functional-offset fallback. The rendered discretization of these halos on curves may change but 
     will be geometrically equivalent within tolerance.
+  - `SolidModels.revolve!` now accepts unitful axis points and directions, converting point
+    coordinates to the solid-model unit and direction components to a common unit. Unitless
+    points and directions remain supported.
   - `SolidModels.dimtags` applied to a vector of physical groups now returns a flat vector of
     `(dimension, tag)` tuples, as its docstring specifies, instead of a vector of per-group
     vectors.

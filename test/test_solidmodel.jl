@@ -373,6 +373,24 @@
           SolidModels.fragment_geom!(sm, "test_bdy", "test_bdy", 1, 1)
     @test SolidModels.hasgroup(sm, "test_bdy", 1)
 
+    @testset "Revolve unit handling" begin
+        function revolved_bounds(name, point, axis)
+            cs_r = CoordinateSystem(name, nm)
+            place!(cs_r, Rectangle(10μm, 5μm) + Point(20μm, 10μm), SemanticMeta(:surface))
+            sm_r = SolidModel(name; overwrite=true)
+            render!(sm_r, cs_r; skip_postrender=true)
+            result = SolidModels.revolve!(sm_r["surface", 2], point..., axis..., π / 3)
+            @test count(dt -> first(dt) == 3, result) == 1
+            SolidModels._synchronize!(sm_r)
+            return SolidModels.bounds3d(filter(dt -> first(dt) == 3, result))
+        end
+
+        unitful_bounds =
+            revolved_bounds("revolve_unitful", (0.001mm, 2μm, 3000nm), (1mm, 1μm, 1nm))
+        unitless_bounds = revolved_bounds("revolve_unitless", (1, 2, 3), (1, 1e-3, 1e-6))
+        @test all(isapprox.(unitful_bounds, unitless_bounds))
+    end
+
     # The collection-accepting forms of `dimtags` and `remove_group!` return a flat dimtag vector
     @testset "Collection forms return flat dimtags" begin
         cs_c = CoordinateSystem("collections", nm)
