@@ -178,14 +178,3 @@ function serialize_metadata(
         "ground" => ground_dict
     )
 end
-
-"""
-    write_metadata(path::AbstractString, metadata::AbstractDict)
-
-Write a metadata dictionary as indented JSON. Rendering never calls this function.
-"""
-function write_metadata(path::AbstractString, metadata::AbstractDict)
-    return open(path, "w") do io
-        return JSON.print(io, metadata, 4)
-    end
-end

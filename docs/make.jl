@@ -28,7 +28,7 @@ makedocs(
         DeviceLayout,
         CoordinateTransformations,
         DeviceLayout.SchematicDrivenLayout,
-        DeviceLayout.SolidModels.Experimental
+        DeviceLayout.SolidModelsExperimental
     ],
     warnonly=true,
     checkdocs=:none,
@@ -68,7 +68,7 @@ makedocs(
             "Routes" => "concepts/routes.md",
             "Rendering and Export" => "concepts/render.md",
             "Solid Models (3D Geometry)" => "concepts/solidmodels.md",
-            "Solid Models (Experimental)" => "concepts/experimental_solidmodels.md",
+            "Solid Models (Experimental)" => "concepts/solidmodels_experimental.md",
             "Schematic-Driven Design" => "concepts/schematic_driven_design.md",
             "Components" => "concepts/components.md",
             "Autofill" => "concepts/autofill.md",

@@ -1,6 +1,6 @@
 # Experimental simulation-agnostic solid models
 
-`DeviceLayout.SolidModels.Experimental` is an opt-in pipeline that separates geometry and
+`DeviceLayout.SolidModelsExperimental` is an opt-in pipeline that separates geometry and
 mesh generation from simulator configuration. It produces a `SolidModel` plus a
 schema-versioned metadata dictionary. Concrete process stacks, material-property databases,
 Palace configuration, and downstream translation are intentionally outside DeviceLayout.
@@ -12,11 +12,12 @@ Palace configuration, and downstream translation are intentionally outside Devic
 
 ## Entity metadata and source stacks
 
-Geometry participating in this pipeline uses `Experimental.EntityMeta`:
+Geometry participating in this pipeline uses `SolidModelsExperimental.EntityMeta`:
 
 ```julia
 using DeviceLayout
-using DeviceLayout.SolidModels.Experimental
+using DeviceLayout.SolidModelsExperimental
+import JSON
 using Unitful: μm, °
 
 coordinate_system = CoordinateSystem("device", μm)
@@ -67,9 +68,7 @@ chip must explicitly map to that chip's layer symbol.
 The target stores exactly the stack and layer-level operations:
 
 ```julia
-const Experimental = DeviceLayout.SolidModels.Experimental
-
-target = Experimental.SolidModelTarget(stack, Tuple[])
+target = SolidModelsExperimental.SolidModelTarget(stack, Tuple[])
 metadata = render!(solid_model, checked_schematic, target)
 ```
 
@@ -90,7 +89,7 @@ ops = Tuple[
     ),
     (:shifted_port, SolidModels.translate!, (:port, 10μm, 0μm, 0μm), :copy => true)
 ]
-target = Experimental.SolidModelTarget(stack, ops)
+target = SolidModelsExperimental.SolidModelTarget(stack, ops)
 ```
 
 The public operation grammar is:
@@ -129,7 +128,9 @@ accumulated transform. The lower-level solid-model renderer performs the only fl
 metadata explicitly:
 
 ```julia
-write_metadata("sm_metadata.json", metadata)
+open("sm_metadata.json", "w") do io
+    JSON.print(io, metadata, 4)
+end
 save("model.msh2", solid_model)
 ```
 
@@ -161,4 +162,4 @@ Migration is not a target substitution. Components must first replace `SemanticM
 `SourceStack`. The legacy technology and targets remain supported and are
 not deprecated by this feature.
 
-See `examples/experimental_solidmodel.jl` for a small end-to-end example.
+See `examples/solidmodels_experimental.jl` for a small end-to-end example.
