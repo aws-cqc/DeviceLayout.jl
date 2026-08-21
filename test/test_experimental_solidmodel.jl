@@ -101,7 +101,7 @@ end
     missing = CoordinateSystem("missing", μm)
     place!(missing, Rectangle(1μm, 1μm), EntityMeta(:unknown; name="bad", index=4))
     @test_throws ArgumentError render!(Cell("missing", μm), missing, stack)
-    registry = Experimental._initial_registry(Experimental._entity_metas(cs), stack)
+    registry = Experimental.initial_registry(Experimental._entity_metas(cs), stack)
     @test !haskey(registry, :art_only)
     @test haskey(registry, :second)
 end
@@ -110,14 +110,14 @@ end
     using DeviceLayout
     using DeviceLayout.SolidModels
     using DeviceLayout.SolidModels.Experimental
-    using DeviceLayout.SolidModels.Experimental: PGRecord, LayerState, Registry
+    using DeviceLayout.SolidModels.Experimental: PGRecord, LayerState, LayerRegistry
     import Unitful: μm
 
     stack = SourceStack(
         :metal => SourceLayer(METAL; level=1, thickness=2μm);
         levels=(1 => 0μm,)
     )
-    registry = Registry(
+    registry = LayerRegistry(
         :metal => LayerState(
             [PGRecord("metal__a__i1__rGeneric", :metal, EntityMeta(:metal; name="a"))],
             2
@@ -127,7 +127,7 @@ end
         compile_layer_ops([(:metal, SolidModels.extrude_z!, ())], stack, registry)
     @test final_registry[:metal].dim == 3
     @test length(pg_ops) == 2
-    @test isempty(Experimental._interface_vertices(deferred))
+    @test isempty(Experimental.interface_vertices(deferred))
 
     @test_throws ArgumentError compile_layer_ops(
         [(:new_layer, SolidModels.difference_geom!, (:missing, :metal))],
@@ -238,38 +238,18 @@ end
     )
     @test isempty(interface_ops)
     @test interface_registry[:interface].dim == 1
-    interface_operation = only(Experimental._interface_vertices(deferred))
+    interface_operation = only(Experimental.interface_vertices(deferred))
     @test Experimental.MetaGraphs.get_prop(deferred, interface_operation, :dest_layer) ==
           :interface
     @test Experimental.MetaGraphs.get_prop(deferred, interface_operation, :parent_layers) ==
           (:metal, :metal)
 
     interface_graph = Experimental._deferred_interface_graph()
-    Experimental._defer_interface!(
-        interface_graph,
-        "ab",
-        "a",
-        "b",
-        2,
-        3,
-        :interface,
-        :a,
-        :b
-    )
-    Experimental._defer_interface!(
-        interface_graph,
-        "ac",
-        "a",
-        "c",
-        2,
-        3,
-        :interface,
-        :a,
-        :c
-    )
+    Experimental.defer_interface!(interface_graph, "ab", "a", "b", 2, 3, :interface, :a, :b)
+    Experimental.defer_interface!(interface_graph, "ac", "a", "c", 2, 3, :interface, :a, :c)
     @test Experimental.Graphs.nv(interface_graph) == 5 # 3 PGs + 2 operations
-    @test length(Experimental._interface_vertices(interface_graph)) == 2
-    @test_throws ArgumentError Experimental._defer_interface!(
+    @test length(Experimental.interface_vertices(interface_graph)) == 2
+    @test_throws ArgumentError Experimental.defer_interface!(
         interface_graph,
         "ab",
         "a",
@@ -280,7 +260,7 @@ end
         :a,
         :b
     )
-    @test_throws ArgumentError Experimental._defer_interface!(
+    @test_throws ArgumentError Experimental.defer_interface!(
         interface_graph,
         "ab",
         "new_a",
@@ -293,7 +273,7 @@ end
     )
     @test Experimental.Graphs.nv(interface_graph) == 5 # no orphan PGs after rejection
 
-    @test length(exnboundaries(:volume)) == 6
+    @test length(exterior_boundaries(:volume)) == 6
 end
 
 @testitem "Placement prefix copies and transformed locators" begin
@@ -361,16 +341,16 @@ end
     addref!(root, locator_geometry, Point(10μm, 0μm))
     addref!(root, locator_geometry, Point(-10μm, 5μm))
     stack = SourceStack(:metal => SourceLayer(METAL; level=1); levels=(1 => 0μm,))
-    locators = Experimental._locators(root, stack)
+    locators = Experimental.find_locators(root, stack)
     @test length(locators) == 2
-    @test sort([locator.center_x for locator in locators]) == [-10.0, 10.0]
-    @test sort([locator.center_y for locator in locators]) == [0.0, 5.0]
+    @test sort([locator.position[1] for locator in locators]) == [-10.0, 10.0]
+    @test sort([locator.position[2] for locator in locators]) == [0.0, 5.0]
 
     hidden_stack = SourceStack(
         :metal => SourceLayer(METAL; level=1, solidmodel=false);
         levels=(1 => 0μm,)
     )
-    @test isempty(Experimental._locators(root, hidden_stack))
+    @test isempty(Experimental.find_locators(root, hidden_stack))
 end
 
 @testitem "LumpedPort directions" begin
@@ -441,7 +421,7 @@ end
     using DeviceLayout
     using DeviceLayout.SolidModels
     using DeviceLayout.SolidModels.Experimental
-    using DeviceLayout.SolidModels.Experimental: PGRecord, LayerState, Registry
+    using DeviceLayout.SolidModels.Experimental: PGRecord, LayerState, LayerRegistry
 
     sm = SolidModel("tag_layer"; overwrite=true)
     first_tag = SolidModels.gmsh.model.occ.addRectangle(0.0, 0.0, 0.0, 10.0, 10.0)
@@ -449,14 +429,14 @@ end
     SolidModels.gmsh.model.occ.synchronize()
     sm["layer_a"] = [(Int32(2), Int32(first_tag))]
     sm["layer_b"] = [(Int32(2), Int32(second_tag))]
-    registry = Registry(
+    registry = LayerRegistry(
         :a => LayerState([PGRecord("layer_a", :a, EntityMeta(:a))], 2),
         :b => LayerState([PGRecord("layer_b", :b, EntityMeta(:b))], 2),
         :interface => LayerState([PGRecord("interface_ab", :interface, nothing)], 1)
     )
-    locator = Experimental.LocatorRecord("tag", 1, Tag(), :a, 5.0, 5.0, 0.0)
+    locator = Experimental.LocatorRecord("tag", 1, Tag(), :a, (5.0, 5.0, 0.0))
     deferred = Experimental._deferred_interface_graph()
-    Experimental._defer_interface!(
+    Experimental.defer_interface!(
         deferred,
         "interface_ab",
         "layer_a",
@@ -467,14 +447,14 @@ end
         :a,
         :b
     )
-    tag_records = Experimental._resolve_tag_locators!(sm, registry, [locator], deferred)
+    tag_records = Experimental.add_tagged_pgs!(sm, registry, [locator], deferred)
     tag_name = physical_group_name(EntityMeta(:a; name="tag", role=Tag()))
     @test tag_records == [(tag_name, "tag", :a)]
     @test SolidModels.hasgroup(sm, tag_name, 2)
     @test SolidModels.entitytags(sm[tag_name, 2]) == [Int32(first_tag)]
-    @test length(Experimental._interface_vertices(deferred)) == 2
-    @test any(Experimental._interface_vertices(deferred)) do operation
-        object, tool = Experimental._interface_pgs(deferred, operation)
+    @test length(Experimental.interface_vertices(deferred)) == 2
+    @test any(Experimental.interface_vertices(deferred)) do operation
+        object, tool = Experimental.operation_pgs(deferred, operation)
         object_name = Experimental.MetaGraphs.get_prop(deferred, object, :name)
         tool_name = Experimental.MetaGraphs.get_prop(deferred, tool, :name)
         return (object_name, tool_name) == (tag_name, "layer_b")
@@ -495,7 +475,7 @@ end
     SolidModels._fragment_three_pass!(sm)
 
     same_dim = Experimental._deferred_interface_graph()
-    Experimental._defer_interface!(
+    Experimental.defer_interface!(
         same_dim,
         "interface_1",
         "object",
@@ -506,7 +486,7 @@ end
         :object,
         :tool
     )
-    Experimental._defer_interface!(
+    Experimental.defer_interface!(
         same_dim,
         "interface_2",
         "object",
@@ -517,7 +497,7 @@ end
         :object,
         :tool
     )
-    Experimental._defer_interface!(
+    Experimental.defer_interface!(
         same_dim,
         "self_interface",
         "object",
@@ -528,7 +508,7 @@ end
         :object,
         :object
     )
-    Experimental._execute_deferred_interfaces!(sm, same_dim)
+    Experimental.execute_deferred_interfaces!(sm, same_dim)
 
     interface_tags = SolidModels.entitytags(sm["interface_1", 2])
     @test !isempty(interface_tags)
@@ -537,7 +517,7 @@ end
 
     sm["lower"] = [(Int32(2), tag) for tag in interface_tags]
     mixed_dim = Experimental._deferred_interface_graph()
-    Experimental._defer_interface!(
+    Experimental.defer_interface!(
         mixed_dim,
         "lower_first",
         "lower",
@@ -548,7 +528,7 @@ end
         :lower,
         :tool
     )
-    Experimental._defer_interface!(
+    Experimental.defer_interface!(
         mixed_dim,
         "higher_first",
         "tool",
@@ -559,7 +539,7 @@ end
         :tool,
         :lower
     )
-    Experimental._execute_deferred_interfaces!(sm, mixed_dim)
+    Experimental.execute_deferred_interfaces!(sm, mixed_dim)
     @test SolidModels.entitytags(sm["lower_first", 2]) == interface_tags
     @test SolidModels.entitytags(sm["higher_first", 2]) == interface_tags
 end
@@ -680,11 +660,9 @@ end
         Rectangle(Point(4.0, 6.0), Point(6.0, 8.0)),
         EntityMeta(:surface; name="locator", role=Terminal())
     )
-    unitless_locators =
-        Experimental._locators(unitless_locator_geometry, unitless_target.stack)
-    @test only(unitless_locators).center_x == 5.0
-    @test only(unitless_locators).center_y == 7.0
-    @test only(unitless_locators).z == 5.0
+    unitlesslocators =
+        Experimental.find_locators(unitless_locator_geometry, unitless_target.stack)
+    @test only(unitlesslocators).position == (5.0, 7.0, 5.0)
 
     warning_geometry = CoordinateSystem{Float64}("warning_surface")
     place!(warning_geometry, Rectangle(10.0, 10.0), EntityMeta(:metal; name="floating"))
@@ -876,7 +854,7 @@ end
             (:restrict, SolidModels.restrict_to_volume!, (:BOUNDING_VOLUME,)),
             # Extract the six BOUNDING_VOLUME boundaries as EXTBND_XMIN,
             # EXTBND_XMAX, and so on.
-            exnboundaries(:BOUNDING_VOLUME)...,
+            exterior_boundaries(:BOUNDING_VOLUME)...,
             (
                 :remove,
                 SolidModels.remove_group!,
