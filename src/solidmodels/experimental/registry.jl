@@ -11,12 +11,56 @@ end
 
 const Registry = Dict{Symbol, LayerState}
 
-struct DeferredInterface
-    dest_name::String
-    obj_pg_name::String
-    tool_pg_name::String
-    obj_dim::Int
+# Directed bipartite graph of unique PG vertices and deferred-interface vertices. Edges
+# `PG → interface → PG` identify object and tool roles; execution caches Gmsh data once per
+# PG vertex, then evaluates each interface vertex using in-memory set intersections.
+function _deferred_interface_graph()
+    graph = MetaGraphs.MetaDiGraph()
+    MetaGraphs.set_indexing_prop!(graph, :key)
+    return graph
+end
+
+function _pg_vertex!(graph::MetaGraphs.MetaDiGraph, name::String, dim::Int)
+    key = (:pg, name, dim)
+    haskey(graph, key, :key) && return graph[key, :key]
+    Graphs.add_vertex!(
+        graph,
+        Dict{Symbol, Any}(:kind => :pg, :key => key, :name => name, :dim => dim)
+    )
+    return Graphs.nv(graph)
+end
+
+function _defer_interface!(
+    graph::MetaGraphs.MetaDiGraph,
+    dest_name::String,
+    obj_name::String,
+    tool_name::String,
+    obj_dim::Int,
     tool_dim::Int
+)
+    key = (:interface, dest_name)
+    haskey(graph, key, :key) &&
+        throw(ArgumentError("Deferred interface '$dest_name' is already defined"))
+    obj = _pg_vertex!(graph, obj_name, obj_dim)
+    tool = _pg_vertex!(graph, tool_name, tool_dim)
+    Graphs.add_vertex!(
+        graph,
+        Dict{Symbol, Any}(:kind => :interface, :key => key, :dest_name => dest_name)
+    )
+    operation = Graphs.nv(graph)
+    Graphs.add_edge!(graph, obj, operation)
+    Graphs.add_edge!(graph, operation, tool)
+    return operation
+end
+
+_interface_vertices(graph::MetaGraphs.MetaDiGraph) = filter(
+    vertex -> MetaGraphs.get_prop(graph, vertex, :kind) == :interface,
+    Graphs.vertices(graph)
+)
+
+function _interface_pgs(graph::MetaGraphs.MetaDiGraph, operation::Integer)
+    return only(Graphs.inneighbors(graph, operation)),
+    only(Graphs.outneighbors(graph, operation))
 end
 
 """
@@ -301,12 +345,10 @@ function _schedule_extrusions(stack::SourceStack, reg::Registry)
     return operations
 end
 
-function _retained_physical_groups(reg::Registry, deferred::Vector{DeferredInterface})
-    deferred_names = Set(interface.dest_name for interface in deferred)
+function _retained_physical_groups(reg::Registry)
     retained = Set{Tuple{String, Int}}()
     for state in values(reg)
         for record in state.pgs
-            record.name in deferred_names && continue
             !isnothing(record.entity_meta) &&
                 record.entity_meta.role isa Locator &&
                 continue
