@@ -2,7 +2,7 @@
 
 """
     compile_layer_ops(layer_ops, stack, initial_registry)
-        -> (pg_ops, registry, interfaces, deferred_interfaces)
+        -> (pg_ops, registry, deferred_interfaces)
 
 Compile layer-level operations into physical-group-level operations suitable for passing
 to DeviceLayout's `_postrender!`.
@@ -11,9 +11,8 @@ Returns:
 
   - `pg_ops::Vector{Tuple}`: physical-group-level postrender operations
   - `registry::Registry`: final state of the layer registry
-  - `interfaces::Dict{String, Tuple{String, String}}`: interface PGs and their parents
-  - `deferred_interfaces::Vector{DeferredInterface}`: intersections computed after
-    fragmentation
+  - `deferred_interfaces::MetaGraphs.MetaDiGraph`: interface operations and unique PGs
+    evaluated after fragmentation
 """
 function compile_layer_ops(
     layer_ops::AbstractVector,
@@ -22,8 +21,7 @@ function compile_layer_ops(
 )
     registry = deepcopy(initial_registry)
     pg_ops = Tuple[]
-    interfaces = Dict{String, Tuple{String, String}}()
-    deferred_interfaces = DeferredInterface[]
+    deferred_interfaces = _deferred_interface_graph()
     # Interior solids from contour_only + !keep_interior extrusions, keyed by layer name.
     # These are subtracted from all 3D volumes before restrict_to_volume!.
     interior_solids = Dict{Symbol, Vector{String}}()
@@ -45,7 +43,6 @@ function compile_layer_ops(
         _compile_one_op!(
             pg_ops,
             registry,
-            interfaces,
             deferred_interfaces,
             interior_solids,
             stack,
@@ -58,14 +55,13 @@ function compile_layer_ops(
     # emptied, so this call will do nothing.
     _flush_interior_solids!(pg_ops, registry, interior_solids, nothing)
 
-    return pg_ops, registry, interfaces, deferred_interfaces
+    return pg_ops, registry, deferred_interfaces
 end
 
 function _compile_one_op!(
     pg_ops::Vector{Tuple},
     registry::Registry,
-    interfaces::Dict{String, Tuple{String, String}},
-    deferred_interfaces::Vector{DeferredInterface},
+    deferred_interfaces::MetaGraphs.MetaDiGraph,
     interior_solids::Dict{Symbol, Vector{String}},
     stack::SourceStack,
     op::Tuple
@@ -82,15 +78,7 @@ function _compile_one_op!(
     elseif op_fn == SolidModels.union_geom!
         _compile_union!(pg_ops, registry, dest, args, kwargs)
     elseif op_fn == SolidModels.intersect_geom!
-        _compile_intersect!(
-            pg_ops,
-            registry,
-            interfaces,
-            deferred_interfaces,
-            dest,
-            args,
-            kwargs
-        )
+        _compile_intersect!(pg_ops, registry, deferred_interfaces, dest, args, kwargs)
     elseif op_fn == SolidModels.restrict_to_volume!
         _compile_restrict!(pg_ops, registry, args)
     elseif op_fn == SolidModels.get_boundary
@@ -540,8 +528,7 @@ end
 function _compile_intersect!(
     ::Vector{Tuple},
     registry::Registry,
-    interfaces::Dict{String, Tuple{String, String}},
-    deferred_interfaces::Vector{DeferredInterface},
+    deferred_interfaces::MetaGraphs.MetaDiGraph,
     dest::Symbol,
     args::Tuple,
     ::Any
@@ -572,18 +559,15 @@ function _compile_intersect!(
             # All intersections are deferred to post-fragmentation. Same-dim
             # intersections find shared boundary entities (dim-1); mixed-dim
             # intersections find lo-dim entities on the hi-dim boundary.
-            push!(
+            _defer_interface!(
                 deferred_interfaces,
-                DeferredInterface(
-                    dest_name,
-                    obj_rec.name,
-                    tool_rec.name,
-                    obj_dim,
-                    tool_dim
-                )
+                dest_name,
+                obj_rec.name,
+                tool_rec.name,
+                obj_dim,
+                tool_dim
             )
             push!(new_recs, PGRecord(dest_name, dest, nothing))
-            interfaces[dest_name] = (obj_rec.name, tool_rec.name)
         end
     end
 

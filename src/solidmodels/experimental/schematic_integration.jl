@@ -166,7 +166,7 @@ end
 function _capture_finalization_inputs(
     sm::SolidModel,
     registry::Registry,
-    interfaces,
+    deferred_interfaces::MetaGraphs.MetaDiGraph,
     terminal_result
 )
     tag_records = Tuple{String, String, Symbol}[]
@@ -188,11 +188,14 @@ function _capture_finalization_inputs(
     end
 
     interface_layer_parents = Dict{Symbol, Vector{String}}()
-    for (interface_name, (parent1, parent2)) in interfaces
+    for operation in _interface_vertices(deferred_interfaces)
+        interface_name = MetaGraphs.get_prop(deferred_interfaces, operation, :dest_name)
         interface_layer = _find_pg_layer(interface_name, registry)
         isnothing(interface_layer) && continue
         parents = get!(Vector{String}, interface_layer_parents, interface_layer)
-        for parent_group in (parent1, parent2)
+        object, tool = _interface_pgs(deferred_interfaces, operation)
+        for parent in (object, tool)
+            parent_group = MetaGraphs.get_prop(deferred_interfaces, parent, :name)
             parent_layer = _find_pg_layer(parent_group, registry)
             isnothing(parent_layer) && continue
             parent_name = string(parent_layer)
@@ -240,9 +243,9 @@ function render!(
         initial_registry = _build_initial_registry(entity_metas, target.stack)
         layer_operations =
             vcat(_schedule_extrusions(target.stack, initial_registry), target.ops)
-        pg_operations, final_registry, interfaces, deferred_interfaces =
+        pg_operations, final_registry, deferred_interfaces =
             compile_layer_ops(layer_operations, target.stack, initial_registry)
-        retained_groups = _retained_physical_groups(final_registry, deferred_interfaces)
+        retained_groups = _retained_physical_groups(final_registry)
 
         reopen_logfile(working_sch, :render_solidmodel)
         metadata = with_logger(working_sch.logger) do
@@ -269,13 +272,7 @@ function render!(
 
             # Required post-fragmentation ordering. Keep finalization under the render
             # logger so strict=:warn also observes discovery/finalization warnings.
-            _resolve_tag_locators!(
-                sm,
-                final_registry,
-                locators,
-                deferred_interfaces,
-                interfaces
-            )
+            _resolve_tag_locators!(sm, final_registry, locators, deferred_interfaces)
             _execute_deferred_interfaces!(sm, deferred_interfaces)
             terminal_result =
                 find_terminals!(sm, final_registry, target.stack, locators)
@@ -294,7 +291,7 @@ function render!(
                 _capture_finalization_inputs(
                     sm,
                     final_registry,
-                    interfaces,
+                    deferred_interfaces,
                     terminal_result
                 )
             split_results = _deduplicate_2d_pgs!(sm, final_registry)
