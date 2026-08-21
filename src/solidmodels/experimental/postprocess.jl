@@ -314,7 +314,7 @@ function _extract_locator_positions(cs, stack::SourceStack)
 end
 
 """
-    find_terminals(
+    find_terminals!(
         sm::SolidModel,
         registry::Registry,
         stack::SourceStack,
@@ -331,7 +331,7 @@ Returns a named tuple `(terminals, ground)` where:
   - `terminals::Dict{String, Vector{String}}`: CC name → locator names (non-ground CCs only)
   - `ground::Vector{String}`: CC names designated as ground
 """
-function find_terminals(
+function find_terminals!(
     sm::SolidModel,
     registry::Registry,
     stack::SourceStack,
