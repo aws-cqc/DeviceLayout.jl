@@ -69,5 +69,5 @@ function physical_group_name(m::EntityMeta)
     return string(m.layer, "__", m.name, "__i", m.index, "__r", m.role)
 end
 
-# Preserve the prototype compiler spelling within the Experimental namespace.
+# Preserve the prototype compiler spelling within the SolidModelsExperimental namespace.
 map_meta(m::EntityMeta) = physical_group_name(m)
