@@ -663,6 +663,24 @@ end
     ns = not_simulated(pa[1])
     @test isempty(to_curvilinear(ns.ent, ns.sty; simulation=true))
     @test length(to_curvilinear(ns.ent, ns.sty; simulation=false).curves) == 2
+
+    rounded_node = to_curvilinear(pa[1], Rounded(2μm))
+    @test length(rounded_node.curves) == 6
+
+    # Works for Straight
+    pa1 = Path()
+    straight!(pa1, 2μm, Paths.Trace(2μm))
+    @test Polygons.area(to_polygons(to_curvilinear(pa1[1], Rounded(1μm)))) ≈ pi * (1μm)^2 atol =
+        (2pi * 1μm * 1nm)
+
+    # No effect on BSplines or variable width Turn
+    pa2 = Path()
+    bspline!(pa2, [Point(1mm, 1mm)], 0°, Paths.Trace(2μm))
+    @test to_polygons(to_curvilinear(pa2[1], Rounded(1μm))) == to_polygons(pa2[1])
+
+    pa3 = Path()
+    turn!(pa3, 90°, 50μm, Paths.TaperTrace(5μm, 6μm))
+    @test to_polygons(to_curvilinear(pa3[1], Rounded(1μm))) == to_polygons(pa3[1])
 end
 
 @testitem "Curve recovery — warn once on silent curve loss" setup = [CommonTestSetup] begin
