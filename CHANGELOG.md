@@ -21,6 +21,11 @@ The format of this changelog is based on
     key a sorted collection. In particular the all-pairs `split_t_junctions!(groups::AbstractDict)`
     can be keyed directly by `SemanticMeta`, giving deterministic all-pairs ownership without a
     caller-supplied `Symbol` key.
+  - `save_render` writes a PNG, SVG, PDF, or EPS image together with a versioned JSON
+    manifest containing the exact viewport-to-canvas transform, selected output metadata,
+    resolved colors, rendering options, and image SHA-256. An overload for a
+    `CoordinateSystem` and `LayoutTarget` records per-call semantic-to-GDS mappings without
+    serializing the target's mutable mapping cache.
 
 ### Fixed
 
@@ -57,7 +62,13 @@ The format of this changelog is based on
     `Plain` or `OptionalStyle` (as produced by `not_simulated`/`only_simulated` and friends),
     which previously fell back to discretization.
   - The `Rounded` style now works on `Paths.Node` with `Straight` or `Turn` segments
+<<<<<<< HEAD
   - Fixed KeyError in `_collect_mesh_control_points!` when a group emits no samples
+=======
+  - Graphics export now clips viewport content to the top-left content rectangle when explicit
+    canvas dimensions have a different aspect ratio from the viewport, preventing geometry from
+    painting into the unused canvas area.
+>>>>>>> 841090c0 (Add save_render with graphical render manifest)
 
 ## 1.18.0 (2026-08-24)
 
