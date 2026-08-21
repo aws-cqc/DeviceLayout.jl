@@ -23,6 +23,11 @@ The format of this changelog is based on
     don't recognize, which they would otherwise ignore silently, once per session and once per
     `Schematic` render. `OptionalStyle` flags are recognized automatically, and
     `DeviceLayout.register_render_kwarg!` registers other custom rendering options.
+  - `save_render` writes a PNG, SVG, PDF, or EPS image together with a versioned JSON
+    manifest containing the exact viewport-to-canvas transform, selected output metadata,
+    resolved colors, rendering options, and image SHA-256. An overload for a
+    `CoordinateSystem` and `LayoutTarget` records per-call semantic-to-GDS mappings without
+    serializing the target's mutable mapping cache.
 
 ### Fixed
 
@@ -34,6 +39,9 @@ The format of this changelog is based on
     or `not_simulated!`, resolve like plain locators instead of throwing an `ArgumentError`.
     Styles, including `OptionalStyle`s, don't affect selection; the `select_*` keywords of
     `render!` turn it off.
+  - Graphics export now clips viewport content to the top-left content rectangle when explicit
+    canvas dimensions have a different aspect ratio from the viewport, preventing geometry from
+    painting into the unused canvas area.
 
 ## 1.22.0 (2026-11-16)
 
