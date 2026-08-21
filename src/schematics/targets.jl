@@ -529,3 +529,55 @@ function _maps(target::LayoutTarget)
     map_meta = (m) -> map_layer(target, m)
     return (; map_meta=map_meta, target.rendering_options...)
 end
+
+"""
+    save_render(image_path, cs::CoordinateSystem, target::LayoutTarget;
+        manifest_path=nothing, render_options=(;), options...)
+
+Render `cs` through `target`, save the graphics artifact, and record the semantic-to-GDS
+metadata mappings encountered during this call. `render_options` are passed while constructing
+the intermediate `Cell`; the remaining options configure graphics output.
+
+Mappings are conservatively retained when their GDS metadata survives the graphics metadata
+filter. If multiple source metadata values map to one selected `GDSMeta`, all encountered
+sources are retained even if one produced no drawable primitive.
+"""
+function DeviceLayout.save_render(
+    image_path::AbstractString,
+    cs::CoordinateSystem{S},
+    target::LayoutTarget;
+    manifest_path=nothing,
+    render_options=(;),
+    options...
+) where {S}
+    render_options isa NamedTuple ||
+        throw(ArgumentError("render_options must be a NamedTuple"))
+    DeviceLayout.Graphics._validate_public_render_options(options)
+    haskey(target.rendering_options, :map_meta) &&
+        throw(ArgumentError("target rendering_options cannot override map_meta"))
+    haskey(render_options, :map_meta) &&
+        throw(ArgumentError("render_options cannot override map_meta"))
+
+    encountered = Dict{DeviceLayout.Meta, Union{GDSMeta, Nothing}}()
+    tracking_map = function (meta)
+        mapped = map_layer(target, meta)
+        encountered[meta] = mapped
+        return mapped
+    end
+    cell = Cell{S}(name(cs))
+    rendering_options = merge(target.rendering_options, render_options)
+    render!(cell, cs; map_meta=tracking_map, rendering_options...)
+    mappings = Pair{DeviceLayout.Meta, GDSMeta}[
+        source => mapped for (source, mapped) in encountered if !isnothing(mapped)
+    ]
+    return DeviceLayout.Graphics._save_render(
+        image_path,
+        cell,
+        cs,
+        mappings;
+        manifest_path=manifest_path,
+        rendered_fingerprint=DeviceLayout.Cells.geometry_fingerprint(cell),
+        geometry_render_options=rendering_options,
+        options...
+    )
+end
