@@ -5,6 +5,417 @@ import DeviceLayout: element_metadata, elements, map_metadata, refs, render!, st
 import DeviceLayout.SchematicDrivenLayout:
     Schematic, build!, close_logfile, max_level_logged, reopen_logfile
 
+const _EXTERIOR_BOUNDARY_LAYERS = Dict(
+    ("X", "min") => :EXTBND_XMIN,
+    ("X", "max") => :EXTBND_XMAX,
+    ("Y", "min") => :EXTBND_YMIN,
+    ("Y", "max") => :EXTBND_YMAX,
+    ("Z", "min") => :EXTBND_ZMIN,
+    ("Z", "max") => :EXTBND_ZMAX
+)
+
+"""
+    exterior_boundaries(bounding_volume_layer::Symbol) -> Vector{Tuple}
+
+Return operations extracting all six axis-aligned exterior faces of
+`bounding_volume_layer` into `:EXTBND_XMIN`, `:EXTBND_XMAX`, `:EXTBND_YMIN`,
+`:EXTBND_YMAX`, `:EXTBND_ZMIN`, and `:EXTBND_ZMAX`.
+"""
+function exterior_boundaries(bounding_volume_layer::Symbol)
+    operations = Tuple[]
+    for direction in ("X", "Y", "Z"), position in ("min", "max")
+        destination = _EXTERIOR_BOUNDARY_LAYERS[(direction, position)]
+        push!(
+            operations,
+            (
+                destination,
+                SolidModels.get_boundary,
+                (bounding_volume_layer,),
+                :direction => direction,
+                :position => position
+            )
+        )
+    end
+    return operations
+end
+
+function _entity_metas(cs)
+    metas = EntityMeta[]
+    for (subcs, _) in DeviceLayout.traversal(cs)
+        for entity_meta in element_metadata(subcs)
+            entity_meta isa EntityMeta && push!(metas, entity_meta)
+        end
+    end
+    return metas
+end
+
+function _map_artwork_meta(
+    stack::SourceStack,
+    levels,
+    level_increment::GDSMeta,
+    m::EntityMeta
+)
+    sl = sourcelayer(m, stack)
+    isnothing(sl.gds_meta) && return nothing
+    source_level = first(sl.level)
+    idx = findfirst(==(source_level), levels)
+    isnothing(idx) && return nothing
+
+    gds_meta = sl.gds_meta
+    if length(levels) > 1
+        delta = idx - 1
+        return GDSMeta(
+            gdslayer(gds_meta) + delta * gdslayer(level_increment),
+            datatype(gds_meta) + delta * datatype(level_increment)
+        )
+    end
+    return gds_meta
+end
+_map_artwork_meta(::SourceStack, ::Any, ::GDSMeta, ::DeviceLayout.Meta) = nothing
+
+"""
+    render!(
+        cell,
+        cs,
+        stack::SourceStack;
+        levels=[1],
+        level_increment=GDSMeta(0, 0),
+        kwargs...
+    )
+
+Render `EntityMeta` artwork using the GDS mapping stored in `stack`. Layers with
+`isnothing(gds_meta)` are omitted independently of `solidmodel` visibility. Metadata
+indices do not alter datatypes.
+"""
+function render!(
+    cell::DeviceLayout.Cell,
+    cs,
+    stack::SourceStack;
+    levels=[1],
+    level_increment=GDSMeta(0, 0),
+    kwargs...
+)
+    selected_levels = collect(levels)
+    isempty(selected_levels) &&
+        throw(ArgumentError("levels must contain at least one level"))
+    for entity_meta in _entity_metas(cs)
+        sourcelayer(entity_meta, stack)
+    end
+    mapper =
+        entity_meta ->
+            _map_artwork_meta(stack, selected_levels, level_increment, entity_meta)
+    return DeviceLayout.render!(cell, cs; map_meta=mapper, kwargs...)
+end
+
+# ─── 2D PG deduplication ─────────────────────────────────────────────────────
+
+"""
+    _deduplicate_2d_pgs!(sm, registry)
+
+Ensure each mesh face belongs to exactly one 2D physical group by splitting PGs that
+span multiple layers into layer-homogeneous sub-PGs.
+
+For each 2D entity, computes its "membership signature" (the set of layers whose PGs
+contain it). PGs where all entities share a single signature are left unchanged. PGs
+with mixed signatures are split into sub-PGs, one per distinct signature. Each sub-PG
+is then cross-referenced into all layers of its signature, and duplicate entity
+assignments are removed from the original PGs.
+
+After this step, the mesh has non-overlapping 2D elements and each layer's PG list in
+the registry can recover its full original surface.
+"""
+function _deduplicate_2d_pgs!(sm::SolidModel, registry::LayerRegistry)
+    # Phase 1: Build entity → layer membership map
+    pg_to_layer = Dict{String, Symbol}()
+    for (layer_name, state) in registry
+        state.dim != 2 && continue
+        for record in state.pgs
+            pg_to_layer[record.name] = layer_name
+        end
+    end
+
+    entity_layers = Dict{Int32, Set{Symbol}}()  # entity tag → set of layers
+    for (pg_name, pg) in SolidModels.dimgroupdict(sm, 2)
+        layer = get(pg_to_layer, pg_name, nothing)
+        isnothing(layer) && continue
+        for t in SolidModels.entitytags(pg)
+            layers_set = get!(Set{Symbol}, entity_layers, t)
+            push!(layers_set, layer)
+        end
+    end
+
+    # Phase 2: For each PG, group entities by membership signature.
+    # Identify which PGs need splitting.
+    # signature = sorted tuple of layers (frozen for use as dict key)
+    Signature = Tuple{Vararg{Symbol}}
+
+    pgs_to_split = Dict{String, Dict{Signature, Vector{Int32}}}()
+    for (pg_name, pg) in SolidModels.dimgroupdict(sm, 2)
+        haskey(pg_to_layer, pg_name) || continue
+        tags = SolidModels.entitytags(pg)
+        isempty(tags) && continue
+
+        groups = Dict{Signature, Vector{Int32}}()
+        for t in tags
+            signature = Tuple(sort!(collect(get(entity_layers, t, Set{Symbol}()))))
+            tag_list = get!(Vector{Int32}, groups, signature)
+            push!(tag_list, t)
+        end
+
+        # If there's only one group and its signature matches the PG's own layer alone,
+        # no split needed (homogeneous PG)
+        if length(groups) == 1
+            only_sig = first(keys(groups))
+            pg_layer = pg_to_layer[pg_name]
+            if length(only_sig) == 1 && only_sig[1] == pg_layer
+                continue
+            end
+        end
+
+        pgs_to_split[pg_name] = groups
+    end
+
+    # Phase 3: Split heterogeneous PGs into sub-PGs
+    # Track: original PG name → list of (sub_pg_name, signature) created from it
+    split_results = Dict{String, Vector{Tuple{String, Signature}}}()
+
+    for (pg_name, groups) in pgs_to_split
+        pg_layer = pg_to_layer[pg_name]
+        sub_pgs = Tuple{String, Signature}[]
+
+        for (signature, tags) in groups
+            if length(signature) == 1 && signature[1] == pg_layer && length(groups) > 1
+                # Residual: entities exclusive to this PG's own layer — keep original name
+                sub_name = pg_name
+            else
+                # Shared or foreign: generate a content-addressed name
+                dimtags_str = join(sort(["2,$(t)" for t in tags]), "&")
+                digest = sha1(dimtags_str)
+                sub_name = "__" * bytes2hex(digest)[1:16]
+            end
+            push!(sub_pgs, (sub_name, signature))
+
+            # Create or update the PG in Gmsh
+            if sub_name == pg_name
+                # Rewrite the original PG to contain only its residual entities
+                sm[pg_name] = Tuple{Int32, Int32}[(Int32(2), t) for t in tags]
+            else
+                # Create new sub-PG
+                sm[sub_name] = Tuple{Int32, Int32}[(Int32(2), t) for t in tags]
+            end
+        end
+
+        # If the original PG name was NOT used as residual, remove it from the model
+        if !any(name == pg_name for (name, _) in sub_pgs)
+            if SolidModels.hasgroup(sm, pg_name, 2)
+                grouptag = sm[pg_name, 2].grouptag
+                SolidModels.gmsh.model.removePhysicalGroups([(2, grouptag)])
+                delete!(SolidModels.dimgroupdict(sm, 2), pg_name)
+            end
+        end
+
+        split_results[pg_name] = sub_pgs
+    end
+
+    # Phase 4: Remove duplicate entity assignments.
+    # After splitting, entities that were in multiple original PGs now have a dedicated
+    # sub-PG. Remove them from any other PG that still contains them.
+    entity_owner = Dict{Int32, String}()  # entity tag → owning PG name
+    # First assign: sub-PGs take priority (they were just created with exact entity sets)
+    for (_, sub_pgs) in split_results
+        for (sub_name, _) in sub_pgs
+            SolidModels.hasgroup(sm, sub_name, 2) || continue
+            for t in SolidModels.entitytags(sm[sub_name, 2])
+                entity_owner[t] = sub_name
+            end
+        end
+    end
+    # Then assign remaining entities from unsplit PGs
+    for (pg_name, pg) in SolidModels.dimgroupdict(sm, 2)
+        for t in SolidModels.entitytags(pg)
+            if !haskey(entity_owner, t)
+                entity_owner[t] = pg_name
+            end
+        end
+    end
+
+    # Rewrite any PG that contains entities it doesn't own
+    for (pg_name, pg) in collect(SolidModels.dimgroupdict(sm, 2))
+        current_tags = SolidModels.entitytags(pg)
+        owned_tags = Int32[t for t in current_tags if get(entity_owner, t, "") == pg_name]
+        if length(owned_tags) < length(current_tags)
+            if isempty(owned_tags)
+                SolidModels.gmsh.model.removePhysicalGroups([(2, pg.grouptag)])
+                delete!(SolidModels.dimgroupdict(sm, 2), pg_name)
+            else
+                sm[pg_name] = Tuple{Int32, Int32}[(Int32(2), t) for t in owned_tags]
+            end
+        end
+    end
+
+    # Phase 5: Update registry cross-references.
+    # For each sub-PG, add it to all layers in its signature.
+    for (original_pg_name, sub_pgs) in split_results
+        original_layer = pg_to_layer[original_pg_name]
+
+        for (sub_name, signature) in sub_pgs
+            # Create a PGRecord for the sub-PG
+            sub_record = PGRecord(sub_name, original_layer, nothing)
+
+            for layer_name in signature
+                !haskey(registry, layer_name) && continue
+                registry[layer_name].dim != 2 && continue
+                # Avoid duplicates
+                any(record -> record.name == sub_name, registry[layer_name].pgs) && continue
+                push!(registry[layer_name].pgs, sub_record)
+            end
+        end
+
+        # Remove the original PG from registry if it was fully replaced
+        if !any(name == original_pg_name for (name, _) in sub_pgs)
+            if haskey(registry, original_layer)
+                filter!(
+                    record -> record.name != original_pg_name,
+                    registry[original_layer].pgs
+                )
+            end
+        end
+    end
+
+    return split_results
+end
+
+"""
+    _split_shared_cc_pgs!(sm, registry, split_results, cc_entity_tags)
+
+Split any 2D PG containing entities from multiple CCs into content-addressed sub-PGs and
+update the registry and prior layer-partition results to reference them.
+"""
+function _split_shared_cc_pgs!(
+    sm::SolidModel,
+    registry::LayerRegistry,
+    split_results::AbstractDict,
+    cc_entity_tags::Dict{String, Vector{Int32}}
+)
+    entity_to_cc = Dict{Int32, String}(
+        tag => cc_name for (cc_name, tags) in cc_entity_tags for tag in tags
+    )
+    Signature = Tuple{Vararg{Symbol}}
+
+    for (pg_name, pg) in collect(SolidModels.dimgroupdict(sm, 2))
+        cc_groups = Dict{String, Vector{Int32}}()
+        non_cc_tags = Int32[]
+        for tag in SolidModels.entitytags(pg)
+            cc_name = get(entity_to_cc, tag, nothing)
+            if isnothing(cc_name)
+                push!(non_cc_tags, tag)
+            else
+                push!(get!(Vector{Int32}, cc_groups, cc_name), tag)
+            end
+        end
+        length(cc_groups) <= 1 && continue
+
+        cc_names = sort!(collect(keys(cc_groups)))
+        tag_groups = [vcat(non_cc_tags, cc_groups[first(cc_names)])]
+        append!(tag_groups, [cc_groups[cc_name] for cc_name in cc_names[2:end]])
+
+        sub_names = String[]
+        for tags in tag_groups
+            dimtags_str = join(sort(["2,$tag" for tag in tags]), "&")
+            sub_name = "__" * bytes2hex(sha1(dimtags_str))[1:16]
+            sm[sub_name] = Tuple{Int32, Int32}[(Int32(2), tag) for tag in tags]
+            push!(sub_names, sub_name)
+        end
+
+        registered_layers = Symbol[]
+        for (layer_name, state) in registry
+            state.dim == 2 || continue
+            matching_records = filter(record -> record.name == pg_name, state.pgs)
+            isempty(matching_records) && continue
+            push!(registered_layers, layer_name)
+            filter!(record -> record.name != pg_name, state.pgs)
+
+            entity_meta = first(matching_records).entity_meta
+            for sub_name in sub_names
+                any(record -> record.name == sub_name, state.pgs) && continue
+                push!(state.pgs, PGRecord(sub_name, layer_name, entity_meta))
+            end
+        end
+
+        replaced_in_split_results = false
+        for original_name in collect(keys(split_results))
+            sub_pgs = split_results[original_name]
+            updated_sub_pgs = similar(sub_pgs, 0)
+            for (sub_name, signature) in sub_pgs
+                if sub_name == pg_name
+                    append!(updated_sub_pgs, [(name, signature) for name in sub_names])
+                    replaced_in_split_results = true
+                else
+                    push!(updated_sub_pgs, (sub_name, signature))
+                end
+            end
+            split_results[original_name] = unique(updated_sub_pgs)
+        end
+        if !replaced_in_split_results
+            signature = Tuple(sort!(unique(registered_layers)))
+            split_results[pg_name] =
+                Tuple{String, Signature}[(sub_name, signature) for sub_name in sub_names]
+        end
+
+        grouptag = sm[pg_name, 2].grouptag
+        SolidModels.gmsh.model.removePhysicalGroups([(2, grouptag)])
+        delete!(SolidModels.dimgroupdict(sm, 2), pg_name)
+    end
+    return nothing
+end
+
+"""
+    _warn_potential_overlaps(registry::LayerRegistry, stack::SourceStack)
+
+Emit warnings for 3D source layers with non-NULL material that remain in the final
+registry and have overlapping z-ranges. This pattern often leads to overlapping volumes
+that crash the OCC kernel during fragmentation.
+"""
+function _warn_potential_overlaps(registry::LayerRegistry, stack::SourceStack)
+    # Collect all 3D source layers with material in the final registry
+    extruded_source_layers = Set{Symbol}()
+    for (layer_name, state) in registry
+        state.dim == 3 || continue
+        haskey(stack.layers, layer_name) || continue
+        stack.layers[layer_name].material == NULL && continue
+        push!(extruded_source_layers, layer_name)
+    end
+
+    length(extruded_source_layers) < 2 && return nothing
+
+    # Compute actual z-ranges using pair-derived thickness when needed.
+    layer_z_ranges = Dict{Symbol, Tuple{Float64, Float64}}()
+    for layer_name in extruded_source_layers
+        source_layer = stack.layers[layer_name]
+        z_base = SolidModels._stp_float(layer_z(layer_name, stack))
+        dz = SolidModels._stp_float(thickness(source_layer, stack))
+        z_min = min(z_base, z_base + dz)
+        z_max = max(z_base, z_base + dz)
+        layer_z_ranges[layer_name] = (z_min, z_max)
+    end
+
+    for layer_a in extruded_source_layers
+        za_min, za_max = layer_z_ranges[layer_a]
+        for layer_b in extruded_source_layers
+            layer_b <= layer_a && continue
+            zb_min, zb_max = layer_z_ranges[layer_b]
+            if za_min <= zb_max && zb_min <= za_max
+                @warn "Layers $layer_a and $layer_b are both 3D volumes with overlapping " *
+                      "z-ranges that remain in the final registry. If they occupy the " *
+                      "same spatial region, one must be subtracted from the other to " *
+                      "avoid OCC geometry failures."
+            end
+        end
+    end
+
+    return nothing
+end
+
 """
     struct SolidModelTarget{L <: SourceLayer, T <: Coordinate} <: SchematicDrivenLayout.Target
         stack::SourceStack{L, T}
@@ -28,6 +439,36 @@ SolidModelTarget(stack::SourceStack{L, T}) where {L, T} =
     SolidModelTarget{L, T}(stack, Tuple[])
 SolidModelTarget(stack::SourceStack{L, T}, ops::AbstractVector{<:Tuple}) where {L, T} =
     SolidModelTarget{L, T}(stack, Tuple[ops...])
+
+function _map_meta_for_stack(stack::SourceStack, m::EntityMeta)
+    sl = sourcelayer(m, stack)
+    (!sl.solidmodel || m.role isa Locator) && return nothing
+    return physical_group_name(m)
+end
+_map_meta_for_stack(::SourceStack, ::DeviceLayout.Meta) = nothing
+
+function _extrusions(stack::SourceStack, reg::LayerRegistry)
+    operations = Tuple[]
+    for (layer_name, source_layer) in stack.layers
+        haskey(reg, layer_name) || continue
+        iszero(thickness(source_layer, stack)) && continue
+        push!(operations, (layer_name, SolidModels.extrude_z!, ()))
+    end
+    return operations
+end
+
+function _retained_physical_groups(reg::LayerRegistry)
+    retained = Set{Tuple{String, Int}}()
+    for state in values(reg)
+        for record in state.pgs
+            !isnothing(record.entity_meta) &&
+                record.entity_meta.role isa Locator &&
+                continue
+            push!(retained, (record.name, state.dim))
+        end
+    end
+    return retained
+end
 
 function _prefixed_meta(m::EntityMeta, prefix::String)
     isempty(m.name) && return m
@@ -202,11 +643,11 @@ function render!(
         # Resolve transformed in-plane directions for all lumped-port source identities.
         lumped_port_directions = _lumped_port_directions(working_sch.coordinate_system)
         # Collect semantic metadata from every entity in the transformed hierarchy.
-        entity_metas = _entity_metas(working_sch.coordinate_system)
+        metas = _entity_metas(working_sch.coordinate_system)
         # Record transformed locator positions for post-fragmentation geometric queries.
-        locators = _locators(working_sch.coordinate_system, target.stack)
+        locator_records = find_locators(working_sch.coordinate_system, target.stack)
         # Seed compiler state with the physical groups produced directly by artwork.
-        registry = _initial_registry(entity_metas, target.stack)
+        registry = initial_registry(metas, target.stack)
         # Prepend required source-layer extrusions to the user-supplied operation schedule.
         layer_ops = vcat(_extrusions(target.stack, registry), target.ops)
         # Compile layer operations and defer interface discovery until after fragmentation.
@@ -246,9 +687,10 @@ function render!(
             # PGs and add Tag-specific deferred interfaces. Execute all interfaces next,
             # then discover connected metal components from the resulting surface model.
             tag_records =
-                _resolve_tag_locators!(sm, registry, locators, deferred_interfaces)
-            _execute_deferred_interfaces!(sm, deferred_interfaces)
-            terminal_result = find_terminals!(sm, registry, target.stack, locators)
+                add_tagged_pgs!(sm, registry, locator_records, deferred_interfaces)
+            execute_deferred_interfaces!(sm, deferred_interfaces)
+            terminal_result =
+                add_terminals!(sm, registry, target.stack, locator_records)
 
             # First partition PGs by identical layer-membership signatures, then split
             # any remaining PG that spans multiple metal connected components. Keeping

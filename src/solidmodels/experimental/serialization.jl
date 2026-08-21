@@ -1,3 +1,42 @@
+function _resolve_split_pgs(pg::String, split_results::AbstractDict, sm::SolidModel)
+    if haskey(split_results, pg)
+        return String[
+            name for (name, _) in split_results[pg] if SolidModels.hasgroup(sm, name, 2)
+        ]
+    elseif SolidModels.hasgroup(sm, pg, 2)
+        return [pg]
+    else
+        return String[]
+    end
+end
+
+"""
+    _resolve_entity_pgs(cc_entity_tags, cc_name, sm) -> Vector{String}
+
+Return the current 2D PGs containing entities from a specific CC.
+
+Callers must first call [`_split_shared_cc_pgs!`](@ref) so each returned PG belongs to only
+one CC and no PG tag appears in multiple terminal or ground entries.
+"""
+function _resolve_entity_pgs(
+    cc_entity_tags::Dict{String, Vector{Int32}},
+    cc_name::String,
+    sm::SolidModel
+)
+    !haskey(cc_entity_tags, cc_name) && return String[]
+    target_tags = Set(cc_entity_tags[cc_name])
+    pg_names = String[]
+    for (name, pg) in SolidModels.dimgroupdict(sm, 2)
+        for t in SolidModels.entitytags(pg)
+            if t in target_tags
+                push!(pg_names, name)
+                break
+            end
+        end
+    end
+    return sort(pg_names)
+end
+
 # ─── Metadata JSON serialization ─────────────────────────────────────────────
 
 """
@@ -10,7 +49,7 @@
 Serialize the finalized solid model metadata to a JSON-compatible dictionary.
 """
 function serialize_metadata(
-    registry::Registry,
+    registry::LayerRegistry,
     terminal_result::NamedTuple{(:terminals, :ground, :cc_entity_tags)},
     tag_records::Vector{Tuple{String, String, Symbol}},
     split_results::AbstractDict,
@@ -70,7 +109,7 @@ function serialize_metadata(
 
     # Build layers map: layer name → {pgs, layer metadata, parents (for interfaces)}
     interface_layer_parents = Dict{Symbol, Vector{String}}()
-    for operation in _interface_vertices(deferred_interfaces)
+    for operation in interface_vertices(deferred_interfaces)
         dest_layer = MetaGraphs.get_prop(deferred_interfaces, operation, :dest_layer)
         parents = get!(Vector{String}, interface_layer_parents, dest_layer)
         parent_layers = MetaGraphs.get_prop(deferred_interfaces, operation, :parent_layers)
@@ -117,10 +156,10 @@ function serialize_metadata(
 
     # Build terminals dict with sub-PG references
     terminals_dict = Dict{String, Any}()
-    for (cc_name, cc_locators) in terminal_result.terminals
+    for (cc_name, cclocators) in terminal_result.terminals
         sub_pg_names = _resolve_entity_pgs(terminal_result.cc_entity_tags, cc_name, sm)
         terminals_dict[cc_name] =
-            Dict{String, Any}("pgs" => sub_pg_names, "locators" => cc_locators)
+            Dict{String, Any}("pgs" => sub_pg_names, "locators" => cclocators)
     end
 
     # Build ground dict with sub-PG references

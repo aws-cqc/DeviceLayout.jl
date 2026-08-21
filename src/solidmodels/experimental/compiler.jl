@@ -1,3 +1,397 @@
+struct PGRecord
+    name::String
+    layer::Symbol
+    entity_meta::Union{EntityMeta, Nothing}
+end
+
+mutable struct LayerState
+    pgs::Vector{PGRecord}
+    dim::Int
+end
+
+const LayerRegistry = Dict{Symbol, LayerState}
+
+function initial_registry(entity_metas::AbstractVector{<:EntityMeta}, stack::SourceStack)
+    registry = LayerRegistry()
+    for entity_meta in unique(entity_metas)
+        source_layer = sourcelayer(entity_meta, stack)
+        (!source_layer.solidmodel || entity_meta.role isa Locator) && continue
+        record = PGRecord(physical_group_name(entity_meta), entity_meta.layer, entity_meta)
+        state = get!(registry, entity_meta.layer) do
+            return LayerState(PGRecord[], 2)
+        end
+        any(existing -> existing.name == record.name, state.pgs) || push!(state.pgs, record)
+    end
+    return registry
+end
+
+# Directed bipartite graph of unique PG vertices and deferred-interface vertices. Edges
+# `PG → interface → PG` identify object and tool roles; execution caches Gmsh data once per
+# PG vertex, then evaluates each interface vertex using in-memory set intersections.
+# Interface vertices also retain destination and parent layers for metadata serialization.
+function _deferred_interface_graph()
+    graph = MetaGraphs.MetaDiGraph()
+    MetaGraphs.set_indexing_prop!(graph, :key)
+    return graph
+end
+
+function _pg_vertex!(graph::MetaGraphs.MetaDiGraph, name::String, dim::Int)
+    key = (:pg, name, dim)
+    haskey(graph, key, :key) && return graph[key, :key]
+    Graphs.add_vertex!(
+        graph,
+        Dict{Symbol, Any}(:kind => :pg, :key => key, :name => name, :dim => dim)
+    )
+    return Graphs.nv(graph)
+end
+
+function defer_interface!(
+    graph::MetaGraphs.MetaDiGraph,
+    dest_pg::String,
+    obj_pg::String,
+    tool_pg::String,
+    obj_dim::Int,
+    tool_dim::Int,
+    dest_layer::Symbol,
+    obj_layer::Symbol,
+    tool_layer::Symbol
+)
+    key = (:interface, dest_pg)
+    haskey(graph, key, :key) &&
+        throw(ArgumentError("Deferred interface '$dest_pg' is already defined"))
+    obj = _pg_vertex!(graph, obj_pg, obj_dim)
+    tool = _pg_vertex!(graph, tool_pg, tool_dim)
+    Graphs.add_vertex!(
+        graph,
+        Dict{Symbol, Any}(
+            :kind => :interface,
+            :key => key,
+            :dest_pg => dest_pg,
+            :dest_layer => dest_layer,
+            :parent_layers => (obj_layer, tool_layer)
+        )
+    )
+    operation = Graphs.nv(graph)
+    Graphs.add_edge!(graph, obj, operation)
+    Graphs.add_edge!(graph, operation, tool)
+    return operation
+end
+
+interface_vertices(graph::MetaGraphs.MetaDiGraph) = filter(
+    vertex -> MetaGraphs.get_prop(graph, vertex, :kind) == :interface,
+    Graphs.vertices(graph)
+)
+
+function operation_pgs(graph::MetaGraphs.MetaDiGraph, operation::Integer)
+    return only(Graphs.inneighbors(graph, operation)),
+    only(Graphs.outneighbors(graph, operation))
+end
+
+"""
+    execute_deferred_interfaces!(sm, deferred_interfaces)
+
+After fragmentation, compute interface PGs as set intersections of entity memberships.
+
+Handles two cases:
+
+  - Same-dimension (for example, 3D∩3D or 2D∩2D): the interface is the set of shared
+    boundary entities at dimension `dim - 1` (faces for volumes, curves for surfaces).
+  - Mixed-dimension (for example, 2D∩3D): the interface is the set of lower-dimensional
+    entities in one PG that are also boundary faces of entities in the other PG.
+"""
+function execute_deferred_interfaces!(sm::SolidModel, interfs::MetaGraphs.MetaDiGraph)
+    Graphs.nv(interfs) == 0 && return nothing
+
+    dimtag_cache = Dict{Int, Any}()
+    boundary_cache = Dict{Int, Any}()
+
+    function _pg_dimtags(vertex)
+        return get!(dimtag_cache, vertex) do
+            name = MetaGraphs.get_prop(interfs, vertex, :name)
+            dim = MetaGraphs.get_prop(interfs, vertex, :dim)
+            SolidModels.hasgroup(sm, name, dim) || return nothing
+            return SolidModels.dimtags(sm[name, dim])
+        end
+    end
+
+    function _pg_boundary_tags(vertex, boundary_dim)
+        boundaries = get!(boundary_cache, vertex) do
+            dimtags = _pg_dimtags(vertex)
+            isnothing(dimtags) && return nothing
+            boundary_dimtags =
+                SolidModels.gmsh.model.getBoundary(dimtags, false, false, false)
+            result = Dict{Int, Set{Int32}}()
+            for (dim, tag) in boundary_dimtags
+                push!(get!(Set{Int32}, result, Int(dim)), Int32(abs(tag)))
+            end
+            return result
+        end
+        isnothing(boundaries) && return nothing
+        return get(boundaries, boundary_dim, Set{Int32}())
+    end
+
+    for operation in interface_vertices(interfs)
+        object, tool = operation_pgs(interfs, operation)
+        obj_dim = MetaGraphs.get_prop(interfs, object, :dim)
+        tool_dim = MetaGraphs.get_prop(interfs, tool, :dim)
+        dest_pg = MetaGraphs.get_prop(interfs, operation, :dest_pg)
+
+        if obj_dim == tool_dim
+            boundary_dim = obj_dim - 1
+            obj_tags = _pg_boundary_tags(object, boundary_dim)
+            tool_tags = _pg_boundary_tags(tool, boundary_dim)
+            (isnothing(obj_tags) || isnothing(tool_tags)) && continue
+            interface_tags = intersect(obj_tags, tool_tags)
+            isempty(interface_tags) && continue
+            sm[dest_pg] =
+                Tuple{Int32, Int32}[(Int32(boundary_dim), tag) for tag in interface_tags]
+        else
+            lo_dim = min(obj_dim, tool_dim)
+            lo = obj_dim <= tool_dim ? object : tool
+            hi = obj_dim <= tool_dim ? tool : object
+            lo_dimtags = _pg_dimtags(lo)
+            hi_tags = _pg_boundary_tags(hi, lo_dim)
+            (isnothing(lo_dimtags) || isnothing(hi_tags)) && continue
+            lo_tags = Set(Int32(tag) for (_, tag) in lo_dimtags)
+            interface_tags = intersect(lo_tags, hi_tags)
+            isempty(interface_tags) && continue
+            sm[dest_pg] =
+                Tuple{Int32, Int32}[(Int32(lo_dim), tag) for tag in interface_tags]
+        end
+    end
+
+    return nothing
+end
+
+"""
+    generated_pg_name(dest, obj_pg, tool_pgs; operation, parameters=()) -> String
+
+Return the content-addressed physical-group name for a generated layer operation.
+"""
+function generated_pg_name(
+    dest::Symbol,
+    obj_pg::String,
+    tool_pgs::Vector{String};
+    operation::Symbol,
+    parameters=()
+)
+    content =
+        join((string(operation), obj_pg, join(sort(tool_pgs), "&"), repr(parameters)), "\0")
+    digest = sha1(content)
+    return string(dest) * "__" * bytes2hex(digest)[1:16]
+end
+
+_content_kwargs(kwargs) = Tuple(sort(collect(kwargs); by=keyword -> string(first(keyword))))
+
+function generated_record_exists(
+    reg::LayerRegistry,
+    dest::Symbol,
+    name::String,
+    pending::Vector{PGRecord}=PGRecord[]
+)
+    any(record -> record.name == name, pending) && return true
+    return haskey(reg, dest) && any(record -> record.name == name, reg[dest].pgs)
+end
+
+function _operation_argument_error(idx::Integer, dest, msg::AbstractString)
+    dest_repr = dest isa Symbol ? ":$dest" : repr(dest)
+    return ArgumentError("Layer operation $idx for destination $dest_repr $msg")
+end
+
+function _require_destination_dimension(reg::LayerRegistry, dest::Symbol, dim::Int)
+    if haskey(reg, dest) && reg[dest].dim != dim
+        throw(
+            ArgumentError(
+                "Destination layer :$dest has dimension $(reg[dest].dim), " *
+                "so dimension $dim physical groups cannot be appended"
+            )
+        )
+    end
+    return nothing
+end
+
+function _validate_layer_operation(operation, operation_idx::Integer)
+    operation isa Tuple || throw(
+        ArgumentError(
+            "Layer operation $operation_idx must be a Tuple, got $(typeof(operation))"
+        )
+    )
+    length(operation) >= 3 || throw(
+        ArgumentError(
+            "Layer operation $operation_idx must contain destination, function, and arguments"
+        )
+    )
+    dest, operation_fn, args = operation[1], operation[2], operation[3]
+    dest isa Symbol || throw(
+        ArgumentError(
+            "Layer operation $operation_idx has non-Symbol destination $(repr(dest))"
+        )
+    )
+    args isa Tuple || throw(
+        _operation_argument_error(operation_idx, dest, "must use a Tuple of arguments")
+    )
+    for keyword in operation[4:end]
+        (keyword isa Pair && first(keyword) isa Symbol) || throw(
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "has malformed keyword $(repr(keyword)); expected :name => value"
+            )
+        )
+    end
+    keyword_values = Dict{Symbol, Any}(operation[4:end])
+    length(keyword_values) == length(operation) - 3 || throw(
+        _operation_argument_error(operation_idx, dest, "contains duplicate keyword names")
+    )
+
+    _require_arity(n) =
+        length(args) == n || throw(
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "expects $n argument$(n == 1 ? "" : "s"), got $(length(args))"
+            )
+        )
+    _require_symbol(value, label) =
+        value isa Symbol || throw(
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "requires $label to be a Symbol"
+            )
+        )
+    allowed_keywords = Symbol[]
+
+    if operation_fn == SolidModels.extrude_z!
+        _require_arity(0)
+    elseif operation_fn == SolidModels.difference_geom!
+        append!(allowed_keywords, (:remove_object, :remove_tool))
+        _require_arity(2)
+        _require_symbol(args[1], "the object layer")
+        tools = args[2] isa AbstractVector ? args[2] : (args[2],)
+        isempty(tools) && throw(
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "requires at least one tool layer"
+            )
+        )
+        all(tool -> tool isa Symbol, tools) || throw(
+            _operation_argument_error(operation_idx, dest, "requires Symbol tool layers")
+        )
+    elseif operation_fn == SolidModels.union_geom!
+        isempty(args) && throw(
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "requires at least one source layer"
+            )
+        )
+        all(source -> source isa Symbol, args) || throw(
+            _operation_argument_error(operation_idx, dest, "requires Symbol source layers")
+        )
+    elseif operation_fn == SolidModels.intersect_geom!
+        _require_arity(2)
+        _require_symbol(args[1], "the object layer")
+        _require_symbol(args[2], "the tool layer")
+    elseif operation_fn == SolidModels.restrict_to_volume!
+        _require_arity(1)
+        _require_symbol(args[1], "the bounding-volume layer")
+    elseif operation_fn == SolidModels.get_boundary
+        append!(allowed_keywords, (:combined, :oriented, :recursive, :direction, :position))
+        _require_arity(1)
+        _require_symbol(args[1], "the source layer")
+    elseif operation_fn == SolidModels.translate!
+        push!(allowed_keywords, :copy)
+        _require_arity(4)
+        _require_symbol(args[1], "the source layer")
+        all(value -> value isa Coordinate, args[2:4]) || throw(
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "requires Coordinate translation offsets"
+            )
+        )
+    elseif operation_fn == SolidModels.remove_group!
+        push!(allowed_keywords, :remove_entities)
+        _require_arity(1)
+        _require_symbol(args[1], "the source layer")
+    elseif operation_fn == SolidModels.revolve!
+        _require_arity(8)
+        _require_symbol(args[1], "the source layer")
+        all(value -> value isa Real, args[2:8]) || throw(
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "requires seven Real revolution values"
+            )
+        )
+    elseif operation_fn == SolidModels.set_periodic!
+        _require_arity(2)
+        _require_symbol(args[1], "the first periodic layer")
+        _require_symbol(args[2], "the second periodic layer")
+    else
+        throw(
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "uses unsupported operation $operation_fn"
+            )
+        )
+    end
+    for keyword in operation[4:end]
+        first(keyword) in allowed_keywords || throw(
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "does not support keyword :$(first(keyword)) for $operation_fn"
+            )
+        )
+    end
+
+    for keyword_name in intersect(
+        keys(keyword_values),
+        (
+            :copy,
+            :remove_object,
+            :remove_tool,
+            :remove_entities,
+            :combined,
+            :oriented,
+            :recursive
+        )
+    )
+        keyword_values[keyword_name] isa Bool || throw(
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "requires keyword :$keyword_name to have a Bool value"
+            )
+        )
+    end
+    for (keyword_name, choices) in
+        (:direction => ("all", "x", "y", "z"), :position => ("all", "min", "max"))
+        haskey(keyword_values, keyword_name) || continue
+        value = keyword_values[keyword_name]
+        valid_value = value isa AbstractString && lowercase(value) in choices
+        # SolidModels.get_boundary accepts case-insensitive axis names, but its all-axis
+        # fast path currently requires the exact lowercase spelling.
+        if keyword_name == :direction &&
+           value isa AbstractString &&
+           lowercase(value) == "all"
+            valid_value = value == "all"
+        end
+        valid_value || throw(
+            _operation_argument_error(
+                operation_idx,
+                dest,
+                "requires keyword :$keyword_name to be one of $(join(choices, ", "))"
+            )
+        )
+    end
+    return nothing
+end
+
 # ─── Layer-level operation compiler ──────────────────────────────────────────
 
 """
@@ -10,14 +404,14 @@ to DeviceLayout's `_postrender!`.
 Returns:
 
   - `pg_ops::Vector{Tuple}`: physical-group-level postrender operations
-  - `registry::Registry`: final state of the layer registry
+  - `registry::LayerRegistry`: final state of the layer registry
   - `deferred_interfaces::MetaGraphs.MetaDiGraph`: interface operations and unique PGs
     evaluated after fragmentation
 """
 function compile_layer_ops(
     layer_ops::AbstractVector,
     stack::SourceStack,
-    initial_registry::Registry
+    initial_registry::LayerRegistry
 )
     registry = deepcopy(initial_registry)
     pg_ops = Tuple[]
@@ -60,7 +454,7 @@ end
 
 function _compile_one_op!(
     pg_ops::Vector{Tuple},
-    registry::Registry,
+    registry::LayerRegistry,
     deferred_interfaces::MetaGraphs.MetaDiGraph,
     interior_solids::Dict{Symbol, Vector{String}},
     stack::SourceStack,
@@ -105,7 +499,7 @@ so they serve as fragmentation boundaries during `restrict_to_volume!`).
 """
 function _flush_interior_solids!(
     pg_ops::Vector{Tuple},
-    registry::Registry,
+    registry::LayerRegistry,
     interior_solids::Dict{Symbol, Vector{String}},
     bv_layer::Union{Symbol, Nothing}
 )
@@ -151,7 +545,7 @@ end
 
 function _compile_extrude!(
     pg_ops::Vector{Tuple},
-    registry::Registry,
+    registry::LayerRegistry,
     interior_solids::Dict{Symbol, Vector{String}},
     stack::SourceStack,
     layer_name::Symbol
@@ -251,7 +645,7 @@ end
 
 function _compile_difference!(
     pg_ops::Vector{Tuple},
-    registry::Registry,
+    registry::LayerRegistry,
     dest::Symbol,
     args::Tuple,
     kwargs
@@ -334,7 +728,7 @@ function _compile_difference!(
                 operation=:difference,
                 parameters=(dim, remove_object)
             )
-            _generated_record_exists(registry, dest, dest_name, new_records) && continue
+            generated_record_exists(registry, dest, dest_name, new_records) && continue
             push!(
                 pg_ops,
                 (
@@ -391,7 +785,7 @@ end
 
 function _compile_union!(
     pg_ops::Vector{Tuple},
-    registry::Registry,
+    registry::LayerRegistry,
     dest::Symbol,
     args::Tuple,
     ::Any
@@ -427,7 +821,7 @@ function _compile_union!(
                     operation=:union,
                     parameters=(state.dim,)
                 )
-                _generated_record_exists(registry, dest, dest_name, new_records) && continue
+                generated_record_exists(registry, dest, dest_name, new_records) && continue
                 push!(
                     pg_ops,
                     (dest_name, SolidModels.union_geom!, (record.name, state.dim))
@@ -485,7 +879,7 @@ function _compile_union!(
             parameters=(dim,)
         )
         new_record = PGRecord(dest_name, dest, nothing)
-        duplicate = _generated_record_exists(registry, dest, dest_name)
+        duplicate = generated_record_exists(registry, dest, dest_name)
         duplicate ||
             push!(pg_ops, (dest_name, SolidModels.union_geom!, (all_pg_names, dim)))
 
@@ -527,7 +921,7 @@ end
 
 function _compile_intersect!(
     ::Vector{Tuple},
-    registry::Registry,
+    registry::LayerRegistry,
     deferred_interfaces::MetaGraphs.MetaDiGraph,
     dest::Symbol,
     args::Tuple,
@@ -555,11 +949,11 @@ function _compile_intersect!(
                 operation=:intersect,
                 parameters=(obj_dim, tool_dim)
             )
-            _generated_record_exists(registry, dest, dest_name, new_recs) && continue
+            generated_record_exists(registry, dest, dest_name, new_recs) && continue
             # All intersections are deferred to post-fragmentation. Same-dim
             # intersections find shared boundary entities (dim-1); mixed-dim
             # intersections find lo-dim entities on the hi-dim boundary.
-            _defer_interface!(
+            defer_interface!(
                 deferred_interfaces,
                 dest_name,
                 obj_rec.name,
@@ -594,7 +988,7 @@ end
 Compile a restriction operation using the single physical group in the bounding-volume
 layer.
 """
-function _compile_restrict!(pg_ops::Vector{Tuple}, reg::Registry, args::Tuple)
+function _compile_restrict!(pg_ops::Vector{Tuple}, reg::LayerRegistry, args::Tuple)
     bv_layer = args[1]
     !haskey(reg, bv_layer) && throw(
         ArgumentError(
@@ -616,7 +1010,7 @@ end
 
 function _compile_get_boundary!(
     pg_ops::Vector{Tuple},
-    registry::Registry,
+    registry::LayerRegistry,
     dest::Symbol,
     args::Tuple,
     kwargs
@@ -648,7 +1042,7 @@ function _compile_get_boundary!(
                 operation=:boundary,
                 parameters=(dim, _content_kwargs(kwargs))
             )
-            _generated_record_exists(registry, dest, dest_name, new_records) && continue
+            generated_record_exists(registry, dest, dest_name, new_records) && continue
             push!(
                 pg_ops,
                 (dest_name, SolidModels.get_boundary, (record.name, dim), kwargs...)
@@ -671,7 +1065,7 @@ end
 
 function _compile_translate!(
     pg_ops::Vector{Tuple},
-    registry::Registry,
+    registry::LayerRegistry,
     dest::Symbol,
     args::Tuple,
     kwargs
@@ -711,7 +1105,7 @@ function _compile_translate!(
                 operation=:translate,
                 parameters=(dx, dy, dz)
             )
-            _generated_record_exists(registry, dest, dest_name, new_records) && continue
+            generated_record_exists(registry, dest, dest_name, new_records) && continue
             push!(
                 pg_ops,
                 (
@@ -736,7 +1130,7 @@ end
 
 # ─── remove_group! ───────────────────────────────────────────────────────────
 
-function _compile_remove!(pg_ops::Vector{Tuple}, reg::Registry, args::Tuple, kwargs)
+function _compile_remove!(pg_ops::Vector{Tuple}, reg::LayerRegistry, args::Tuple, kwargs)
     layer_name = args[1]
     !haskey(reg, layer_name) &&
         throw(ArgumentError("Layer :$layer_name is absent from the compiler registry"))
@@ -764,7 +1158,7 @@ end
 
 function _compile_revolve!(
     pg_ops::Vector{Tuple},
-    registry::Registry,
+    registry::LayerRegistry,
     dest::Symbol,
     args::Tuple,
     ::Any
@@ -800,7 +1194,7 @@ function _compile_revolve!(
                 operation=:revolve,
                 parameters=(dim, x, y, z, ax, ay, az, θ)
             )
-            _generated_record_exists(registry, dest, dest_name, new_records) && continue
+            generated_record_exists(registry, dest, dest_name, new_records) && continue
             push!(
                 pg_ops,
                 (
@@ -825,7 +1219,7 @@ end
 
 # ─── set_periodic! ───────────────────────────────────────────────────────────
 
-function _compile_set_periodic!(pg_ops::Vector{Tuple}, reg::Registry, args::Tuple)
+function _compile_set_periodic!(pg_ops::Vector{Tuple}, reg::LayerRegistry, args::Tuple)
     layer_a, layer_b = args[1], args[2]
     !haskey(reg, layer_a) && throw(
         ArgumentError("Periodic layer :$layer_a is absent from the compiler registry")
