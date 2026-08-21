@@ -101,7 +101,7 @@ end
     missing = CoordinateSystem("missing", μm)
     place!(missing, Rectangle(1μm, 1μm), EntityMeta(:unknown; name="bad", index=4))
     @test_throws ArgumentError render!(Cell("missing", μm), missing, stack)
-    registry = Experimental._build_initial_registry(Experimental._entity_metas(cs), stack)
+    registry = Experimental._initial_registry(Experimental._entity_metas(cs), stack)
     @test !haskey(registry, :art_only)
     @test haskey(registry, :second)
 end
@@ -238,11 +238,35 @@ end
     )
     @test isempty(interface_ops)
     @test interface_registry[:interface].dim == 1
-    @test length(Experimental._interface_vertices(deferred)) == 1
+    interface_operation = only(Experimental._interface_vertices(deferred))
+    @test Experimental.MetaGraphs.get_prop(deferred, interface_operation, :dest_layer) ==
+          :interface
+    @test Experimental.MetaGraphs.get_prop(deferred, interface_operation, :parent_layers) ==
+          (:metal, :metal)
 
     interface_graph = Experimental._deferred_interface_graph()
-    Experimental._defer_interface!(interface_graph, "ab", "a", "b", 2, 3)
-    Experimental._defer_interface!(interface_graph, "ac", "a", "c", 2, 3)
+    Experimental._defer_interface!(
+        interface_graph,
+        "ab",
+        "a",
+        "b",
+        2,
+        3,
+        :interface,
+        :a,
+        :b
+    )
+    Experimental._defer_interface!(
+        interface_graph,
+        "ac",
+        "a",
+        "c",
+        2,
+        3,
+        :interface,
+        :a,
+        :c
+    )
     @test Experimental.Graphs.nv(interface_graph) == 5 # 3 PGs + 2 operations
     @test length(Experimental._interface_vertices(interface_graph)) == 2
     @test_throws ArgumentError Experimental._defer_interface!(
@@ -251,7 +275,10 @@ end
         "a",
         "b",
         2,
-        3
+        3,
+        :interface,
+        :a,
+        :b
     )
     @test_throws ArgumentError Experimental._defer_interface!(
         interface_graph,
@@ -259,7 +286,10 @@ end
         "new_a",
         "new_b",
         2,
-        3
+        3,
+        :interface,
+        :new_a,
+        :new_b
     )
     @test Experimental.Graphs.nv(interface_graph) == 5 # no orphan PGs after rejection
 
@@ -331,7 +361,7 @@ end
     addref!(root, locator_geometry, Point(10μm, 0μm))
     addref!(root, locator_geometry, Point(-10μm, 5μm))
     stack = SourceStack(:metal => SourceLayer(METAL; level=1); levels=(1 => 0μm,))
-    locators = Experimental._extract_locator_positions(root, stack)
+    locators = Experimental._locators(root, stack)
     @test length(locators) == 2
     @test sort([locator.center_x for locator in locators]) == [-10.0, 10.0]
     @test sort([locator.center_y for locator in locators]) == [0.0, 5.0]
@@ -340,7 +370,7 @@ end
         :metal => SourceLayer(METAL; level=1, solidmodel=false);
         levels=(1 => 0μm,)
     )
-    @test isempty(Experimental._extract_locator_positions(root, hidden_stack))
+    @test isempty(Experimental._locators(root, hidden_stack))
 end
 
 @testitem "LumpedPort directions" begin
@@ -348,7 +378,7 @@ end
     using DeviceLayout.SolidModels.Experimental
     import Unitful: μm, °
 
-    const direction_map = Experimental._extract_lumped_port_directions
+    const direction_map = Experimental._lumped_port_directions
 
     local_cs = CoordinateSystem("local_port", μm)
     nested_port = meshsized_entity(
@@ -426,9 +456,20 @@ end
     )
     locator = Experimental.LocatorRecord("tag", 1, Tag(), :a, 5.0, 5.0, 0.0)
     deferred = Experimental._deferred_interface_graph()
-    Experimental._defer_interface!(deferred, "interface_ab", "layer_a", "layer_b", 2, 2)
-    Experimental._resolve_tag_locators!(sm, registry, [locator], deferred)
+    Experimental._defer_interface!(
+        deferred,
+        "interface_ab",
+        "layer_a",
+        "layer_b",
+        2,
+        2,
+        :interface,
+        :a,
+        :b
+    )
+    tag_records = Experimental._resolve_tag_locators!(sm, registry, [locator], deferred)
     tag_name = physical_group_name(EntityMeta(:a; name="tag", role=Tag()))
+    @test tag_records == [(tag_name, "tag", :a)]
     @test SolidModels.hasgroup(sm, tag_name, 2)
     @test SolidModels.entitytags(sm[tag_name, 2]) == [Int32(first_tag)]
     @test length(Experimental._interface_vertices(deferred)) == 2
@@ -454,9 +495,39 @@ end
     SolidModels._fragment_three_pass!(sm)
 
     same_dim = Experimental._deferred_interface_graph()
-    Experimental._defer_interface!(same_dim, "interface_1", "object", "tool", 3, 3)
-    Experimental._defer_interface!(same_dim, "interface_2", "object", "tool", 3, 3)
-    Experimental._defer_interface!(same_dim, "self_interface", "object", "object", 3, 3)
+    Experimental._defer_interface!(
+        same_dim,
+        "interface_1",
+        "object",
+        "tool",
+        3,
+        3,
+        :interface,
+        :object,
+        :tool
+    )
+    Experimental._defer_interface!(
+        same_dim,
+        "interface_2",
+        "object",
+        "tool",
+        3,
+        3,
+        :interface,
+        :object,
+        :tool
+    )
+    Experimental._defer_interface!(
+        same_dim,
+        "self_interface",
+        "object",
+        "object",
+        3,
+        3,
+        :interface,
+        :object,
+        :object
+    )
     Experimental._execute_deferred_interfaces!(sm, same_dim)
 
     interface_tags = SolidModels.entitytags(sm["interface_1", 2])
@@ -466,8 +537,28 @@ end
 
     sm["lower"] = [(Int32(2), tag) for tag in interface_tags]
     mixed_dim = Experimental._deferred_interface_graph()
-    Experimental._defer_interface!(mixed_dim, "lower_first", "lower", "tool", 2, 3)
-    Experimental._defer_interface!(mixed_dim, "higher_first", "tool", "lower", 3, 2)
+    Experimental._defer_interface!(
+        mixed_dim,
+        "lower_first",
+        "lower",
+        "tool",
+        2,
+        3,
+        :interface,
+        :lower,
+        :tool
+    )
+    Experimental._defer_interface!(
+        mixed_dim,
+        "higher_first",
+        "tool",
+        "lower",
+        3,
+        2,
+        :interface,
+        :tool,
+        :lower
+    )
     Experimental._execute_deferred_interfaces!(sm, mixed_dim)
     @test SolidModels.entitytags(sm["lower_first", 2]) == interface_tags
     @test SolidModels.entitytags(sm["higher_first", 2]) == interface_tags
@@ -589,10 +680,8 @@ end
         Rectangle(Point(4.0, 6.0), Point(6.0, 8.0)),
         EntityMeta(:surface; name="locator", role=Terminal())
     )
-    unitless_locators = Experimental._extract_locator_positions(
-        unitless_locator_geometry,
-        unitless_target.stack
-    )
+    unitless_locators =
+        Experimental._locators(unitless_locator_geometry, unitless_target.stack)
     @test only(unitless_locators).center_x == 5.0
     @test only(unitless_locators).center_y == 7.0
     @test only(unitless_locators).z == 5.0
