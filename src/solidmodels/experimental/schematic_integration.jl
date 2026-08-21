@@ -154,7 +154,7 @@ function _check_render_strict(sch::Schematic, strict)
     return nothing
 end
 
-function _safe_close_logfile(sch::Schematic)
+function _safe_close_logfile!(sch::Schematic)
     try
         close_logfile(sch)
     catch e
@@ -277,7 +277,8 @@ function render!(
                 interfaces
             )
             _execute_deferred_interfaces!(sm, deferred_interfaces)
-            terminal_result = find_terminals(sm, final_registry, target.stack, locators)
+            terminal_result =
+                find_terminals!(sm, final_registry, target.stack, locators)
 
             cc_records = PGRecord[]
             for cc_name in Iterators.flatten((
@@ -314,7 +315,7 @@ function render!(
         _check_render_strict(working_sch, strict)
         return metadata
     finally
-        _safe_close_logfile(working_sch)
+        _safe_close_logfile!(working_sch)
     end
 end
 
