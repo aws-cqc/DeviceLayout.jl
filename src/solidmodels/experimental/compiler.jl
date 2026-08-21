@@ -565,7 +565,10 @@ function _compile_intersect!(
                 obj_rec.name,
                 tool_rec.name,
                 obj_dim,
-                tool_dim
+                tool_dim,
+                dest,
+                obj_rec.layer,
+                tool_rec.layer
             )
             push!(new_recs, PGRecord(dest_name, dest, nothing))
         end

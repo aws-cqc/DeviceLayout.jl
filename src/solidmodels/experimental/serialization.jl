@@ -3,19 +3,18 @@
 """
     serialize_metadata(
         registry, terminal_result, tag_records, split_results,
-        cc_entity_tags, interface_layer_parents, stack, sm,
+        deferred_interfaces, stack, sm,
         lumped_port_directions
     ) -> Dict{String, Any}
 
-Serialize the solid model metadata to a JSON-compatible dictionary.
+Serialize the finalized solid model metadata to a JSON-compatible dictionary.
 """
 function serialize_metadata(
     registry::Registry,
-    terminal_result::NamedTuple{(:terminals, :ground)},
+    terminal_result::NamedTuple{(:terminals, :ground, :cc_entity_tags)},
     tag_records::Vector{Tuple{String, String, Symbol}},
     split_results::AbstractDict,
-    cc_entity_tags::Dict{String, Vector{Int32}},
-    interface_layer_parents::Dict{Symbol, Vector{String}},
+    deferred_interfaces::MetaGraphs.MetaDiGraph,
     stack::SourceStack,
     sm::SolidModel,
     lumped_port_directions::Dict{String, Vector{Float64}}
@@ -70,6 +69,17 @@ function serialize_metadata(
     end
 
     # Build layers map: layer name → {pgs, layer metadata, parents (for interfaces)}
+    interface_layer_parents = Dict{Symbol, Vector{String}}()
+    for operation in _interface_vertices(deferred_interfaces)
+        dest_layer = MetaGraphs.get_prop(deferred_interfaces, operation, :dest_layer)
+        parents = get!(Vector{String}, interface_layer_parents, dest_layer)
+        parent_layers = MetaGraphs.get_prop(deferred_interfaces, operation, :parent_layers)
+        for parent_layer in parent_layers
+            parent_name = string(parent_layer)
+            parent_name in parents || push!(parents, parent_name)
+        end
+    end
+
     layers_dict = Dict{String, Any}()
     for (layer_name, state) in registry
         dimension_groups = SolidModels.dimgroupdict(sm, state.dim)
@@ -108,7 +118,7 @@ function serialize_metadata(
     # Build terminals dict with sub-PG references
     terminals_dict = Dict{String, Any}()
     for (cc_name, cc_locators) in terminal_result.terminals
-        sub_pg_names = _resolve_entity_pgs(cc_entity_tags, cc_name, sm)
+        sub_pg_names = _resolve_entity_pgs(terminal_result.cc_entity_tags, cc_name, sm)
         terminals_dict[cc_name] =
             Dict{String, Any}("pgs" => sub_pg_names, "locators" => cc_locators)
     end
@@ -116,7 +126,7 @@ function serialize_metadata(
     # Build ground dict with sub-PG references
     ground_dict = Dict{String, Any}()
     for cc_name in terminal_result.ground
-        sub_pg_names = _resolve_entity_pgs(cc_entity_tags, cc_name, sm)
+        sub_pg_names = _resolve_entity_pgs(terminal_result.cc_entity_tags, cc_name, sm)
         ground_dict[cc_name] = Dict{String, Any}("pgs" => sub_pg_names)
     end
 

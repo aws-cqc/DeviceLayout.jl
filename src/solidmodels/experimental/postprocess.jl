@@ -265,12 +265,12 @@ struct LocatorRecord
 end
 
 """
-    _extract_locator_positions(cs, stack) -> Vector{LocatorRecord}
+    _locators(cs, stack) -> Vector{LocatorRecord}
 
 Extract one locator record per transformed reference occurrence without flattening `cs`.
 Locator geometry is excluded from the mesh but remains visible to this discovery pass.
 """
-function _extract_locator_positions(cs, stack::SourceStack)
+function _locators(cs, stack::SourceStack)
     records = LocatorRecord[]
     for (subcs, trans) in DeviceLayout.traversal(cs)
         for (entity_meta, element) in zip(element_metadata(subcs), elements(subcs))
@@ -317,10 +317,11 @@ Locator positions are matched to CCs using exact point-in-surface queries
 (`gmsh.model.isInside`). Ground locators designate the CCs reported as ground. CCs with
 no locators at all emit a warning.
 
-Returns a named tuple `(terminals, ground)` where:
+Returns a named tuple `(terminals, ground, cc_entity_tags)` where:
 
   - `terminals::Dict{String, Vector{String}}`: CC name → locator names (non-ground CCs only)
   - `ground::Vector{String}`: CC names designated as ground
+  - `cc_entity_tags::Dict{String, Vector{Int32}}`: CC name → surface entity tags
 """
 function find_terminals!(
     sm::SolidModel,
@@ -328,7 +329,9 @@ function find_terminals!(
     stack::SourceStack,
     locators::Vector{LocatorRecord}
 )
-    empty_result = (terminals=Dict{String, Vector{String}}(), ground=String[])
+    terminals = Dict{String, Vector{String}}()
+    ground = String[]
+    cc_entity_tags = Dict{String, Vector{Int32}}()
 
     # Collect all 2D PGs whose layer material is METAL (including Tag PGs, which
     # are real mesh entities; only Terminal/Ground locators are excluded)
@@ -347,7 +350,7 @@ function find_terminals!(
         end
     end
 
-    isempty(metal_pg_names) && return empty_result
+    isempty(metal_pg_names) && return (; terminals, ground, cc_entity_tags)
 
     ccs = SolidModels.connected_components(sm, metal_pg_names)
 
@@ -369,7 +372,10 @@ function find_terminals!(
         cc_names[idx] = cc_name
         sm[cc_name] = cc
         cc_locators[cc_name] = String[]
+        cc_entity_tags[cc_name] = Int32[tag for (_, tag) in cc]
     end
+    registry[:METAL_CC] =
+        LayerState([PGRecord(name, :METAL_CC, nothing) for name in cc_names], 2)
 
     # Assign locator names to CCs using gmsh.model.isInside for exact point-in-surface
     # geometric queries. For each locator, find the single coplanar entity that contains
@@ -416,8 +422,6 @@ function find_terminals!(
     end
 
     # Partition into terminals and ground
-    terminals = Dict{String, Vector{String}}()
-    ground = String[]
     for (idx, cc_name) in enumerate(cc_names)
         if idx in ground_cc_indices
             push!(ground, cc_name)
@@ -430,13 +434,14 @@ function find_terminals!(
         end
     end
 
-    return (; terminals, ground)
+    return (; terminals, ground, cc_entity_tags)
 end
 
 # ─── Tag locator resolution ──────────────────────────────────────────────────
 
 """
     _resolve_tag_locators!(sm, registry, locators, deferred_interfaces)
+        -> Vector{Tuple{String, String, Symbol}}
 
 After fragmentation, resolve Tag locators by finding the 2D surface entity that
 contains each locator's center point and creating a dedicated PG for it. The PG is named
@@ -445,7 +450,8 @@ registered in the final registry under the locator's layer.
 
 For each Tag PG, any pending deferred interfaces whose object references the parent
 PG are duplicated with the Tag PG as object, so that `_execute_deferred_interfaces!`
-naturally produces per-Tag interface PGs via the cross product.
+naturally produces per-Tag interface PGs via the cross product. Return records containing
+each resolved Tag PG name, locator name, and layer.
 """
 function _resolve_tag_locators!(
     sm::SolidModel,
@@ -453,8 +459,8 @@ function _resolve_tag_locators!(
     locators::Vector{LocatorRecord},
     deferred_interfaces::MetaGraphs.MetaDiGraph
 )
+    tag_records = Tuple{String, String, Symbol}[]
     tag_locators = filter(locator -> locator.role isa Tag, locators)
-    isempty(tag_locators) && return nothing
 
     for locator in tag_locators
         # A Tag is meaningful only within its declared source layer. Searching all 2D
@@ -532,10 +538,10 @@ function _resolve_tag_locators!(
                 _, tool = _interface_pgs(deferred_interfaces, operation)
                 tool_name = MetaGraphs.get_prop(deferred_interfaces, tool, :name)
                 tool_dim = MetaGraphs.get_prop(deferred_interfaces, tool, :dim)
-                previous_dest =
-                    MetaGraphs.get_prop(deferred_interfaces, operation, :dest_name)
-                dest_layer = _find_pg_layer(previous_dest, registry)
-                isnothing(dest_layer) && continue
+                dest_layer =
+                    MetaGraphs.get_prop(deferred_interfaces, operation, :dest_layer)
+                _, tool_layer =
+                    MetaGraphs.get_prop(deferred_interfaces, operation, :parent_layers)
                 dest_name = generated_pg_name(
                     dest_layer,
                     pg_name,
@@ -550,7 +556,10 @@ function _resolve_tag_locators!(
                     pg_name,
                     tool_name,
                     2,
-                    tool_dim
+                    tool_dim,
+                    dest_layer,
+                    locator.layer,
+                    tool_layer
                 )
                 push!(registry[dest_layer].pgs, PGRecord(dest_name, dest_layer, nothing))
             end
@@ -563,16 +572,10 @@ function _resolve_tag_locators!(
         else
             registry[locator.layer] = LayerState([record], 2)
         end
+        push!(tag_records, (pg_name, locator.name, locator.layer))
     end
 
-    return nothing
-end
-
-function _find_pg_layer(pg::String, reg::Registry)
-    for (layer_name, state) in reg
-        any(record -> record.name == pg, state.pgs) && return layer_name
-    end
-    return nothing
+    return tag_records
 end
 
 function _resolve_split_pgs(pg::String, split_results::AbstractDict, sm::SolidModel)
