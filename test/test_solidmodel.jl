@@ -373,6 +373,70 @@
           SolidModels.fragment_geom!(sm, "test_bdy", "test_bdy", 1, 1)
     @test SolidModels.hasgroup(sm, "test_bdy", 1)
 
+    @testset "Revolve unit handling" begin
+        function revolved_bounds(name, point, axis)
+            cs_r = CoordinateSystem(name, nm)
+            place!(cs_r, Rectangle(10μm, 5μm) + Point(20μm, 10μm), SemanticMeta(:surface))
+            sm_r = SolidModel(name; overwrite=true)
+            render!(sm_r, cs_r; skip_postrender=true)
+            result = SolidModels.revolve!(sm_r["surface", 2], point..., axis..., π / 3)
+            @test count(dt -> first(dt) == 3, result) == 1
+            SolidModels._synchronize!(sm_r)
+            return SolidModels.bounds3d(filter(dt -> first(dt) == 3, result))
+        end
+
+        unitful_bounds =
+            revolved_bounds("revolve_unitful", (0.001mm, 2μm, 3000nm), (1mm, 1μm, 1nm))
+        unitless_bounds = revolved_bounds("revolve_unitless", (1, 2, 3), (1, 1e-3, 1e-6))
+        @test all(isapprox.(unitful_bounds, unitless_bounds))
+    end
+
+    # The collection-accepting forms of `dimtags` and `remove_group!` return a flat dimtag vector
+    @testset "Collection forms return flat dimtags" begin
+        cs_c = CoordinateSystem("collections", nm)
+        place!(cs_c, Rectangle(10μm, 10μm), SemanticMeta(:a))
+        place!(cs_c, Rectangle(4μm, 4μm) + Point(20μm, 0μm), SemanticMeta(:b))
+
+        # dimtags
+        sm_c = SolidModel("collections"; overwrite=true)
+        render!(sm_c, cs_c; skip_postrender=true)
+        ga, gb = sm_c["a", 2], sm_c["b", 2]
+        @test !isempty(SolidModels.dimtags(ga))
+        @test !isempty(SolidModels.dimtags(gb))
+        @test SolidModels.dimtags([ga, gb]) ==
+              vcat(SolidModels.dimtags(ga), SolidModels.dimtags(gb))
+        @test eltype(SolidModels.dimtags([ga, gb])) <: Tuple
+        @test isempty(SolidModels.dimtags(typeof(ga)[]))
+        @test eltype(SolidModels.dimtags(typeof(ga)[])) <: Tuple
+
+        # remove_group!
+        @test isempty(SolidModels.remove_group!(sm_c, ["a", "b"], 2; remove_entities=false))
+        @test eltype(SolidModels.remove_group!(sm_c, String[], 2; remove_entities=false)) <:
+              Tuple
+        @test !SolidModels.hasgroup(sm_c, "a", 2)
+        @test !SolidModels.hasgroup(sm_c, "b", 2)
+
+        # ...and through the postrender protocol
+        sm_v = SolidModel("collections_vec"; overwrite=true)
+        @test_nowarn render!(
+            sm_v,
+            cs_c;
+            postrender_ops=[("gone", SolidModels.remove_group!, (["a", "b"], 2))]
+        )
+        @test !SolidModels.hasgroup(sm_v, "a", 2)
+        @test !SolidModels.hasgroup(sm_v, "b", 2)
+
+        # scalar control
+        sm_s = SolidModel("collections_scalar"; overwrite=true)
+        @test_nowarn render!(
+            sm_s,
+            cs_c;
+            postrender_ops=[("gone", SolidModels.remove_group!, ("a", 2))]
+        )
+        @test !SolidModels.hasgroup(sm_s, "a", 2)
+        @test SolidModels.hasgroup(sm_s, "b", 2)
+    end
+
     # Simple keyhole polygon - one square from another
     r1 = difference2d(centered(Rectangle(4μm, 4μm)), centered(Rectangle(3μm, 3μm)))
     r2 = difference2d(centered(Rectangle(2μm, 2μm)), centered(Rectangle(1μm, 1μm)))

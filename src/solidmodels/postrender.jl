@@ -162,14 +162,17 @@ end
     revolve!(sm::SolidModel, groupname, groupdim, x, y, z, ax, ay, az, θ)
 
 Extrude the entities in `g` using a rotation of `θ` radians around the axis of revolution
-through `(x, y, z)` in the direction `(ax, ay, az)`.
+through `(x, y, z)` in the direction `(ax, ay, az)`. The point and direction may each
+be unitful or unitless.
 
 When the mesh is extruded the angle should be strictly smaller than 2π.
 
 Return the resulting entities as a vector of `(dimension, entity_tag)` `Tuple`s.
 """
 function revolve!(g::AbstractPhysicalGroup, x, y, z, ax, ay, az, θ)
-    outdimtags = kernel(g).revolve(dimtags(g), x, y, z, ax, ay, az, θ)
+    point = x isa Length ? ustrip.(STP_UNIT, (x, y, z)) : (x, y, z)
+    axis = ustrip.(unit(ax), (ax, ay, az))
+    outdimtags = kernel(g).revolve(dimtags(g), point..., axis..., θ)
     return outdimtags
 end
 function revolve!(sm::SolidModel, groupname, groupdim, args...)
@@ -1011,7 +1014,7 @@ function remove_group!(
 end
 
 remove_group!(sm::SolidModel, group, dim; kwargs...) =
-    remove_group!.(sm, group, dim; kwargs...)
+    reduce(vcat, remove_group!.(sm, group, dim; kwargs...); init=Tuple{Int32, Int32}[])
 
 function remove_group!(group::PhysicalGroup; recursive=true, remove_entities=true)
     if remove_entities

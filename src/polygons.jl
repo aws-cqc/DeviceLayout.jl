@@ -1552,7 +1552,7 @@ end
 addstyle!(d::StyleDict, s::GeometryEntityStyle, indices::Int...) =
     addstyle!(d, s, [indices...])
 addstyle!(d::StyleDict, s::GeometryEntityStyle, node::Clipper.PolyNode) =
-    addstyle!(d, s, getkey(n))
+    addstyle!(d, s, getkey(node))
 
 # Accessors for a StyleDict
 Base.getindex(d::StyleDict, indices::Vector{Int}) = get(d.styles, indices, d.default)

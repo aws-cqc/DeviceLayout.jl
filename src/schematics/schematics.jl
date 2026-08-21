@@ -168,7 +168,7 @@ add_node!(g::SchematicGraph, n::ComponentNode; base_id=n.id, kwargs...) =
 function rem_node!(g::SchematicGraph, n::ComponentNode)
     idx = indexof(n, g)
     rem_vertex!(g.graph, idx)
-    delete!(g.node_dict, n.id)
+    delete!(g.node_dict, Symbol(n.id))
     # Tricky indexing external data structure with vertices
     g.nodes[idx] = last(g.nodes) # Internally rem_vertex swaps with last vertex and pops
     pop!(g.nodes)

@@ -28,6 +28,23 @@ The format of this changelog is based on
   - Path termination and `SimpleNoRender` halos now use constant-offset edges instead of the generic
     functional-offset fallback. The rendered discretization of these halos on curves may change but 
     will be geometrically equivalent within tolerance.
+  - `SolidModels.revolve!` now accepts unitful axis points and directions, converting point
+    coordinates to the solid-model unit and direction components to a common unit. Unitless
+    points and directions remain supported.
+  - `SolidModels.dimtags` applied to a vector of physical groups now returns a flat vector of
+    `(dimension, tag)` tuples, as its docstring specifies, instead of a vector of per-group
+    vectors.
+  - `SolidModels.remove_group!` applied to a collection of group names now returns a flat
+    (empty) dimtag vector, so it can be used as a postrender operation. Previously it returned
+    a vector of vectors and raised a `BoundsError` when the postrender machinery assigned the
+    result to a physical group.
+  - `addstyle!(d::StyleDict, s::GeometryEntityStyle, node::Clipper.PolyNode)` no longer throws
+    an `UndefVarError`. This documented form of `addstyle!` referred to an undefined name in
+    its body, so it never worked; the equivalent `d[node] = s` spelling was unaffected.
+  - `rem_node!` now removes the node from a `SchematicGraph`'s name lookup as well as from its
+    node list. Previously the removed node stayed reachable as `g.<id>`, and using it then
+    failed obscurely — with a `MethodError` mentioning `Nothing`, or a `KeyError` whose key is
+    the whole `ComponentNode` — instead of reporting that the node had been removed.
 
 ## 1.17.0 (2026-08-10)
 
