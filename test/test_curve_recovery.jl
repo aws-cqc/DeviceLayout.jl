@@ -664,14 +664,18 @@ end
     @test isempty(to_curvilinear(ns.ent, ns.sty; simulation=true))
     @test length(to_curvilinear(ns.ent, ns.sty; simulation=false).curves) == 2
 
+    # Rounding
     rounded_node = to_curvilinear(pa[1], Rounded(2μm))
     @test length(rounded_node.curves) == 6
 
     # Works for Straight
     pa1 = Path()
-    straight!(pa1, 2μm, Paths.Trace(2μm))
-    @test Polygons.area(to_polygons(to_curvilinear(pa1[1], Rounded(1μm)))) ≈ pi * (1μm)^2 atol =
-        (2pi * 1μm * 1nm)
+    straight!(pa1, 2μm, Paths.CPW(2μm, 2μm))
+    @test sum(Polygons.area.(to_polygons.(to_curvilinear(pa1[1], Rounded(1μm))))) ≈
+          2 * pi * (1μm)^2 atol = (2 * 2pi * 1μm * 1nm)
+    opt_rnd = OptionalStyle(Rounded(1μm), :test)
+    @test sum(Polygons.area.(to_polygons.(to_curvilinear(pa1[1], opt_rnd)))) ≈
+          2 * pi * (1μm)^2 atol = (2 * 2pi * 1μm * 1nm)
 
     # No effect on BSplines or variable width Turn
     pa2 = Path()
