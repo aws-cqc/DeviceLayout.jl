@@ -2,11 +2,12 @@
 using DeviceLayout
 using DeviceLayout.SchematicDrivenLayout
 using DeviceLayout.SolidModels
-using DeviceLayout.SolidModels.Experimental
+using DeviceLayout.SolidModelsExperimental
 using FileIO
+import JSON
 import Unitful: μm
 
-build_dir = joinpath(@__DIR__, "build", "experimental_solidmodel")
+build_dir = joinpath(@__DIR__, "build", "solidmodels_experimental")
 mkpath(build_dir)
 
 geometry = CoordinateSystem("device", μm)
@@ -18,7 +19,7 @@ place!(
 )
 
 component = BasicComponent(geometry)
-graph = SchematicGraph("experimental_solidmodel")
+graph = SchematicGraph("solidmodels_experimental")
 add_node!(graph, component; base_id="q1")
 schematic = plan(graph; log_dir=build_dir)
 check!(schematic)
@@ -28,16 +29,18 @@ stack = SourceStack(
     :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(11, 0));
     levels=(1 => 0μm,)
 )
-target = Experimental.SolidModelTarget(stack)
+target = SolidModelsExperimental.SolidModelTarget(stack)
 
-solid_model = SolidModel("experimental_solidmodel"; overwrite=true)
+solid_model = SolidModel("solidmodels_experimental"; overwrite=true)
 metadata = render!(solid_model, schematic, target)
-write_metadata(joinpath(build_dir, "sm_metadata.json"), metadata)
+open(joinpath(build_dir, "sm_metadata.json"), "w") do io
+    return JSON.print(io, metadata, 4)
+end
 DeviceLayout.save(joinpath(build_dir, "model.xao"), solid_model)
 SolidModels.gmsh.model.mesh.generate(2)
 save(joinpath(build_dir, "model.msh2"), solid_model)
 
-artwork = Cell("experimental_solidmodel", μm)
+artwork = Cell("solidmodels_experimental", μm)
 render!(artwork, geometry, stack)
 save(joinpath(build_dir, "artwork.gds"), artwork)
 
