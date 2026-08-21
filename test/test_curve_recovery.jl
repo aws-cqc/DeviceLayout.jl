@@ -679,8 +679,8 @@ end
 
     # No effect on BSplines or variable width Turn
     pa2 = Path()
-    bspline!(pa2, [Point(1mm, 1mm)], 0°, Paths.Trace(2μm))
-    @test to_polygons(to_curvilinear(pa2[1], Rounded(1μm))) == to_polygons(pa2[1])
+    bspline!(pa2, [Point(1mm, 1mm)], 0°, Paths.CPW(2μm, 2μm))
+    @test to_polygons.(to_curvilinear(pa2[1], Rounded(1μm))) == to_polygons(pa2[1])
 
     pa3 = Path()
     turn!(pa3, 90°, 50μm, Paths.TaperTrace(5μm, 6μm))
