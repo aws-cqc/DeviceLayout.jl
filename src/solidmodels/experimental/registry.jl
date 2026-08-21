@@ -14,6 +14,7 @@ const Registry = Dict{Symbol, LayerState}
 # Directed bipartite graph of unique PG vertices and deferred-interface vertices. Edges
 # `PG → interface → PG` identify object and tool roles; execution caches Gmsh data once per
 # PG vertex, then evaluates each interface vertex using in-memory set intersections.
+# Interface vertices also retain destination and parent layers for metadata serialization.
 function _deferred_interface_graph()
     graph = MetaGraphs.MetaDiGraph()
     MetaGraphs.set_indexing_prop!(graph, :key)
@@ -32,20 +33,29 @@ end
 
 function _defer_interface!(
     graph::MetaGraphs.MetaDiGraph,
-    dest_name::String,
-    obj_name::String,
-    tool_name::String,
+    dest_pg::String,
+    obj_pg::String,
+    tool_pg::String,
     obj_dim::Int,
-    tool_dim::Int
+    tool_dim::Int,
+    dest_layer::Symbol,
+    obj_layer::Symbol,
+    tool_layer::Symbol
 )
-    key = (:interface, dest_name)
+    key = (:interface, dest_pg)
     haskey(graph, key, :key) &&
-        throw(ArgumentError("Deferred interface '$dest_name' is already defined"))
-    obj = _pg_vertex!(graph, obj_name, obj_dim)
-    tool = _pg_vertex!(graph, tool_name, tool_dim)
+        throw(ArgumentError("Deferred interface '$dest_pg' is already defined"))
+    obj = _pg_vertex!(graph, obj_pg, obj_dim)
+    tool = _pg_vertex!(graph, tool_pg, tool_dim)
     Graphs.add_vertex!(
         graph,
-        Dict{Symbol, Any}(:kind => :interface, :key => key, :dest_name => dest_name)
+        Dict{Symbol, Any}(
+            :kind => :interface,
+            :key => key,
+            :dest_pg => dest_pg,
+            :dest_layer => dest_layer,
+            :parent_layers => (obj_layer, tool_layer)
+        )
     )
     operation = Graphs.nv(graph)
     Graphs.add_edge!(graph, obj, operation)
@@ -318,10 +328,7 @@ function _map_meta_for_stack(stack::SourceStack, m::EntityMeta)
 end
 _map_meta_for_stack(::SourceStack, ::DeviceLayout.Meta) = nothing
 
-function _build_initial_registry(
-    entity_metas::AbstractVector{<:EntityMeta},
-    stack::SourceStack
-)
+function _initial_registry(entity_metas::AbstractVector{<:EntityMeta}, stack::SourceStack)
     registry = Registry()
     for entity_meta in unique(entity_metas)
         source_layer = sourcelayer(entity_meta, stack)
@@ -335,7 +342,7 @@ function _build_initial_registry(
     return registry
 end
 
-function _schedule_extrusions(stack::SourceStack, reg::Registry)
+function _extrusions(stack::SourceStack, reg::Registry)
     operations = Tuple[]
     for (layer_name, source_layer) in stack.layers
         haskey(reg, layer_name) || continue
