@@ -6,6 +6,8 @@ The format of this changelog is based on
 
 ## Unreleased
 
+## 1.18.0 (2026-08-24)
+
 ### Added
 
   - OpenCascade SolidModel rendering adds radius-sized mesh control points at the centers of
