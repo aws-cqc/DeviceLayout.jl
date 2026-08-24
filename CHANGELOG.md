@@ -1,4 +1,4 @@
-j# Changelog
+# Changelog
 
 The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
