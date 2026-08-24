@@ -341,12 +341,12 @@ end
     check!(sch)
 
     original_metadata = deepcopy(element_metadata(component.geometry))
-    working = SolidModelsExperimental._working_schematic(sch)
-    build!(working)
-    SolidModelsExperimental._prefix_placement_names!(working)
+    sch_copy = deepcopy(sch)
+    build!(sch_copy)
+    SolidModelsExperimental._prefix_placement_names!(sch_copy)
 
     names_by_node = Dict{String, Vector{String}}()
-    for (node, ref) in working.ref_dict
+    for (node, ref) in sch_copy.ref_dict
         names_by_node[node.id] = [
             entity_meta.name for
             (subcs, _) in DeviceLayout.traversal(DeviceLayout.structure(ref)) for
@@ -364,7 +364,7 @@ end
     )
     empty_names = [
         entity_meta.name for
-        (subcs, _) in DeviceLayout.traversal(working.coordinate_system) for
+        (subcs, _) in DeviceLayout.traversal(sch_copy.coordinate_system) for
         entity_meta in element_metadata(subcs) if
         entity_meta isa EntityMeta && isempty(entity_meta.name)
     ]
