@@ -1804,9 +1804,11 @@ to_curvilinear(ent::CurvilinearPolygon, sty; kwargs...) = styled_loop(ent, sty; 
 # styles pass through. Without this method a `MeshSized` path node falls to the generic
 # `to_polygons` fallback and silently discretizes its arcs. Zero-length continuous-style
 # nodes (as left around `attach!`/`launch!`) expand to nothing, matching `_normalize_curved_clip_arg`.
+# Geometry-changing styles must specialize or fall back to `to_polygons`: `Rounded` applies rounding,
+# `ToTolerance` applies tolerance control through the `to_polygons` fallback
 function to_curvilinear(
     n::Paths.Node{T},
-    ::Union{MeshSized, WithDirection};
+    ::Union{MeshSized, WithDirection, Plain};
     kwargs...
 ) where {T}
     iszero(pathlength(n.seg)) &&
@@ -1814,6 +1816,38 @@ function to_curvilinear(
         return CurvilinearPolygon{T}[]
     return pathtopolys(n; kwargs...)
 end
+# `OptionalStyle` selects one of its two branches, either of which may be geometry-transparent,
+# so resolve the flag first rather than treating the wrapper itself as opaque.
+to_curvilinear(n::Paths.Node, sty::OptionalStyle; kwargs...) = to_curvilinear(
+    n,
+    get(kwargs, sty.flag, sty.default) ? sty.true_style : sty.false_style;
+    kwargs...
+)
+
+function to_curvilinear(n::Paths.Node, sty::Rounded; kwargs...)
+    polys = pathtopolys(n; kwargs...)
+    resolved = _resolve_roundable_offsets(polys)
+    return to_curvilinear(resolved, sty; kwargs...)
+end
+
+_is_roundable_offset(::Paths.ConstantOffset{T, Paths.Turn{T}}) where {T} = true
+_is_roundable_offset(seg) = false
+_resolve_roundable_offset(seg::Paths.ConstantOffset{T, Paths.Turn{T}}) where {T} =
+    Paths.resolve_offset(seg)
+_resolve_roundable_offset(seg) = seg
+function _resolve_roundable_offsets(polys::Vector{<:GeometryEntity})
+    return _resolve_roundable_offsets.(polys)
+end
+_resolve_roundable_offsets(poly::Polygon) = poly
+function _resolve_roundable_offsets(poly::CurvilinearPolygon)
+    !(any(_is_roundable_offset.(poly.curves))) && return poly
+    return CurvilinearPolygon(
+        poly.p,
+        [_resolve_roundable_offset(k) for k in poly.curves],
+        poly.curve_start_idx
+    )
+end
+
 to_curvilinear(ent::ClippedPolygon, sty; kwargs...) =
     to_curvilinear(ent, StyleDict(sty); kwargs...)
 to_curvilinear(ent::CurvilinearRegion, sty; kwargs...) =

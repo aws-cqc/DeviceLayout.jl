@@ -649,6 +649,42 @@ end
     pa0 = Path()
     straight!(pa0, 0μm, Paths.Trace(5μm))
     @test isempty(_normalize_curved_clip_arg(MeshSized(1μm)(pa0[1])))
+
+    # `Plain` and `OptionalStyle` are geometry-transparent too. `not_simulated` resolves to
+    # `Plain` by default, so a curved path node marked not-simulated must keep its arcs.
+    not_simulated = DeviceLayout.SchematicDrivenLayout.not_simulated
+    for node in (DeviceLayout.Plain()(pa[1]), not_simulated(pa[1]))
+        node_out = union2d_curved(node)
+        @test length(node_out) == 1
+        @test length(node_out[1].exterior.curves) == 2
+        @test isempty(to_polygons(xor2d(node_out, pathtopolys(pa))))
+    end
+    # The flag selects the branch: with `simulation=true`, not_simulated renders nothing.
+    ns = not_simulated(pa[1])
+    @test isempty(to_curvilinear(ns.ent, ns.sty; simulation=true))
+    @test length(to_curvilinear(ns.ent, ns.sty; simulation=false).curves) == 2
+
+    # Rounding
+    rounded_node = to_curvilinear(pa[1], Rounded(2μm))
+    @test length(rounded_node.curves) == 6
+
+    # Works for Straight
+    pa1 = Path()
+    straight!(pa1, 2μm, Paths.CPW(2μm, 2μm))
+    @test sum(Polygons.area.(to_polygons.(to_curvilinear(pa1[1], Rounded(1μm))))) ≈
+          2 * pi * (1μm)^2 atol = (2 * 2pi * 1μm * 1nm)
+    opt_rnd = OptionalStyle(Rounded(1μm), :test)
+    @test sum(Polygons.area.(to_polygons.(to_curvilinear(pa1[1], opt_rnd)))) ≈
+          2 * pi * (1μm)^2 atol = (2 * 2pi * 1μm * 1nm)
+
+    # No effect on BSplines or variable width Turn
+    pa2 = Path()
+    bspline!(pa2, [Point(1mm, 1mm)], 0°, Paths.CPW(2μm, 2μm))
+    @test to_polygons.(to_curvilinear(pa2[1], Rounded(1μm))) == to_polygons(pa2[1])
+
+    pa3 = Path()
+    turn!(pa3, 90°, 50μm, Paths.TaperTrace(5μm, 6μm))
+    @test to_polygons(to_curvilinear(pa3[1], Rounded(1μm))) == to_polygons(pa3[1])
 end
 
 @testitem "Curve recovery — warn once on silent curve loss" setup = [CommonTestSetup] begin

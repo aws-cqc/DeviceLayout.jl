@@ -21,8 +21,8 @@ For `CoordinateSystem` input, the union preserves curves already present in the 
 (arcs from paths, `Rounded` entities, circles, ...) using [`union2d_curved`](@ref), and
 corners between straight edges and arcs are rounded natively. Curve recovery is currently
 all-or-nothing: an input curve cut by the union falls back to a polyline, as described in
-[`recover_curves`](@ref). For `Cell` input, elements are already plain polygons, which are
-unioned with [`union2d`](@ref), then converted to rounded `CurvilinearRegion`s.
+[`Curvilinear.recover_curves`](@ref). For `Cell` input, elements are already plain polygons,
+which are unioned with [`union2d`](@ref), then converted to rounded `CurvilinearRegion`s.
 
 # Keyword arguments
 

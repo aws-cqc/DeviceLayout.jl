@@ -174,7 +174,7 @@ copy(e::Ellipse) = Ellipse(e.center, e.radii, e.angle)
 Construct an Ellipse with major and minor radii equal to `r` at `center` (or origin if not provided).
 
 The result satisfies [`iscircle`](@ref Polygons.iscircle), so it discretizes with the constant-curvature
-fast path and participates in curve recovery (see [`recover_curves`](@ref)) as an exact
+fast path and participates in curve recovery (see [`recover_curves`](@ref DeviceLayout.Curvilinear.recover_curves)) as an exact
 four-arc representation.
 """
 Circle(center::Point{T}, r::T) where {T} = Ellipse(center, (r, r), 0.0°)
