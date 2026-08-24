@@ -1,10 +1,17 @@
-# Changelog
+j# Changelog
 
 The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
+
+### Fixed
+
+  - Curve recovery (`union2d_curved` and friends) preserves arcs from path nodes styled with
+    `Plain` or `OptionalStyle` (as produced by `not_simulated`/`only_simulated` and friends),
+    which previously fell back to discretization.
+  - The `Rounded` style now works on `Paths.Node` with `Straight` or `Turn` segments
 
 ## 1.18.0 (2026-08-24)
 
@@ -47,10 +54,6 @@ The format of this changelog is based on
     node list. Previously the removed node stayed reachable as `g.<id>`, and using it then
     failed obscurely — with a `MethodError` mentioning `Nothing`, or a `KeyError` whose key is
     the whole `ComponentNode` — instead of reporting that the node had been removed.
-  - Curve recovery (`union2d_curved` and friends) preserves arcs from path nodes styled with
-    `Plain` or `OptionalStyle` (as produced by `not_simulated`/`only_simulated` and friends),
-    which previously fell back to discretization.
-  - The `Rounded` style now works on `Paths.Node` with `Straight` or `Turn` segments
 
 ## 1.17.0 (2026-08-10)
 
