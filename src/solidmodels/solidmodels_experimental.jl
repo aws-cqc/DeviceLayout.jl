@@ -566,40 +566,6 @@ function _lumped_port_directions(cs)::Dict{String, Vector{Float64}}
     return directions
 end
 
-"""
-    _working_schematic(sch::Schematic{S}) where {S}
-
-Create a private schematic for rendering. The geometry and node-reference values are copied
-together to preserve shared-reference identity, while the graph-node keys retain their
-identity from `sch`.
-"""
-function _working_schematic(sch::Schematic{S}) where {S}
-    node_ref_pairs = collect(sch.ref_dict)
-    root_copy, ref_copies = deepcopy((sch.coordinate_system, last.(node_ref_pairs)))
-
-    working_sch = Schematic{S}(sch.graph; log_dir=nothing)
-    working_sch.coordinate_system.name = root_copy.name
-    working_sch.coordinate_system.elements = root_copy.elements
-    working_sch.coordinate_system.element_metadata = root_copy.element_metadata
-    working_sch.coordinate_system.refs = root_copy.refs
-    working_sch.coordinate_system.create = root_copy.create
-    for ((node, _), ref) in zip(node_ref_pairs, ref_copies)
-        working_sch.ref_dict[node] = ref
-    end
-    for (layer_name, nodes) in sch.index_dict
-        working_sch.index_dict[layer_name] = copy(nodes)
-    end
-    working_sch.checked[] = sch.checked[]
-
-    # Reuse normal schematic logging without copying streams. reopen_logfile replaces the
-    # working logger's file sink for each stage; the caller retains its own logger object.
-    working_sch.logger.max_level_logged = sch.logger.max_level_logged
-    working_sch.logger.stage = sch.logger.stage
-    working_sch.logger.logname = sch.logger.logname
-    working_sch.logger.logger = sch.logger.logger
-    return working_sch
-end
-
 function _check_render_strict(sch::Schematic, strict)
     if strict == :error
         max_level_logged(sch, :render_solidmodel) >= Logging.Error && error(
@@ -651,21 +617,23 @@ function render!(
         )
     )
 
-    # Build and rename a private schematic so rendering never mutates the caller's
-    # hierarchy or introduces collisions between repeated component placements.
-    working_sch = _working_schematic(sch)
+    # Rendering needs disposable schematic state: build! replaces component references
+    # with geometry, and placement prefixing rewrites EntityMeta names while separating
+    # structures shared by multiple references. Deep-copying keeps the caller's schematic
+    # reusable and makes repeated renders deterministic instead of accumulating mutations.
+    sch_copy = deepcopy(sch)
     try
-        build!(working_sch; strict=strict)
-        _prefix_placement_names!(working_sch)
+        build!(sch_copy; strict=strict)
+        _prefix_placement_names!(sch_copy)
         # Collect transformed schematic data once, then compile the declarative layer
         # operations before invoking Gmsh. Interface intersections remain deferred until
         # after fragmentation has produced conformal topology.
         # Resolve transformed in-plane directions for all lumped-port source identities.
-        lumped_port_directions = _lumped_port_directions(working_sch.coordinate_system)
+        lumped_port_directions = _lumped_port_directions(sch_copy.coordinate_system)
         # Collect semantic metadata from every entity in the transformed hierarchy.
-        metas = _entity_metas(working_sch.coordinate_system)
+        metas = _entity_metas(sch_copy.coordinate_system)
         # Record transformed locator positions for post-fragmentation geometric queries.
-        locator_records = find_locators(working_sch.coordinate_system, target.stack)
+        locators = find_locators(sch_copy.coordinate_system, target.stack)
         # Seed compiler state with the physical groups produced directly by artwork.
         registry = initial_registry(metas, target.stack)
         # Prepend required source-layer extrusions to the user-supplied operation schedule.
@@ -678,15 +646,15 @@ function render!(
 
         # Route both geometry construction and postprocessing diagnostics through the
         # render stage so the final strictness check sees the complete operation.
-        reopen_logfile(working_sch, :render_solidmodel)
-        metadata = with_logger(working_sch.logger) do
+        reopen_logfile(sch_copy, :render_solidmodel)
+        metadata = with_logger(sch_copy.logger) do
             _warn_potential_overlaps(registry, target.stack)
             try
                 # The legacy renderer creates and fragments the geometry, then applies
                 # the non-interface physical-group operations produced by the compiler.
                 SolidModels.render!(
                     sm,
-                    working_sch.coordinate_system;
+                    sch_copy.coordinate_system;
                     map_meta=meta -> _map_meta_for_stack(target.stack, meta),
                     postrender_ops=pg_operations,
                     retained_physical_groups=retained_groups,
@@ -703,14 +671,12 @@ function render!(
                 rethrow()
             end
 
-            # Resolve Tags first because they remove tagged surfaces from their parent
-            # PGs and add Tag-specific deferred interfaces. Execute all interfaces next,
-            # then discover connected metal components from the resulting surface model.
-            tag_records =
-                add_tagged_pgs!(sm, registry, locator_records, deferred_interfaces)
+            # Create tagged PGs first because this routine removes tagged surfaces from
+            # their parent PGs and adds them to the deferred interfaces.
+            # Execute all interfaces next, then discover connected metal components.
+            tag_records = add_tagged_pgs!(sm, registry, locators, deferred_interfaces)
             execute_deferred_interfaces!(sm, deferred_interfaces)
-            terminal_result =
-                add_terminals!(sm, registry, target.stack, locator_records)
+            terminal_result = add_terminals!(sm, registry, target.stack, locators)
 
             # First partition PGs by identical layer-membership signatures, then split
             # any remaining PG that spans multiple metal connected components. Keeping
@@ -737,10 +703,10 @@ function render!(
             )
         end
         # Apply strictness only after all render and finalization warnings are logged.
-        _check_render_strict(working_sch, strict)
+        _check_render_strict(sch_copy, strict)
         return metadata
     finally
-        _safe_close_logfile!(working_sch)
+        _safe_close_logfile!(sch_copy)
     end
 end
 
