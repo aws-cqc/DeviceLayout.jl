@@ -10,31 +10,23 @@ function _resolve_split_pgs(pg::String, split_results::AbstractDict, sm::SolidMo
     end
 end
 
-"""
-    _resolve_entity_pgs(cc_entity_tags, cc_name, sm) -> Vector{String}
-
-Return the current 2D PGs containing entities from a specific CC.
-
-Callers must first call [`_split_shared_cc_pgs!`](@ref) so each returned PG belongs to only
-one CC and no PG tag appears in multiple terminal or ground entries.
-"""
-function _resolve_entity_pgs(
-    cc_entity_tags::Dict{String, Vector{Int32}},
-    cc_name::String,
-    sm::SolidModel
-)
-    !haskey(cc_entity_tags, cc_name) && return String[]
-    target_tags = Set(cc_entity_tags[cc_name])
-    pg_names = String[]
+function _entity_pg_map(sm::SolidModel)
+    tag_to_pgs = Dict{Int32, Vector{String}}()
     for (name, pg) in SolidModels.dimgroupdict(sm, 2)
-        for t in SolidModels.entitytags(pg)
-            if t in target_tags
-                push!(pg_names, name)
-                break
-            end
+        for tag in SolidModels.entitytags(pg)
+            push!(get!(Vector{String}, tag_to_pgs, tag), name)
         end
     end
-    return sort(pg_names)
+    return tag_to_pgs
+end
+
+
+function _resolve_entity_pgs(tag_to_pgs::Dict{Int32, Vector{String}}, tags::Vector{Int32})
+    pgs = Set{String}()
+    for tag in tags
+        union!(pgs, get(tag_to_pgs, tag, String[]))
+    end
+    return sort!(collect(pgs))
 end
 
 # ─── Metadata JSON serialization ─────────────────────────────────────────────
@@ -154,10 +146,14 @@ function serialize_metadata(
             Dict{String, Any}("pgs" => sub_pg_names, "layer" => string(layer_name))
     end
 
+    # Build an entity-tag -> PGs map
+    entity_to_pgs = _entity_pg_map(sm)
+
     # Build terminals dict with sub-PG references
     terminals_dict = Dict{String, Any}()
     for (cc_name, cclocators) in terminal_result.terminals
-        sub_pg_names = _resolve_entity_pgs(terminal_result.cc_entity_tags, cc_name, sm)
+        cc_entity_tags = get(terminal_result.cc_entity_tags, cc_name, Int32[])
+        sub_pg_names = _resolve_entity_pgs(entity_to_pgs, cc_entity_tags)
         terminals_dict[cc_name] =
             Dict{String, Any}("pgs" => sub_pg_names, "locators" => cclocators)
     end
@@ -165,7 +161,8 @@ function serialize_metadata(
     # Build ground dict with sub-PG references
     ground_dict = Dict{String, Any}()
     for cc_name in terminal_result.ground
-        sub_pg_names = _resolve_entity_pgs(terminal_result.cc_entity_tags, cc_name, sm)
+        cc_entity_tags = get(terminal_result.cc_entity_tags, cc_name, Int32[])
+        sub_pg_names = _resolve_entity_pgs(entity_to_pgs, cc_entity_tags)
         ground_dict[cc_name] = Dict{String, Any}("pgs" => sub_pg_names)
     end
 
