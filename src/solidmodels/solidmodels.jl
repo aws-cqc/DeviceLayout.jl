@@ -507,8 +507,14 @@ include("postrender.jl")
 include("conformal/conformal.jl")
 
 using .ConformalRender:
-    render_conformal!, render_conformal_groups!, ConformalRenderContext, add_conformal_loop!
+    render_conformal!,
+    render_conformal_groups!,
+    ConformalRenderContext,
+    add_conformal_loop!,
+    split_pinches,
+    find_pinch_points
 export render_conformal!,
     render_conformal_groups!, ConformalRenderContext, add_conformal_loop!
+export split_pinches, find_pinch_points
 
 end # module

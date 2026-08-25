@@ -85,6 +85,9 @@ import SpatialIndexing: RTree
 
 export render_conformal!,
     render_conformal_groups!, ConformalRenderContext, add_conformal_loop!
+export split_pinches, find_pinch_points
+
+include("preprocess.jl")
 
 """
 Entry in `endpoint_curve_index`: the signed OCC tag of the curve, plus a
