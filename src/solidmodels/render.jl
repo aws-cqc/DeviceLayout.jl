@@ -975,6 +975,7 @@ function _render_orchestrator!(
     skip_postrender=false,
     auto_union=false,
     skip_unused_layers=false,
+    preflattened=false,
     kwargs...
 ) where {T}
     gmsh.model.set_current(name(sm))
@@ -993,7 +994,7 @@ function _render_orchestrator!(
 
     set_gmsh_option(gmsh_options)
 
-    flat = flatten(cs)
+    flat = preflattened ? cs : flatten(cs)
 
     clear_mesh_control_points!()
 

@@ -691,7 +691,14 @@ end
 function close_logfile(sch::Schematic)
     tee = sch.logger.logger
     l = tee.loggers[2]
-    return !(l isa Base.NullLogger) && close(l.logger.stream) # MinLevelLogger->FormatLogger
+    # Cleanup may run after another stage has already closed the stream. Treat that case
+    # as success so an InvalidStateException does not mask an earlier workflow failure.
+    try
+        return !(l isa Base.NullLogger) && close(l.logger.stream) # MinLevelLogger->FormatLogger
+    catch e
+        e isa InvalidStateException || rethrow()
+        return nothing
+    end
 end
 
 function reopen_logfile(sch::Schematic, stage)

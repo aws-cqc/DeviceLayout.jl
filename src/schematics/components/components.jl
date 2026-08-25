@@ -428,6 +428,37 @@ function has_hook(comp::AbstractComponent, h::Symbol)
     return false
 end
 
+# Julia always executes code inside a Task, including ordinary top-level calls. Store the
+# active renderer's recovery policy on that implicit current Task so geometry accessors
+# deep in traversal code can see it without changing their public signatures.
+const _GEOMETRY_RESOLUTION_CONTEXT_KEY = gensym(:geometry_resolution_context)
+
+_geometry_resolution_context() =
+    get(task_local_storage(), _GEOMETRY_RESOLUTION_CONTEXT_KEY, nothing)
+
+function with_geometry_resolution_context(f::F) where {F}
+    on_error = function (component, err, backtrace)
+        @error "Failed to resolve component geometry for $(name(component))" exception =
+            (err, backtrace)
+        return nothing
+    end
+    tls = task_local_storage()
+    # Save and restore any outer scope so nested rendering remains well behaved.
+    had_context = haskey(tls, _GEOMETRY_RESOLUTION_CONTEXT_KEY)
+    previous_context = get(tls, _GEOMETRY_RESOLUTION_CONTEXT_KEY, nothing)
+    # The policy and per-render component cache are visible only to this Task while f runs.
+    tls[_GEOMETRY_RESOLUTION_CONTEXT_KEY] = (cache=IdDict{Any, Any}(), on_error)
+    try
+        return f()
+    finally
+        if had_context
+            tls[_GEOMETRY_RESOLUTION_CONTEXT_KEY] = previous_context
+        else
+            delete!(tls, _GEOMETRY_RESOLUTION_CONTEXT_KEY)
+        end
+    end
+end
+
 """
     geometry(comp::AbstractComponent)
 
@@ -438,16 +469,42 @@ The result for each unique `comp` (by `===`) is memoized.
 The result has `result.name == uniquename(name(comp))`.
 """
 function geometry(comp::AbstractComponent)
-    # If we have a _geometry field, then use that to cache the result
-    if hasproperty(comp, :_geometry)
-        !isempty(comp._geometry) && return comp._geometry
-        _geometry!(comp._geometry, comp)
-        return comp._geometry
+    # Renderer-provided context used for geometry caching and error recovery.
+    # We use a separate cache because elements, element_metadata, and refs query geometry
+    # independently. The scoped cache ensures a shared component is resolved only
+    # once per render, including components that do not define the optional _geometry field.
+    # When no such context exists, preserve the standard geometry behavior and its
+    # optional component-owned _geometry cache.
+    context = _geometry_resolution_context()
+    !isnothing(context) && haskey(context.cache, comp) && return context.cache[comp]
+
+    result = try
+        # If we have a _geometry field, then use that to cache the result.
+        if hasproperty(comp, :_geometry)
+            isempty(comp._geometry) && _geometry!(comp._geometry, comp)
+            comp._geometry
+        else
+            # Otherwise, just make a new coordinate system with a unique name.
+            cs = CoordinateSystem{coordinatetype(comp)}(uniquename(name(comp)))
+            _geometry!(cs, comp)
+            cs
+        end
+    catch err
+        isnothing(context) && rethrow()
+        # Use the context-provided callback to log the failure.
+        context.on_error(comp, err, catch_backtrace())
+        # Clear any partially built component cache, then cache an empty CoordinateSystem
+        # for subsequent queries so strict=:no can continue without rerunning the failure.
+        if hasproperty(comp, :_geometry)
+            empty!(elements(comp._geometry))
+            empty!(element_metadata(comp._geometry))
+            empty!(refs(comp._geometry))
+        end
+        CoordinateSystem{coordinatetype(comp)}(uniquename(name(comp)))
     end
-    # Otherwise, just make a new CS with a unique name
-    cs = CoordinateSystem{coordinatetype(comp)}(uniquename(name(comp)))
-    _geometry!(cs, comp)
-    return cs
+
+    !isnothing(context) && (context.cache[comp] = result)
+    return result
 end
 
 """

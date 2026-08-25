@@ -203,17 +203,17 @@ function flatten(
 ) where {S, T <: GeometryStructure{S}}
     cflat = coordsys_type(c)(name)
     if depth == 0
-        append_coordsys!(cflat, c; addrefs=true, metadata_filter=metadata_filter)
+        append_coordsys!(cflat, c; addrefs=true, metadata_filter)
         return cflat
     end
     # append the top-level elements
-    append_coordsys!(cflat, c; addrefs=false, metadata_filter=metadata_filter)
+    append_coordsys!(cflat, c; addrefs=false, metadata_filter)
     flatrefs, deeprefs = flatten_refs(c, depth=depth)
     # append the references beyond `depth` brought down to top level
     append!(cflat.refs, deeprefs)
     if isinf(max_copy)
         # append the elements of the flattened references
-        append_coordsys!.(cflat, flatrefs; addrefs=false, metadata_filter=metadata_filter)
+        append_coordsys!.(cflat, flatrefs; addrefs=false, metadata_filter)
     else # If any structures are referenced more than `max_copy` times, treat as deeprefs
         structure_count = Dict{GeometryStructure, Int}() # Count up structures
         for s in structure.(flatrefs)
@@ -221,12 +221,7 @@ function flatten(
         end
         keepref_idx = findall(r -> structure_count[structure(r)] > max_copy, flatrefs)
         append_idx = findall(r -> !(structure_count[structure(r)] > max_copy), flatrefs)
-        append_coordsys!.(
-            cflat,
-            flatrefs[append_idx];
-            addrefs=false,
-            metadata_filter=metadata_filter
-        )
+        append_coordsys!.(cflat, flatrefs[append_idx]; addrefs=false, metadata_filter)
         append!(cflat.refs, flatrefs[keepref_idx])
     end
     return cflat
