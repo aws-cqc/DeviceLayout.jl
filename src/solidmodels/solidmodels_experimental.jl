@@ -21,9 +21,9 @@ include("experimental/serialization.jl")
 using DeviceLayout.SchematicDrivenLayout
 using Logging: with_logger
 
-import DeviceLayout: element_metadata, elements, map_metadata, refs, render!, structure
+import DeviceLayout: element_metadata, elements
 import DeviceLayout.SchematicDrivenLayout:
-    Schematic, build!, close_logfile, max_level_logged, reopen_logfile
+    Schematic, check_render_strict, close_logfile, reopen_logfile
 
 const _EXTERIOR_BOUNDARY_LAYERS = Dict(
     ("X", "min") => :EXTBND_XMIN,
@@ -505,7 +505,7 @@ those receive their own stable node prefix. This deliberately implements the v1 
 prefix contract rather than arbitrary-depth composite paths.
 """
 function _prefix_placement_names!(sch::Schematic)
-    graph_refs = IdDict{Any, String}(ref => node.id for (node, ref) in sch.ref_dict)
+    ref_to_node_id = IdDict{Any, String}(ref => node.id for (node, ref) in sch.ref_dict)
     for (node, node_ref) in sch.ref_dict
         node_cs = structure(node_ref)
         metadata = element_metadata(node_cs)
@@ -513,8 +513,10 @@ function _prefix_placement_names!(sch::Schematic)
             metadata[idx] = _prefixed_meta(metadata[idx], node.id)
         end
         for (idx, ref) in pairs(refs(node_cs))
-            haskey(graph_refs, ref) && continue
+            haskey(ref_to_node_id, ref) && continue
             ref_copy = deepcopy(ref)
+            # map_metadata resolves each placement-specific component copy here. The active
+            # recovery context caches that result so flattening does not resolve it again.
             ref_copy.structure =
                 map_metadata(structure(ref), meta -> _prefixed_meta(meta, node.id))
             refs(node_cs)[idx] = ref_copy
@@ -566,30 +568,6 @@ function _lumped_port_directions(cs)::Dict{String, Vector{Float64}}
     return directions
 end
 
-function _check_render_strict(sch::Schematic, strict)
-    if strict == :error
-        max_level_logged(sch, :render_solidmodel) >= Logging.Error && error(
-            "Encountered errors while rendering. See $(sch.logger.logname) for details."
-        )
-    elseif strict == :warn
-        max_level_logged(sch, :render_solidmodel) >= Logging.Warn && error(
-            "Encountered warnings while rendering. See $(sch.logger.logname) for details."
-        )
-    elseif strict != :no
-        @warn "Keyword `strict` should be `:error`, `:warn`, or `:no` (got :$strict); proceeding as :no"
-    end
-    return nothing
-end
-
-function _safe_close_logfile!(sch::Schematic)
-    try
-        close_logfile(sch)
-    catch e
-        e isa InvalidStateException || rethrow()
-    end
-    return nothing
-end
-
 """
     render!(
         sm::SolidModel,
@@ -617,44 +595,55 @@ function render!(
         )
     )
 
-    # Rendering needs disposable schematic state: build! replaces component references
-    # with geometry, and placement prefixing rewrites EntityMeta names while separating
-    # structures shared by multiple references. Deep-copying keeps the caller's schematic
-    # reusable and makes repeated renders deterministic instead of accumulating mutations.
+    # Prefixing mutates only a disposable schematic copy; the caller's schematic and
+    # component geometry caches remain unchanged.
     sch_copy = deepcopy(sch)
+    stage = :render_solidmodel
+    previous_logger_stage = sch.logger.stage
+    # Stage maxima accumulate across invocations. Save the caller's previous value and
+    # clear it so check_render_strict considers only warnings and errors from this render.
+    had_stage_level = haskey(sch.logger.max_level_logged, stage)
+    previous_stage_level = get(sch.logger.max_level_logged, stage, Logging.Debug)
+    delete!(sch.logger.max_level_logged, stage)
     try
-        build!(sch_copy; strict=strict)
-        _prefix_placement_names!(sch_copy)
-        # Collect transformed schematic data once, then compile the declarative layer
-        # operations before invoking Gmsh. Interface intersections remain deferred until
-        # after fragmentation has produced conformal topology.
-        # Resolve transformed in-plane directions for all lumped-port source identities.
-        lumped_port_directions = _lumped_port_directions(sch_copy.coordinate_system)
-        # Collect semantic metadata from every entity in the transformed hierarchy.
-        metas = _entity_metas(sch_copy.coordinate_system)
-        # Record transformed locator positions for post-fragmentation geometric queries.
-        locators = find_locators(sch_copy.coordinate_system, target.stack)
-        # Seed compiler state with the physical groups produced directly by artwork.
-        registry = initial_registry(metas, target.stack)
-        # Prepend required source-layer extrusions to the user-supplied operation schedule.
-        layer_ops = vcat(_extrusions(target.stack, registry), target.ops)
-        # Compile layer operations and defer interface discovery until after fragmentation.
-        pg_operations, registry, deferred_interfaces =
-            compile_layer_ops(layer_ops, target.stack, registry)
-        # Preserve every compiled physical group needed by later finalization passes.
-        retained_groups = _retained_physical_groups(registry)
+        # Route geometry preparation, construction, and postprocessing diagnostics through
+        # the render stage so the final strictness check sees the complete operation.
+        reopen_logfile(sch, stage)
+        metadata = with_logger(sch.logger) do
+            # Prefix placement names and flatten once under the same recovery scope so
+            # geometry failures are logged once and strict=:no can continue.
+            flat = DeviceLayout.SchematicDrivenLayout.with_geometry_resolution_context() do
+                    _prefix_placement_names!(sch_copy)
+                    return DeviceLayout.flatten(sch_copy.coordinate_system)
+                end
+            # Collect transformed schematic data once, then compile the declarative layer
+            # operations before invoking Gmsh. Interface intersections remain deferred until
+            # after fragmentation has produced conformal topology.
+            # Resolve transformed in-plane directions for all lumped-port source identities.
+            lumped_port_directions = _lumped_port_directions(flat)
+            # Collect semantic metadata from every entity in the transformed hierarchy.
+            metas = _entity_metas(flat)
+            # Record transformed locator positions for post-fragmentation geometric queries.
+            locators = find_locators(flat, target.stack)
+            # Seed compiler state with the physical groups produced directly by artwork.
+            registry = initial_registry(metas, target.stack)
+            # Prepend required source-layer extrusions to the user-supplied operation schedule.
+            layer_ops = vcat(_extrusions(target.stack, registry), target.ops)
+            # Compile layer operations and defer interface discovery until after fragmentation.
+            pg_operations, registry, deferred_interfaces =
+                compile_layer_ops(layer_ops, target.stack, registry)
+            # Preserve every compiled physical group needed by later finalization passes.
+            retained_groups = _retained_physical_groups(registry)
 
-        # Route both geometry construction and postprocessing diagnostics through the
-        # render stage so the final strictness check sees the complete operation.
-        reopen_logfile(sch_copy, :render_solidmodel)
-        metadata = with_logger(sch_copy.logger) do
+            # Warn about source-layer volume overlaps before invoking the geometry kernel.
             _warn_potential_overlaps(registry, target.stack)
             try
                 # The legacy renderer creates and fragments the geometry, then applies
                 # the non-interface physical-group operations produced by the compiler.
                 SolidModels.render!(
                     sm,
-                    sch_copy.coordinate_system;
+                    flat;
+                    preflattened=true,
                     map_meta=meta -> _map_meta_for_stack(target.stack, meta),
                     postrender_ops=pg_operations,
                     retained_physical_groups=retained_groups,
@@ -703,10 +692,17 @@ function render!(
             )
         end
         # Apply strictness only after all render and finalization warnings are logged.
-        _check_render_strict(sch_copy, strict)
+        check_render_strict(sch, strict)
         return metadata
     finally
-        _safe_close_logfile!(sch_copy)
+        close_logfile(sch)
+        # Restore the caller's logger bookkeeping after strictness has been evaluated.
+        if had_stage_level
+            sch.logger.max_level_logged[stage] = previous_stage_level
+        else
+            delete!(sch.logger.max_level_logged, stage)
+        end
+        sch.logger.stage = previous_logger_stage
     end
 end
 
