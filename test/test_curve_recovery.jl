@@ -667,24 +667,51 @@ end
     # Rounding
     rounded_node = to_curvilinear(pa[1], Rounded(2μm))
     @test length(rounded_node.curves) == 6
+    # Works via `to_polygons`
+    rounded_poly = to_polygons(Rounded(2μm)(pa[1]))
+    @test rounded_poly == to_polygons(rounded_node)
+    nested_rounded_poly = to_polygons(Rounded(2μm)(DeviceLayout.Plain()(pa[1])))
+    @test nested_rounded_poly == rounded_poly
+    nested_rounded_node = to_curvilinear(Rounded(2μm)(DeviceLayout.Plain()(pa[1])))
+    @test to_polygons(nested_rounded_node) == rounded_poly
 
     # Works for Straight
     pa1 = Path()
     straight!(pa1, 2μm, Paths.CPW(2μm, 2μm))
-    @test sum(Polygons.area.(to_polygons.(to_curvilinear(pa1[1], Rounded(1μm))))) ≈
+    @test sum(Polygons.area.(only.(to_polygons.(to_curvilinear(pa1[1], Rounded(1μm)))))) ≈
           2 * pi * (1μm)^2 atol = (2 * 2pi * 1μm * 1nm)
     opt_rnd = OptionalStyle(Rounded(1μm), :test)
-    @test sum(Polygons.area.(to_polygons.(to_curvilinear(pa1[1], opt_rnd)))) ≈
+    @test sum(Polygons.area.(only.(to_polygons.(to_curvilinear(pa1[1], opt_rnd))))) ≈
           2 * pi * (1μm)^2 atol = (2 * 2pi * 1μm * 1nm)
 
     # No effect on BSplines or variable width Turn
     pa2 = Path()
     bspline!(pa2, [Point(1mm, 1mm)], 0°, Paths.CPW(2μm, 2μm))
-    @test to_polygons.(to_curvilinear(pa2[1], Rounded(1μm))) == to_polygons(pa2[1])
+    @test isempty(
+        to_polygons(xor2d(to_curvilinear(pa2[1], Rounded(1μm)), to_polygons(pa2[1])))
+    )
 
     pa3 = Path()
     turn!(pa3, 90°, 50μm, Paths.TaperTrace(5μm, 6μm))
     @test to_polygons(to_curvilinear(pa3[1], Rounded(1μm))) == to_polygons(pa3[1])
+
+    # Multi-segment resolution
+    ## Split full turn
+    pa4 = Path()
+    turn!(pa4, 360°, 50μm, Paths.Trace(5μm))
+    rounded_node_polys = to_polygons.(to_curvilinear(pa4[1], Rounded(1μm)))[1]
+    node_polys = to_polygons(pa4[1])
+    @test isempty(to_polygons(xor2d(rounded_node_polys, node_polys)))
+    ## Compound segment
+    pa5 = Path()
+    turn!(pa5, 90°, 50μm, Paths.CPW(5μm, 5μm))
+    turn!(pa5, 90°, 50μm)
+    simplify!(pa5)
+    pa6 = Path()
+    turn!(pa6, 180°, 50μm, Paths.CPW(5μm, 5μm))
+    compound_node_polys = vcat(to_polygons.(to_curvilinear(pa5[1], Rounded(2μm)))...)
+    single_node_polys = vcat(to_polygons.(to_curvilinear(pa6[1], Rounded(2μm)))...)
+    @test all(is_sliver.(to_polygons(xor2d(compound_node_polys, single_node_polys))))
 end
 
 @testitem "Curve recovery — warn once on silent curve loss" setup = [CommonTestSetup] begin
