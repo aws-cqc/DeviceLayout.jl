@@ -4,6 +4,7 @@ using SHA
 import Graphs
 using Logging
 import MetaGraphs
+import SpatialIndexing
 using Unitful
 using DeviceLayout
 using DeviceLayout: Coordinate, GDSMeta, μm, ustrip
@@ -660,12 +661,22 @@ function render!(
                 rethrow()
             end
 
+            # Cache entity bounding boxes across both locator-resolution passes.
+            entity_bboxes = Dict{Int32, NTuple{6, Float64}}()
+
             # Create tagged PGs first because this routine removes tagged surfaces from
             # their parent PGs and adds them to the deferred interfaces.
             # Execute all interfaces next, then discover connected metal components.
-            tag_records = add_tagged_pgs!(sm, registry, locators, deferred_interfaces)
+            tag_records = add_tagged_pgs!(
+                sm,
+                registry,
+                locators,
+                deferred_interfaces,
+                entity_bboxes
+            )
             execute_deferred_interfaces!(sm, deferred_interfaces)
-            terminal_result = add_terminals!(sm, registry, target.stack, locators)
+            terminal_result =
+                add_terminals!(sm, registry, target.stack, locators, entity_bboxes)
 
             # First partition PGs by identical layer-membership signatures, then split
             # any remaining PG that spans multiple metal connected components. Keeping

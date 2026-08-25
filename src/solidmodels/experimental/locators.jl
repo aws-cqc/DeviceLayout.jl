@@ -44,13 +44,32 @@ function find_locators(cs, stack::SourceStack)
     return records
 end
 
-function _containing_entity_tag(locator::LocatorRecord, entity_tags; z_tol=1e-6)
+function _entity_rtree(entity_tags, bbox_cache::Dict{Int32, NTuple{6, Float64}})
+    tree = SpatialIndexing.RTree{Float64, 3}(Int32)
+    isempty(entity_tags) && return tree
+    function convertel(tag)
+        bbox = get!(bbox_cache, tag) do
+            result = SolidModels.gmsh.model.getBoundingBox(2, Int(tag))
+            return convert(NTuple{6, Float64}, Tuple(result))
+        end
+        rect = SpatialIndexing.Rect((bbox[1:3]...,), (bbox[4:6]...,))
+        return SpatialIndexing.SpatialElem(rect, nothing, tag)
+    end
+    SpatialIndexing.load!(tree, collect(entity_tags); convertel)
+    return tree
+end
+
+function _containing_entity_tag(locator::LocatorRecord, entity_rtree; tol=1e-6)
     x, y, z = locator.position
+    query = SpatialIndexing.Rect((x - tol, y - tol, z - tol), (x + tol, y + tol, z + tol))
+    candidates = SpatialIndexing.intersects_with(entity_rtree, query)
     found_tag = Int32(0)
     hit_count = 0
-    for tag in entity_tags
-        _, _, zmin, _, _, zmax = SolidModels.gmsh.model.getBoundingBox(2, Int(tag))
-        (abs(zmax - zmin) < z_tol && abs(zmin - z) < z_tol) || continue
+    for candidate in candidates
+        tag = candidate.val
+        zmin = candidate.mbr.low[3]
+        zmax = candidate.mbr.high[3]
+        (abs(zmax - zmin) < tol && abs(zmin - z) < tol) || continue
         inside_count = SolidModels.gmsh.model.isInside(2, Int(tag), [x, y, z])
         if inside_count > 0
             hit_count += 1
@@ -71,7 +90,8 @@ end
         sm::SolidModel,
         registry::LayerRegistry,
         stack::SourceStack,
-        locators::Vector{LocatorRecord}
+        locators::Vector{LocatorRecord},
+        bbox_cache::Dict{Int32, NTuple{6, Float64}}
     )
 
 Identify electrostatic terminals and ground via connected components of metal surfaces.
@@ -89,7 +109,8 @@ function add_terminals!(
     sm::SolidModel,
     registry::LayerRegistry,
     stack::SourceStack,
-    locators::Vector{LocatorRecord}
+    locators::Vector{LocatorRecord},
+    bbox_cache::Dict{Int32, NTuple{6, Float64}}=Dict{Int32, NTuple{6, Float64}}()
 )
     terminals = Dict{String, Vector{String}}()
     ground = String[]
@@ -147,9 +168,10 @@ function add_terminals!(
     ground_cc_indices = Set{Int}()
     terminal_locators =
         filter(locator -> locator.role isa Terminal || locator.role isa Ground, locators)
+    candidate_tags = Int32[dimtag[2] for dimtag in keys(tag_to_cc)]
+    entity_rtree = _entity_rtree(candidate_tags, bbox_cache)
     for locator in terminal_locators
-        candidate_tags = [dimtag[2] for dimtag in keys(tag_to_cc)]
-        matched_tag = _containing_entity_tag(locator, candidate_tags)
+        matched_tag = _containing_entity_tag(locator, entity_rtree)
         matched_cc_idx = iszero(matched_tag) ? 0 : tag_to_cc[(Int32(2), matched_tag)]
         if iszero(matched_cc_idx)
             @warn "$(nameof(typeof(locator.role))) locator '$(locator.name)' at " *
@@ -180,7 +202,7 @@ end
 # ─── Tag locator resolution ──────────────────────────────────────────────────
 
 """
-    add_tagged_pgs!(sm, registry, locators, deferred_interfaces)
+    add_tagged_pgs!(sm, registry, locators, deferred_interfaces, bbox_cache)
         -> Vector{Tuple{String, String, Symbol}}
 
 After fragmentation, resolve Tag locators by finding the 2D surface entity that
@@ -197,11 +219,13 @@ function add_tagged_pgs!(
     sm::SolidModel,
     registry::LayerRegistry,
     locators::Vector{LocatorRecord},
-    deferred_interfaces::MetaGraphs.MetaDiGraph
+    deferred_interfaces::MetaGraphs.MetaDiGraph,
+    bbox_cache::Dict{Int32, NTuple{6, Float64}}=Dict{Int32, NTuple{6, Float64}}()
 )
-    # return 0
     tag_records = Tuple{String, String, Symbol}[]
     tag_locators = filter(locator -> locator.role isa Tag, locators)
+    tree_type = typeof(SpatialIndexing.RTree{Float64, 3}(Int32))
+    layer_trees = Dict{Symbol, tree_type}()
 
     for locator in tag_locators
         # A Tag is meaningful only within its declared source layer. Searching all 2D
@@ -209,13 +233,16 @@ function add_tagged_pgs!(
         haskey(registry, locator.layer) || continue
         layer_state = registry[locator.layer]
         layer_state.dim == 2 || continue
-        layer_tags = Set{Int32}()
-        for record in layer_state.pgs
-            SolidModels.hasgroup(sm, record.name, 2) || continue
-            union!(layer_tags, SolidModels.entitytags(sm[record.name, 2]))
+        entity_rtree = get!(layer_trees, locator.layer) do
+            tags = Set{Int32}()
+            for record in layer_state.pgs
+                SolidModels.hasgroup(sm, record.name, 2) || continue
+                union!(tags, SolidModels.entitytags(sm[record.name, 2]))
+            end
+            return _entity_rtree(tags, bbox_cache)
         end
 
-        found_tag = _containing_entity_tag(locator, layer_tags)
+        found_tag = _containing_entity_tag(locator, entity_rtree)
         if found_tag == 0
             @warn "Tag locator '$(locator.name)' at $(locator.position) did not " *
                   "match any 2D entity"
