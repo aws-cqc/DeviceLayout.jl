@@ -14,7 +14,9 @@
         LineSegment,
         straight!,
         turn!,
-        bspline!
+        bspline!,
+        union2d,
+        to_polygons
     using DeviceLayout.Polygons: Rounded
     using DeviceLayout.Curvilinear: CurvilinearPolygon, CurvilinearRegion
     using DeviceLayout.SolidModels:
@@ -518,5 +520,352 @@
         render_conformal!(sm, cs)
         @test hasgroup(sm, "l1", 2)
         gmsh.finalize()
+    end
+
+    # ─── Preprocessing (split_pinches) ────────────────────────────────────
+
+    @testset "find_pinch_points detects self-touching contours" begin
+        # A rectangular polygon with a duplicate vertex at (5, 0) — a
+        # zero-width neck. The pinch is between indices 3 and 6.
+        pts = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(5.0μm, 0.0μm),
+            Point(5.0μm, 5.0μm),
+            Point(0.0μm, 5.0μm),
+            Point(0.0μm, 0.0μm),
+            Point(5.0μm, 0.0μm)  # same coord as index 2 → pinch (2, 6)
+        ]
+        pinches = SolidModels.ConformalRender.find_pinch_points(pts)
+        @test !isempty(pinches)
+        @test any(p -> p == (1, 5) || p == (2, 6), pinches)
+    end
+
+    @testset "find_pinch_points returns empty for a clean polygon" begin
+        pts = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(10.0μm, 0.0μm),
+            Point(10.0μm, 10.0μm),
+            Point(0.0μm, 10.0μm)
+        ]
+        @test isempty(SolidModels.ConformalRender.find_pinch_points(pts))
+    end
+
+    @testset "Clipper does not produce pinches on simple touching shapes" begin
+        # Simple pinch-shaped inputs (diagonal-touching rects, hourglass
+        # apex-to-apex triangles) don't produce self-touching outlines from
+        # `union2d` — Clipper separates them into distinct polygons. This
+        # documents the class of inputs where `find_pinch_points` /
+        # `split_pinches` are unnecessary.
+        #
+        # Coordinates are chosen large enough (~100 µm) that no two
+        # distinct vertices fall within `find_pinch_points`'s 2 nm
+        # atol (the fn ustrips whatever unit the point carries).
+
+        # Diagonal-touching rectangles at (0, 0)
+        r1 = Polygon([
+            Point(-100.0μm, 0.0μm),
+            Point(0.0μm, 0.0μm),
+            Point(0.0μm, 100.0μm),
+            Point(-100.0μm, 100.0μm)
+        ])
+        r2 = Polygon([
+            Point(0.0μm, -100.0μm),
+            Point(100.0μm, -100.0μm),
+            Point(100.0μm, 0.0μm),
+            Point(0.0μm, 0.0μm)
+        ])
+        polys1 = to_polygons(union2d([r1, r2]))
+        @test length(polys1) == 2  # separated, not one figure-8 poly
+        for p in polys1
+            @test isempty(SolidModels.ConformalRender.find_pinch_points(collect(points(p))))
+        end
+
+        # Hourglass triangles sharing apex at (0, 0)
+        tri1 = Polygon([
+            Point(0.0μm, 0.0μm),
+            Point(100.0μm, 100.0μm),
+            Point(-100.0μm, 100.0μm)
+        ])
+        tri2 = Polygon([
+            Point(0.0μm, 0.0μm),
+            Point(-100.0μm, -100.0μm),
+            Point(100.0μm, -100.0μm)
+        ])
+        polys2 = to_polygons(union2d([tri1, tri2]))
+        @test length(polys2) == 2  # separated, not one bow-tie poly
+        for p in polys2
+            @test isempty(SolidModels.ConformalRender.find_pinch_points(collect(points(p))))
+        end
+    end
+
+    @testset "find_pinch_points catches noding-induced pinches" begin
+        # The pinch case `find_pinch_points`/`split_pinches` actually needs
+        # to handle in a downstream pipeline: shared-boundary vertex
+        # injection (used to make adjacent physical groups share bit-
+        # identical vertex sequences on their common boundary) turns a
+        # Clipper-clean pair of outlines into a self-touching outline.
+        #
+        # Region A visits (150 µm, 0) once as an interior corner of a
+        # satellite feature. A also has a long shared-edge segment
+        # (-300, 0) → (300, 0) with no interior vertex at x=150. When
+        # a noding pass injects region B's on-edge port anchor at
+        # (150, 0) into that segment, A's outline visits (150 µm, 0)
+        # twice at non-adjacent positions — the exact failure OCC
+        # rejects with "Curve loop is not closed".
+        A = Point{typeof(1.0μm)}[
+            Point(-300.0μm, 0.0μm),
+            Point(300.0μm, 0.0μm),
+            Point(300.0μm, 200.0μm),
+            Point(200.0μm, 200.0μm),
+            Point(200.0μm, 100.0μm),
+            Point(100.0μm, 100.0μm),
+            Point(150.0μm, 0.0μm),    # A already has this vertex
+            Point(100.0μm, 50.0μm),
+            Point(0.0μm, 50.0μm),
+            Point(-300.0μm, 200.0μm)
+        ]
+        @test isempty(SolidModels.ConformalRender.find_pinch_points(A))
+
+        # Simulate the injection: B's on-edge port anchor at (150, 0)
+        # gets injected into A's long shared-edge segment.
+        A_after_noding = vcat(A[1:1], [Point(150.0μm, 0.0μm)], A[2:end])
+
+        pinches = SolidModels.ConformalRender.find_pinch_points(A_after_noding)
+        @test length(pinches) == 1
+        i, j = pinches[1]
+        @test A_after_noding[i] ≈ A_after_noding[j]
+        # split_pinches then cleaves A into two simple faces at the pinch.
+        cp = CurvilinearPolygon(A_after_noding)
+        r = CurvilinearRegion(cp, CurvilinearPolygon{typeof(1.0μm)}[])
+        @test length(SolidModels.split_pinches([r])) >= 2
+    end
+
+    @testset "render_conformal! fails on pinched outline, split_pinches fixes it" begin
+        # End-to-end: build a CoordinateSystem containing a
+        # `CurvilinearRegion` whose outline was produced by symmetric
+        # shared-boundary noding (see previous testset for construction).
+        # Rendering it directly through `render_conformal!` must raise
+        # OCC's "Curve loop is not closed" error. Preprocessing the region
+        # with `split_pinches` first must let the render complete.
+        A_pinched = Point{typeof(1.0μm)}[
+            Point(-300.0μm, 0.0μm),
+            Point(150.0μm, 0.0μm),   # injected copy
+            Point(300.0μm, 0.0μm),
+            Point(300.0μm, 200.0μm),
+            Point(200.0μm, 200.0μm),
+            Point(200.0μm, 60.0μm),
+            Point(150.0μm, 0.0μm),   # A's original notch tip — pinch
+            Point(100.0μm, 60.0μm),
+            Point(100.0μm, 200.0μm),
+            Point(-300.0μm, 200.0μm)
+        ]
+        cp = CurvilinearPolygon(A_pinched)
+        region = CurvilinearRegion(cp, CurvilinearPolygon{typeof(1.0μm)}[])
+
+        # Attempt 1: render_conformal! on the pinched outline throws.
+        cs_pinched = CoordinateSystem("pinched_direct", nm)
+        place!(cs_pinched, region, :layer_A)
+        sm_pinched = SolidModel("pinched_direct"; overwrite=true)
+        @test_throws ErrorException render_conformal!(sm_pinched, cs_pinched)
+        gmsh.finalize()
+
+        # Attempt 2: split_pinches first, then render_conformal! succeeds.
+        split_regions = SolidModels.split_pinches([region])
+        @test length(split_regions) >= 2
+
+        cs_split = CoordinateSystem("pinched_split", nm)
+        for r in split_regions
+            place!(cs_split, r, :layer_A)
+        end
+        sm_split = SolidModel("pinched_split"; overwrite=true)
+        render_conformal!(sm_split, cs_split)
+        @test hasgroup(sm_split, "layer_A", 2)
+        gmsh.finalize()
+    end
+
+    @testset "split_pinches splits a figure-8 into two simple loops" begin
+        # Figure-8: two lobes touching at (5, 0). One CurvilinearRegion
+        # in, two out.
+        pts = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(5.0μm, 0.0μm),  # pinch
+            Point(2.0μm, 5.0μm),
+            Point(0.0μm, 0.0μm),  # loop 1 closes here
+            Point(5.0μm, 0.0μm),  # pinch again — starts loop 2
+            Point(8.0μm, 5.0μm),
+            Point(10.0μm, 0.0μm)
+        ]
+        cp = CurvilinearPolygon(pts)
+        r = CurvilinearRegion(cp, CurvilinearPolygon{typeof(1.0μm)}[])
+        out = SolidModels.split_pinches([r])
+        @test length(out) >= 2  # at least two lobes after split
+    end
+
+    @testset "split_pinches leaves clean regions untouched" begin
+        pts = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(10.0μm, 0.0μm),
+            Point(10.0μm, 10.0μm),
+            Point(0.0μm, 10.0μm)
+        ]
+        cp = CurvilinearPolygon(pts)
+        r = CurvilinearRegion(cp, CurvilinearPolygon{typeof(1.0μm)}[])
+        out = SolidModels.split_pinches([r])
+        @test length(out) == 1
+        # Same points, in the same order.
+        @test points(out[1].exterior) == pts
+    end
+
+    @testset "split_pinches handles multi-lobe exterior + hole assignment" begin
+        # A region whose exterior has TWO pinches, splitting it into three
+        # simple lobes. Also has a hole that should get assigned to the
+        # containing lobe by the point-in-polygon test.
+        # Layout (drawn upside-down for clarity):
+        #   Three squares strung side-by-side, each touching the next at one
+        #   vertex — chain of pinch points at x=10 and x=20, y=0.
+        pts = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(10.0μm, 0.0μm),  # pinch 1 (also index below)
+            Point(10.0μm, 10.0μm),
+            Point(0.0μm, 10.0μm),
+            Point(0.0μm, 0.0μm),   # closes lobe 1, duplicate of index 1
+            Point(10.0μm, 0.0μm),  # pinch 1 continued
+            Point(20.0μm, 0.0μm),  # pinch 2
+            Point(20.0μm, 10.0μm),
+            Point(10.0μm, 10.0μm)  # duplicate of index 3
+        ]
+        cp = CurvilinearPolygon(pts)
+        # Add a hole inside what will become the first lobe.
+        hole_pts = Point{typeof(1.0μm)}[
+            Point(2.0μm, 2.0μm),
+            Point(4.0μm, 2.0μm),
+            Point(4.0μm, 4.0μm),
+            Point(2.0μm, 4.0μm)
+        ]
+        hole = CurvilinearPolygon(hole_pts)
+        r = CurvilinearRegion(cp, [hole])
+        out = SolidModels.split_pinches([r])
+        # Should split into multiple simple regions.
+        @test length(out) >= 2
+        # Total holes across all output regions should be 1 (the original hole).
+        @test sum(length(rr.holes) for rr in out) == 1
+    end
+
+    @testset "split_pinches drops zero-area sliver sub-loops" begin
+        # A polygon where a run of collinear duplicated vertices causes a
+        # 2-point sub-loop to be carved off. Such slivers should be dropped.
+        pts = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(5.0μm, 0.0μm),  # will pinch with index 4
+            Point(10.0μm, 0.0μm),
+            Point(5.0μm, 0.0μm),  # pinch 1
+            Point(5.0μm, 5.0μm),
+            Point(0.0μm, 5.0μm)
+        ]
+        cp = CurvilinearPolygon(pts)
+        r = CurvilinearRegion(cp, CurvilinearPolygon{typeof(1.0μm)}[])
+        # Splitting should not throw and should produce at least one region
+        # (the 2-point sliver, if any, is dropped internally).
+        out = SolidModels.split_pinches([r])
+        @test length(out) >= 1
+        # No output region should be degenerate (< 3 vertices).
+        @test all(length(points(rr.exterior)) >= 3 for rr in out)
+    end
+
+    @testset "find_pinch_points detection is unit-invariant (nm vs µm)" begin
+        # `find_pinch_points` detects at a 2 nm tolerance, so it must strip
+        # coordinates to nm regardless of the Point's storage unit. The SAME
+        # physical geometry expressed in µm and in nm must give the identical
+        # result — otherwise µm-scale vertices (0.5–1 µm apart) would ustrip to
+        # magnitudes ≤ the 2 nm cell and be mis-flagged as coincident.
+        fp = SolidModels.ConformalRender.find_pinch_points
+
+        # A clean 5-vertex outline with vertices 0.5–1 µm apart — NO pinch.
+        clean_um = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(1.0μm, 0.0μm),
+            Point(1.0μm, 1.0μm),
+            Point(0.5μm, 1.0μm),
+            Point(0.0μm, 1.0μm)
+        ]
+        clean_nm = [convert(Point{typeof(1.0nm)}, p) for p in clean_um]
+        @test isempty(fp(clean_um))          # µm-based: no false positives
+        @test isempty(fp(clean_nm))          # nm-based: also none
+        @test fp(clean_um) == fp(clean_nm)   # unit-invariant
+
+        # A genuine figure-8: non-adjacent vertices 2 and 5 coincide exactly.
+        # Detected in BOTH units, identically.
+        fig8_um = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(5.0μm, 0.0μm),
+            Point(10.0μm, 5.0μm),
+            Point(5.0μm, 10.0μm),
+            Point(5.0μm, 0.0μm),  # coincides with index 2
+            Point(0.0μm, 10.0μm)
+        ]
+        fig8_nm = [convert(Point{typeof(1.0nm)}, p) for p in fig8_um]
+        @test fp(fig8_um) == [(2, 5)]
+        @test fp(fig8_nm) == [(2, 5)]
+    end
+
+    @testset "split_pinches preserves Turn curves through a split (both lobes)" begin
+        # A pinched contour carrying a native `Paths.Turn` arc in EACH lobe.
+        # The pinch at indices (3, 6) partitions vertices into lobe1 = {3,4,5}
+        # and lobe2 = {6,1,2}; an arc starts at index 4 (→ lobe1) and another at
+        # index 1 (→ lobe2), exercising both curve-remap branches of
+        # `_split_at_pinch`. Both arcs must survive as native Turns, not be
+        # discretized.
+        R = 5.0μm
+        pp = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),        # 1: arc B start
+            Point(0.0μm + R, R),        # 2: arc B end
+            Point(20.0μm, 20.0μm),      # 3: pinch (coincides with 6)
+            Point(30.0μm, 20.0μm),      # 4: arc A start
+            Point(30.0μm + R, 20.0μm + R), # 5: arc A end
+            Point(20.0μm, 20.0μm)       # 6: coincides with index 3 → pinch
+        ]
+        turnB = Paths.Turn(90°, R, α0=90°, p0=pp[1])
+        turnA = Paths.Turn(90°, R, α0=90°, p0=pp[4])
+        cp = CurvilinearPolygon(pp, [turnB, turnA], [1, 4])
+        r = CurvilinearRegion(cp, CurvilinearPolygon{typeof(1.0μm)}[])
+        out = SolidModels.split_pinches([r])
+        @test length(out) >= 2
+        # A Turn must survive in each of the two lobes (both remap branches ran).
+        @test all(any(c -> c isa Paths.Turn, rr.exterior.curves) for rr in out)
+        # Two native Turns total across the output — none discretized away.
+        all_curves = reduce(vcat, [rr.exterior.curves for rr in out]; init=[])
+        @test count(c -> c isa Paths.Turn, all_curves) == 2
+    end
+
+    @testset "split_pinches splits a pinch inside a hole" begin
+        # The exterior is clean; a HOLE is self-touching. split_pinches must
+        # walk holes too (find_pinch_points on each hole, split, reassign).
+        ext = CurvilinearPolygon(
+            Point{typeof(1.0μm)}[
+                Point(-50.0μm, -50.0μm),
+                Point(50.0μm, -50.0μm),
+                Point(50.0μm, 50.0μm),
+                Point(-50.0μm, 50.0μm)
+            ]
+        )
+        # Figure-8 hole: non-adjacent vertices 1 and 4 coincide.
+        hole = CurvilinearPolygon(
+            Point{typeof(1.0μm)}[
+                Point(0.0μm, 0.0μm),
+                Point(10.0μm, 0.0μm),
+                Point(5.0μm, 10.0μm),
+                Point(0.0μm, 0.0μm),   # coincides with index 1
+                Point(-10.0μm, 0.0μm),
+                Point(-5.0μm, 10.0μm)
+            ]
+        )
+        r = CurvilinearRegion(ext, [hole])
+        @test !isempty(SolidModels.ConformalRender.find_pinch_points(points(hole)))
+        out = SolidModels.split_pinches([r])
+        # Exterior stays one region; the pinched hole is cleaved into simple
+        # sub-loops (so total hole count across the output grew).
+        total_holes = sum(length(rr.holes) for rr in out)
+        @test total_holes >= 2
+        @test all(length(points(h)) >= 3 for rr in out for h in rr.holes)
     end
 end
