@@ -46,6 +46,7 @@ YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 [extensions]
 ParameterSetYAMLExt = "YAML"
 SchematicGraphMakieExt = "GraphMakie"
+SchematicGraphYAMLExt = "YAML"
 
 [compat]
 Accessors = "0.1"
