@@ -218,6 +218,24 @@ function _map_meta_fn(target::SolidModelTarget)
     end
 end
 
+function check_render_strict(sch::Schematic, strict)
+    if strict == :error
+        max_level_logged(sch, :render_solidmodel) >= Logging.Error && error(
+            "Encountered errors while rendering. See $(sch.logger.logname) for details. " *
+            "Render with `strict=:no` to continue anyway (not recommended except for debugging)."
+        )
+    elseif strict == :warn
+        max_level_logged(sch, :render_solidmodel) >= Logging.Warn && error(
+            "Encountered warnings while rendering. See $(sch.logger.logname) for details. " *
+            "Render with `strict=:error` to allow warnings while still failing on errors."
+        )
+    elseif strict != :no
+        @warn "Keyword `strict` in `render!` should be `:error`, `:warn`, or `:no` " *
+              "(got `:$strict`). Proceeding as though `strict=:no` were used."
+    end
+    return nothing
+end
+
 """
     render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, kwargs...)
 
@@ -243,39 +261,35 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
     sch.checked[] || error(
         "Cannot render an unchecked Schematic. Run check!(sch::Schematic), or override by setting sch.checked[] = true (not recommended!)"
     )
-    # Index layers
-    for ly in indexed_layers(target)
-        !haskey(sch.index_dict, ly) && index_layer!(sch::Schematic, ly)
-    end
-    # Finish assembling postrender operations
-    # Extrusions
-    # Target specific actions
-    # Intersections with rendered volume
-    postrender_ops =
-        vcat(extrusion_ops(target, sch), target.postrenderer, intersection_ops(target, sch))
     reopen_logfile(sch, :render_solidmodel)
-    with_logger(sch.logger) do
-        return render!(
-            sm,
-            sch.coordinate_system;
-            zmap=Base.Fix1(layer_z, target),
-            postrender_ops=postrender_ops,
-            map_meta=_map_meta_fn(target),
-            retained_physical_groups=target.retained_physical_groups,
-            kwargs...,
-            target.rendering_options...
-        )
+    try
+        with_logger(sch.logger) do
+            with_geometry_resolution_context() do
+                # Index layers
+                for ly in indexed_layers(target)
+                    !haskey(sch.index_dict, ly) && index_layer!(sch::Schematic, ly)
+                end
+                # Finish assembling postrender operations: extrusions, target-specific
+                # actions, and intersections with the rendered volume.
+                postrender_ops = vcat(
+                    extrusion_ops(target, sch),
+                    target.postrenderer,
+                    intersection_ops(target, sch)
+                )
+                return render!(
+                    sm,
+                    sch.coordinate_system;
+                    zmap=Base.Fix1(layer_z, target),
+                    postrender_ops=postrender_ops,
+                    map_meta=_map_meta_fn(target),
+                    retained_physical_groups=target.retained_physical_groups,
+                    kwargs...,
+                    target.rendering_options...
+                )
+            end
+        end
+    finally
+        close_logfile(sch)
     end
-    close_logfile(sch)
-    if strict == :error
-        max_level_logged(sch, :render_solidmodel) >= Logging.Error && error(
-            "Encountered errors while rendering. See $(sch.logger.logname) for details. Render with `strict=:no` to continue anyway (not recommended except for debugging)."
-        )
-    elseif strict == :warn
-        max_level_logged(sch, :render_solidmodel) >= Logging.Warn && error(
-            "Encountered warnings while rendering. See $(sch.logger.logname) for details. Render with `strict=:error` to continue anyway."
-        )
-    elseif strict != :no
-        @warn "Keyword `strict` in `render!` should be `:error`, `:warn`, or `:no` (got `:$strict`). Proceeding as though `strict=:no` were used."
-    end
+    return check_render_strict(sch, strict)
 end
