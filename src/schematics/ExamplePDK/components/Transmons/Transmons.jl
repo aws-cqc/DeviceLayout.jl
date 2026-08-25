@@ -19,7 +19,7 @@ import Unitful: uconvert, NoUnits
 
 import .ExamplePDK: add_bridges!
 import .ExamplePDK.SimpleJunctions: ExampleSimpleSQUID, ExampleSimpleJunction
-export ExampleStarTransmon, ExampleRectangleTransmon
+export ExampleStarTransmon, ExampleRectangleTransmon, ExampleStrictRectangleTransmon
 
 include("star_island.jl")
 include("control_lines.jl")
@@ -302,6 +302,87 @@ end
 
 SchematicDrivenLayout.check_rotation(::ExampleRectangleTransmon) = true
 SchematicDrivenLayout.allowed_rotation_angles(::ExampleRectangleTransmon) = [0]
+
+"""
+    struct ExampleStrictRectangleTransmon <: StrictCompositeComponent
+    ExampleStrictRectangleTransmon(base_parameters::NamedTuple=default_parameters(ExampleStrictRectangleTransmon);
+        kwargs...)
+
+The [`ExampleRectangleTransmon`](@ref) rewritten as a `StrictCompositeComponent`,
+demonstrating the declarative composite interface.
+
+The subcomponent structure is declared by `composite_spec`: an `island` slot
+(`ExampleRectangleIsland`) and a `junction` slot (`ExampleSimpleJunction`), each filling
+one graph node of the same name. The framework builds the slot instances (forwarding
+the shared island parameters automatically) and adds the declared nodes, so the
+component itself only specifies the junction's `ground_island_length` override
+(`_build_subcomponent`), the single island-junction edge (`_graph!`), and the hook map
+(`map_hooks`, keyed by node id rather than node index).
+
+Unlike `ExampleRectangleTransmon`, there is no `jj_template` parameter: the junction
+type is fixed by the spec.
+
+# Parameters
+
+  - `name = "tr"`: Name of component
+  - `cap_width = 24μm`: The width of the rectangular island
+  - `cap_length = 520μm`: The length of the rectangular island
+  - `cap_gap = 30μm`: The gap surrounding the rectangular island, except the side with the junction/SQUID
+  - `junction_gap = 12μm`: The gap on the side of the island where the junction/SQUID will go
+  - `junction_pos = :bottom`: Location to place junction/SQUID (options `:top` or `:bottom`)
+  - `island_rounding = 0µm`: Optional rounding radius to apply to the island; if zero, no
+    rounding is applied to the island
+
+# Hooks
+
+  - `readout`: The center edge of the ground plane on the opposite side of the island from the SQUID.
+  - `xy`: The left side of the capacitor gap.
+  - `z`: The center edge of the ground plane in the SQUID loop.
+
+Unmapped subcomponent hooks are available under node-id fallback names, e.g.
+`:island_junction`, `:junction_ground`.
+
+# Subcomponents
+
+ 1. `island::ExampleRectangleIsland` (node `:island`)
+ 2. `junction::ExampleSimpleJunction` (node `:junction`)
+"""
+@compdef struct ExampleStrictRectangleTransmon <: StrictCompositeComponent
+    name = "tr"
+    cap_width = 24μm
+    cap_length = 520μm
+    cap_gap = 30μm
+    junction_gap = 12μm
+    junction_pos = :bottom
+    island_rounding::typeof(1.0µm) = 0µm
+end
+
+SchematicDrivenLayout.composite_spec(::Type{ExampleStrictRectangleTransmon}) = (
+    slots=(; island=ExampleRectangleIsland, junction=ExampleSimpleJunction),
+    nodes=(:island => :island, :junction => :junction)
+)
+
+# The island's parameters are all shared with the composite, so they're forwarded
+# automatically; only the junction needs an explicit override.
+SchematicDrivenLayout._build_subcomponent(
+    tr::ExampleStrictRectangleTransmon,
+    ::Val{:junction}
+) = (; ground_island_length=tr.junction_gap)
+
+function SchematicDrivenLayout._graph!(
+    g::SchematicGraph,
+    comp::ExampleStrictRectangleTransmon,
+    subcomps::NamedTuple
+)
+    # Declared nodes are already in `g`; only the edge is added here.
+    return fuse!(g, g.island => :junction, g.junction => :island)
+end
+
+SchematicDrivenLayout.map_hooks(::Type{ExampleStrictRectangleTransmon}) =
+    Dict((:island => :readout) => :readout, (:island => :xy) => :xy, (:island => :z) => :z)
+
+SchematicDrivenLayout.check_rotation(::ExampleStrictRectangleTransmon) = true
+SchematicDrivenLayout.allowed_rotation_angles(::ExampleStrictRectangleTransmon) = [0]
 
 """
     ExampleRectangleIsland <: Component

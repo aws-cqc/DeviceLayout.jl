@@ -52,6 +52,22 @@ SchematicDrivenLayout.graph
 SchematicDrivenLayout.map_hooks
 ```
 
+#### Strict Composite Components
+
+```@docs
+SchematicDrivenLayout.AbstractStrictCompositeComponent
+SchematicDrivenLayout.StrictCompositeComponent
+SchematicDrivenLayout.composite_spec
+SchematicDrivenLayout.validate_composite_spec
+SchematicDrivenLayout.slot_names
+SchematicDrivenLayout.slot_types
+SchematicDrivenLayout.node_ids
+SchematicDrivenLayout.node_slots
+SchematicDrivenLayout.slot_of_node
+SchematicDrivenLayout._build_subcomponents
+SchematicDrivenLayout._build_subcomponent
+```
+
 ### [Hooks](@id api-hooks)
 
 ```@docs
