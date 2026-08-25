@@ -636,7 +636,12 @@ function _collect_mesh_control_points!(
         first_new = record_points ? length(get(mesh_control_points(), key, ())) + 1 : 1
         _sample_meshsize!(prims, h_float, α_float, Float64(z))
         if record_points
-            for point in (@view mesh_control_points()[key][first_new:end])
+            # `_sample_meshsize!` only creates `mesh_control_points()[key]` if it
+            # actually emitted a sample; primitives that produce none
+            # (e.g. sub-3-vertex loops) leave the key absent. Fall back to an
+            # empty view so recording is a no-op then.
+            new_points = get(mesh_control_points(), key, SVector{3, Float64}[])
+            for point in (@view new_points[first_new:end])
                 record = (point[1], point[2], point[3], h_float, α_float)
                 !isnothing(mesh_seen) && push!(mesh_seen, record)
                 !isnothing(mesh_points) && push!(mesh_points, record)
