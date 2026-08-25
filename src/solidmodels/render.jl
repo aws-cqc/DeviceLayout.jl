@@ -1238,6 +1238,7 @@ function _render_orchestrator!(
     skip_postrender=false,
     auto_union=false,
     skip_unused_layers=false,
+    preflattened=false,
     curvature_sizing=true,
     kwargs...
 ) where {T}
@@ -1259,7 +1260,7 @@ function _render_orchestrator!(
 
     set_gmsh_option(gmsh_options)
 
-    flat = flatten(cs)
+    flat = preflattened ? cs : flatten(cs)
 
     clear_mesh_control_points!()
     mesh_seen = Set{_MeshControlPointRecord}()

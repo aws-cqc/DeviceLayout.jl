@@ -342,7 +342,6 @@ end
 
     original_metadata = deepcopy(element_metadata(component.geometry))
     sch_copy = deepcopy(sch)
-    build!(sch_copy)
     SolidModelsExperimental._prefix_placement_names!(sch_copy)
 
     names_by_node = Dict{String, Vector{String}}()
