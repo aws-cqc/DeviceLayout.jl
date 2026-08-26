@@ -490,7 +490,7 @@ function curvatureradius(b::BSpline{T}, s) where {T}
     t = clamp(arclength_to_t(b, s), 0.0, 1.0)
     g = Interpolations.gradient(b.r, t)[1]
     h = Interpolations.hessian(b.r, t)[1]
-    return (g[1]^2 + g[2]^2)^(3 // 2) / (g[1] * h[2] - g[2] * h[1])
+    return norm(g)^3 / (g[1] * h[2] - g[2] * h[1])
 end
 
 """
