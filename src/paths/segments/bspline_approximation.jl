@@ -138,7 +138,7 @@ _default_curve_atol(::Type{<:Real}) = 1e-3
 _default_curve_atol(::Type{<:Length}) = 1nm
 
 ############################################################################
-# Prototype (#3): Gauss-point error metric.
+# Gauss-point error metric (default, via errmetric=:gaussfit or :gauss).
 #
 # The dense metric above builds a full discretization grid of the curve at the
 # package-default atol (1nm) and measures each exact sample against the
@@ -265,13 +265,100 @@ function _approximation_error_gauss(f_approx::Paths.BSpline{T}, testvals) where 
     return maxerr
 end
 
+############################################################################
+# Tangent-magnitude fitting (errmetric=:gaussfit).
+#
+# A 2-point BSpline candidate with Neumann end conditions is exactly the cubic
+# Hermite interpolant r(u) = h00(u)p₀ + h10(u)T₀ + h01(u)p₁ + h11(u)T₁ (four
+# conditions — two positions, two end derivatives — determine the cubic). With
+# endpoint positions and tangent DIRECTIONS fixed by G1 continuity, candidates
+# form a two-parameter family: T₀ = s₀t₀, T₁ = s₁t₁. The normal-direction
+# mismatch at each sample is LINEAR in (s₀, s₁), so the least-squares fit is a
+# closed-form 2×2 solve — no iterative optimizer. (Levien's cubic fitting pins
+# the same two-parameter family with area/moment constraints instead; fitted
+# cubics converge like O(h⁶) vs O(h⁴) for the fixed-magnitude initial guess.)
+############################################################################
+
+_hermite00(u) = (1 + 2u) * (1 - u)^2
+_hermite10(u) = u * (1 - u)^2
+_hermite01(u) = u^2 * (3 - 2u)
+_hermite11(u) = u^2 * (u - 1)
+
+# Least-squares fit of the tangent magnitude scales (s₀, s₁) of `approx` to the
+# exact samples in `testvals`, using `approx` itself for ray correspondence and
+# for the side of the base curve each (unsigned) offset sample lies on.
+# Returns the fitted candidate, or nothing when the fit has no leverage (e.g.
+# nearly straight: the tangents barely move points in the normal direction).
+function _fit_tangent_magnitudes(approx::Paths.BSpline{T}, testvals) where {T}
+    tgrid, exact, normal, offsets = testvals
+    pa, pb = approx.p[1], approx.p[end]
+    t0, t1 = approx.t0, approx.t1
+    uT = oneunit(T)
+    A11 = A12 = A22 = b1 = b2 = 0.0
+    nvalid = 0
+    for (t, p, n, off) in zip(tgrid, exact, normal, offsets)
+        u = _ray_spline_param(p, n, approx.r, t)
+        isnothing(u) && continue
+        n̂ = n / norm(n)
+        # Exact target point: offsets are stored unsigned, so take the side of
+        # the base curve the current candidate is on at this sample
+        d = dot(approx.r(u) - p, n̂)
+        q = p + (d < zero(d) ? -off : off) * n̂
+        a1 = _hermite10(u) * dot(t0, n̂) / uT
+        a2 = _hermite11(u) * dot(t1, n̂) / uT
+        rhs = (dot(q, n̂) - _hermite00(u) * dot(pa, n̂) - _hermite01(u) * dot(pb, n̂)) / uT
+        A11 += a1 * a1
+        A12 += a1 * a2
+        A22 += a2 * a2
+        b1 += a1 * rhs
+        b2 += a2 * rhs
+        nvalid += 1
+    end
+    nvalid < 6 && return nothing
+    det = A11 * A22 - A12 * A12
+    det <= 1e-10 * (A11 * A22 + eps()) && return nothing
+    s0 = (b1 * A22 - b2 * A12) / det
+    s1 = (b2 * A11 - b1 * A12) / det
+    # Preserve tangent directions (G1): reject sign flips and runaway scales
+    (0.05 <= s0 <= 20.0 && 0.05 <= s1 <= 20.0) || return nothing
+    return BSpline{T}([pa, pb], s0 * t0, s1 * t1)
+end
+
+# Fitted candidates are accepted only against atol scaled by this margin: a
+# near-optimal fit's error curve equioscillates (more, narrower lobes than the
+# single-lobed initial-guess error), so the fixed Gauss sample can undershoot
+# the true peak slightly. O(h⁶) convergence makes the margin cheap: ~2% extra
+# subdivision at 0.9. The unfitted acceptance test stays at plain atol,
+# matching errmetric=:gauss.
+const _FIT_ACCEPT_MARGIN = 0.9
+
+# Fit, verify with the true Gauss metric, and iterate the correspondence once
+# if the first fit is not yet within tolerance. Returns the best (candidate,
+# error) seen, never worse than the input pair.
+function _fit_and_check(approx::Paths.BSpline{T}, testvals, atol, err) where {T}
+    best, besterr = approx, err
+    cand = approx
+    for _ = 1:2
+        fitted = _fit_tangent_magnitudes(cand, testvals)
+        isnothing(fitted) && break
+        errf = _approximation_error_gauss(fitted, testvals)
+        if errf < besterr
+            best, besterr = fitted, errf
+        end
+        besterr <= _FIT_ACCEPT_MARGIN * atol && break
+        cand = fitted
+    end
+    return best, besterr
+end
+
 function _bspline_approximation_gauss(
     f::Paths.Segment{T};
     atol=_default_curve_atol(T),
-    maxits=10
+    maxits=10,
+    fit=false
 ) where {T}
     approxs = BSpline{T}[]
-    err = _approx_gauss!(approxs, f, atol, 0, maxits)
+    err = _approx_gauss!(approxs, f, atol, 0, maxits, fit)
     if err > atol
         @warn """
         Maximum error $err > tolerance $atol after $maxits refinement iterations.
@@ -285,30 +372,55 @@ end
 # Push accepted candidates onto `approxs`; return the largest estimated error
 # among leaves accepted only because `maxdepth` was reached (zero if all leaves
 # converged), so the caller can warn once per curve rather than once per leaf.
-function _approx_gauss!(approxs, f::Paths.Segment{T}, atol, depth, maxdepth) where {T}
+function _approx_gauss!(approxs, f::Paths.Segment{T}, atol, depth, maxdepth, fit) where {T}
     approx = _initial_guess(f)
-    err = _approximation_error_gauss(approx, _gauss_testvals(f))
-    if err > atol && depth < maxdepth
+    testvals = _gauss_testvals(f)
+    err = _approximation_error_gauss(approx, testvals)
+    tol = atol
+    if fit && err > atol
+        fitted, errf = _fit_and_check(approx, testvals, atol, err)
+        if errf < err
+            approx, err = fitted, errf
+            # Fitted candidates must clear the tighter acceptance threshold
+            # (see _FIT_ACCEPT_MARGIN); unfitted ones match errmetric=:gauss.
+            tol = _FIT_ACCEPT_MARGIN * atol
+        end
+    end
+    if err > tol && depth < maxdepth
         suberr = zero(T)
         for sub in split(f, pathlength(f) / 2)
-            suberr = max(suberr, _approx_gauss!(approxs, sub, atol, depth + 1, maxdepth))
+            suberr =
+                max(suberr, _approx_gauss!(approxs, sub, atol, depth + 1, maxdepth, fit))
         end
         return suberr
     end
     push!(approxs, approx)
-    return err > atol ? err : zero(T)
+    return err > tol ? err : zero(T)
 end
 
-# Approximate f with a BSpline
+# Approximate f with a BSpline.
+#
+# `errmetric` selects how candidate error is estimated:
+#   :gaussfit (default) — Gauss-point metric plus closed-form fitting of the
+#       candidate tangent magnitudes before subdividing (see above).
+#   :gauss — Gauss-point metric with fixed-magnitude candidates only.
+#   :dense — legacy metric: project a dense (package-default atol) sampling of
+#       the exact curve onto the candidate's polyline discretization. Retained
+#       for comparison during the transition; note its accept/reject decision
+#       carries a noise floor of order atol (the polyline's own chord error),
+#       and samples whose normal ray misses the candidate polyline are silently
+#       dropped from the estimate, which can accept out-of-tolerance results
+#       near cusps without warning.
 function bspline_approximation(
     f::Paths.Segment{T};
     atol=_default_curve_atol(T),
     maxits=10,
     rtol=nothing,
-    errmetric=:dense
+    errmetric=:gaussfit
 ) where {T}
-    # errmetric=:gauss is a prototype alternative error measurement; see above.
     errmetric === :gauss && return _bspline_approximation_gauss(f; atol, maxits)
+    errmetric === :gaussfit &&
+        return _bspline_approximation_gauss(f; atol, maxits, fit=true)
     # rtol is accepted for API consistency with render-time callers (e.g. OffsetSegment).
     # The internal _testvals sampling grid is construction-time, not render-time, and
     # intentionally stays at the package default atol.
