@@ -674,6 +674,10 @@ end
     @test nested_rounded_poly == rounded_poly
     nested_rounded_node = to_curvilinear(Rounded(2μm)(DeviceLayout.Plain()(pa[1])))
     @test to_polygons(nested_rounded_node) == rounded_poly
+    nested_optional_node =
+        to_curvilinear(OptionalStyle(Rounded(2μm), :rounding)(DeviceLayout.Plain()(pa[1])))
+    @test to_polygons(nested_optional_node) == rounded_poly
+    @test to_polygons(pathtopolys(pa[1]), Rounded(2μm)) == rounded_poly
 
     # Works for Straight
     pa1 = Path()

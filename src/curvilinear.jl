@@ -1113,15 +1113,15 @@ function to_polygons(
     kwargs...
 ) where {S, T}
     iszero(Polygons.radius(sty)) && return to_polygons(ent; atol=atol, rtol=rtol, kwargs...)
-
+    resolved = _resolve_roundable_offsets(ent)
     # Reuse Rounded's corner selection and radius semantics, but keep fillets symbolic until
     # the CurvilinearPolygon discretizer runs.
     rounded = round_to_curvilinearpolygon(
-        ent,
+        resolved,
         Polygons.radius(sty);
-        corner_indices=cornerindices(ent, sty),
-        line_arc_corner_indices=line_arc_cornerindices(ent, sty),
-        arc_arc_corner_indices=arc_arc_cornerindices(ent, sty),
+        corner_indices=cornerindices(resolved, sty),
+        line_arc_corner_indices=line_arc_cornerindices(resolved, sty),
+        arc_arc_corner_indices=arc_arc_cornerindices(resolved, sty),
         min_angle=sty.min_angle,
         min_side_len=sty.min_side_len
     )
@@ -1824,6 +1824,11 @@ to_curvilinear(n::Paths.Node, sty::OptionalStyle; kwargs...) = to_curvilinear(
     get(kwargs, sty.flag, sty.default) ? sty.true_style : sty.false_style;
     kwargs...
 )
+to_curvilinear(ent::StyledEntity, sty::OptionalStyle; kwargs...) = to_curvilinear(
+    ent,
+    get(kwargs, sty.flag, sty.default) ? sty.true_style : sty.false_style;
+    kwargs...
+)
 
 # If rounding, inner boundaries need to be healed (compound or full-turn Paths.Node and styled Paths.Node)
 # Healing is unnecessary for CPW/Strands or styled multi-polygon ClippedPolygon, but we pay the tax
@@ -1863,7 +1868,7 @@ function _resolve_roundable_offsets(poly::CurvilinearPolygon)
 end
 function _resolve_roundable_offsets(reg::CurvilinearRegion)
     return CurvilinearRegion(
-        _resolve_roundable_offsets(reg.ext),
+        _resolve_roundable_offsets(reg.exterior),
         _resolve_roundable_offsets.(reg.holes)
     )
 end
