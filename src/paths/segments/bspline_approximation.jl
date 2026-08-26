@@ -1,3 +1,5 @@
+import QuadGK
+
 # Sample points used to estimate approximation error
 function _testvals(f::Paths.Segment{T}, f_approx::Paths.BSpline) where {T}
     l = Paths.pathlength(f)
@@ -135,13 +137,178 @@ end
 _default_curve_atol(::Type{<:Real}) = 1e-3
 _default_curve_atol(::Type{<:Length}) = 1nm
 
+############################################################################
+# Prototype (#3): Gauss-point error metric.
+#
+# The dense metric above builds a full discretization grid of the curve at the
+# package-default atol (1nm) and measures each exact sample against the
+# *polyline* discretization of the candidate. That has two structural problems:
+#   1. Cost scales with the 1nm grid regardless of the requested atol; post-#245
+#      this dense sampling dominates bspline_approximation.
+#   2. The polyline's own chord-height error is ~atol by construction, so the
+#      accept/reject decision carries a measurement noise floor of order atol.
+# Instead, sample a fixed, small set of Gauss-Legendre nodes per candidate and
+# intersect each exact-curve normal ray with the candidate *cubic itself* via a
+# scalar root solve. The fit error of a cubic Hermite candidate is a smooth,
+# low-frequency function of the parameter, so a modest fixed sample captures
+# its maximum well. (Same approach as kurbo / Levien's cubic fitting.)
+############################################################################
+
+# Gauss-Legendre nodes mapped from [-1, 1] to (0, 1). Endpoints are excluded
+# because the candidate interpolates them exactly.
+const _GAUSS_NODES = (QuadGK.gauss(24)[1] .+ 1) ./ 2
+
+_cross2(a::Point, b::Point) = getx(a) * gety(b) - gety(a) * getx(b)
+
+# Per-candidate exact samples at the Gauss nodes: (tgrid, exact, normal, offsets)
+# with the same semantics as _testvals. `normal` need not be normalized: it is
+# only used as a ray direction (the error is measured as a point distance).
+function _gauss_testvals(f::Paths.Segment{T}) where {T}
+    l = Paths.pathlength(f)
+    sgrid = _GAUSS_NODES * l
+    exact = f.(sgrid)
+    dir = direction.(Ref(f), sgrid)
+    normal = oneunit(T) * Point.(-sin.(dir), cos.(dir))
+    return _GAUSS_NODES, exact, normal, fill(zero(T), length(sgrid))
+end
+
+# For offset segments, sample the base curve and check the offset distance
+function _gauss_testvals(f::Paths.OffsetSegment{T}) where {T}
+    l = Paths.pathlength(f)
+    sgrid = _GAUSS_NODES * l
+    offsets = abs.(getoffset.(Ref(f), sgrid))
+    exact = f.seg.(sgrid)
+    dir = direction.(Ref(f.seg), sgrid)
+    normal = oneunit(T) * Point.(-sin.(dir), cos.(dir))
+    return _GAUSS_NODES, exact, normal, offsets
+end
+
+# Offset BSplines evaluate the interpolation directly (no arclength_to_t)
+function _gauss_testvals(f::Paths.GeneralOffset{T, BSpline{T}}) where {T}
+    tgrid = _GAUSS_NODES
+    sgrid = t_to_arclength.(Ref(f.seg), tgrid)
+    offsets = abs.(getoffset.(Ref(f), sgrid))
+    exact = f.seg.r.(tgrid)
+    tangent = first.(Paths.Interpolations.gradient.(Ref(f.seg.r), tgrid))
+    normal = Point.(-gety.(tangent), getx.(tangent))
+    return tgrid, exact, normal, offsets
+end
+
+function _gauss_testvals(f::Paths.ConstantOffset{T, BSpline{T}}) where {T}
+    tgrid = _GAUSS_NODES
+    off = abs(getoffset(f))
+    exact = f.seg.r.(tgrid)
+    tangent = first.(Paths.Interpolations.gradient.(Ref(f.seg.r), tgrid))
+    normal = Point.(-gety.(tangent), getx.(tangent))
+    return tgrid, exact, normal, fill(off, length(tgrid))
+end
+
+# Find u ∈ [0, 1] such that r(u) lies on the line through p along n, i.e.
+# g(u) = (r(u) - p) × n = 0. Newton seeded at the sample's own parameter
+# (candidates roughly preserve parameterization), bisection scan as fallback.
+# Returns nothing if the line misses the candidate entirely.
+function _ray_spline_param(p::Point, n::Point, r, t_seed)
+    u = t_seed
+    for _ = 1:20
+        g = _cross2(r(u) - p, n)
+        dg = _cross2(first(Paths.Interpolations.gradient(r, u)), n)
+        iszero(dg) && break # normal parallel to candidate tangent; use fallback
+        du = g / dg
+        u_new = u - du
+        # The interpolation is only defined on [0, 1]; if Newton steps outside
+        # (root beyond the candidate's domain, or diverging), use the fallback.
+        (u_new < 0.0 || u_new > 1.0) && break
+        u = u_new
+        abs(du) < 1e-12 && return u
+    end
+    return _ray_param_bisect(p, n, r, t_seed)
+end
+
+function _ray_param_bisect(p::Point, n::Point, r, t_seed)
+    N = 32
+    us = range(0.0, 1.0, length=N + 1)
+    gs = [_cross2(r(u) - p, n) for u in us]
+    best = nothing
+    for i = 1:N
+        glo, ghi = gs[i], gs[i + 1]
+        (sign(glo) == sign(ghi) && !iszero(glo)) && continue
+        lo, hi = us[i], us[i + 1]
+        for _ = 1:50
+            mid = (lo + hi) / 2
+            gm = _cross2(r(mid) - p, n)
+            if sign(gm) == sign(glo)
+                lo, glo = mid, gm
+            else
+                hi = mid
+            end
+        end
+        u = (lo + hi) / 2
+        # The line can cross a cubic up to 3 times; keep the root nearest the seed
+        if isnothing(best) || abs(u - t_seed) < abs(best - t_seed)
+            best = u
+        end
+    end
+    return best
+end
+
+function _approximation_error_gauss(f_approx::Paths.BSpline{T}, testvals) where {T}
+    tgrid, exact, normal, offsets = testvals
+    maxerr = zero(T)
+    for (t, p, n, off) in zip(tgrid, exact, normal, offsets)
+        u = _ray_spline_param(p, n, f_approx.r, t)
+        # A missed ray means the candidate doesn't even cross this sample's
+        # normal line: force refinement. (The dense metric silently skips such
+        # samples instead.)
+        isnothing(u) && return Inf * oneunit(T)
+        maxerr = max(maxerr, abs(norm(f_approx.r(u) - p) - off))
+    end
+    return maxerr
+end
+
+function _bspline_approximation_gauss(
+    f::Paths.Segment{T};
+    atol=_default_curve_atol(T),
+    maxits=10
+) where {T}
+    approxs = BSpline{T}[]
+    err = _approx_gauss!(approxs, f, atol, 0, maxits)
+    if err > atol
+        @warn """
+        Maximum error $err > tolerance $atol after $maxits refinement iterations.
+        Check curve $f for cusps and self-intersections, which may cause approximation to fail.
+        Increase `maxits` or manually split path to refine further, or increase `atol` to relax tolerance.
+        """
+    end
+    return CompoundSegment(convert(Vector{Segment{T}}, approxs))
+end
+
+# Push accepted candidates onto `approxs`; return the largest estimated error
+# among leaves accepted only because `maxdepth` was reached (zero if all leaves
+# converged), so the caller can warn once per curve rather than once per leaf.
+function _approx_gauss!(approxs, f::Paths.Segment{T}, atol, depth, maxdepth) where {T}
+    approx = _initial_guess(f)
+    err = _approximation_error_gauss(approx, _gauss_testvals(f))
+    if err > atol && depth < maxdepth
+        suberr = zero(T)
+        for sub in split(f, pathlength(f) / 2)
+            suberr = max(suberr, _approx_gauss!(approxs, sub, atol, depth + 1, maxdepth))
+        end
+        return suberr
+    end
+    push!(approxs, approx)
+    return err > atol ? err : zero(T)
+end
+
 # Approximate f with a BSpline
 function bspline_approximation(
     f::Paths.Segment{T};
     atol=_default_curve_atol(T),
     maxits=10,
-    rtol=nothing
+    rtol=nothing,
+    errmetric=:dense
 ) where {T}
+    # errmetric=:gauss is a prototype alternative error measurement; see above.
+    errmetric === :gauss && return _bspline_approximation_gauss(f; atol, maxits)
     # rtol is accepted for API consistency with render-time callers (e.g. OffsetSegment).
     # The internal _testvals sampling grid is construction-time, not render-time, and
     # intentionally stays at the package default atol.
