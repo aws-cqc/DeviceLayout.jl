@@ -27,7 +27,11 @@ function _pt_seg_dist(p, a, b)
     denom = ab.x^2 + ab.y^2
     t =
         iszero(denom) ? 0.0 :
-        clamp(Unitful.ustrip(Unitful.NoUnits, (ap.x * ab.x + ap.y * ab.y) / denom), 0.0, 1.0)
+        clamp(
+            Unitful.ustrip(Unitful.NoUnits, (ap.x * ab.x + ap.y * ab.y) / denom),
+            0.0,
+            1.0
+        )
     return norm(p - (a + t * ab))
 end
 
@@ -104,29 +108,19 @@ function bench(f; errmetric)
     return approx, t
 end
 
-@printf(
-    "%-26s %10s %10s %6s %6s %12s %12s\n",
-    "case",
-    "t_dense",
-    "t_gauss",
-    "N_d",
-    "N_g",
-    "err_d (nm)",
-    "err_g (nm)"
-)
+const METRICS = (:dense, :gauss, :gaussfit)
+
+@printf("%-26s", "case")
+for m in METRICS
+    @printf(" %10s %5s %10s", "t_$m", "N", "err (nm)")
+end
+println()
 for (name, f) in cases
-    a_dense, t_dense = bench(f; errmetric=:dense)
-    a_gauss, t_gauss = bench(f; errmetric=:gauss)
-    e_dense = true_max_error(f, a_dense)
-    e_gauss = true_max_error(f, a_gauss)
-    @printf(
-        "%-26s %9.2fms %9.2fms %6d %6d %12.3f %12.3f\n",
-        name,
-        1e3 * t_dense,
-        1e3 * t_gauss,
-        length(a_dense.segments),
-        length(a_gauss.segments),
-        Unitful.ustrip(nm, e_dense),
-        Unitful.ustrip(nm, e_gauss)
-    )
+    @printf("%-26s", name)
+    for m in METRICS
+        a, t = bench(f; errmetric=m)
+        e = true_max_error(f, a)
+        @printf(" %8.2fms %5d %10.3f", 1e3 * t, length(a.segments), Unitful.ustrip(nm, e))
+    end
+    println()
 end
