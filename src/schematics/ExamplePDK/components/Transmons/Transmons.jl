@@ -304,7 +304,7 @@ SchematicDrivenLayout.check_rotation(::ExampleRectangleTransmon) = true
 SchematicDrivenLayout.allowed_rotation_angles(::ExampleRectangleTransmon) = [0]
 
 """
-    struct ExampleStrictRectangleTransmon <: StrictCompositeComponent
+    struct ExampleStrictRectangleTransmon{JunctionType} <: StrictCompositeComponent
     ExampleStrictRectangleTransmon(base_parameters::NamedTuple=default_parameters(ExampleStrictRectangleTransmon);
         kwargs...)
 
@@ -320,7 +320,9 @@ component itself only specifies the junction's `ground_island_length` override
 (`map_hooks`, keyed by node id rather than node index).
 
 Unlike `ExampleRectangleTransmon`, there is no `jj_template` parameter: the junction
-type is fixed by the spec.
+type is fixed by the type parameter, and uses the type's defaults. The junction is
+assumed to have a `ground_island_length` parameter (set to `junction_gap`) and an
+`:island` hook.
 
 # Parameters
 
@@ -345,9 +347,9 @@ Unmapped subcomponent hooks are available under node-id fallback names, e.g.
 # Subcomponents
 
  1. `island::ExampleRectangleIsland` (node `:island`)
- 2. `junction::ExampleSimpleJunction` (node `:junction`)
+ 2. `junction::JunctionType` (node `:junction`)
 """
-@compdef struct ExampleStrictRectangleTransmon <: StrictCompositeComponent
+@compdef struct ExampleStrictRectangleTransmon{JunctionType} <: StrictCompositeComponent
     name = "tr"
     cap_width = 24μm
     cap_length = 520μm
@@ -357,10 +359,11 @@ Unmapped subcomponent hooks are available under node-id fallback names, e.g.
     island_rounding::typeof(1.0µm) = 0µm
 end
 
-SchematicDrivenLayout.composite_spec(::Type{ExampleStrictRectangleTransmon}) = (
-    slots=(; island=ExampleRectangleIsland, junction=ExampleSimpleJunction),
-    nodes=(:island => :island, :junction => :junction)
-)
+SchematicDrivenLayout.composite_spec(::Type{ExampleStrictRectangleTransmon{T}}) where {T} =
+    (
+        slots=(; island=ExampleRectangleIsland, junction=T),
+        nodes=(:island => :island, :junction => :junction)
+    )
 
 # The island's parameters are all shared with the composite, so they're forwarded
 # automatically; only the junction needs an explicit override.
@@ -378,7 +381,7 @@ function SchematicDrivenLayout._graph!(
     return fuse!(g, g.island => :junction, g.junction => :island)
 end
 
-SchematicDrivenLayout.map_hooks(::Type{ExampleStrictRectangleTransmon}) =
+SchematicDrivenLayout.map_hooks(::Type{<:ExampleStrictRectangleTransmon}) =
     Dict((:island => :readout) => :readout, (:island => :xy) => :xy, (:island => :z) => :z)
 
 SchematicDrivenLayout.check_rotation(::ExampleStrictRectangleTransmon) = true

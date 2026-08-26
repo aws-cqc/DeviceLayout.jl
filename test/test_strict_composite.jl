@@ -426,10 +426,13 @@
 
     @testset "ExampleStrictRectangleTransmon matches the v1 component" begin
         using .SchematicDrivenLayout.ExamplePDK.Transmons:
-            ExampleStrictRectangleTransmon, ExampleRectangleTransmon
+            ExampleStrictRectangleTransmon, ExampleRectangleTransmon, ExampleSimpleJunction
         # ExamplePDK defaults use nm-preferred units; use matching units here since
         # Unitful cannot promote across different unit preferences.
-        tr = ExampleStrictRectangleTransmon(; junction_gap=14μm2nm, cap_length=500μm2nm)
+        tr = ExampleStrictRectangleTransmon{ExampleSimpleJunction}(;
+            junction_gap=14μm2nm,
+            cap_length=500μm2nm
+        )
         tr_v1 = ExampleRectangleTransmon(; junction_gap=14μm2nm, cap_length=500μm2nm)
         @test slot_names(typeof(tr)) == (:island, :junction)
         # Junction override matches the v1 build rule
