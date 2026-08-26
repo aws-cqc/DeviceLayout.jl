@@ -294,7 +294,7 @@ function to_polygons(e::CurvilinearRegion{T}; kwargs...) where {T}
     isempty(holes) && return [to_polygons(e.exterior; kwargs...)]
     return to_polygons(
         union2d(vcat(to_polygons(e.exterior; kwargs...), _hole_polygon.(holes; kwargs...)))
-    )
+    ) # Single element for a valid CurvilinearRegion; returns a vector for backwards compatibility
 end
 
 # Discretize a hole through its reversed (counterclockwise) traversal, then flip the point
@@ -1113,15 +1113,15 @@ function to_polygons(
     kwargs...
 ) where {S, T}
     iszero(Polygons.radius(sty)) && return to_polygons(ent; atol=atol, rtol=rtol, kwargs...)
-
+    resolved = _resolve_roundable_offsets(ent)
     # Reuse Rounded's corner selection and radius semantics, but keep fillets symbolic until
     # the CurvilinearPolygon discretizer runs.
     rounded = round_to_curvilinearpolygon(
-        ent,
+        resolved,
         Polygons.radius(sty);
-        corner_indices=cornerindices(ent, sty),
-        line_arc_corner_indices=line_arc_cornerindices(ent, sty),
-        arc_arc_corner_indices=arc_arc_cornerindices(ent, sty),
+        corner_indices=cornerindices(resolved, sty),
+        line_arc_corner_indices=line_arc_cornerindices(resolved, sty),
+        arc_arc_corner_indices=arc_arc_cornerindices(resolved, sty),
         min_angle=sty.min_angle,
         min_side_len=sty.min_side_len
     )
@@ -1748,13 +1748,14 @@ function styled_loop(p::GeometryEntity, sty::OptionalStyle; kwargs...)
     )
 end
 function styled_loop(p::GeometryEntity, sty::Rounded; kwargs...)
+    resolved = _resolve_roundable_offsets(p) # Rounding needs Turn, not ConstantOffset{T, Turn{T}}
     return round_to_curvilinearpolygon(
-        p,
+        resolved,
         radius(sty),
         min_side_len=sty.min_side_len,
-        corner_indices=cornerindices(p, sty),
-        line_arc_corner_indices=line_arc_cornerindices(p, sty),
-        arc_arc_corner_indices=arc_arc_cornerindices(p, sty),
+        corner_indices=cornerindices(resolved, sty),
+        line_arc_corner_indices=line_arc_cornerindices(resolved, sty),
+        arc_arc_corner_indices=arc_arc_cornerindices(resolved, sty),
         min_angle=sty.min_angle
     )
 end
@@ -1823,11 +1824,32 @@ to_curvilinear(n::Paths.Node, sty::OptionalStyle; kwargs...) = to_curvilinear(
     get(kwargs, sty.flag, sty.default) ? sty.true_style : sty.false_style;
     kwargs...
 )
+to_curvilinear(ent::StyledEntity, sty::OptionalStyle; kwargs...) = to_curvilinear(
+    ent,
+    get(kwargs, sty.flag, sty.default) ? sty.true_style : sty.false_style;
+    kwargs...
+)
 
-function to_curvilinear(n::Paths.Node, sty::Rounded; kwargs...)
-    polys = pathtopolys(n; kwargs...)
-    resolved = _resolve_roundable_offsets(polys)
-    return to_curvilinear(resolved, sty; kwargs...)
+# If rounding, inner boundaries need to be healed (compound or full-turn Paths.Node and styled Paths.Node)
+# Healing is unnecessary for CPW/Strands or styled multi-polygon ClippedPolygon, but we pay the tax
+to_curvilinear(ent::StyledEntity; kwargs...) = to_curvilinear(ent.ent, ent.sty; kwargs...)
+to_curvilinear(ent::Paths.Node; kwargs...) = pathtopolys(ent; kwargs...)
+function to_curvilinear(ent::Paths.Node, sty::Rounded; kwargs...)
+    inner = to_curvilinear(ent; kwargs...)
+    if inner isa AbstractVector
+        regions = union2d_curved(inner)
+        return to_curvilinear.(regions, Ref(sty); kwargs...)
+    end
+    return to_curvilinear(inner, sty; kwargs...)
+end
+# Identical to Paths.Node method, define separately to avoid ambiguity
+function to_curvilinear(ent::StyledEntity, sty::Rounded; kwargs...)
+    inner = to_curvilinear(ent; kwargs...)
+    if inner isa AbstractVector
+        regions = union2d_curved(inner)
+        return to_curvilinear.(regions, Ref(sty); kwargs...)
+    end
+    return to_curvilinear(inner, sty; kwargs...)
 end
 
 _is_roundable_offset(::Paths.ConstantOffset{T, Paths.Turn{T}}) where {T} = true
@@ -1835,16 +1857,19 @@ _is_roundable_offset(seg) = false
 _resolve_roundable_offset(seg::Paths.ConstantOffset{T, Paths.Turn{T}}) where {T} =
     Paths.resolve_offset(seg)
 _resolve_roundable_offset(seg) = seg
-function _resolve_roundable_offsets(polys::Vector{<:GeometryEntity})
-    return _resolve_roundable_offsets.(polys)
-end
-_resolve_roundable_offsets(poly::Polygon) = poly
+_resolve_roundable_offsets(ent::GeometryEntity) = ent
 function _resolve_roundable_offsets(poly::CurvilinearPolygon)
     !(any(_is_roundable_offset.(poly.curves))) && return poly
     return CurvilinearPolygon(
         poly.p,
         [_resolve_roundable_offset(k) for k in poly.curves],
         poly.curve_start_idx
+    )
+end
+function _resolve_roundable_offsets(reg::CurvilinearRegion)
+    return CurvilinearRegion(
+        _resolve_roundable_offsets(reg.exterior),
+        _resolve_roundable_offsets.(reg.holes)
     )
 end
 
@@ -1913,12 +1938,15 @@ end
 # style resolves to a plain Polygon (losing arc info), so the outer Rounded could only do
 # line-line rounding. Routing the inner styles through `to_curvilinear` yields exact fillet
 # arcs, so the outer Rounded can apply line-arc rounding via to_polygons(_, ::Rounded).
-function to_polygons(ent::StyledEntity, sty::Rounded; kwargs...)
-    inner = to_curvilinear(ent.ent, ent.sty; kwargs...)
+function to_polygons(ent::Union{StyledEntity, Paths.Node}, sty::Rounded; kwargs...)
+    inner = to_curvilinear(ent; kwargs...)
     if inner isa AbstractVector
-        return vcat(to_polygons.(inner, Ref(sty); kwargs...)...)
+        regions = union2d_curved(inner) # Heal internal boundaries
+        rounded_regions = to_curvilinear.(regions, Ref(sty); kwargs...)
+        return only.(to_polygons.(rounded_regions; kwargs...)) # to_polygons(region) is a one-element Vector
     end
-    return to_polygons(sty(inner); kwargs...)
+    rounded_inner = to_curvilinear(inner, sty; kwargs...)
+    return to_polygons(rounded_inner; kwargs...)
 end
 
 include("curve_recovery.jl")
