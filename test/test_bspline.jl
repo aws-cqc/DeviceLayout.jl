@@ -306,6 +306,56 @@ end
     @test_logs (:warn, r"Maximum error") Paths.bspline_approximation(cps[1].curves[1])
 end
 
+@testitem "BSpline approximation error metrics" setup = [CommonTestSetup] begin
+    # S-curve with a 68μm minimum radius of curvature
+    b = Paths.BSpline(
+        [
+            Point(0.0μm, 0.0μm),
+            Point(300.0μm, 150.0μm),
+            Point(600.0μm, -150.0μm),
+            Point(900.0μm, 0.0μm)
+        ],
+        Point(400.0μm, 0.0μm),
+        Point(400.0μm, 0.0μm)
+    )
+    L = Paths.pathlength(b)
+    taper(s) = 5.0μm + 10.0μm * s / L
+    κs = [Paths.signed_curvature(b, s) for s in range(zero(L), L, length=201)]
+    κ = κs[argmax(abs.(κs))]
+    segs = [
+        Paths.offset(b, 10.0μm),
+        Paths.offset(b, -10.0μm),
+        Paths.offset(b, taper),
+        Paths.offset(b, 0.9 / κ) # near-cusp: offset approaching radius of curvature
+    ]
+    # Deviation between exact curve and approximation, both discretized at `tol`:
+    # enclosed area / perimeter is bounded by roughly the sum of the
+    # approximation and discretization errors
+    function deviation(c, approx, tol)
+        pts = DeviceLayout.discretize_curve(c, tol)
+        pts_approx = vcat(DeviceLayout.discretize_curve.(approx.segments, tol)...)
+        poly = Polygon([pts; reverse(pts_approx)])
+        return abs(Polygons.area(poly) / perimeter(poly))
+    end
+    for f in segs
+        nsegs = Dict{Symbol, Int}()
+        for m in (:gaussfit, :gauss, :dense)
+            approx = Paths.bspline_approximation(f; errmetric=m)
+            @test deviation(f, approx, 1.0nm) < 2nm
+            @test Paths.arclength(approx) ≈ Paths.arclength(f) atol = 2nm
+            nsegs[m] = length(approx.segments)
+            # The approximation is G1: subsegments share endpoint tangent
+            # directions (magnitude fitting must not change directions)
+            for i = 1:(length(approx.segments) - 1)
+                Δα = Paths.α1(approx.segments[i]) - Paths.α0(approx.segments[i + 1])
+                @test abs(rem(Δα, 360°, RoundNearest)) < 1e-6°
+            end
+        end
+        # Tangent-magnitude fitting reduces the subdivision count
+        @test nsegs[:gaussfit] <= nsegs[:gauss]
+    end
+end
+
 @testitem "BSpline optimization" setup = [CommonTestSetup] begin
     ## 90 degree turn
     pa = Path() # auto_speed
