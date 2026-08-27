@@ -35,6 +35,26 @@
     )
     @test isempty(SolidModels.mesh_control_points())
 
+    # Regression: when a positive-`h` group's primitives emit NO samples (e.g. a
+    # sub-3-vertex polygon), the `(h, α)` bucket is never created. Recording
+    # (`mesh_seen`/`mesh_points` non-nothing) must not index a missing key — it
+    # previously threw `KeyError((h, α))`. This is the recording path
+    # `_render_orchestrator!` uses, so it must be a safe no-op here.
+    SolidModels.clear_mesh_control_points!()
+    seen = Set{NTuple{5, Float64}}()
+    collected = Set{NTuple{5, Float64}}()
+    SolidModels._collect_mesh_control_points!(
+        [Polygon([Point(0μm, 0μm), Point(1μm, 0μm)])],  # 2 vertices → no samples
+        75.0,
+        -1.0,
+        0.0;
+        curvature_sizing=false,
+        mesh_seen=seen,
+        mesh_points=collected
+    )
+    @test isempty(collected)
+    @test isempty(seen)
+
     circle_cs = CoordinateSystem("circle_size_fields", nm)
     render!(circle_cs, Circle(Point(3μm, 4μm), 2μm), SemanticMeta(:circle))
     render!(circle_cs, Circle(Point(3μm, 4μm), 2μm), SemanticMeta(:circle_copy))
