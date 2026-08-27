@@ -106,3 +106,428 @@ function _rounded_regions(cs::CoordinateSystem{S}, layer, sty) where {S}
     # rather than being discretized, and line-arc corners are rounded natively.
     return [to_curvilinear(r, sty) for r in union2d_curved(ents)]
 end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Vertex noding: injecting foreign vertices onto edges to make shared boundaries
+# conformal. Two public entry points share one RTree-based core:
+#
+#   - `split_t_junctions!(targets, sources...)` — asymmetric. Inject the
+#     `sources` vertices that lie on `targets` edges. A general 2D-geometry
+#     operation (also closes ~1 nm grid-snap gaps in GDS output).
+#   - `mutual_node!(groups)` — symmetric all-pairs (in the ConformalRender
+#     submodule). Inject, into each group's edges, the vertices owned by *other*
+#     groups. Prepares adjacent physical groups for `render_conformal!`.
+#
+# The core (`_VertexIndex` + `_node_contour`) does the geometry once: it projects
+# candidate points onto straight edges (perpendicular distance) and curved edges
+# (`Paths.Turn`/`Paths.BSpline`, via `pathlength_nearest`), splits curves natively
+# with `Paths.split` at the exact on-curve point, guards endpoints, and drops
+# near-coincident duplicates. A per-candidate "owner" tag lets `mutual_node!`
+# restrict injection to foreign vertices while `split_t_junctions!` accepts all.
+
+# A spatial index of candidate vertices for on-edge queries. Each unique vertex
+# (deduplicated on an integer-nm grid so bit-identical copies collapse) is stored
+# as an `atol`-padded `Rect` in an `RTree`, following the `mbr_spatial_index`
+# idiom in `src/entities.jl`. `owner[i]` tags which group contributed vertex `i`
+# (used by `mutual_node!`); `pts[i]` is the original `Point` (reused verbatim so
+# an injected copy is bit-identical to its partner and the render-time point
+# merge unifies them). Coordinates are indexed in nm so `atol` means the same
+# physical distance regardless of the input unit.
+struct _VertexIndex{T}
+    tree::SpatialIndexing.RTree{
+        Float64,
+        2,
+        SpatialIndexing.SpatialElem{Float64, 2, Nothing, Int}
+    }
+    pts::Vector{Point{T}}
+    owner::Vector{Int}
+    atol_nm::Float64
+end
+
+_nm(x) = Float64(ustrip(Unitful.nm, x))
+
+# Build an index over `groups`, an iterable of `(owner_id, vertices)` pairs.
+# `atol` is a length; it sets both the padding of each vertex's query Rect and
+# the coincidence tolerance. Vertices within `atol` of an existing indexed vertex
+# collapse onto it (first owner wins the `pts` slot; later owners are OR-ed into
+# a shared slot only when they hash to the same nm cell — exact grid coincidence,
+# which is what bit-identical Clipper output produces).
+function _build_vertex_index(groups, ::Type{T}; atol) where {T}
+    atol_nm = _nm(atol)
+    cell = max(atol_nm, 1.0)
+    slot = Dict{Tuple{Int, Int}, Int}()   # nm-grid key → index into pts/owner
+    pts = Point{T}[]
+    owner = Int[]
+    for (oid, verts) in groups
+        for p in verts
+            key = (round(Int, _nm(getx(p)) / cell), round(Int, _nm(gety(p)) / cell))
+            i = get(slot, key, 0)
+            if i == 0
+                push!(pts, p)
+                push!(owner, oid)
+                slot[key] = length(pts)
+            end
+            # else: a vertex already occupies this cell; keep the first Point.
+            # (owner stays the first contributor; foreign-eligibility below still
+            # holds because a shared vertex is by definition not "foreign".)
+        end
+    end
+    tree = SpatialIndexing.RTree{Float64, 2}(Int)
+    elems = [
+        SpatialIndexing.SpatialElem(
+            SpatialIndexing.Rect(
+                (_nm(getx(p)) - atol_nm, _nm(gety(p)) - atol_nm),
+                (_nm(getx(p)) + atol_nm, _nm(gety(p)) + atol_nm)
+            ),
+            nothing,
+            i
+        ) for (i, p) in enumerate(pts)
+    ]
+    isempty(elems) || SpatialIndexing.load!(tree, elems)
+    return _VertexIndex{T}(tree, pts, owner, atol_nm)
+end
+
+# Candidate indices whose padded Rect intersects the bbox of segment a→b (nm),
+# itself padded by `atol_nm`. `exclude_owner` (or 0 for none) drops candidates
+# contributed only-by that owner — the "foreign vertices only" filter.
+function _query_bbox(idx::_VertexIndex, axmin, aymin, axmax, aymax, exclude_owner::Int)
+    pad = idx.atol_nm
+    box = SpatialIndexing.Rect(
+        (min(axmin, axmax) - pad, min(aymin, aymax) - pad),
+        (max(axmin, axmax) + pad, max(aymin, aymax) + pad)
+    )
+    hits = Int[]
+    for x in SpatialIndexing.intersects_with(idx.tree, box)
+        i = x.val
+        (exclude_owner != 0 && idx.owner[i] == exclude_owner) && continue
+        push!(hits, i)
+    end
+    return hits
+end
+
+# Foreign points on the straight edge p1→p2, as `(t, Point)` sorted by parameter,
+# excluding endpoints (within `rtol` of an end) and this contour's own owner.
+function _points_on_straight(
+    idx::_VertexIndex{T},
+    p1::Point{T},
+    p2::Point{T},
+    exclude_owner::Int,
+    atol,
+    rtol::Real
+) where {T}
+    x1 = _nm(getx(p1))
+    y1 = _nm(gety(p1))
+    x2 = _nm(getx(p2))
+    y2 = _nm(gety(p2))
+    dx = x2 - x1
+    dy = y2 - y1
+    len_sq = dx * dx + dy * dy
+    atol_nm = idx.atol_nm
+    len_sq <= (2 * atol_nm)^2 && return Tuple{Float64, Point{T}}[]  # degenerate
+    len = sqrt(len_sq)
+    found = Tuple{Float64, Point{T}}[]
+    for i in _query_bbox(idx, x1, y1, x2, y2, exclude_owner)
+        px = _nm(getx(idx.pts[i]))
+        py = _nm(gety(idx.pts[i]))
+        t = ((px - x1) * dx + (py - y1) * dy) / len_sq
+        (t <= rtol || t >= 1.0 - rtol) && continue           # interior only
+        perp = abs((px - x1) * dy - (py - y1) * dx) / len
+        perp > atol_nm && continue
+        push!(found, (t, idx.pts[i]))                        # reuse foreign Point
+    end
+    sort!(found; by=first)
+    # Drop candidates closer than atol *along* the edge to the previous kept one —
+    # two near-coincident injections would make a sub-tolerance-length edge.
+    isempty(found) && return found
+    min_dt = atol_nm / len
+    kept = Tuple{Float64, Point{T}}[found[1]]
+    for k = 2:length(found)
+        found[k][1] - kept[end][1] < min_dt && continue
+        push!(kept, found[k])
+    end
+    return kept
+end
+
+# Foreign points on a curved edge (`Paths.Turn`, `Paths.BSpline`, …), as
+# `(arclength, on-curve Point)` sorted along travel, excluding endpoints and this
+# contour's own owner. The injected point is the EXACT point on the curve at that
+# arclength (`curve(s)`), not the possibly-off-curve candidate — so the
+# `CurvilinearPolygon` point/endpoint agreement is preserved.
+function _points_on_curve(
+    idx::_VertexIndex{T},
+    curve,
+    exclude_owner::Int,
+    atol,
+    rtol::Real
+) where {T}
+    L = pathlength(curve)                      # a length, in the curve's unit
+    L_nm = _nm(L)
+    L_nm <= 0 && return Tuple{typeof(L), Point{T}}[]
+    disc = discretize_curve(curve, onenanometer(T); rtol=nothing)
+    isempty(disc) && return Tuple{typeof(L), Point{T}}[]
+    atol_nm = idx.atol_nm
+    # The polyline approximates the curve to within 1 nm, so widen the
+    # perpendicular test by that slop before the exact on-curve residual check.
+    perp_tol = atol_nm + 1.0
+    tol2 = perp_tol * perp_tol
+    seen = Set{Int}()
+    # (arclength as a length, arclength in nm) for the qualifying candidates.
+    found = Tuple{typeof(L), Float64}[]
+    nd = length(disc)
+    for j = 1:(nd - 1)
+        ax = _nm(getx(disc[j]))
+        ay = _nm(gety(disc[j]))
+        bx = _nm(getx(disc[j + 1]))
+        by = _nm(gety(disc[j + 1]))
+        vx = bx - ax
+        vy = by - ay
+        seg_len2 = vx * vx + vy * vy
+        seg_len2 == 0 && continue
+        for i in _query_bbox(idx, ax, ay, bx, by, exclude_owner)
+            i in seen && continue
+            px = _nm(getx(idx.pts[i]))
+            py = _nm(gety(idx.pts[i]))
+            t = clamp(((px - ax) * vx + (py - ay) * vy) / seg_len2, 0.0, 1.0)
+            qx = ax + t * vx
+            qy = ay + t * vy
+            (px - qx)^2 + (py - qy)^2 > tol2 && continue
+            push!(seen, i)
+            V = idx.pts[i]
+            s = pathlength_nearest(curve, V)   # a length in the curve's unit
+            s_nm = _nm(s)
+            (s_nm <= atol_nm || s_nm >= L_nm - atol_nm) && continue
+            cs_pt = curve(s)                   # exact point on the curve at s
+            resid = hypot(_nm(getx(cs_pt) - getx(V)), _nm(gety(cs_pt) - gety(V)))
+            resid > atol_nm && continue
+            push!(found, (s, s_nm))
+        end
+    end
+    isempty(found) && return Tuple{typeof(L), Point{T}}[]
+    sort!(found; by=x -> x[2])                 # by arclength = order of travel
+    out = Tuple{typeof(L), Point{T}}[]
+    prev = -Inf
+    for (s, s_nm) in found
+        s_nm - prev < atol_nm && continue      # de-dup co-located along the curve
+        push!(out, (s, curve(s)))              # exact on-curve point
+        prev = s_nm
+    end
+    return out
+end
+
+# Collect every vertex of a region (exterior + holes) into `pts`.
+function _collect_region_vertices!(
+    pts::Vector{Point{T}},
+    region::CurvilinearRegion{T}
+) where {T}
+    append!(pts, points(region.exterior))
+    for h in region.holes
+        append!(pts, points(h))
+    end
+    return pts
+end
+
+# Rebuild one contour, injecting foreign vertices onto its edges. Straight edges
+# get the foreign point verbatim; `Paths.Turn`/`Paths.BSpline` curves are split at
+# the foreign arclength via `Paths.split`, staying native. `exclude_owner` (0 for
+# none) restricts injection to vertices NOT solely owned by this contour's group.
+# Returns `(new_cpoly, n_injected)`.
+function _node_contour(
+    cpoly::CurvilinearPolygon{T},
+    idx::_VertexIndex{T},
+    exclude_owner::Int,
+    atol,
+    rtol::Real
+) where {T}
+    pts = points(cpoly)
+    n = length(pts)
+    n < 3 && return cpoly, 0
+    curve_at = Dict{Int, Int}()   # start-vertex index → position in cpoly.curves
+    for (k, csi) in enumerate(cpoly.curve_start_idx)
+        curve_at[csi] = k
+    end
+    new_points = Point{T}[]
+    new_curves = eltype(cpoly.curves)[]
+    new_csi = Int[]
+    n_injected = 0
+    for i = 1:n
+        push!(new_points, pts[i])
+        start_idx = length(new_points)
+        if haskey(curve_at, i)
+            seg = cpoly.curves[curve_at[i]]
+            splits = _points_on_curve(idx, seg, exclude_owner, atol, rtol)
+            if isempty(splits)
+                push!(new_curves, seg)
+                push!(new_csi, start_idx)
+            else
+                # Split successively at each interior arclength, working in
+                # remaining-arclength coordinates as the head is peeled off.
+                remaining = seg
+                consumed = zero(pathlength(seg))
+                acc_idx = start_idx
+                for (s, on_pt) in splits
+                    sub1, sub2 = Paths.split(remaining, s - consumed)
+                    push!(new_curves, sub1)
+                    push!(new_csi, acc_idx)
+                    push!(new_points, on_pt)
+                    acc_idx = length(new_points)
+                    remaining = sub2
+                    consumed = s
+                    n_injected += 1
+                end
+                push!(new_curves, remaining)
+                push!(new_csi, acc_idx)
+            end
+        else
+            p2 = pts[mod1(i + 1, n)]
+            for (_, c) in _points_on_straight(idx, pts[i], p2, exclude_owner, atol, rtol)
+                push!(new_points, c)
+                n_injected += 1
+            end
+        end
+    end
+    n_injected == 0 && return cpoly, 0
+    if !isempty(new_csi)
+        perm = sortperm(new_csi)
+        new_curves = new_curves[perm]
+        new_csi = new_csi[perm]
+    end
+    return CurvilinearPolygon{T}(new_points, new_curves, new_csi), n_injected
+end
+
+# Node every contour (exterior + holes) of `region` against `idx`.
+function _node_region(
+    region::CurvilinearRegion{T},
+    idx,
+    exclude_owner,
+    atol,
+    rtol
+) where {T}
+    new_ext, n_ext = _node_contour(region.exterior, idx, exclude_owner, atol, rtol)
+    new_holes = CurvilinearPolygon{T}[]
+    n_holes = 0
+    for h in region.holes
+        h_new, n_h = _node_contour(h, idx, exclude_owner, atol, rtol)
+        push!(new_holes, h_new)
+        n_holes += n_h
+    end
+    total = n_ext + n_holes
+    total == 0 && return region, 0
+    return CurvilinearRegion{T}(new_ext, new_holes), total
+end
+
+"""
+    split_t_junctions!(targets, sources...; atol=onenanometer(T), rtol=1e-6) -> Int
+
+Inject every vertex of the `sources` that lies on an edge of `targets` into that
+edge, so a boundary shared between the two groups has matching vertices on both
+sides. Modifies `targets` in place and returns the number of vertices inserted.
+
+`targets` and each of `sources` are iterables of [`CurvilinearRegion`](@ref) (a
+[`Polygon`](@ref)-vector method is also provided). A T junction occurs where a
+`sources` vertex lands partway along a `targets` edge without a corresponding
+`targets` vertex there; this eliminates them:
+
+  - **Straight edges** get the foreign vertex inserted verbatim (the two copies,
+    one per side, coincide and merge downstream).
+  - **Curved edges** (`Paths.Turn`, `Paths.BSpline`) are split at the foreign
+    vertex's arclength with [`Paths.split`](@ref), so sub-curves stay exact. The
+    injected vertex is the exact on-curve point at that arclength, not the
+    (possibly slightly off-curve) source vertex.
+
+Candidate lookup uses an `RTree` of the `sources` vertices (see
+[`mbr_spatial_index`](@ref)), so cost scales with the number of on-edge hits
+rather than the product of edge and vertex counts.
+
+Fixing T junctions avoids ~1 nm gaps from manufacturing-grid snapping in GDS
+output and "vertex lies in segment" PLC errors when meshing a solid model.
+
+# Keywords
+
+  - `atol`: coincidence tolerance (a length). A source vertex within `atol` of a
+    target edge (perpendicular distance for straight edges, on-curve residual for
+    curves) is considered to lie on it. Defaults to `onenanometer(T)`, matching
+    the default render discretization tolerance and the GDS 1 nm grid.
+  - `rtol`: relative endpoint guard, as a fraction of edge/curve length. Splits
+    within `rtol` of an endpoint are skipped, since those coincide with an
+    existing vertex. Defaults to `1e-6`.
+
+# Example
+
+```julia
+targets = union2d_curved(cs => :metal_negative) # Vector{<:CurvilinearRegion}
+sources = union2d_curved(cs => :metal_positive)
+split_t_junctions!(targets, sources)
+```
+"""
+function split_t_junctions!(
+    targets::AbstractVector{CurvilinearRegion{T}},
+    sources...;
+    atol=onenanometer(T),
+    rtol::Real=1e-6
+) where {T}
+    isempty(targets) && return 0
+    candidates = Point{T}[]
+    for group in sources
+        for region in group
+            _collect_region_vertices!(candidates, region)
+        end
+    end
+    isempty(candidates) && return 0
+    idx = _build_vertex_index(((0, candidates),), T; atol)
+    total = 0
+    for (ri, region) in enumerate(targets)
+        new_region, n = _node_region(region, idx, 0, atol, rtol)
+        if n > 0
+            targets[ri] = new_region
+            total += n
+        end
+    end
+    return total
+end
+
+"""
+    split_t_junctions!(targets::AbstractVector{<:Polygon}, sources...; atol, rtol) -> Int
+
+[`Polygon`](@ref)-vector method of [`split_t_junctions!`](@ref): inject `sources`
+vertices that lie on `targets` polygon edges. Useful for eliminating T junctions
+in 2D layout geometry before GDS output (where grid snapping could otherwise open
+1 nm gaps along a shared straight boundary). Modifies `targets` in place; returns
+the number of vertices inserted.
+"""
+function split_t_junctions!(
+    targets::AbstractVector{<:Polygon{T}},
+    sources...;
+    atol=onenanometer(T),
+    rtol::Real=1e-6
+) where {T}
+    isempty(targets) && return 0
+    candidates = Point{T}[]
+    for group in sources
+        for poly in group
+            append!(candidates, points(poly))
+        end
+    end
+    isempty(candidates) && return 0
+    idx = _build_vertex_index(((0, candidates),), T; atol)
+    total = 0
+    for (pi, poly) in enumerate(targets)
+        pts = points(poly)
+        n = length(pts)
+        n < 3 && continue
+        new_points = Point{T}[]
+        inserted = 0
+        for i = 1:n
+            push!(new_points, pts[i])
+            p2 = pts[mod1(i + 1, n)]
+            for (_, c) in _points_on_straight(idx, pts[i], p2, 0, atol, rtol)
+                push!(new_points, c)
+                inserted += 1
+            end
+        end
+        if inserted > 0
+            targets[pi] = Polygon{T}(new_points)
+            total += inserted
+        end
+    end
+    return total
+end
