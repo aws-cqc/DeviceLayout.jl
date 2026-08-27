@@ -168,7 +168,7 @@ end
 function _bspline_signed_curvature(r, t)
     g = Paths.Interpolations.gradient(r, t)[1]
     h = Paths.Interpolations.hessian(r, t)[1]
-    return (g.x * h.y - g.y * h.x) / (g.x^2 + g.y^2)^(3 // 2)
+    return (g.x * h.y - g.y * h.x) / norm(g)^3
 end
 
 function _offset_bspline_point(s::Paths.ConstantOffset, t)
