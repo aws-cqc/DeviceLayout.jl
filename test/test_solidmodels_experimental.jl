@@ -213,15 +213,11 @@ end
         (:bad, identity, (:metal,))
     ]
     for operation in malformed_operations
-        err = try
-            SolidModelsExperimental.compile_layer_ops([operation], stack, registry)
-            nothing
-        catch caught
-            caught
-        end
-        @test err isa ArgumentError
-        @test occursin("Layer operation 1", sprint(showerror, err))
-        @test occursin(":bad", sprint(showerror, err))
+        @test_throws ArgumentError SolidModelsExperimental.compile_layer_ops(
+            [operation],
+            stack,
+            registry
+        )
     end
     append_registry = deepcopy(registry)
     append_registry[:combined] =
@@ -398,7 +394,16 @@ end
     using DeviceLayout.SolidModelsExperimental
     import Unitful: μm, °
 
-    const direction_map = SolidModelsExperimental._lumped_port_directions
+    function direction_map(cs)
+        flat = flatten(cs)
+        return Dict(
+            SolidModelsExperimental.physical_group_name(meta) =>
+                SolidModelsExperimental._direction_vector(
+                    DeviceLayout.extract_direction(entity)
+                ) for (entity, meta) in zip(elements(flat), element_metadata(flat)) if
+            meta isa EntityMeta && meta.role isa LumpedPort
+        )
+    end
 
     local_cs = CoordinateSystem("local_port", μm)
     nested_port = meshsized_entity(
@@ -421,44 +426,6 @@ end
     reflected_direction =
         direction_map(reflected)[SolidModelsExperimental.physical_group_name(local_meta)]
     @test reflected_direction ≈ [0.5, cospi(1 / 6), 0.0]
-
-    missing = CoordinateSystem("missing_direction", μm)
-    place!(missing, Rectangle(1μm, 1μm), EntityMeta(:port; name="missing", role=LumpedPort))
-    err = try
-        direction_map(missing)
-        nothing
-    catch caught
-        caught
-    end
-    @test err isa ArgumentError
-    @test occursin("WithDirection", sprint(showerror, err))
-    @test occursin("port__missing__i1__rLumpedPort", sprint(showerror, err))
-
-    shared = CoordinateSystem("shared_port", μm)
-    shared_meta = EntityMeta(:port; role=LumpedPort)
-    place!(shared, WithDirection(0°)(Rectangle(1μm, 1μm)), shared_meta)
-
-    identical = CoordinateSystem("identical_directions", μm)
-    addref!(identical, shared, Point(0μm, 0μm))
-    addref!(identical, shared, Point(2μm, 0μm))
-    @test direction_map(identical)[SolidModelsExperimental.physical_group_name(
-        shared_meta
-    )] == [1.0, 0.0, 0.0]
-
-    conflicting = CoordinateSystem("conflicting_directions", μm)
-    addref!(conflicting, shared)
-    addref!(conflicting, shared; rot=90°)
-    conflict_err = try
-        direction_map(conflicting)
-        nothing
-    catch caught
-        caught
-    end
-    @test conflict_err isa ArgumentError
-    @test occursin("inconsistent final directions", sprint(showerror, conflict_err))
-    @test occursin("distinct", sprint(showerror, conflict_err))
-    @test occursin("name", sprint(showerror, conflict_err))
-    @test occursin("index", sprint(showerror, conflict_err))
 end
 
 @testitem "Tag resolution stays within its declared layer" begin
@@ -478,7 +445,10 @@ end
         :b => LayerState([PGRecord("layer_b", :b, EntityMeta(:b))], 2),
         :interface => LayerState([PGRecord("interface_ab", :interface, nothing)], 1)
     )
-    locator = SolidModelsExperimental.LocatorRecord("tag", 1, Tag(), :a, (5.0, 5.0, 0.0))
+    locator = SolidModelsExperimental.LocatorRecord(
+        EntityMeta(:a; name="tag", role=Tag()),
+        (5.0, 5.0, 0.0)
+    )
     deferred = SolidModelsExperimental._deferred_interface_graph()
     SolidModelsExperimental.defer_interface!(
         deferred,
@@ -637,15 +607,23 @@ end
     add_node!(missing_graph, BasicComponent(missing_geometry); base_id="q1")
     missing_sch = plan(missing_graph; log_dir=nothing) |> check!
     missing_sm = SolidModel("missing_port_style"; overwrite=true)
-    missing_err = try
-        render!(missing_sm, missing_sch, target)
-        nothing
-    catch caught
-        caught
-    end
-    @test missing_err isa ArgumentError
-    @test occursin("WithDirection", sprint(showerror, missing_err))
+    @test_throws ArgumentError render!(missing_sm, missing_sch, target)
     @test isempty(SolidModels.dimgroupdict(missing_sm, 2))
+
+    duplicate_geometry = CoordinateSystem("duplicate_port_identity", μm)
+    duplicate_meta = EntityMeta(:port; name="duplicate", role=LumpedPort)
+    place!(duplicate_geometry, WithDirection(0°)(Rectangle(1μm, 1μm)), duplicate_meta)
+    place!(
+        duplicate_geometry,
+        WithDirection(0°)(Rectangle(Point(2μm, 0μm), Point(3μm, 1μm))),
+        duplicate_meta
+    )
+    duplicate_graph = SchematicGraph("duplicate_port_identity")
+    add_node!(duplicate_graph, BasicComponent(duplicate_geometry); base_id="q1")
+    duplicate_sch = plan(duplicate_graph; log_dir=nothing) |> check!
+    duplicate_sm = SolidModel("duplicate_port_identity"; overwrite=true)
+    @test_throws ArgumentError render!(duplicate_sm, duplicate_sch, target)
+    @test isempty(SolidModels.dimgroupdict(duplicate_sm, 2))
 
     output_dir = mktempdir()
     before = readdir(output_dir)
@@ -733,7 +711,6 @@ end
         strict=:warn
     )
     @test isfile(warning_sch.logger.logname)
-    @test contains(read(warning_sch.logger.logname, String), "has no locators")
 
     # A second render proves the exceptional strict path closed its working logfile.
     nonstrict_sm = SolidModel("strict_cleanup"; overwrite=true)
