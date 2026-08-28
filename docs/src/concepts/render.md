@@ -136,22 +136,22 @@ artifact = save_render(
 ```
 
 This writes `junction_crop.png` and `junction_crop.render.json`, then returns a
-[`RenderArtifact`](@ref). Set `manifest_path` to choose another sidecar path. Ordinary
-`save` remains file-only. Both outputs are prepared in temporary files and the image is
-finalized before its SHA-256 is calculated. On replacement, the old sidecar is removed before
-the new image is published, so a failure can leave an image without a manifest but never a
-stale manifest paired with new image bytes.
+[`RenderArtifact`](@ref) containing their absolute paths and the JSON-shaped manifest. Set
+`manifest_path` to choose another sidecar path. Ordinary `save` remains file-only. Both outputs
+are prepared in temporary files, and the image is finalized before its SHA-256 is calculated.
+The old sidecar is removed before a replacement image is published, preventing it from
+silently describing new image bytes.
 
 Schema version `0.1` records the effective viewport and coordinate unit, exact canvas size,
-selected concrete `GDSMeta` values, resolved RGBA colors, background and dimension options,
-and the image hash. `selected_metadata` and `resolved_colors` describe all metadata retained
-by `metadata_filter`, independently of whether an element is visible inside the `bbox` crop.
-The manifest's `metadata_selection` is `"all"` or `"filtered"` and records whether that filter
-was supplied. The `rendered_cell_fingerprint` intentionally identifies the complete pre-filter
-cell; the filter state is recorded separately. The image path is relative to the manifest while paths in the returned
-artifact are absolute. The `layout_to_canvas.matrix` maps homogeneous layout coordinates to
-the recorded canvas unit (`px` for PNG/SVG and `pt` for PDF/EPS). For viewport
-`(xmin, ymin, xmax, ymax)` and uniform scale `s`, the top-left-anchored matrix is
+selected concrete `GDSMeta` values with their resolved RGBA colors, background and dimension
+options, and the image hash. `selected_metadata` describes all metadata retained by
+`metadata_filter`, independently of whether an element is visible inside the `bbox` crop. The
+manifest's `metadata_selection` is `"all"` or `"filtered"`. The
+`rendered_cell_fingerprint` identifies the complete pre-filter cell; the filter state is
+recorded separately. The manifest stores the image path relative to itself. The
+`layout_to_canvas.matrix` maps homogeneous layout coordinates to the recorded canvas unit
+(`px` for PNG/SVG and `pt` for PDF/EPS). For viewport `(xmin, ymin, xmax, ymax)` and uniform
+scale `s`, the top-left-anchored matrix is
 
 ```text
 [ s   0  -s*xmin ]
@@ -171,9 +171,8 @@ artifact = save_render("overview.png", coordinate_system, layout_target; width=1
 ```
 
 That overload records semantic-to-GDS mappings encountered while constructing the intermediate
-cell. It never dumps the target's mutable mapping cache. Internal provenance keywords are reserved
-and cannot be supplied through the public graphics options. Mappings are conservatively retained
-when their output `GDSMeta` survives `metadata_filter`; when several semantic metadata values
-map to one selected output, all encountered values are retained. Pass a `NamedTuple` as
+cell; it never dumps the target's mutable mapping cache. Mappings are conservatively retained
+when their output `GDSMeta` survives `metadata_filter`, including every encountered source when
+several semantic metadata values map to one selected output. Pass a `NamedTuple` as
 `render_options` for options used while constructing the intermediate cell. The other keyword
 arguments are graphics options listed above.

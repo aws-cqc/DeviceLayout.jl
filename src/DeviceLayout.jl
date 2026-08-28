@@ -630,8 +630,8 @@ import .GDS: GDSWriterOptions
 export GDSWriterOptions
 
 include("backends/graphics.jl")
-import .Graphics: RenderArtifact, RenderInfo
-export RenderArtifact, RenderInfo
+import .Graphics: RenderArtifact
+export RenderArtifact
 include("backends/dxf.jl")
 
 include("solidmodels/solidmodels.jl")

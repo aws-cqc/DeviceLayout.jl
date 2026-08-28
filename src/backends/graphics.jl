@@ -165,38 +165,15 @@ MIMETypes = Union{
 const RENDER_MANIFEST_SCHEMA_VERSION = "0.1"
 
 """
-    RenderInfo
-
-Machine-readable provenance for one graphics render. Coordinates in `viewport` use
-`geometry["unit"]`; the layout-to-canvas matrix output uses `canvas["unit"]` (`px` for PNG
-and SVG, `pt` for PDF and EPS). Its fields are a mutable JSON-shaped snapshot; changing them
-does not rewrite the saved manifest.
-"""
-struct RenderInfo
-    geometry::Dict{String, Any}
-    viewport::Dict{String, Any}
-    canvas::Dict{String, Any}
-    layout_to_canvas::Dict{String, Any}
-    metadata_selection::String
-    selected_metadata::Vector{Dict{String, Any}}
-    metadata_mapping::Vector{Dict{String, Any}}
-    resolved_colors::Vector{Dict{String, Any}}
-    background::Dict{String, Any}
-    render_options::Dict{String, Any}
-end
-
-"""
     RenderArtifact
 
-Paths, hash, format, and [`RenderInfo`](@ref) for an image and its render manifest.
-Paths are absolute; the manifest stores the image path relative to the manifest directory.
+Absolute image and manifest paths together with the JSON-shaped manifest snapshot.
+Changing `manifest` does not rewrite the saved manifest.
 """
 struct RenderArtifact
     image_path::String
     manifest_path::String
-    image_sha256::String
-    format::String
-    info::RenderInfo
+    manifest::Dict{String, Any}
 end
 
 struct GraphicsRenderPlan{T, F, E, M, R}
@@ -458,12 +435,7 @@ _coordinate_unit(x::Real) = "unitless"
 function _dimension_request(options, key, canvas_unit)
     haskey(options, key) || return nothing
     value = options[key]
-    if value isa Length
-        return Dict{String, Any}(
-            "value" => Float64(ustrip(value)),
-            "unit" => string(unit(value))
-        )
-    end
+    value isa Length && return _manifest_value(value)
     return Dict{String, Any}("value" => Float64(value), "unit" => canvas_unit)
 end
 
@@ -504,18 +476,15 @@ end
 
 function _layout_to_canvas_manifest(plan, canvas_unit)
     bnd = ustrip(plan.viewport)
-    xmin, ymin = Float64(bnd.ll.x), Float64(bnd.ll.y)
-    xmax, ymax = Float64(bnd.ur.x), Float64(bnd.ur.y)
+    xmin = Float64(bnd.ll.x)
+    ymax = Float64(bnd.ur.y)
     sf = plan.scale
-    invertible = !iszero(sf)
     matrix = [[sf, 0.0, -sf * xmin], [0.0, -sf, sf * ymax], [0.0, 0.0, 1.0]]
-    inverse =
-        invertible ? [[1 / sf, 0.0, xmin], [0.0, -1 / sf, ymax], [0.0, 0.0, 1.0]] : nothing
+    inverse = [[1 / sf, 0.0, xmin], [0.0, -1 / sf, ymax], [0.0, 0.0, 1.0]]
     return Dict{String, Any}(
         "matrix" => matrix,
         "output_unit" => canvas_unit,
         "inverse" => inverse,
-        "invertible" => invertible,
         "anchoring" => "top-left",
         "content_rect" => Dict{String, Any}(
             "xmin" => 0.0,
@@ -527,17 +496,13 @@ function _layout_to_canvas_manifest(plan, canvas_unit)
     )
 end
 
-function _metadata_manifest(plan, mappings)
-    selected_metadata = _metadata_record.(plan.selected_metadata)
-    resolved_colors = [
-        Dict{String, Any}(
-            "metadata" => _metadata_record(meta),
-            "rgba" => collect(plan.colors[meta])
+function _selected_metadata_records(plan)
+    return [
+        merge(
+            _metadata_record(meta),
+            Dict{String, Any}("rgba" => collect(plan.colors[meta]))
         ) for meta in plan.selected_metadata
     ]
-    return selected_metadata,
-    _mapping_records(mappings, plan.selected_metadata),
-    resolved_colors
 end
 
 function _render_options_manifest(plan, geometry_render_options, canvas_unit)
@@ -558,63 +523,48 @@ function _render_options_manifest(plan, geometry_render_options, canvas_unit)
     return render_options
 end
 
-function _render_info(
+function _render_manifest(
     plan,
     manifest_source,
     mappings,
     rendered_fingerprint,
     geometry_render_options,
-    format
+    format,
+    image_path,
+    manifest_path,
+    image_sha256
 )
     bnd = ustrip(plan.viewport)
-    geometry_unit = _coordinate_unit(plan.viewport.ll.x)
     canvas_unit = format in ("pdf", "eps") ? "pt" : "px"
-    selected_metadata, metadata_mapping, resolved_colors =
-        _metadata_manifest(plan, mappings)
-    return RenderInfo(
-        _geometry_manifest(plan, manifest_source, rendered_fingerprint),
-        Dict{String, Any}(
+    return Dict{String, Any}(
+        "schema_version" => RENDER_MANIFEST_SCHEMA_VERSION,
+        "image" => relpath(image_path, dirname(manifest_path)),
+        "image_sha256" => image_sha256,
+        "format" => format,
+        "geometry" => _geometry_manifest(plan, manifest_source, rendered_fingerprint),
+        "viewport" => Dict{String, Any}(
             "xmin" => Float64(bnd.ll.x),
             "ymin" => Float64(bnd.ll.y),
             "xmax" => Float64(bnd.ur.x),
             "ymax" => Float64(bnd.ur.y),
-            "unit" => geometry_unit
+            "unit" => _coordinate_unit(plan.viewport.ll.x)
         ),
-        Dict{String, Any}(
+        "canvas" => Dict{String, Any}(
             "width" => plan.canvas_width,
             "height" => plan.canvas_height,
             "unit" => canvas_unit
         ),
-        _layout_to_canvas_manifest(plan, canvas_unit),
-        isnothing(get(plan.options, :metadata_filter, nothing)) ? "all" : "filtered",
-        selected_metadata,
-        metadata_mapping,
-        resolved_colors,
-        Dict{String, Any}(
+        "layout_to_canvas" => _layout_to_canvas_manifest(plan, canvas_unit),
+        "metadata_selection" =>
+            isnothing(get(plan.options, :metadata_filter, nothing)) ? "all" : "filtered",
+        "selected_metadata" => _selected_metadata_records(plan),
+        "metadata_mapping" => _mapping_records(mappings, plan.selected_metadata),
+        "background" => Dict{String, Any}(
             "requested" => _background_request(plan.options),
             "rgba" => collect(plan.background)
         ),
-        _render_options_manifest(plan, geometry_render_options, canvas_unit)
-    )
-end
-
-function _manifest_dict(artifact::RenderArtifact)
-    info = artifact.info
-    return Dict{String, Any}(
-        "schema_version" => RENDER_MANIFEST_SCHEMA_VERSION,
-        "image" => relpath(artifact.image_path, dirname(artifact.manifest_path)),
-        "image_sha256" => artifact.image_sha256,
-        "format" => artifact.format,
-        "geometry" => info.geometry,
-        "viewport" => info.viewport,
-        "canvas" => info.canvas,
-        "layout_to_canvas" => info.layout_to_canvas,
-        "metadata_selection" => info.metadata_selection,
-        "selected_metadata" => info.selected_metadata,
-        "metadata_mapping" => info.metadata_mapping,
-        "resolved_colors" => info.resolved_colors,
-        "background" => info.background,
-        "render_options" => info.render_options
+        "render_options" =>
+            _render_options_manifest(plan, geometry_render_options, canvas_unit)
     )
 end
 
@@ -625,8 +575,6 @@ function _write_manifest_temp(directory, manifest)
         JSON.json(io, manifest; pretty=true)
         write(io, '\n')
         close(io)
-        # mktemp uses a private mode; published artifacts follow ordinary file output.
-        chmod(tmp_path, 0o644)
         succeeded = true
         return tmp_path
     finally
@@ -639,11 +587,9 @@ function _save_render(
     image_path::AbstractString,
     rendered_geom::Union{Cell, CoordinateSystem},
     manifest_source=rendered_geom,
-    mappings=Pair{Meta, GDSMeta}[];
+    mappings=Pair{Meta, GDSMeta}[],
+    geometry_render_options=nothing;
     manifest_path=nothing,
-    rendered_fingerprint=rendered_geom isa Cell ?
-                         Cells.geometry_fingerprint(rendered_geom) : nothing,
-    geometry_render_options=nothing,
     options...
 )
     image_abs = abspath(image_path)
@@ -661,25 +607,28 @@ function _save_render(
     isdir(manifest_abs) && throw(ArgumentError("manifest_path cannot be a directory"))
     format, mime = _graphics_format(image_abs)
     plan = prepare_graphics_render(rendered_geom; options...)
+    rendered_fingerprint =
+        rendered_geom isa Cell ? Cells.geometry_fingerprint(rendered_geom) : nothing
 
     image_tmp, image_io = mktemp(dirname(image_abs))
     manifest_tmp = nothing
     try
         write_graphics(image_io, mime, plan)
         close(image_io)
-        # Match the permissions of ordinary file output rather than mktemp's 0600 mode.
-        chmod(image_tmp, 0o644)
         image_sha256 = open(SHA.sha256, image_tmp) |> bytes2hex
-        info = _render_info(
+        manifest = _render_manifest(
             plan,
             manifest_source,
             mappings,
             rendered_fingerprint,
             geometry_render_options,
-            format
+            format,
+            image_abs,
+            manifest_abs,
+            image_sha256
         )
-        artifact = RenderArtifact(image_abs, manifest_abs, image_sha256, format, info)
-        manifest_tmp = _write_manifest_temp(dirname(manifest_abs), _manifest_dict(artifact))
+        artifact = RenderArtifact(image_abs, manifest_abs, manifest)
+        manifest_tmp = _write_manifest_temp(dirname(manifest_abs), manifest)
 
         # Remove the old sidecar before replacing the image. A publication failure can
         # leave an image without a manifest, but never a stale manifest paired with it.
@@ -696,20 +645,12 @@ function _save_render(
     end
 end
 
-function _validate_public_render_options(options)
-    for key in (:rendered_fingerprint, :geometry_render_options)
-        haskey(options, key) &&
-            throw(ArgumentError("$key is reserved for internal render provenance"))
-    end
-end
-
 function save_render(
     image_path::AbstractString,
     geom::Union{Cell, CoordinateSystem};
     manifest_path=nothing,
     options...
 )
-    _validate_public_render_options(options)
     return _save_render(image_path, geom; manifest_path=manifest_path, options...)
 end
 
