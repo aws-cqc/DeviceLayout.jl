@@ -1,8 +1,5 @@
 struct LocatorRecord
-    name::String
-    index::Int
-    role::Locator
-    layer::Symbol
+    meta::EntityMeta
     position::NTuple{3, Float64}
 end
 
@@ -29,16 +26,7 @@ function find_locators(cs, stack::SourceStack)
             cx = SolidModels._stp_float(getx(ctr))
             cy = SolidModels._stp_float(gety(ctr))
             z = SolidModels._stp_float(layer_z(entity_meta.layer, stack))
-            push!(
-                records,
-                LocatorRecord(
-                    entity_meta.name,
-                    entity_meta.index,
-                    entity_meta.role,
-                    entity_meta.layer,
-                    (cx, cy, z)
-                )
-            )
+            push!(records, LocatorRecord(entity_meta, (cx, cy, z)))
         end
     end
     return records
@@ -78,7 +66,7 @@ function _containing_entity_tag(locator::LocatorRecord, entity_rtree; tol=1e-6)
     end
     if hit_count > 1
         error(
-            "Locator '$(locator.name)' at $(locator.position) matched " *
+            "Locator '$(locator.meta.name)' at $(locator.position) matched " *
             "$hit_count entities; expected exactly 1 on a fragmented plane"
         )
     end
@@ -166,20 +154,23 @@ function add_terminals!(
     # Only Terminal and Ground locators participate (Tags are handled by
     # add_tagged_pgs!).
     ground_cc_indices = Set{Int}()
-    terminal_locators =
-        filter(locator -> locator.role isa Terminal || locator.role isa Ground, locators)
+    terminal_locators = filter(
+        locator -> locator.meta.role isa Terminal || locator.meta.role isa Ground,
+        locators
+    )
     candidate_tags = Int32[dimtag[2] for dimtag in keys(tag_to_cc)]
     entity_rtree = _entity_rtree(candidate_tags, bbox_cache)
     for locator in terminal_locators
+        entity_meta = locator.meta
         matched_tag = _containing_entity_tag(locator, entity_rtree)
         matched_cc_idx = iszero(matched_tag) ? 0 : tag_to_cc[(Int32(2), matched_tag)]
         if iszero(matched_cc_idx)
-            @warn "$(nameof(typeof(locator.role))) locator '$(locator.name)' at " *
+            @warn "$(nameof(typeof(entity_meta.role))) locator '$(entity_meta.name)' at " *
                   "$(locator.position) did not match any metal connected component"
-        elseif locator.role isa Ground
+        elseif entity_meta.role isa Ground
             push!(ground_cc_indices, matched_cc_idx)
         else
-            push!(cc_locators[cc_names[matched_cc_idx]], locator.name)
+            push!(cc_locators[cc_names[matched_cc_idx]], entity_meta.name)
         end
     end
 
@@ -223,17 +214,18 @@ function add_tagged_pgs!(
     bbox_cache::Dict{Int32, NTuple{6, Float64}}=Dict{Int32, NTuple{6, Float64}}()
 )
     tag_records = Tuple{String, String, Symbol}[]
-    tag_locators = filter(locator -> locator.role isa Tag, locators)
+    tag_locators = filter(locator -> locator.meta.role isa Tag, locators)
     tree_type = typeof(SpatialIndexing.RTree{Float64, 3}(Int32))
     layer_trees = Dict{Symbol, tree_type}()
 
     for locator in tag_locators
+        entity_meta = locator.meta
         # A Tag is meaningful only within its declared source layer. Searching all 2D
         # groups could attach it to an unrelated coplanar or overlapping layer.
-        haskey(registry, locator.layer) || continue
-        layer_state = registry[locator.layer]
+        haskey(registry, entity_meta.layer) || continue
+        layer_state = registry[entity_meta.layer]
         layer_state.dim == 2 || continue
-        entity_rtree = get!(layer_trees, locator.layer) do
+        entity_rtree = get!(layer_trees, entity_meta.layer) do
             tags = Set{Int32}()
             for record in layer_state.pgs
                 SolidModels.hasgroup(sm, record.name, 2) || continue
@@ -244,13 +236,11 @@ function add_tagged_pgs!(
 
         found_tag = _containing_entity_tag(locator, entity_rtree)
         if found_tag == 0
-            @warn "Tag locator '$(locator.name)' at $(locator.position) did not " *
+            @warn "Tag locator '$(entity_meta.name)' at $(locator.position) did not " *
                   "match any 2D entity"
             continue
         end
 
-        entity_meta =
-            EntityMeta(locator.layer; name=locator.name, index=locator.index, role=Tag())
         pg_name = physical_group_name(entity_meta)
 
         # Create PG in the solid model
@@ -259,8 +249,8 @@ function add_tagged_pgs!(
         # Remove tagged entity from all other 2D PGs on the same layer and
         # duplicate deferred interfaces for the Tag PG
         parent_pg_names = String[]
-        if haskey(registry, locator.layer) && registry[locator.layer].dim == 2
-            for record in registry[locator.layer].pgs
+        if haskey(registry, entity_meta.layer) && registry[entity_meta.layer].dim == 2
+            for record in registry[entity_meta.layer].pgs
                 SolidModels.hasgroup(sm, record.name, 2) || continue
                 existing_dimtags = SolidModels.dimtags(sm[record.name, 2])
                 filtered = filter(dimtag -> dimtag[2] != found_tag, existing_dimtags)
@@ -303,7 +293,7 @@ function add_tagged_pgs!(
                     2,
                     tool_dim,
                     dest_layer,
-                    locator.layer,
+                    entity_meta.layer,
                     tool_layer
                 )
                 push!(registry[dest_layer].pgs, PGRecord(dest_pg, dest_layer, nothing))
@@ -311,13 +301,13 @@ function add_tagged_pgs!(
         end
 
         # Add to registry
-        record = PGRecord(pg_name, locator.layer, entity_meta)
-        if haskey(registry, locator.layer)
-            push!(registry[locator.layer].pgs, record)
+        record = PGRecord(pg_name, entity_meta.layer, entity_meta)
+        if haskey(registry, entity_meta.layer)
+            push!(registry[entity_meta.layer].pgs, record)
         else
-            registry[locator.layer] = LayerState([record], 2)
+            registry[entity_meta.layer] = LayerState([record], 2)
         end
-        push!(tag_records, (pg_name, locator.name, locator.layer))
+        push!(tag_records, (pg_name, entity_meta.name, entity_meta.layer))
     end
 
     return tag_records
