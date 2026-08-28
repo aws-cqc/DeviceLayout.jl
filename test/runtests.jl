@@ -24,6 +24,15 @@ using TestItemRunner
 
     p(x, y) = Point(x, y)
 
+    function png_dimensions(path)
+        bytes = read(path)
+        bigendian_uint32(range) =
+            foldl(range; init=UInt32(0)) do value, byte
+                return (value << 8) | byte
+            end
+        return Int(bigendian_uint32(bytes[17:20])), Int(bigendian_uint32(bytes[21:24]))
+    end
+
     """
         is_sliver(p::Polygon{T}; atol=DeviceLayout.onenanometer(T))
 

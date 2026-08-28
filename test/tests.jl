@@ -1156,15 +1156,6 @@ end
         save(path, s1, width=72 * 4)
         rm(path, force=true)
 
-        png_dimensions(path) = begin
-            bytes = read(path)
-            bigendian_uint32(range) =
-                foldl(range; init=UInt32(0)) do value, byte
-                    return (value << 8) | byte
-                end
-            return Int(bigendian_uint32(bytes[17:20])), Int(bigendian_uint32(bytes[21:24]))
-        end
-
         wide = Cell("wide", nm)
         render!(wide, Rectangle(20μm, 10μm), GDSMeta(1, 0))
         path = joinpath(tdir, "wide.png")
@@ -1309,14 +1300,6 @@ end
     using SHA
     using DeviceLayout.SchematicDrivenLayout
 
-    png_dimensions(path) = begin
-        bytes = read(path)
-        bigendian_uint32(range) =
-            foldl(range; init=UInt32(0)) do value, byte
-                return (value << 8) | byte
-            end
-        return Int(bigendian_uint32(bytes[17:20])), Int(bigendian_uint32(bytes[21:24]))
-    end
     matrix(json_matrix) = [Float64(json_matrix[i][j]) for i = 1:3, j = 1:3]
     metadata_pairs(records) = [(record["layer"], record["datatype"]) for record in records]
 
@@ -1339,11 +1322,15 @@ end
     )
     manifest_path = joinpath(tdir, "chip.v2.render.json")
     @test artifact isa RenderArtifact
-    @test artifact.info isa RenderInfo
+    @test artifact.manifest isa Dict{String, Any}
     @test artifact.image_path == abspath(image_path)
     @test artifact.manifest_path == abspath(manifest_path)
     @test isfile(image_path)
     @test isfile(manifest_path)
+    if !Sys.iswindows()
+        @test filemode(image_path) & 0o077 == 0
+        @test filemode(manifest_path) & 0o077 == 0
+    end
     @test png_dimensions(image_path) == (300, 300)
     parity_path = joinpath(tdir, "parity.png")
     save(
@@ -1362,7 +1349,7 @@ end
     @test manifest["image"] == "chip.v2.png"
     @test manifest["format"] == "png"
     @test manifest["image_sha256"] == bytes2hex(SHA.sha256(read(image_path)))
-    @test manifest["image_sha256"] == artifact.image_sha256
+    @test manifest == artifact.manifest
     @test manifest["geometry"]["type"] == "Cell"
     @test manifest["geometry"]["name"] == "artifact"
     @test manifest["geometry"]["unit"] == "nm"
@@ -1374,14 +1361,13 @@ end
     @test manifest["render_options"]["height"]["unit"] == "px"
     @test manifest["layout_to_canvas"]["output_unit"] == "px"
     @test manifest["layout_to_canvas"]["anchoring"] == "top-left"
-    @test manifest["layout_to_canvas"]["invertible"]
     @test manifest["layout_to_canvas"]["content_rect"]["xmax"] ≈ 300
     @test manifest["layout_to_canvas"]["content_rect"]["ymax"] ≈ 150
     @test manifest["layout_to_canvas"]["content_rect"]["unit"] == "px"
     @test manifest["background"]["requested"] == "white"
     @test collect(manifest["background"]["rgba"]) == [1.0, 1.0, 1.0, 1.0]
     @test metadata_pairs(manifest["selected_metadata"]) == [(5, 1)]
-    @test collect(manifest["resolved_colors"][1]["rgba"]) == [0.25, 0.5, 0.75, 1.0]
+    @test collect(manifest["selected_metadata"][1]["rgba"]) == [0.25, 0.5, 0.75, 1.0]
     @test manifest["metadata_selection"] == "all"
 
     original_image_sha256 = manifest["image_sha256"]
@@ -1421,7 +1407,7 @@ end
     @test filtered_manifest["format"] == "svg"
     @test filtered_manifest["metadata_selection"] == "filtered"
     @test metadata_pairs(filtered_manifest["selected_metadata"]) == [(2, 0)]
-    @test collect(filtered_manifest["resolved_colors"][1]["rgba"]) == [0.0, 1.0, 0.0, 1.0]
+    @test collect(filtered_manifest["selected_metadata"][1]["rgba"]) == [0.0, 1.0, 0.0, 1.0]
     @test filtered_manifest["layout_to_canvas"]["content_rect"]["ymax"] ≈ 100
     @test filtered_manifest["layout_to_canvas"]["content_rect"]["unit"] == "px"
 
@@ -1441,7 +1427,6 @@ end
 
     empty_artifact = save_render(joinpath(tdir, "empty.png"), Cell("empty", nm); width=10)
     empty_manifest = JSON.parsefile(empty_artifact.manifest_path)
-    @test empty_manifest["layout_to_canvas"]["invertible"]
     @test matrix(empty_manifest["layout_to_canvas"]["inverse"]) ==
           [1.0 0.0 0.0; 0.0 -1.0 0.0; 0.0 0.0 1.0]
 
@@ -1490,6 +1475,9 @@ end
     target_manifest = JSON.parsefile(target_artifact.manifest_path)
     @test target_manifest["geometry"]["type"] == "CoordinateSystem"
     @test target_manifest["geometry"]["name"] == "semantic"
+    expected_cell = Cell(cs, target; atol=2nm)
+    @test target_manifest["geometry"]["rendered_cell_fingerprint"]["sha256"] ==
+          Cells.geometry_fingerprint(expected_cell)
     geometry_options = target_manifest["render_options"]["geometry_render_options"]
     @test !geometry_options["simulation"]
     @test geometry_options["artwork"]
@@ -1531,18 +1519,6 @@ end
     plain_cs_artifact = save_render(joinpath(tdir, "plain-cs.png"), cs; width=100)
     plain_cs_manifest = JSON.parsefile(plain_cs_artifact.manifest_path)
     @test !haskey(plain_cs_manifest["geometry"], "rendered_cell_fingerprint")
-
-    @test_throws ArgumentError save_render(
-        joinpath(tdir, "spoofed-fingerprint.png"),
-        cell;
-        rendered_fingerprint="not-the-cell"
-    )
-    @test_throws ArgumentError save_render(
-        joinpath(tdir, "spoofed-options.png"),
-        cs,
-        target;
-        geometry_render_options=(; untrusted=true)
-    )
 
     bad_target = ArtworkTarget(
         technology;

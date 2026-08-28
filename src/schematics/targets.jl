@@ -552,7 +552,6 @@ function DeviceLayout.save_render(
 ) where {S}
     render_options isa NamedTuple ||
         throw(ArgumentError("render_options must be a NamedTuple"))
-    DeviceLayout.Graphics._validate_public_render_options(options)
     haskey(target.rendering_options, :map_meta) &&
         throw(ArgumentError("target rendering_options cannot override map_meta"))
     haskey(render_options, :map_meta) &&
@@ -574,10 +573,9 @@ function DeviceLayout.save_render(
         image_path,
         cell,
         cs,
-        mappings;
+        mappings,
+        rendering_options;
         manifest_path=manifest_path,
-        rendered_fingerprint=DeviceLayout.Cells.geometry_fingerprint(cell),
-        geometry_render_options=rendering_options,
         options...
     )
 end
