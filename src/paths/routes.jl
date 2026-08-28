@@ -176,6 +176,14 @@ Route(rule, path0::Path, endpoint::Point, end_direction; kwargs...) =
 @inline Base.eltype(::Route{T}) where {T} = T
 @inline Base.eltype(::Type{<:Route{T}}) where {T} = T
 
+function show(io::IO, r::Route)
+    print(io, "Route from ", r.p0, " @ ", r.α0, " to ", r.p1, " @ ", r.α1)
+    print(io, " with rule ", nameof(typeof(r.rule)))
+    nwp = length(r.waypoints)
+    nwp > 0 && print(io, " via ", nwp, nwp == 1 ? " waypoint" : " waypoints")
+    return nothing
+end
+
 """
     p0(r::Route)
 
