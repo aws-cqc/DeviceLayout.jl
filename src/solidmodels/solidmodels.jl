@@ -203,6 +203,33 @@ struct SolidModel{T <: SolidModelKernel}
 end
 Base.broadcastable(x::SolidModel) = Ref(x)
 
+summary(sm::SolidModel) = string(
+    "SolidModel \"",
+    sm.name,
+    "\" (",
+    nameof(typeof(sm.kernel)),
+    " kernel) with ",
+    sum(length, sm.groups),
+    " physical group",
+    sum(length, sm.groups) == 1 ? "" : "s"
+)
+Base.show(io::IO, sm::SolidModel) = print(io, summary(sm))
+function Base.show(io::IO, ::MIME"text/plain", sm::SolidModel)
+    print(io, summary(sm))
+    for dim = 3:-1:0
+        groups = sm.groups[dim + 1]
+        isempty(groups) && continue
+        names = sort!(collect(keys(groups)))
+        print(io, "\n  dim ", dim, ": ")
+        if get(io, :limit, false)::Bool && length(names) > 10
+            print(io, join(names[1:10], ", "), " … (+", length(names) - 10, " more)")
+        else
+            print(io, join(names, ", "))
+        end
+    end
+    return nothing
+end
+
 """
     struct PhysicalGroup
         name::String
