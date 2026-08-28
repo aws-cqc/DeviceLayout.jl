@@ -368,13 +368,13 @@
     v2 = Point(6.0, 0.0)μm
 
     # Round first line-arc corner
-    pol1 = styled_loop(semi_cp, Rounded(r_la; p0=[v1]))
+    pol1 = styled_loop(semi_cp, Rounded(r_la; p0=[v1], selection_tolerance=1nm))
     pol1_poly = to_polygons(pol1)
     pol1_pts = points(pol1_poly)
     @test length(pol1_pts) > 2
 
     # Round both line-arc corners
-    pol2 = styled_loop(pol1, Rounded(r_la; p0=[v2]))
+    pol2 = styled_loop(pol1, Rounded(r_la; p0=[v2], selection_tolerance=1nm))
     pol2_poly = to_polygons(pol2)
     pol2_pts = points(pol2_poly)
     @test length(pol2_pts) > length(pol1_pts)
@@ -419,7 +419,7 @@
         )
     end
     la_pts = simple_cp.p[line_arc_cornerindices(simple_cp)]
-    inv_sty = Rounded(0.5μm; p0=la_pts, inverse_selection=true)
+    inv_sty = Rounded(0.5μm; p0=la_pts, inverse_selection=true, selection_tolerance=1nm)
     # inverse_selection with line-arc p0: should select all straight-straight corners
     sc = cornerindices(simple_cp, inv_sty)
     @test sort(sc) == sort(cornerindices(simple_cp))
@@ -428,7 +428,7 @@
     @test isempty(la)
 
     # The inverse: selecting with those p0 points should select the line-arc corners
-    fwd_sty = Rounded(0.5μm; p0=la_pts)
+    fwd_sty = Rounded(0.5μm; p0=la_pts, selection_tolerance=1nm)
     la_fwd = line_arc_cornerindices(simple_cp, fwd_sty)
     @test sort(la_fwd) == sort(line_arc_cornerindices(simple_cp))
     sc_fwd = cornerindices(simple_cp, fwd_sty)
@@ -512,7 +512,9 @@
 
     # RelativeRounded with a p0 selection must not error on the unit promotion
     rect = Rectangle(10.0μm2nm, 10.0μm2nm)
-    rr = to_polygons(RelativeRounded(0.15; p0=[Point(0μm2nm, 0μm2nm)])(rect))
+    rr = to_polygons(
+        RelativeRounded(0.15; p0=[Point(0μm2nm, 0μm2nm)], selection_tolerance=1nm)(rect)
+    )
     @test length(points(rr)) > 20
 
     # Unitful issue addressed by Unitful.jl PR#845 bypassed
@@ -981,11 +983,14 @@ end
     @test_nowarn to_polygons(blob, Rounded(fillet_r))
 
     # Selection: a p0 point rounds only the nearest arc-arc corner; inverse_selection the rest.
-    sel = arc_arc_cornerindices(clover, Rounded(fillet_r; p0=[cusps[1]]))
+    sel = arc_arc_cornerindices(
+        clover,
+        Rounded(fillet_r; p0=[cusps[1]], selection_tolerance=1nm)
+    )
     @test sel == [1]
     inv = arc_arc_cornerindices(
         clover,
-        Rounded(fillet_r; p0=[cusps[1]], inverse_selection=true)
+        Rounded(fillet_r; p0=[cusps[1]], inverse_selection=true, selection_tolerance=1nm)
     )
     @test sort(inv) == [2, 3, 4]
 

@@ -1,4 +1,4 @@
-@testitem "Schematic-Driven Layout" setup = [CommonTestSetup] begin
+@testitem "Schematic-Driven Layout" setup = [CommonTestSetup, QuietGmshSetup] begin
     using .SchematicDrivenLayout
 
     import .SchematicDrivenLayout: AbstractComponent, AbstractCompositeComponent
@@ -73,17 +73,19 @@
 
     @variant CutoutFlipchipArrow SchematicDrivenLayout.ArrowAnnotation{typeof(1.0nm)} map_meta =
         facing new_defaults = (; cutout_margin=20μm)
-    function SchematicDrivenLayout._geometry!(
-        cs::CoordinateSystem,
-        arrow::CutoutFlipchipArrow
-    )
-        _geometry!(cs, base_variant(arrow))
-        map_metadata!(cs, facing)
-        return place!(
-            cs,
-            offset(bounds(cs), parameters(arrow).cutout_margin)[1],
-            SemanticMeta(:base_negative)
+    quiet_test_output() do
+        @eval function SchematicDrivenLayout._geometry!(
+            cs::CoordinateSystem,
+            arrow::CutoutFlipchipArrow
         )
+            _geometry!(cs, base_variant(arrow))
+            map_metadata!(cs, facing)
+            return place!(
+                cs,
+                offset(bounds(cs), parameters(arrow).cutout_margin)[1],
+                SemanticMeta(:base_negative)
+            )
+        end
     end
     @testset "Variants" begin
         cs = geometry(CutoutFlipchipArrow(; cutout_margin=10μm))
@@ -206,12 +208,24 @@
         g2 = SchematicGraph("test_graph_attach")
         template_node2 = add_node!(g2, template(name="template_2"))
         @test_throws "No matching hook" fuse!(g2, template_node2 => :bq, bq)
-        SchematicDrivenLayout.matching_hook(::TestComponent, ::Symbol, ::TestComponent) = :z
+        use_test_matching_hook = Ref(true)
+        use_test_matching_hooks = Ref(false)
+        function SchematicDrivenLayout.matching_hook(
+            t1::TestComponent,
+            s::Symbol,
+            ::TestComponent
+        )
+            return use_test_matching_hook[] ? :z :
+                   SchematicDrivenLayout.matching_hook(t1, s, Spacer())
+        end
+        function SchematicDrivenLayout.matching_hooks(t1::TestComponent, ::TestComponent)
+            return use_test_matching_hooks[] ? (:xy, :qubit) :
+                   SchematicDrivenLayout.matching_hooks(t1, Spacer())
+        end
         bq_node2 = fuse!(g2, template_node2 => :bq, bq)
         z_node2 = fuse!(g2, bq_node2, zline => :qubit)
         @test_throws "No matching hook" fuse!(g2, bq_node2, xyline)
-        SchematicDrivenLayout.matching_hooks(::TestComponent, ::TestComponent) =
-            (:xy, :qubit)
+        use_test_matching_hooks[] = true
         xy_node2 = fuse!(g2, bq_node2, xyline)
         floorplan2 = plan(g2; log_dir=nothing)
         @test transformation(floorplan2, bq_node2) == transformation(floorplan, bq_node)
@@ -230,10 +244,8 @@
         @test transformation(floorplan2, xy_node2) == transformation(floorplan, xy_node)
 
         # Reset matching hooks to something that returns original error
-        SchematicDrivenLayout.matching_hook(t1::TestComponent, s::Symbol, ::TestComponent) =
-            SchematicDrivenLayout.matching_hook(t1, s, Spacer())
-        SchematicDrivenLayout.matching_hooks(t1::TestComponent, ::TestComponent) =
-            SchematicDrivenLayout.matching_hooks(t1, Spacer())
+        use_test_matching_hook[] = false
+        use_test_matching_hooks[] = false
 
         # `rem_node!` drops the node from `nodes` and from the name lookup. `node_dict` is
         # keyed by `Symbol`, as `add_node!` inserts it, so deleting with the node's `String`
@@ -334,7 +346,10 @@
                 meta
             )
             log_dir = mktempdir()
-            floorplan = plan(g; log_dir=log_dir)
+            logger = TestLogger()
+            floorplan = with_logger(logger) do
+                return plan(g; log_dir=log_dir)
+            end
             check!(floorplan)
             @test_throws "Encountered errors" build!(floorplan)
             build!(floorplan; strict=:no)
@@ -343,6 +358,12 @@
                 read(floorplan.logger.logname, String),
                 "Could not automatically route"
             )
+            @test all(logger.logs) do log
+                return log.level < Logging.Warn || (
+                    log.level == Logging.Error &&
+                    occursin("Could not automatically route", log.message)
+                )
+            end
         end
 
         @testset "Check" begin
@@ -489,9 +510,23 @@
                 comp3_node = fuse!(g, comp2_node => :hook1, qubit[3] => :hook2)
                 comp4_node = fuse!(g, comp3_node => :hook1, qubit[4] => :hook2)
                 fuse!(g, comp4_node => :hook1, comp1_node => :hook1)
-                @test_throws "Encountered errors" plan(g; log_dir=nothing)
+                allowed_cycle_log =
+                    log ->
+                        log.level == Logging.Error && (
+                            occursin("overconstrained", log.message) ||
+                            occursin("Failed to plan", log.message)
+                        )
+                @test_throws "Encountered errors" with_test_logger(
+                    allowed_cycle_log;
+                    required=allowed_cycle_log
+                ) do
+                    return plan(g; log_dir=nothing)
+                end
                 log_dir = mktempdir()
-                floorplan = plan(g; strict=:no, log_dir=log_dir)
+                floorplan =
+                    with_test_logger(allowed_cycle_log; required=allowed_cycle_log) do
+                        return plan(g; strict=:no, log_dir=log_dir)
+                    end
                 @test SchematicDrivenLayout.max_level_logged(floorplan, :plan) ==
                       Logging.Error
                 @test contains(read(floorplan.logger.logname, String), "is overconstrained")
@@ -566,13 +601,21 @@
         render!(cs, rect, GDSMeta(2, 2))
 
         cell = Cell("test", nm)
-        render!(cell, cs, ArtworkTarget(tech; levels=[1])) # meta, undef_meta, GDSMeta(2,2)
+        @test_logs (:warn, r"Target technology") render!(
+            cell,
+            cs,
+            ArtworkTarget(tech; levels=[1])
+        ) # meta, undef_meta, GDSMeta(2,2)
         @test cell.element_metadata == [GDSMeta(), GDSMeta(), GDSMeta(2, 2)]
         cell = Cell("test", nm)
         render!(cell, cs, ArtworkTarget(tech; levels=[2])) # facing(meta), (:GDS2_2,2,2), GDSMeta(2,2)
         @test cell.element_metadata == [GDSMeta(), GDSMeta(2, 2), GDSMeta(2, 2)]
         cell = Cell("test", nm)
-        render!(cell, cs, ArtworkTarget(tech; levels=[1, 2], indexed_layers=[:GDS2_2]))
+        @test_logs (:warn, r"Target technology") render!(
+            cell,
+            cs,
+            ArtworkTarget(tech; levels=[1, 2], indexed_layers=[:GDS2_2])
+        )
         @test cell.element_metadata ==
               [GDSMeta(), GDSMeta(300), GDSMeta(302, 4), GDSMeta(), GDSMeta(2, 2)]
         @test SchematicDrivenLayout.map_layer(ArtworkTarget(tech), SemanticMeta(:GDS2)) ==
@@ -583,7 +626,7 @@
         target.map_meta_dict[meta] = nothing
         target.map_meta_dict[GDSMeta(2, 2)] = GDSMeta(3, 3)
         cell = Cell("test", nm)
-        render!(cell, cs, target) # undef_meta, GDSMeta(2,2)
+        @test_logs (:warn, r"Target technology") render!(cell, cs, target) # undef_meta, GDSMeta(2,2)
         @test cell.element_metadata == [GDSMeta(), GDSMeta(3, 3)]
 
         @testset "Target style helpers" begin
@@ -596,7 +639,19 @@
                 (not_solidmodel!, artwork, solidmodel),
                 (only_solidmodel!, solidmodel, artwork)
             )
-            nrendered(cs, target) = length(elements(flatten(Cell(cs, nm, target))))
+            function nrendered(cs, target)
+                logger = TestLogger()
+                cell = with_logger(logger) do
+                    return flatten(Cell(cs, nm, target))
+                end
+                @test all(logger.logs) do log
+                    return log.level == Logging.Warn && occursin(
+                        "Target technology does not have a mapping",
+                        log.message
+                    )
+                end
+                return length(elements(cell))
+            end
 
             @testset "Coordinate-system references" begin
                 arr!(parent, child) = addarr!(
@@ -705,7 +760,7 @@
                     rot=30°
                 )
 
-                pa = Path(Point(0μm, 0μm))
+                pa = Path(Point(0μm, 0μm); metadata=meta)
                 straight!(pa, 100μm, Paths.SimpleTrace(10.0μm))
                 turn!(pa, 90°, 50μm)
                 attach!(pa, attached, 25μm; i=2)
@@ -747,7 +802,7 @@
             end
 
             @testset "Path and Cell arrays preserve their shape" begin
-                array_path = Path(Point(0μm, 0μm))
+                array_path = Path(Point(0μm, 0μm); metadata=meta)
                 straight!(array_path, 10μm, Paths.SimpleTrace(1.0μm))
                 array_cell = Cell("array_cell", nm)
                 render!(array_cell, rect, GDSMeta())
@@ -956,13 +1011,14 @@
             fuse!(g, n1 => :z, subcomps.pz => :p0)
             return g
         end
-        SchematicDrivenLayout.map_hooks(::Type{Test2BQ}) = Dict{Pair{Int, Symbol}, Symbol}()
+        test_hook_map = Ref(Dict{Pair{Int, Symbol}, Symbol}())
+        SchematicDrivenLayout.map_hooks(::Type{Test2BQ}) = test_hook_map[]
 
         bq2 = Test2BQ(; name="2bq", jj_width=200nm)
         @test SchematicDrivenLayout.decompose_hookname(bq2, :_1_xy) == (1 => :xy)
         @test_throws "No hook" SchematicDrivenLayout.decompose_hookname(bq2, :_1_q)
 
-        SchematicDrivenLayout.map_hooks(::Type{Test2BQ}) =
+        test_hook_map[] =
             Dict((1 => :xy) => :xy1, (2 => :xy) => :xy2, (1 => :z) => :z1, (2 => :z) => :z2)
         empty!(bq2._hooks)
 
@@ -1265,11 +1321,11 @@
         cc = MyCompositeComponent(; templates=(; subcomp1, subcomp2))
         @test SchematicDrivenLayout.filter_parameters(MySubComponent, cc) ==
               Dict(:length => 2mm)
-        @test SchematicDrivenLayout.filter_parameters(
+        @test (@test_logs (:warn, r"No shared parameters") SchematicDrivenLayout.filter_parameters(
             MySubComponent,
             cc,
             except=[:length]
-        ) == Dict()
+        )) == Dict()
         @test SchematicDrivenLayout.filter_parameters(subcomp1, cc) == Dict(:width => 2mm)
         @test_logs (:warn, r"No shared parameters") SchematicDrivenLayout.filter_parameters(
             Spacer,

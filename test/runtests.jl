@@ -37,6 +37,61 @@ using TestItemRunner
 
     const tdir = mktempdir()
 
+    function check_test_logs(logger, allowed; required=nothing)
+        unexpected = filter(!allowed, logger.logs)
+        if !isempty(unexpected)
+            show(stderr, "text/plain", unexpected)
+            println(stderr)
+        end
+        @test isempty(unexpected)
+        isnothing(required) || @test any(required, logger.logs)
+        return
+    end
+
+    function with_test_logger(f, allowed; required=nothing)
+        logger = TestLogger()
+        try
+            result = with_logger(f, logger)
+            check_test_logs(logger, allowed; required)
+            return result
+        catch
+            check_test_logs(logger, allowed; required)
+            rethrow()
+        end
+    end
+
+    function with_expected_info(f, pattern)
+        allowed = log -> log.level < Logging.Warn
+        required = log -> log.level == Logging.Info && occursin(pattern, log.message)
+        return with_test_logger(f, allowed; required)
+    end
+
+    function quiet_test_output(f; allowed_log=(_ -> false))
+        logger = TestLogger()
+        result = mktemp() do _, io
+            try
+                return redirect_stdio(stdout=io, stderr=io) do
+                    return with_logger(f, logger)
+                end
+            catch
+                flush(io)
+                seekstart(io)
+                write(stderr, read(io))
+                isempty(logger.logs) || show(stderr, "text/plain", logger.logs)
+                rethrow()
+            end
+        end
+        unexpected = filter(logger.logs) do log
+            return log.level >= Logging.Warn && !allowed_log(log)
+        end
+        if !isempty(unexpected)
+            show(stderr, "text/plain", unexpected)
+            println(stderr)
+        end
+        @test isempty(unexpected)
+        return result
+    end
+
     # G1 continuity check: verify no angle jump exceeds the discretization step
     function check_g1_continuity(poly_pts, dθ_max)
         n = length(poly_pts)
@@ -148,6 +203,12 @@ using TestItemRunner
 
         @test n_filleted == n_line_arc
     end
+end
+
+@testsnippet QuietGmshSetup begin
+    DeviceLayout.SolidModels.gmsh.is_initialized() == 0 &&
+        DeviceLayout.SolidModels.gmsh.initialize()
+    DeviceLayout.SolidModels.set_gmsh_option("General.Verbosity", 0)
 end
 
 @run_package_tests filter =

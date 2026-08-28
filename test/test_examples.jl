@@ -1,6 +1,18 @@
 @testitem "ExamplePDK" setup = [CommonTestSetup] begin
     include("../examples/DemoQPU17/DemoQPU17.jl")
-    @time "Total" schematic, artwork = DemoQPU17.qpu17_demo(dir=tdir)
+    logger = TestLogger()
+    schematic, artwork = quiet_test_output() do
+        with_logger(logger) do
+            return DemoQPU17.qpu17_demo(dir=tdir)
+        end
+    end
+    expected_error_groups = ("bridge", "_shadow", "_leg")
+    @test all(logger.logs) do log
+        return log.level < Logging.Warn || (
+            log.level == Logging.Error &&
+            any(group -> occursin(group, log.message), expected_error_groups)
+        )
+    end
     # Check for changes to geometry
     if VERSION >= v"1.12-"
         # Julia v1.10 and v1.11 give different fingerprints
@@ -25,7 +37,7 @@
     @test ("port_2", 2) in fc_target.rendering_options.retained_physical_groups # Backwards compatibility
 end
 
-@testitem "Single Transmon" setup = [CommonTestSetup] begin
+@testitem "Single Transmon" setup = [CommonTestSetup, QuietGmshSetup] begin
     # Single transmon example file requires CSV, JSON, JSONSchema, DataFrames
     # Just test the components
     using .SchematicDrivenLayout
@@ -57,7 +69,10 @@ end
     attach!(p_readout, sref(csport), 2mm - 10μm, i=2) # @ end
     p_readout_node = add_node!(g, p_readout)
     attach!(g, p_readout_node, rres_node => :feedline, 0mm, location=1)
-    floorplan = plan(g)
+    logger = TestLogger()
+    floorplan = with_logger(logger) do
+        return plan(g; log_dir=nothing)
+    end
     # Define bounds for bounding simulation box
     chip = offset(bounds(floorplan), 2mm)[1]
     sim_area = chip
@@ -78,6 +93,13 @@ end
         ]);
         strict=:no
     )
+    expected_error_groups = ("bridge", "_shadow", "_leg")
+    @test all(logger.logs) do log
+        return log.level < Logging.Warn || (
+            log.level == Logging.Error &&
+            any(group -> occursin(group, log.message), expected_error_groups)
+        )
+    end
     # Ensure fragment and map found all the exterior boundaries: 3*4 sides of chip and vacuum boxes + top + bottom = 14
     @test length(SolidModels.dimtags(sm["exterior_boundary", 2])) == 14
     @test length(SolidModels.dimtags(sm["metal", 2])) == 7 # Island + ground + 2x leads + 2x mesh control partitions of ground + CPW trace between ports
