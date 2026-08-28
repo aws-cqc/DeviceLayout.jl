@@ -515,7 +515,9 @@ function _prefix_placement_names!(sch::Schematic)
         end
         for (idx, ref) in pairs(refs(node_cs))
             haskey(ref_to_node_id, ref) && continue
-            ref_copy = deepcopy(ref)
+            # Copy only the mutable reference shell. map_metadata independently copies the
+            # referenced structure, so recursively copying it here would be redundant.
+            ref_copy = copy(ref)
             # map_metadata resolves each placement-specific component copy here. The active
             # recovery context caches that result so flattening does not resolve it again.
             ref_copy.structure =
@@ -529,44 +531,6 @@ end
 function _direction_vector(direction)
     turns = Float64(ustrip(°, direction)) / 180
     return Float64[cospi(turns), sinpi(turns), 0.0]
-end
-
-"""
-    _lumped_port_directions(cs) -> Dict{String, Vector{Float64}}
-
-Resolve the final in-plane direction of every placed lumped-port occurrence without
-flattening the hierarchy. Keys are source physical-group identities, which remain stable
-when compiler operations generate new physical-group names while preserving `entity_meta`.
-"""
-function _lumped_port_directions(cs)::Dict{String, Vector{Float64}}
-    directions = Dict{String, Vector{Float64}}()
-    for (subcs, trans) in DeviceLayout.traversal(cs)
-        for (ent, meta) in zip(elements(subcs), element_metadata(subcs))
-            (meta isa EntityMeta && meta.role isa LumpedPort) || continue
-            group_name = physical_group_name(meta)
-            local_direction = DeviceLayout.extract_direction(ent)
-            isnothing(local_direction) && throw(
-                ArgumentError(
-                    "Placed LumpedPort '$group_name' has no WithDirection style; " *
-                    "annotate its geometry with `entity |> WithDirection(angle)`"
-                )
-            )
-            direction =
-                _direction_vector(DeviceLayout.rotated_direction(local_direction, trans))
-            if haskey(directions, group_name) &&
-               !isapprox(directions[group_name], direction; atol=1e-12, rtol=1e-12)
-                throw(
-                    ArgumentError(
-                        "Placed LumpedPort occurrences for physical-group identity " *
-                        "'$group_name' have inconsistent final directions; assign distinct " *
-                        "EntityMeta `name` or `index` values"
-                    )
-                )
-            end
-            directions[group_name] = direction
-        end
-    end
-    return directions
 end
 
 """
@@ -617,15 +581,55 @@ function render!(
                     _prefix_placement_names!(sch_copy)
                     return DeviceLayout.flatten(sch_copy.coordinate_system)
                 end
-            # Collect transformed schematic data once, then compile the declarative layer
-            # operations before invoking Gmsh. Interface intersections remain deferred until
-            # after fragmentation has produced conformal topology.
-            # Resolve transformed in-plane directions for all lumped-port source identities.
-            lumped_port_directions = _lumped_port_directions(flat)
-            # Collect semantic metadata from every entity in the transformed hierarchy.
-            metas = _entity_metas(flat)
-            # Record transformed locator positions for post-fragmentation geometric queries.
-            locators = find_locators(flat, target.stack)
+            # The flat geometry is the canonical stream of placed metadata occurrences.
+            # Collect compiler metadata and role-specific geometric facts in one pass.
+            lumped_port_directions = Dict{String, Vector{Float64}}()
+            metas = EntityMeta[]
+            locator_candidates = Tuple{Any, EntityMeta}[]
+            for (entity, entity_meta) in zip(elements(flat), element_metadata(flat))
+                entity_meta isa EntityMeta || continue
+                push!(metas, entity_meta)
+                if entity_meta.role isa LumpedPort
+                    pg_name = physical_group_name(entity_meta)
+                    local_direction = DeviceLayout.extract_direction(entity)
+                    isnothing(local_direction) && throw(
+                        ArgumentError(
+                            "Placed LumpedPort '$pg_name' has no WithDirection style; " *
+                            "annotate its geometry with `WithDirection(angle)`"
+                        )
+                    )
+                    direction = _direction_vector(local_direction)
+                    haskey(lumped_port_directions, pg_name) && throw(
+                        ArgumentError(
+                            "Multiple placed LumpedPort occurrences in physical group " *
+                            "'$pg_name'; assign distinct EntityMeta `name` or " *
+                            "`index` values"
+                        )
+                    )
+                    lumped_port_directions[pg_name] = direction
+                elseif entity_meta.role isa Locator
+                    push!(locator_candidates, (entity, entity_meta))
+                end
+            end
+
+            # Resolve locators only after every port is validated, preserving error priority.
+            locators = LocatorRecord[]
+            for (entity, entity_meta) in locator_candidates
+                entity_meta.role isa Terminal && isempty(entity_meta.name) && continue
+                entity_meta.role isa Tag &&
+                    isempty(entity_meta.name) &&
+                    throw(ArgumentError("Tag locators must have a nonempty name"))
+                source_layer = sourcelayer(entity_meta, target.stack)
+                source_layer.solidmodel || continue
+                ctr = center(bounds(entity))
+                position = (
+                    SolidModels._stp_float(getx(ctr)),
+                    SolidModels._stp_float(gety(ctr)),
+                    SolidModels._stp_float(layer_z(entity_meta.layer, target.stack))
+                )
+                push!(locators, LocatorRecord(entity_meta, position))
+            end
+
             # Seed compiler state with the physical groups produced directly by artwork.
             registry = initial_registry(metas, target.stack)
             # Prepend required source-layer extrusions to the user-supplied operation schedule.
