@@ -20,7 +20,6 @@ function _entity_pg_map(sm::SolidModel)
     return tag_to_pgs
 end
 
-
 function _resolve_entity_pgs(tag_to_pgs::Dict{Int32, Vector{String}}, tags::Vector{Int32})
     pgs = Set{String}()
     for tag in tags
@@ -54,9 +53,8 @@ function serialize_metadata(
         "schema_version" => "1.0.0",
         "length_units" => "um",
         "assembly" => Dict{String, Any}(
-            "levels" => Dict(
-                string(level) => SolidModels._stp_float(z) for (level, z) in stack.levels
-            )
+            "levels" =>
+                Dict(string(level) => _stp_float(z) for (level, z) in stack.levels)
         )
     )
 
@@ -126,9 +124,8 @@ function serialize_metadata(
             source_layer = stack.layers[layer_name]
             layer_entry["type"] = "source"
             layer_entry["level"] = first(source_layer.level)
-            layer_entry["height"] = SolidModels._stp_float(first(source_layer.height))
-            layer_entry["thickness"] =
-                SolidModels._stp_float(thickness(source_layer, stack))
+            layer_entry["height"] = _stp_float(first(source_layer.height))
+            layer_entry["thickness"] = _stp_float(thickness(source_layer, stack))
         else
             layer_entry["type"] = "generated"
         end
