@@ -9,7 +9,7 @@ using Unitful
 using DeviceLayout
 using DeviceLayout: Coordinate, GDSMeta, μm, ustrip
 using ..SolidModels
-import ..SolidModels: SolidModel
+using ..SolidModels: SolidModel, _stp_float
 
 import DeviceLayout: datatype, gdslayer, layer, layerindex, name, render!
 
@@ -390,6 +390,20 @@ function _split_shared_cc_pgs!(
     return nothing
 end
 
+function _check_pgs_registered(sm::SolidModel, registry::LayerRegistry)
+    registered =
+        Set((record.name, state.dim) for state in values(registry) for record in state.pgs)
+    unregistered = Tuple{String, Int}[]
+    for dim = 0:3, name in keys(SolidModels.dimgroupdict(sm, dim))
+        (name, dim) in registered || push!(unregistered, (name, dim))
+    end
+    isempty(unregistered) || error(
+        "Solid model contains physical groups absent from the layer registry: " *
+        join(["'$name' (dimension $dim)" for (name, dim) in unregistered], ", ")
+    )
+    return nothing
+end
+
 """
     _warn_potential_overlaps(registry::LayerRegistry, stack::SourceStack)
 
@@ -413,8 +427,8 @@ function _warn_potential_overlaps(registry::LayerRegistry, stack::SourceStack)
     layer_z_ranges = Dict{Symbol, Tuple{Float64, Float64}}()
     for layer_name in extruded_source_layers
         source_layer = stack.layers[layer_name]
-        z_base = SolidModels._stp_float(layer_z(layer_name, stack))
-        dz = SolidModels._stp_float(thickness(source_layer, stack))
+        z_base = _stp_float(layer_z(layer_name, stack))
+        dz = _stp_float(thickness(source_layer, stack))
         z_min = min(z_base, z_base + dz)
         z_max = max(z_base, z_base + dz)
         layer_z_ranges[layer_name] = (z_min, z_max)
@@ -461,12 +475,14 @@ SolidModelTarget(stack::SourceStack{L, T}) where {L, T} =
 SolidModelTarget(stack::SourceStack{L, T}, ops::AbstractVector{<:Tuple}) where {L, T} =
     SolidModelTarget{L, T}(stack, Tuple[ops...])
 
-function _map_meta_for_stack(stack::SourceStack, m::EntityMeta)
-    sl = sourcelayer(m, stack)
-    (!sl.solidmodel || m.role isa Locator) && return nothing
-    return physical_group_name(m)
+function _map_meta(target::SolidModelTarget)
+    return meta -> begin
+        meta isa EntityMeta || return nothing
+        source_layer = sourcelayer(meta, target.stack)
+        (!source_layer.solidmodel || meta.role isa Locator) && return nothing
+        return physical_group_name(meta)
+    end
 end
-_map_meta_for_stack(::SourceStack, ::DeviceLayout.Meta) = nothing
 
 function _extrusions(stack::SourceStack, reg::LayerRegistry)
     operations = Tuple[]
@@ -526,11 +542,6 @@ function _prefix_placement_names!(sch::Schematic)
         end
     end
     return sch
-end
-
-function _direction_vector(direction)
-    turns = Float64(ustrip(°, direction)) / 180
-    return Float64[cospi(turns), sinpi(turns), 0.0]
 end
 
 """
@@ -598,7 +609,6 @@ function render!(
                             "annotate its geometry with `WithDirection(angle)`"
                         )
                     )
-                    direction = _direction_vector(local_direction)
                     haskey(lumped_port_directions, pg_name) && throw(
                         ArgumentError(
                             "Multiple placed LumpedPort occurrences in physical group " *
@@ -606,6 +616,8 @@ function render!(
                             "`index` values"
                         )
                     )
+                    direction = Float64[cospi(turns), sinpi(turns), 0.0]
+                    turns = Float64(ustrip(°, local_direction)) / 180
                     lumped_port_directions[pg_name] = direction
                 elseif entity_meta.role isa Locator
                     push!(locator_candidates, (entity, entity_meta))
@@ -621,12 +633,13 @@ function render!(
                     throw(ArgumentError("Tag locators must have a nonempty name"))
                 source_layer = sourcelayer(entity_meta, target.stack)
                 source_layer.solidmodel || continue
-                ctr = center(bounds(entity))
-                position = (
-                    SolidModels._stp_float(getx(ctr)),
-                    SolidModels._stp_float(gety(ctr)),
-                    SolidModels._stp_float(layer_z(entity_meta.layer, target.stack))
-                )
+                r = center(bounds(entity))
+                position =
+                    _stp_float.((
+                        getx(r),
+                        gety(r),
+                        layer_z(entity_meta.layer, target.stack)
+                    ))
                 push!(locators, LocatorRecord(entity_meta, position))
             end
 
@@ -649,7 +662,7 @@ function render!(
                     sm,
                     flat;
                     preflattened=true,
-                    map_meta=meta -> _map_meta_for_stack(target.stack, meta),
+                    map_meta=_map_meta(target),
                     postrender_ops=pg_operations,
                     retained_physical_groups=retained_groups,
                     zmap=meta -> layer_z(meta.layer, target.stack),
@@ -679,6 +692,8 @@ function render!(
                 entity_bboxes
             )
             execute_deferred_interfaces!(sm, deferred_interfaces)
+            # Downstream discovery assumes every realized PG has semantic registry data.
+            _check_pgs_registered(sm, registry)
             terminal_result =
                 add_terminals!(sm, registry, target.stack, locators, entity_bboxes)
 
