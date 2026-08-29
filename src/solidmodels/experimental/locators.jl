@@ -3,35 +3,6 @@ struct LocatorRecord
     position::NTuple{3, Float64}
 end
 
-"""
-    find_locators(cs, stack) -> Vector{LocatorRecord}
-
-Extract one locator record per transformed reference occurrence without flattening `cs`.
-Locator geometry is excluded from the mesh but remains visible to this discovery pass.
-"""
-function find_locators(cs, stack::SourceStack)
-    records = LocatorRecord[]
-    for (subcs, trans) in DeviceLayout.traversal(cs)
-        for (entity_meta, element) in zip(element_metadata(subcs), elements(subcs))
-            entity_meta isa EntityMeta || continue
-            entity_meta.role isa Locator || continue
-            entity_meta.role isa Terminal && isempty(entity_meta.name) && continue
-            entity_meta.role isa Tag &&
-                isempty(entity_meta.name) &&
-                throw(ArgumentError("Tag locators must have a nonempty name"))
-            source_layer = sourcelayer(entity_meta, stack)
-            source_layer.solidmodel || continue
-            global_element = trans(element)
-            ctr = center(bounds(global_element))
-            cx = SolidModels._stp_float(getx(ctr))
-            cy = SolidModels._stp_float(gety(ctr))
-            z = SolidModels._stp_float(layer_z(entity_meta.layer, stack))
-            push!(records, LocatorRecord(entity_meta, (cx, cy, z)))
-        end
-    end
-    return records
-end
-
 function _entity_rtree(entity_tags, bbox_cache::Dict{Int32, NTuple{6, Float64}})
     tree = SpatialIndexing.RTree{Float64, 3}(Int32)
     isempty(entity_tags) && return tree
@@ -52,22 +23,23 @@ function _containing_entity_tag(locator::LocatorRecord, entity_rtree; tol=1e-6)
     query = SpatialIndexing.Rect((x - tol, y - tol, z - tol), (x + tol, y + tol, z + tol))
     candidates = SpatialIndexing.intersects_with(entity_rtree, query)
     found_tag = Int32(0)
-    hit_count = 0
+    count = 0
     for candidate in candidates
         tag = candidate.val
         zmin = candidate.mbr.low[3]
         zmax = candidate.mbr.high[3]
-        (abs(zmax - zmin) < tol && abs(zmin - z) < tol) || continue
+        coplanar = (abs(zmax - zmin) < tol && abs(zmin - z) < tol)
+        coplanar || continue
         inside_count = SolidModels.gmsh.model.isInside(2, Int(tag), [x, y, z])
         if inside_count > 0
-            hit_count += 1
+            count += 1
             found_tag = tag
         end
     end
-    if hit_count > 1
+    if count > 1
         error(
             "Locator '$(locator.meta.name)' at $(locator.position) matched " *
-            "$hit_count entities; expected exactly 1 on a fragmented plane"
+            "$count entities; expected exactly 1 on a fragmented plane"
         )
     end
     return found_tag
