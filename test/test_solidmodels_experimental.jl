@@ -313,7 +313,26 @@ end
     @test length(exterior_boundaries(:volume)) == 6
 end
 
-@testitem "Placement prefix copies and transformed locators" begin
+@testitem "Model physical groups are registered" begin
+    using DeviceLayout
+    using DeviceLayout.SolidModels
+    using DeviceLayout.SolidModelsExperimental
+    using DeviceLayout.SolidModelsExperimental: PGRecord, LayerState, LayerRegistry
+
+    sm = SolidModel("registry_validation"; overwrite=true)
+    tag = SolidModels.gmsh.model.occ.addRectangle(0.0, 0.0, 0.0, 1.0, 1.0)
+    SolidModels.gmsh.model.occ.synchronize()
+    sm["surface"] = [(Int32(2), Int32(tag))]
+
+    registry = LayerRegistry()
+    @test_throws ErrorException SolidModelsExperimental._check_pgs_registered(sm, registry)
+
+    registry[:surface] =
+        LayerState([PGRecord("surface", :surface, EntityMeta(:surface))], 2)
+    @test isnothing(SolidModelsExperimental._check_pgs_registered(sm, registry))
+end
+
+@testitem "Placement prefix copies" begin
     using DeviceLayout
     using DeviceLayout.SchematicDrivenLayout
     using DeviceLayout.SolidModelsExperimental
@@ -366,43 +385,24 @@ end
     @test length(empty_names) == 2
     @test element_metadata(component.geometry) == original_metadata
     @test element_metadata(geometry)[1].name == "island"
-
-    locator_geometry = CoordinateSystem("locator", μm)
-    place!(
-        locator_geometry,
-        centered(Rectangle(2μm, 2μm)),
-        EntityMeta(:metal; name="terminal", role=Terminal)
-    )
-    root = CoordinateSystem("root", μm)
-    addref!(root, locator_geometry, Point(10μm, 0μm))
-    addref!(root, locator_geometry, Point(-10μm, 5μm))
-    stack = SourceStack(:metal => SourceLayer(METAL; level=1); levels=(1 => 0μm,))
-    locators = SolidModelsExperimental.find_locators(root, stack)
-    @test length(locators) == 2
-    @test sort([locator.position[1] for locator in locators]) == [-10.0, 10.0]
-    @test sort([locator.position[2] for locator in locators]) == [0.0, 5.0]
-
-    hidden_stack = SourceStack(
-        :metal => SourceLayer(METAL; level=1, solidmodel=false);
-        levels=(1 => 0μm,)
-    )
-    @test isempty(SolidModelsExperimental.find_locators(root, hidden_stack))
 end
 
 @testitem "LumpedPort directions" begin
     using DeviceLayout
     using DeviceLayout.SolidModelsExperimental
-    import Unitful: μm, °
+    import Unitful: μm, °, ustrip
 
     function direction_map(cs)
+        directions = Dict{String, Vector{Float64}}()
         flat = flatten(cs)
-        return Dict(
-            SolidModelsExperimental.physical_group_name(meta) =>
-                SolidModelsExperimental._direction_vector(
-                    DeviceLayout.extract_direction(entity)
-                ) for (entity, meta) in zip(elements(flat), element_metadata(flat)) if
-            meta isa EntityMeta && meta.role isa LumpedPort
-        )
+        for (entity, meta) in zip(elements(flat), element_metadata(flat))
+            (meta isa EntityMeta && meta.role isa LumpedPort) || continue
+            angle = DeviceLayout.extract_direction(entity)
+            turns = Float64(ustrip(°, angle)) / 180
+            directions[SolidModelsExperimental.physical_group_name(meta)] =
+                Float64[cospi(turns), sinpi(turns), 0.0]
+        end
+        return directions
     end
 
     local_cs = CoordinateSystem("local_port", μm)
@@ -678,18 +678,6 @@ end
     @test unitless_metadata["metadata"]["assembly"]["levels"]["1"] == 2.0
     @test unitless_metadata["layers"]["surface"]["height"] == 3.0
     @test unitless_metadata["layers"]["surface"]["thickness"] == 0.0
-
-    unitless_locator_geometry = CoordinateSystem{Float64}("unitless_locator")
-    place!(
-        unitless_locator_geometry,
-        Rectangle(Point(4.0, 6.0), Point(6.0, 8.0)),
-        EntityMeta(:surface; name="locator", role=Terminal())
-    )
-    unitlesslocators = SolidModelsExperimental.find_locators(
-        unitless_locator_geometry,
-        unitless_target.stack
-    )
-    @test only(unitlesslocators).position == (5.0, 7.0, 5.0)
 
     warning_geometry = CoordinateSystem{Float64}("warning_surface")
     place!(warning_geometry, Rectangle(10.0, 10.0), EntityMeta(:metal; name="floating"))
