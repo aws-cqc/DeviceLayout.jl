@@ -61,13 +61,13 @@ DeviceLayout.name(m::EntityMeta) = m.name
 Base.broadcastable(m::EntityMeta) = Ref(m)
 
 """
-    physical_group_name(m::EntityMeta) -> String
+    pgname(m::EntityMeta) -> String
 
 Return the stable physical-group name for `m`.
 """
-function physical_group_name(m::EntityMeta)
+function pgname(m::EntityMeta)
     return string(m.layer, "__", m.name, "__i", m.index, "__r", m.role)
 end
 
 # Preserve the prototype compiler spelling within the SolidModelsExperimental namespace.
-map_meta(m::EntityMeta) = physical_group_name(m)
+map_meta(m::EntityMeta) = pgname(m)

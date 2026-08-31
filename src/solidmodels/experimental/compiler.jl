@@ -16,7 +16,7 @@ function initial_registry(metas::AbstractVector{<:EntityMeta}, stack::SourceStac
     for meta in unique(metas)
         source_layer = sourcelayer(meta, stack)
         (!source_layer.solidmodel || meta.role isa Locator) && continue
-        record = PGRecord(physical_group_name(meta), meta.layer, meta)
+        record = PGRecord(pgname(meta), meta.layer, meta)
         state = get!(registry, meta.layer) do
             return LayerState(PGRecord[], 2)
         end
