@@ -6,12 +6,8 @@
             return DemoQPU17.qpu17_demo(dir=tdir)
         end
     end
-    expected_error_groups = ("bridge", "_shadow", "_leg")
     @test all(logger.logs) do log
-        return log.level < Logging.Warn || (
-            log.level == Logging.Error &&
-            any(group -> occursin(group, log.message), expected_error_groups)
-        )
+        return log.level < Logging.Warn
     end
     # Check for changes to geometry
     if VERSION >= v"1.12-"
