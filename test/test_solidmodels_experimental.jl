@@ -177,17 +177,11 @@ end
     @test length(shifted_names) == 2
     @test allunique(shifted_names)
     @test count(operation -> operation[2] == SolidModels.translate!, two_translate_ops) == 2
-    @test SolidModelsExperimental.generated_pg_name(
-        :generated,
+    @test SolidModelsExperimental.operation_hash(
         "object",
         ["tool"];
         operation=:difference
-    ) != SolidModelsExperimental.generated_pg_name(
-        :generated,
-        "object",
-        ["tool"];
-        operation=:intersect
-    )
+    ) != SolidModelsExperimental.operation_hash("object", ["tool"]; operation=:intersect)
 
     malformed_operations = [
         (:bad, SolidModels.translate!, (:metal, 1μm)),
@@ -362,10 +356,9 @@ end
     names_by_node = Dict{String, Vector{String}}()
     for (node, ref) in sch_copy.ref_dict
         names_by_node[node.id] = [
-            entity_meta.name for
+            meta.name for
             (subcs, _) in DeviceLayout.traversal(DeviceLayout.structure(ref)) for
-            entity_meta in element_metadata(subcs) if
-            entity_meta isa EntityMeta && !isempty(entity_meta.name)
+            meta in element_metadata(subcs) if meta isa EntityMeta && !isempty(meta.name)
         ]
     end
     @test "q1.island" in names_by_node["q1"]
@@ -377,10 +370,8 @@ end
         vcat(values(names_by_node)...)
     )
     empty_names = [
-        entity_meta.name for
-        (subcs, _) in DeviceLayout.traversal(sch_copy.coordinate_system) for
-        entity_meta in element_metadata(subcs) if
-        entity_meta isa EntityMeta && isempty(entity_meta.name)
+        meta.name for (subcs, _) in DeviceLayout.traversal(sch_copy.coordinate_system)
+        for meta in element_metadata(subcs) if meta isa EntityMeta && isempty(meta.name)
     ]
     @test length(empty_names) == 2
     @test element_metadata(component.geometry) == original_metadata
@@ -1018,9 +1009,8 @@ end
         @testset "Port metadata preserved" begin
             pgs = solid_model_metadata["physical_groups"]
             port_pgs = filter(pgs) do (_, data)
-                entity_meta = data["entity_meta"]
-                return !isnothing(entity_meta) &&
-                       entity_meta["role"]["type"] == "LumpedPort"
+                meta = data["entity_meta"]
+                return !isnothing(meta) && meta["role"]["type"] == "LumpedPort"
             end
             # Each transmon gets its own port PG (names prefixed by component node ID)
             @test length(port_pgs) == 2
