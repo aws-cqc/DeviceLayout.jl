@@ -120,6 +120,7 @@ export @component,
     rem_node!,
     replace_component!,
     route!,
+    save_schematic,
     set_parameters
 export ParameterSet,
     MissingNamespace, ParameterKeyError, resolve, leaf_params, save_parameter_set
@@ -148,6 +149,7 @@ include("components/composite_components.jl")
 include("components/builtin_components.jl")
 include("parameter_set_extraction.jl")
 include("routes.jl")
+include("schematic_export.jl")
 include("components/variants.jl")
 include("solidmodels.jl")
 include("pdktools.jl")

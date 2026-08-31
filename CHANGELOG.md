@@ -6,6 +6,17 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - `save_schematic(dir, ::SchematicGraph)` and `save_schematic(dir, ::Schematic)` (requires
+    `using YAML`) write a read-only YAML bundle for external tooling: `topology.yml` (nodes,
+    edges, additional hooks, and vertex/edge properties, recursing into composite subgraphs),
+    `parameters.yml` (the `extract_parameter_set` result), and, when a planned `Schematic` is
+    given, `floorplan.yml` (global transformations, resolved hooks, bounds, and resolved route
+    geometry, with composite-internal nodes addressed by node-ID path). All files share a
+    `bundle` identity with the design name, a source fingerprint, the generating package
+    version, and a timestamp.
+
 ### Fixed
 
   - Curve recovery (`union2d_curved` and friends) preserves arcs from path nodes styled with

@@ -123,6 +123,7 @@ SchematicDrivenLayout.check!
 SchematicDrivenLayout.build!
 SchematicDrivenLayout.render!(::SchematicDrivenLayout.AbstractCoordinateSystem, ::SchematicDrivenLayout.Schematic, ::SchematicDrivenLayout.LayoutTarget; kwargs...)
 render!(::DeviceLayout.SolidModel, ::SchematicDrivenLayout.Schematic, ::SchematicDrivenLayout.Target; kwargs...)
+SchematicDrivenLayout.save_schematic
 ```
 
 ### [Technologies](@id api-technologies)
