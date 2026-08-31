@@ -1,7 +1,7 @@
 struct PGRecord
     name::String
     layer::Symbol
-    entity_meta::Union{EntityMeta, Nothing}
+    meta::Union{EntityMeta, Nothing}
 end
 
 mutable struct LayerState
@@ -11,13 +11,13 @@ end
 
 const LayerRegistry = Dict{Symbol, LayerState}
 
-function initial_registry(entity_metas::AbstractVector{<:EntityMeta}, stack::SourceStack)
+function initial_registry(metas::AbstractVector{<:EntityMeta}, stack::SourceStack)
     registry = LayerRegistry()
-    for entity_meta in unique(entity_metas)
-        source_layer = sourcelayer(entity_meta, stack)
-        (!source_layer.solidmodel || entity_meta.role isa Locator) && continue
-        record = PGRecord(physical_group_name(entity_meta), entity_meta.layer, entity_meta)
-        state = get!(registry, entity_meta.layer) do
+    for meta in unique(metas)
+        source_layer = sourcelayer(meta, stack)
+        (!source_layer.solidmodel || meta.role isa Locator) && continue
+        record = PGRecord(physical_group_name(meta), meta.layer, meta)
+        state = get!(registry, meta.layer) do
             return LayerState(PGRecord[], 2)
         end
         any(existing -> existing.name == record.name, state.pgs) || push!(state.pgs, record)
@@ -163,13 +163,17 @@ function execute_deferred_interfaces!(sm::SolidModel, interfs::MetaGraphs.MetaDi
     return nothing
 end
 
-"""
-    generated_pg_name(dest, obj_pg, tool_pgs; operation, parameters=()) -> String
+function pghash(dimtags)
+    content = join(sort(["$dim,$tag" for (dim, tag) in dimtags]), "&")
+    return bytes2hex(sha1(content))[1:16]
+end
 
-Return the content-addressed physical-group name for a generated layer operation.
 """
-function generated_pg_name(
-    dest::Symbol,
+    operation_hash(obj_pg, tool_pgs; operation, parameters=()) -> String
+
+Return the content hash for a generated layer operation.
+"""
+function operation_hash(
     obj_pg::String,
     tool_pgs::Vector{String};
     operation::Symbol,
@@ -177,8 +181,7 @@ function generated_pg_name(
 )
     content =
         join((string(operation), obj_pg, join(sort(tool_pgs), "&"), repr(parameters)), "\0")
-    digest = sha1(content)
-    return string(dest) * "__" * bytes2hex(digest)[1:16]
+    return bytes2hex(sha1(content))[1:16]
 end
 
 _content_kwargs(kwargs) = Tuple(sort(collect(kwargs); by=keyword -> string(first(keyword))))
@@ -578,14 +581,11 @@ function _compile_extrude!(
     # exterior-only (or shared with another layer) from sub-PGs whose faces are
     # purely interior interfaces, avoiding the "mixed boundary attribute" warning
     # that Palace emits for PGs containing both kinds of faces.
-    function _register_extbnd_misc!(bnd_pg, entity_meta)
+    function _register_extbnd_misc!(bnd_pg, meta)
         if !haskey(registry, :EXTBND_MISC)
             registry[:EXTBND_MISC] = LayerState(PGRecord[], 2)
         end
-        return push!(
-            registry[:EXTBND_MISC].pgs,
-            PGRecord(bnd_pg, :EXTBND_MISC, entity_meta)
-        )
+        return push!(registry[:EXTBND_MISC].pgs, PGRecord(bnd_pg, :EXTBND_MISC, meta))
     end
 
     for record in state.pgs
@@ -608,11 +608,11 @@ function _compile_extrude!(
                 )
                 push!(pg_ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
                 push!(get!(interior_solids, layer_name, String[]), int_pg)
-                _register_extbnd_misc!(intbnd_pg, record.entity_meta)
+                _register_extbnd_misc!(intbnd_pg, record.meta)
             else
                 push!(pg_ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
             end
-            push!(new_records, PGRecord(ext_pg, layer_name, record.entity_meta))
+            push!(new_records, PGRecord(ext_pg, layer_name, record.meta))
         elseif !source_layer.keep_interior
             # Boundary-only extrusion: extrude to solid, extract boundary, discard interior.
             # The solid is registered for auto-subtraction from surrounding volumes.
@@ -625,14 +625,14 @@ function _compile_extrude!(
             )
             push!(pg_ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
             push!(get!(interior_solids, layer_name, String[]), ext_pg)
-            push!(new_records, PGRecord(bnd_pg, layer_name, record.entity_meta))
-            _register_extbnd_misc!(bnd_pg, record.entity_meta)
+            push!(new_records, PGRecord(bnd_pg, layer_name, record.meta))
+            _register_extbnd_misc!(bnd_pg, record.meta)
         else
             # Standard extrusion: 2D surface → 3D volume
             ext_pg = pg * "__EXN"
             push!(pg_ops, (ext_pg, SolidModels.extrude_z!, (pg, dz, 2)))
             push!(pg_ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
-            push!(new_records, PGRecord(ext_pg, layer_name, record.entity_meta))
+            push!(new_records, PGRecord(ext_pg, layer_name, record.meta))
         end
     end
 
@@ -721,13 +721,15 @@ function _compile_difference!(
         # Create or append mode.
         new_records = PGRecord[]
         for record in object_state.pgs
-            dest_name = generated_pg_name(
-                dest,
-                record.name,
-                tool_pg_names;
-                operation=:difference,
-                parameters=(dim, remove_object)
-            )
+            dest_name =
+                string(dest) *
+                "__" *
+                operation_hash(
+                    record.name,
+                    tool_pg_names;
+                    operation=:difference,
+                    parameters=(dim, remove_object)
+                )
             generated_record_exists(registry, dest, dest_name, new_records) && continue
             push!(
                 pg_ops,
@@ -747,7 +749,7 @@ function _compile_difference!(
             _require_destination_dimension(registry, dest, dim)
             existing_pgs = [
                 record.name for record in registry[dest].pgs if
-                isnothing(record.entity_meta) || !(record.entity_meta.role isa Locator)
+                isnothing(record.meta) || !(record.meta.role isa Locator)
             ]
             if !isempty(existing_pgs)
                 for record in new_records
@@ -814,27 +816,27 @@ function _compile_union!(
             # exists independently, append distinct records without discarding its state.
             new_records = PGRecord[]
             for record in state.pgs
-                dest_name = generated_pg_name(
-                    dest,
-                    record.name,
-                    String[];
-                    operation=:union,
-                    parameters=(state.dim,)
-                )
+                dest_name =
+                    string(dest) *
+                    "__" *
+                    operation_hash(
+                        record.name,
+                        String[];
+                        operation=:union,
+                        parameters=(state.dim,)
+                    )
                 generated_record_exists(registry, dest, dest_name, new_records) && continue
                 push!(
                     pg_ops,
                     (dest_name, SolidModels.union_geom!, (record.name, state.dim))
                 )
-                push!(new_records, PGRecord(dest_name, dest, record.entity_meta))
+                push!(new_records, PGRecord(dest_name, dest, record.meta))
             end
             if haskey(registry, dest)
                 _require_destination_dimension(registry, dest, state.dim)
                 existing_pgs = [
-                    record.name for record in registry[dest].pgs if !(
-                        !isnothing(record.entity_meta) &&
-                        record.entity_meta.role isa Locator
-                    )
+                    record.name for record in registry[dest].pgs if
+                    !(!isnothing(record.meta) && record.meta.role isa Locator)
                 ]
                 if !isempty(existing_pgs)
                     for record in new_records
@@ -871,13 +873,15 @@ function _compile_union!(
         end
 
         sorted_pg_names = sort(all_pg_names)
-        dest_name = generated_pg_name(
-            dest,
-            first(sorted_pg_names),
-            sorted_pg_names[2:end];
-            operation=:union,
-            parameters=(dim,)
-        )
+        dest_name =
+            string(dest) *
+            "__" *
+            operation_hash(
+                first(sorted_pg_names),
+                sorted_pg_names[2:end];
+                operation=:union,
+                parameters=(dim,)
+            )
         new_record = PGRecord(dest_name, dest, nothing)
         duplicate = generated_record_exists(registry, dest, dest_name)
         duplicate ||
@@ -889,7 +893,7 @@ function _compile_union!(
             # geometry again or duplicate the layer's physical-group list.
             existing_pgs = [
                 record.name for record in registry[dest].pgs if
-                isnothing(record.entity_meta) || !(record.entity_meta.role isa Locator)
+                isnothing(record.meta) || !(record.meta.role isa Locator)
             ]
             if !duplicate && !isempty(existing_pgs)
                 push!(
@@ -942,13 +946,15 @@ function _compile_intersect!(
     new_recs = PGRecord[]
     for obj_rec in obj_state.pgs
         for tool_rec in tool_state.pgs
-            dest_name = generated_pg_name(
-                dest,
-                obj_rec.name,
-                [tool_rec.name];
-                operation=:intersect,
-                parameters=(obj_dim, tool_dim)
-            )
+            dest_name =
+                string(dest) *
+                "__" *
+                operation_hash(
+                    obj_rec.name,
+                    [tool_rec.name];
+                    operation=:intersect,
+                    parameters=(obj_dim, tool_dim)
+                )
             generated_record_exists(registry, dest, dest_name, new_recs) && continue
             # All intersections are deferred to post-fragmentation. Same-dim
             # intersections find shared boundary entities (dim-1); mixed-dim
@@ -1035,13 +1041,15 @@ function _compile_get_boundary!(
         # Create/append mode
         new_records = PGRecord[]
         for record in state.pgs
-            dest_name = generated_pg_name(
-                dest,
-                record.name,
-                String[];
-                operation=:boundary,
-                parameters=(dim, _content_kwargs(kwargs))
-            )
+            dest_name =
+                string(dest) *
+                "__" *
+                operation_hash(
+                    record.name,
+                    String[];
+                    operation=:boundary,
+                    parameters=(dim, _content_kwargs(kwargs))
+                )
             generated_record_exists(registry, dest, dest_name, new_records) && continue
             push!(
                 pg_ops,
@@ -1098,13 +1106,15 @@ function _compile_translate!(
         # Create/append mode (copy-translate)
         new_records = PGRecord[]
         for record in state.pgs
-            dest_name = generated_pg_name(
-                dest,
-                record.name,
-                String[];
-                operation=:translate,
-                parameters=(dx, dy, dz)
-            )
+            dest_name =
+                string(dest) *
+                "__" *
+                operation_hash(
+                    record.name,
+                    String[];
+                    operation=:translate,
+                    parameters=(dx, dy, dz)
+                )
             generated_record_exists(registry, dest, dest_name, new_records) && continue
             push!(
                 pg_ops,
@@ -1187,13 +1197,15 @@ function _compile_revolve!(
     else
         new_records = PGRecord[]
         for record in state.pgs
-            dest_name = generated_pg_name(
-                dest,
-                record.name,
-                String[];
-                operation=:revolve,
-                parameters=(dim, x, y, z, ax, ay, az, θ)
-            )
+            dest_name =
+                string(dest) *
+                "__" *
+                operation_hash(
+                    record.name,
+                    String[];
+                    operation=:revolve,
+                    parameters=(dim, x, y, z, ax, ay, az, θ)
+                )
             generated_record_exists(registry, dest, dest_name, new_records) && continue
             push!(
                 pg_ops,

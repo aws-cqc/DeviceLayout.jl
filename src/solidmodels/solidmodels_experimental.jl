@@ -63,8 +63,8 @@ end
 function _entity_metas(cs)
     metas = EntityMeta[]
     for (subcs, _) in DeviceLayout.traversal(cs)
-        for entity_meta in element_metadata(subcs)
-            entity_meta isa EntityMeta && push!(metas, entity_meta)
+        for meta in element_metadata(subcs)
+            meta isa EntityMeta && push!(metas, meta)
         end
     end
     return metas
@@ -119,12 +119,10 @@ function render!(
     selected_levels = collect(levels)
     isempty(selected_levels) &&
         throw(ArgumentError("levels must contain at least one level"))
-    for entity_meta in _entity_metas(cs)
-        sourcelayer(entity_meta, stack)
+    for meta in _entity_metas(cs)
+        sourcelayer(meta, stack)
     end
-    mapper =
-        entity_meta ->
-            _map_artwork_meta(stack, selected_levels, level_increment, entity_meta)
+    mapper = meta -> _map_artwork_meta(stack, selected_levels, level_increment, meta)
     return DeviceLayout.render!(cell, cs; map_meta=mapper, kwargs...)
 end
 
@@ -210,9 +208,7 @@ function _deduplicate_2d_pgs!(sm::SolidModel, registry::LayerRegistry)
                 sub_name = pg_name
             else
                 # Shared or foreign: generate a content-addressed name
-                dimtags_str = join(sort(["2,$(t)" for t in tags]), "&")
-                digest = sha1(dimtags_str)
-                sub_name = "__" * bytes2hex(digest)[1:16]
+                sub_name = "__" * pghash((2, tag) for tag in tags)
             end
             push!(sub_pgs, (sub_name, signature))
 
@@ -342,8 +338,7 @@ function _split_shared_cc_pgs!(
 
         sub_names = String[]
         for tags in tag_groups
-            dimtags_str = join(sort(["2,$tag" for tag in tags]), "&")
-            sub_name = "__" * bytes2hex(sha1(dimtags_str))[1:16]
+            sub_name = "__" * pghash((2, tag) for tag in tags)
             sm[sub_name] = Tuple{Int32, Int32}[(Int32(2), tag) for tag in tags]
             push!(sub_names, sub_name)
         end
@@ -356,10 +351,10 @@ function _split_shared_cc_pgs!(
             push!(registered_layers, layer_name)
             filter!(record -> record.name != pg_name, state.pgs)
 
-            entity_meta = first(matching_records).entity_meta
+            meta = first(matching_records).meta
             for sub_name in sub_names
                 any(record -> record.name == sub_name, state.pgs) && continue
-                push!(state.pgs, PGRecord(sub_name, layer_name, entity_meta))
+                push!(state.pgs, PGRecord(sub_name, layer_name, meta))
             end
         end
 
@@ -498,9 +493,7 @@ function _retained_physical_groups(reg::LayerRegistry)
     retained = Set{Tuple{String, Int}}()
     for state in values(reg)
         for record in state.pgs
-            !isnothing(record.entity_meta) &&
-                record.entity_meta.role isa Locator &&
-                continue
+            !isnothing(record.meta) && record.meta.role isa Locator && continue
             push!(retained, (record.name, state.dim))
         end
     end
@@ -597,11 +590,11 @@ function render!(
             lumped_port_directions = Dict{String, Vector{Float64}}()
             metas = EntityMeta[]
             locator_candidates = Tuple{Any, EntityMeta}[]
-            for (entity, entity_meta) in zip(elements(flat), element_metadata(flat))
-                entity_meta isa EntityMeta || continue
-                push!(metas, entity_meta)
-                if entity_meta.role isa LumpedPort
-                    pg_name = physical_group_name(entity_meta)
+            for (entity, meta) in zip(elements(flat), element_metadata(flat))
+                meta isa EntityMeta || continue
+                push!(metas, meta)
+                if meta.role isa LumpedPort
+                    pg_name = physical_group_name(meta)
                     local_direction = DeviceLayout.extract_direction(entity)
                     isnothing(local_direction) && throw(
                         ArgumentError(
@@ -616,31 +609,27 @@ function render!(
                             "`index` values"
                         )
                     )
-                    direction = Float64[cospi(turns), sinpi(turns), 0.0]
                     turns = Float64(ustrip(°, local_direction)) / 180
+                    direction = Float64[cospi(turns), sinpi(turns), 0.0]
                     lumped_port_directions[pg_name] = direction
-                elseif entity_meta.role isa Locator
-                    push!(locator_candidates, (entity, entity_meta))
+                elseif meta.role isa Locator
+                    push!(locator_candidates, (entity, meta))
                 end
             end
 
             # Resolve locators only after every port is validated, preserving error priority.
             locators = LocatorRecord[]
-            for (entity, entity_meta) in locator_candidates
-                entity_meta.role isa Terminal && isempty(entity_meta.name) && continue
-                entity_meta.role isa Tag &&
-                    isempty(entity_meta.name) &&
+            for (entity, meta) in locator_candidates
+                meta.role isa Terminal && isempty(meta.name) && continue
+                meta.role isa Tag &&
+                    isempty(meta.name) &&
                     throw(ArgumentError("Tag locators must have a nonempty name"))
-                source_layer = sourcelayer(entity_meta, target.stack)
+                source_layer = sourcelayer(meta, target.stack)
                 source_layer.solidmodel || continue
                 r = center(bounds(entity))
                 position =
-                    _stp_float.((
-                        getx(r),
-                        gety(r),
-                        layer_z(entity_meta.layer, target.stack)
-                    ))
-                push!(locators, LocatorRecord(entity_meta, position))
+                    _stp_float.((getx(r), gety(r), layer_z(meta.layer, target.stack)))
+                push!(locators, LocatorRecord(meta, position))
             end
 
             # Seed compiler state with the physical groups produced directly by artwork.

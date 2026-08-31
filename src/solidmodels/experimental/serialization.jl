@@ -72,11 +72,11 @@ function serialize_metadata(
             )
 
             # Entity metadata.
-            if !isnothing(record.entity_meta)
-                entity_meta = record.entity_meta
-                role_dict = Dict{String, Any}("type" => string(entity_meta.role))
-                if entity_meta.role isa LumpedPort
-                    source_name = physical_group_name(entity_meta)
+            if !isnothing(record.meta)
+                meta = record.meta
+                role_dict = Dict{String, Any}("type" => string(meta.role))
+                if meta.role isa LumpedPort
+                    source_name = physical_group_name(meta)
                     haskey(lumped_port_directions, source_name) || error(
                         "Internal metadata serialization error: LumpedPort record " *
                         "'$(record.name)' has no resolved direction for source identity " *
@@ -85,8 +85,8 @@ function serialize_metadata(
                     role_dict["direction"] = lumped_port_directions[source_name]
                 end
                 pg_entry["entity_meta"] = Dict{String, Any}(
-                    "name" => entity_meta.name,
-                    "index" => entity_meta.index,
+                    "name" => meta.name,
+                    "index" => meta.index,
                     "role" => role_dict
                 )
             else
