@@ -6,12 +6,23 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - `save_render` writes a PNG, SVG, PDF, or EPS image together with a versioned JSON
+    manifest containing the exact viewport-to-canvas transform, selected output metadata,
+    resolved colors, rendering options, and image SHA-256. An overload for a
+    `CoordinateSystem` and `LayoutTarget` records per-call semantic-to-GDS mappings without
+    serializing the target's mutable mapping cache.
+
 ### Fixed
 
   - Curve recovery (`union2d_curved` and friends) preserves arcs from path nodes styled with
     `Plain` or `OptionalStyle` (as produced by `not_simulated`/`only_simulated` and friends),
     which previously fell back to discretization.
   - The `Rounded` style now works on `Paths.Node` with `Straight` or `Turn` segments
+  - Graphics export now clips viewport content to the top-left content rectangle when explicit
+    canvas dimensions have a different aspect ratio from the viewport, preventing geometry from
+    painting into the unused canvas area.
 
 ## 1.18.0 (2026-08-24)
 
