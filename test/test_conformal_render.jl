@@ -1,4 +1,4 @@
-@testitem "ConformalRender smoke" setup = [CommonTestSetup] begin
+@testitem "ConformalRender smoke" setup = [CommonTestSetup, QuietGmshSetup] begin
     using DeviceLayout:
         Point,
         Rectangle,
@@ -46,6 +46,7 @@
         # Two rectangles sharing an edge — the shared edge should resolve to
         # the same OCC tag in both loops, proving the cache works.
         sm = SolidModel("conformal_share_edge"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
@@ -90,10 +91,12 @@
         place!(cs, Rectangle(Point(10.0μm, 0.0μm), Point(20.0μm, 10.0μm)), :l1)
 
         sm_stock = SolidModel("stock"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         render!(sm_stock, cs)
         n_surf_stock = length(gmsh.model.occ.getEntities(2))
 
         sm_conformal = SolidModel("conformal"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         render_conformal!(sm_conformal, cs)
         n_surf_conformal = length(gmsh.model.occ.getEntities(2))
 
@@ -114,12 +117,14 @@
 
         # Default: no backstop
         sm1 = SolidModel("bs_default"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         render_conformal!(sm1, cs)
         @test hasgroup(sm1, "l1", 2)
 
         # With backstop: same result (backstop runs as no-op when the cache
         # already produced conformal geometry).
         sm2 = SolidModel("bs_on"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         render_conformal!(sm2, cs; fragment_backstop=true)
         @test hasgroup(sm2, "l1", 2)
 
@@ -128,6 +133,7 @@
 
     @testset "render_conformal! rejects GmshNative kernel" begin
         sm_native = SolidModel("native", SolidModels.GmshNative(); overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         cs = CoordinateSystem("dummy", nm)
         place!(cs, Rectangle(Point(0.0μm, 0.0μm), Point(1.0μm, 1.0μm)), :l1)
         @test_throws ErrorException render_conformal!(sm_native, cs)
@@ -137,6 +143,7 @@
     @testset "add_conformal_loop! with Paths.Turn (short arc)" begin
         # Direct exercise of _add_conformal_curve!(Paths.Turn) — a 90° arc.
         sm = SolidModel("turn_short"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
@@ -154,6 +161,7 @@
     @testset "add_conformal_loop! with Paths.Turn (large arc)" begin
         # Turn with |α| >= 180° triggers the multi-segment arc path.
         sm = SolidModel("turn_large"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
@@ -171,6 +179,7 @@
     @testset "add_conformal_loop! with Paths.BSpline" begin
         # Exercise _add_conformal_curve!(Paths.BSpline).
         sm = SolidModel("bspline"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
@@ -201,6 +210,7 @@
         place!(cs, Rounded(5.0μm)(rect), :l1)
 
         sm = SolidModel("cvr"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         render_conformal!(sm, cs)
         @test hasgroup(sm, "l1", 2)
         @test length(SolidModels.mesh_control_points()[(5.0, -1.0)]) == 4
@@ -208,6 +218,7 @@
         @test length(gmsh.model.occ.getEntities(2)) >= 1
 
         sm_off = SolidModel("cvr_off"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         render_conformal!(sm_off, cs; curvature_sizing=false)
         @test isempty(SolidModels.mesh_control_points())
         gmsh.finalize()
@@ -222,6 +233,7 @@
         place!(cs, clipped, :l1)
 
         sm = SolidModel("holed"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         render_conformal!(sm, cs)
         @test hasgroup(sm, "l1", 2)
         gmsh.finalize()
@@ -237,6 +249,7 @@
 
         ctx = ConformalRenderContext()
         sm = SolidModel("shared"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         render_conformal!(sm, cs; context=ctx)
         # Each rect contributes 4 edges; a duplicated shared edge would give 8.
         # With dedup, the shared edge is 1, so total = 7.
@@ -252,6 +265,7 @@
         place!(cs, Rectangle(Point(0.0μm, 0.0μm), Point(10.0μm, 10.0μm)), :l1)
 
         sm = SolidModel("zmap"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         z_target = 5.0μm
         render_conformal!(sm, cs; zmap=(_) -> z_target)
         @test hasgroup(sm, "l1", 2)
@@ -269,6 +283,7 @@
         # edge — otherwise a shared boundary between an arc-side and a
         # line-side face is non-conformal.
         sm = SolidModel("prefer_curve_arc_line"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
@@ -291,6 +306,7 @@
 
     @testset "prefer-curve invariant: spline then line on shared endpoints" begin
         sm = SolidModel("prefer_curve_spline_line"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
@@ -326,6 +342,7 @@
         place!(cs, LineSegment(Point(10.0μm, 0.0μm), Point(10.0μm, 5.0μm)), :l1)
 
         sm = SolidModel("linesegs"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         render_conformal!(sm, cs)
         # `l1` should end up as a group at dim=1 (segments do not get closed
         # into a 2D face) with at least two 1D entities in the model.
@@ -338,6 +355,7 @@
         # Same Turn requested twice → second call hits the exact-key branch
         # and returns the same tag (up to sign).
         sm = SolidModel("arc_dup"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
@@ -363,6 +381,7 @@
 
     @testset "spline curve_cache exact-key hit" begin
         sm = SolidModel("spline_dup"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
@@ -400,6 +419,7 @@
         # add_conformal_loop! so we can construct the exact "two arcs on the
         # same endpoints, different centers" case without a Path adapter.
         sm = SolidModel("lens_primitive"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
@@ -458,6 +478,7 @@
         # than silently BSpline-approximating (which would leave the edge out
         # of the cache and break conformality with the caching side).
         sm = SolidModel("bad_seg"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         k = kernel(sm)
         ctx = ConformalRenderContext()
         import SpatialIndexing
@@ -484,6 +505,7 @@
         place!(cs, pa, :l1)
 
         sm = SolidModel("trace_path"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         render_conformal!(sm, cs)
         @test hasgroup(sm, "l1", 2)
         gmsh.finalize()
@@ -499,6 +521,7 @@
         place!(cs, pa, :l1)
 
         sm = SolidModel("taper_path"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         render_conformal!(sm, cs)
         @test hasgroup(sm, "l1", 2)
         gmsh.finalize()
@@ -515,6 +538,7 @@
         place!(cs, pa, :l1)
 
         sm = SolidModel("cpw_bspline"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
         render_conformal!(sm, cs)
         @test hasgroup(sm, "l1", 2)
         gmsh.finalize()

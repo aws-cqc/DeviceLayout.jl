@@ -58,12 +58,18 @@
     @test_nowarn render!(Cell("test", nm), cs)
 
     # Rounding of subset of vertices with style
-    rs1 = Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]])(r1)
-    rs2 = Polygons.Rounded(0.25μm, p0=points(r2)[[1, 3]])(r2)
+    rs1 = Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]], selection_tolerance=1nm)(r1)
+    rs2 = Polygons.Rounded(0.25μm, p0=points(r2)[[1, 3]], selection_tolerance=1nm)(r2)
 
     # Clipping subrounded style
     rd1 = Polygons._round_poly(difference2d(r1, r2), 0.25μm, corner_indices=[1, 3])
-    rd2 = Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]])(difference2d(r1, r2))
+    rd2 = with_test_logger(
+        log ->
+            log.level == Logging.Warn &&
+                occursin("Non-finite selection tolerance", log.message)
+    ) do
+        return Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]])(difference2d(r1, r2))
+    end
     @test all(isapprox.(to_polygons(rd1), to_polygons(rd2), atol=0.1nm))
 
     # StyleDict to apply different style at each level.
@@ -158,7 +164,11 @@
     @test to_polygons(DeviceLayout.styled(rd1, d3)) == to_polygons(rds)
 
     # Apply a Rounding style specified by target points
-    sty = Polygons.Rounded(2.0μm, p0=[Point(1.0μm, 1.0μm), Point(-1.0μm, -1.0μm)])
+    sty = Polygons.Rounded(
+        2.0μm,
+        p0=[Point(1.0μm, 1.0μm), Point(-1.0μm, -1.0μm)],
+        selection_tolerance=1nm
+    )
     r = centered(Rectangle(2.0μm, 2.0μm))
     rs = styled(r, sty)
     cs = CoordinateSystem("test", nm)
@@ -188,7 +198,8 @@
     sty = Polygons.Rounded(
         2.0μm,
         p0=[Point(1.0μm, 1.0μm), Point(-1.0μm, -1.0μm)],
-        inverse_selection=true
+        inverse_selection=true,
+        selection_tolerance=1nm
     )
     rs = styled(r, sty)
     cs = CoordinateSystem("test", nm)
@@ -216,7 +227,7 @@
 
     r = Rectangle(2μm, 1μm)
     cs_local = CoordinateSystem("test", μm)
-    sty = Rounded(0.25μm, p0=points(r))
+    sty = Rounded(0.25μm, p0=points(r), selection_tolerance=1nm)
     place!(cs_local, styled(r, sty), GDSMeta())
     cs = CoordinateSystem("outer", nm)
     addref!(cs, sref(cs_local, angle=π / 2))
@@ -229,7 +240,7 @@
     # mixing rendering units works, and directly on polygons works
     r = to_polygons(Rectangle(2μm, 1μm))
     cs_local = CoordinateSystem("test", nm)
-    sty = Rounded(0.25μm, p0=points(r))
+    sty = Rounded(0.25μm, p0=points(r), selection_tolerance=1nm)
     place!(cs_local, styled(r, sty), GDSMeta())
     cs = CoordinateSystem("outer", nm)
     addref!(cs, sref(cs_local, angle=π / 2))
@@ -271,8 +282,20 @@
         difference2d(centered(Rectangle(4.0μm, 4.0μm)), centered(Rectangle(2.0μm, 2.0μm)))
 
     sty = StyleDict()
-    sty[1] = RelativeRounded(0.5, p0=[Point(2.0μm, 2.0μm), Point(-2.0μm, -2.0μm)])
-    sty[1, 1] = RelativeRounded(0.5, p0=[Point(2.0μm, -2.0μm), Point(-2.0μm, 2.0μm)])
+    sty[1] = with_test_logger(
+        log ->
+            log.level == Logging.Warn &&
+                occursin("Non-finite selection tolerance", log.message)
+    ) do
+        return RelativeRounded(0.5, p0=[Point(2.0μm, 2.0μm), Point(-2.0μm, -2.0μm)])
+    end
+    sty[1, 1] = with_test_logger(
+        log ->
+            log.level == Logging.Warn &&
+                occursin("Non-finite selection tolerance", log.message)
+    ) do
+        return RelativeRounded(0.5, p0=[Point(2.0μm, -2.0μm), Point(-2.0μm, 2.0μm)])
+    end
     e = styled(poly, sty)
     # correct end points removed
     pp = points(to_polygons(e)[1])
@@ -302,7 +325,13 @@
     c = Cell("test", nm)
     @test_nowarn render!(c, cs)
 
-    er = Rotation(90°)(e)
+    er = with_test_logger(
+        log ->
+            log.level == Logging.Warn &&
+                occursin("Non-finite selection tolerance", log.message)
+    ) do
+        return Rotation(90°)(e)
+    end
     pp = points(Rotation(-90°)(to_polygons(er)[1]))
     # Should be equivalent to original (although keyhole will be different)
     # correct end points removed
@@ -337,7 +366,13 @@
     r1 = centered(Rectangle(2.0μm, 2.0μm))
     r2 = centered(Rectangle(4.0μm, 4.0μm))
     p0 = [Point(1.0μm, 1.0μm)] # should be only point on outer poly
-    sty = Rounded(1.0μm; p0)
+    sty = with_test_logger(
+        log ->
+            log.level == Logging.Warn &&
+                occursin("Non-finite selection tolerance", log.message)
+    ) do
+        return Rounded(1.0μm; p0)
+    end
 
     # Removes top right
     pp = points(to_polygons(styled(r1, sty)))
@@ -935,7 +970,16 @@ end
         @test characters_demo(path) == 60138 # bytes written
         rm(path; force=true)
         path = joinpath(tdir, "referenced_characters.gds")
-        @test referenced_characters_demo(path, verbose_override=true) == 2460
+        logger = TestLogger()
+        result = with_logger(logger) do
+            return referenced_characters_demo(path, verbose_override=true)
+        end
+        @test result == 2460
+        @test length(logger.logs) == 4
+        @test all(
+            log -> log.level == Logging.Warn && occursin("Cannot render", log.message),
+            logger.logs
+        )
         rm(path; force=true)
         path = joinpath(tdir, "scripted.gds")
         @test scripted_demo(path) == 8682

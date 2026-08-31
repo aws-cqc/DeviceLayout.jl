@@ -1,6 +1,8 @@
 @testitem "PDK Tools" setup = [CommonTestSetup] begin
     # PDK
-    SchematicDrivenLayout.generate_pdk("MyPDK"; dir=tdir, user="testuser")
+    quiet_test_output() do
+        return SchematicDrivenLayout.generate_pdk("MyPDK"; dir=tdir, user="testuser")
+    end
     pdkpath = joinpath(tdir, "MyPDK")
     using Pkg
     pdktoml = Pkg.TOML.parsefile(joinpath(pdkpath, "Project.toml"))
@@ -13,22 +15,28 @@
     # load-and-generate-component path on 1.13+; the 1.10/1.11/1.12 matrix
     # entries still exercise it.
     @static if VERSION < v"1.13-"
-        Pkg.develop(path=pdkpath)
-        using MyPDK
+        quiet_test_output() do
+            Pkg.develop(path=pdkpath)
+            @eval using MyPDK
+        end
 
         # Component package
-        SchematicDrivenLayout.without_precompile() do
-            SchematicDrivenLayout.generate_component_package(
-                "MyComps",
-                MyPDK,
-                user="testuser"
-            )
-            @test ENV["JULIA_PKG_PRECOMPILE_AUTO"] == "0" # Environment variable is not changed
+        quiet_test_output() do
+            SchematicDrivenLayout.without_precompile() do
+                SchematicDrivenLayout.generate_component_package(
+                    "MyComps",
+                    MyPDK,
+                    user="testuser"
+                )
+                @test ENV["JULIA_PKG_PRECOMPILE_AUTO"] == "0" # Environment variable is not changed
+            end
         end
         @test !haskey(ENV, "JULIA_PKG_PRECOMPILE_AUTO") # Temporary env var was removed
         comppkg = joinpath(pdkpath, "components", "MyComps")
         @test isfile(joinpath(comppkg, "test", "runtests.jl")) # Package template includes tests
-        Pkg.develop(path=comppkg)
+        quiet_test_output() do
+            return Pkg.develop(path=comppkg)
+        end
 
         # Component file
         SchematicDrivenLayout.generate_component_definition(
@@ -38,7 +46,9 @@
             composite=true
         )
         @test isfile(joinpath(comppkg, "src", "MyComposites.jl")) # File was generated
-        Pkg.rm("MyComps")
-        Pkg.rm("MyPDK")
+        quiet_test_output() do
+            Pkg.rm("MyComps")
+            return Pkg.rm("MyPDK")
+        end
     end
 end

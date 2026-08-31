@@ -1,4 +1,4 @@
-@testitem "SolidModels" setup = [CommonTestSetup] begin
+@testitem "SolidModels" setup = [CommonTestSetup, QuietGmshSetup] begin
     import DeviceLayout.SolidModels.STP_UNIT
     pa = Path(0nm, 0nm)
     turn!(pa, -90°, 50μm, Paths.SimpleTrace(10μm))
@@ -102,8 +102,6 @@
             atol=1e-6 # If discretized, the right boundary is < 61 (atol ~1e-4)
         )
     )
-    # Reduce the noise in the REPL
-    SolidModels.gmsh.option.setNumber("General.Verbosity", 0)
     @test_nowarn SolidModels.gmsh.model.mesh.generate(3) # Should run without error
 
     # Try native kernel
@@ -185,7 +183,7 @@
     ymax = maximum(getindex.(pcorner, 2))
     # Find the coordinates of all points which have at least one coordinate at one of these limits
     pp = filter(c -> c[1] ≈ xmin || c[1] ≈ xmax || c[2] ≈ ymin || c[2] ≈ ymax, pcorner)
-    rs = RelativeRounded(0.25; inverse_selection=true, p0=pp)
+    rs = RelativeRounded(0.25; inverse_selection=true, p0=pp, selection_tolerance=1nm)
     rsc = rs(union2d([sc]))
     prim = SolidModels.to_primitives(sm, rsc)
 
@@ -490,7 +488,14 @@
     @test length(SolidModels.gmsh.model.get_entities(3)) == 0
 
     cs = CoordinateSystem("test", nm)
-    place!(cs, Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]])(u), SemanticMeta(:test))
+    selected_rounding = with_test_logger(
+        log ->
+            log.level == Logging.Warn &&
+                occursin("Non-finite selection tolerance", log.message)
+    ) do
+        return Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]])
+    end
+    place!(cs, selected_rounding(u), SemanticMeta(:test))
     sm = SolidModel("test"; overwrite=true)
     @test_nowarn render!(sm, cs)
     @test SolidModels.hasgroup(sm, "test", 2)
@@ -548,12 +553,11 @@
     sm = SolidModel("test"; overwrite=true)
     render!(sm, cs)
     @test SolidModels.to_primitives(sm, e) === e
-    @test SolidModels.to_primitives(sm, e; rounded=true) === e
-    @test length(points(SolidModels.to_primitives(sm, e; rounded=false))) == 8
+    @test length(points(SolidModels.to_primitives(sm, e; Δθ=360° / 8))) == 8
     @test length(points(SolidModels.to_primitives(sm, e; Δθ=pi / 2))) == 4
     smg = SolidModel("test_gmsh_ellipse", SolidModels.GmshNative(); overwrite=true)
     @test SolidModels.to_primitives(smg, e) isa Polygon
-    @test length(points(SolidModels.to_primitives(smg, e; rounded=false))) == 8
+    @test length(points(SolidModels.to_primitives(smg, e; Δθ=360° / 8))) == 8
     cs = CoordinateSystem("test_gmsh_ellipse", nm)
     place!(cs, e, SemanticMeta(:test))
     @test_nowarn render!(smg, cs)
@@ -573,7 +577,10 @@
     prim1 = SolidModels.to_primitives(sm, cp)
     prim2 = SolidModels.to_primitives(
         sm,
-        styled(Rectangle(1.0μm, 1.0μm), Rounded(1.0μm, p0=[Point(1.0μm, 1.0μm)]))
+        styled(
+            Rectangle(1.0μm, 1.0μm),
+            Rounded(1.0μm, p0=[Point(1.0μm, 1.0μm)], selection_tolerance=1nm)
+        )
     )
     # Manually check the fields given Turn is mutable.
     function test_turn(x, y, op)
@@ -626,10 +633,10 @@
         [Point(0.0μm, 0.0μm), Point(1.0μm, 0.0μm), Point(1.0μm, 1.0μm), Point(0.0μm, 1.0μm)]
     poly = Polygon(pp)
     sty = [
-        RelativeRounded(0.05, p0=[pp[1]]),
-        RelativeRounded(0.125, p0=[pp[2]]),
-        RelativeRounded(0.25, p0=[pp[3]]),
-        RelativeRounded(0.5, p0=[pp[4]])
+        RelativeRounded(0.05, p0=[pp[1]], selection_tolerance=1nm),
+        RelativeRounded(0.125, p0=[pp[2]], selection_tolerance=1nm),
+        RelativeRounded(0.25, p0=[pp[3]], selection_tolerance=1nm),
+        RelativeRounded(0.5, p0=[pp[4]], selection_tolerance=1nm)
     ]
     psty = styled(styled(styled(styled(poly, sty[1]), sty[2]), sty[3]), sty[4])
     pri = SolidModels.to_primitives(sm, psty)
@@ -661,8 +668,8 @@
     cs = CoordinateSystem("abc", nm)
     place!(cs, cc, SemanticMeta(:test))
     place!(cs, Rounded(1.0μm)(cc), SemanticMeta(:test))
-    sty1 = Rounded(2.0μm, p0=points(r))
-    sty2 = Rounded(0.5μm, p0=points(ss))
+    sty1 = Rounded(2.0μm, p0=points(r), selection_tolerance=1nm)
+    sty2 = Rounded(0.5μm, p0=points(ss), selection_tolerance=1nm)
     cs = CoordinateSystem("abc", nm)
     place!(cs, styled(styled(cc, sty1), sty2), SemanticMeta(:test))
     @test_nowarn render!(SolidModel("test"; overwrite=true), cs)
@@ -909,7 +916,11 @@
     @test SolidModels.to_primitives(sm, styled(e, sty); simulation=false) == e
 
     # Apply a Rounding style specified by target points
-    sty = Polygons.Rounded(1.0μm, p0=[Point(1.0μm, 1.0μm), Point(-1.0μm, -1.0μm)])
+    sty = Polygons.Rounded(
+        1.0μm,
+        p0=[Point(1.0μm, 1.0μm), Point(-1.0μm, -1.0μm)],
+        selection_tolerance=1nm
+    )
     r = centered(Rectangle(2.0μm, 2.0μm))
     rs = styled(r, sty)
     cs = CoordinateSystem("test", nm)
@@ -1009,8 +1020,8 @@
     m_sty = MeshSized(0.25μm)
     for e ∈
         [styled(r, r_sty), styled(styled(r, r_sty), m_sty), styled(styled(r, m_sty), r_sty)]
-        cs = CoordinateSystem("test", nm)
-        sm = test_sm()
+        local cs = CoordinateSystem("test", nm)
+        local sm = test_sm()
         place!(cs, e, SemanticMeta(:test))
         render!(sm, cs)
         # 8 vertices, 4 radius origins
@@ -1025,8 +1036,8 @@
         OptionalStyle(Polygons.Rounded(0.25μm), :rounded, false_style=DeviceLayout.Plain())
     e = styled(styled(r, r_sty), m_sty)
     for rounded ∈ (false, true)
-        cs = CoordinateSystem("test", nm)
-        sm = test_sm()
+        local cs = CoordinateSystem("test", nm)
+        local sm = test_sm()
         place!(cs, e, SemanticMeta(:test))
         render!(sm, cs, rounded=rounded)
         @test length(SolidModels.gmsh.model.get_entities(0)) == (rounded ? 12 : 4)
@@ -1039,8 +1050,8 @@
     m_sty = OptionalStyle(MeshSized(0.25μm), :meshed)
     e = styled(styled(r, m_sty), r_sty)
     for meshed ∈ (false, true)
-        cs = CoordinateSystem("test", nm)
-        sm = test_sm()
+        local cs = CoordinateSystem("test", nm)
+        local sm = test_sm()
         place!(cs, e, SemanticMeta(:test))
         render!(sm, cs, meshed=meshed)
         @test length(SolidModels.gmsh.model.get_entities(0)) == 12
@@ -1063,8 +1074,8 @@
     # Adding sizing does not change the primitive
     for e ∈
         [styled(c, r_sty), styled(styled(c, r_sty), m_sty), styled(styled(c, m_sty), r_sty)]
-        cs = CoordinateSystem("test", nm)
-        sm = test_sm()
+        local cs = CoordinateSystem("test", nm)
+        local sm = test_sm()
         place!(cs, e, SemanticMeta(:test))
         render!(sm, cs)
         # 16 vertices, 8 radius origins
@@ -1080,8 +1091,8 @@
     m_sty = MeshSized(0.25μm)
     e = styled(styled(c, r_sty), m_sty)
     for rounded ∈ (false, true)
-        cs = CoordinateSystem("test", nm)
-        sm = test_sm()
+        local cs = CoordinateSystem("test", nm)
+        local sm = test_sm()
         place!(cs, e, SemanticMeta(:test))
         render!(sm, cs, rounded=rounded)
         @test length(SolidModels.gmsh.model.get_entities(0)) == (rounded ? 24 : 8)
@@ -1101,8 +1112,8 @@
     )
     e = styled(poly, r_sty)
     for rounded ∈ (false, true)
-        cs = CoordinateSystem("test", nm)
-        sm = test_sm()
+        local cs = CoordinateSystem("test", nm)
+        local sm = test_sm()
         place!(cs, e, SemanticMeta(:test))
         render!(sm, cs, rounded=rounded)
         @test length(SolidModels.gmsh.model.get_entities(0)) == (rounded ? 3 * 6 : 6)
@@ -1115,8 +1126,8 @@
     poly = difference2d(Rectangle(2μm, 2μm), Rectangle(1μm, 1μm))
     e = styled(poly, r_sty)
     for rounded ∈ (false, true)
-        cs = CoordinateSystem("test", nm)
-        sm = test_sm()
+        local cs = CoordinateSystem("test", nm)
+        local sm = test_sm()
         place!(cs, e, SemanticMeta(:test))
         render!(sm, cs, rounded=rounded)
         @test length(SolidModels.gmsh.model.get_entities(0)) == (rounded ? 3 * 6 : 6)
@@ -1128,8 +1139,8 @@
     # RelativeRounded works with holey ClippedPolygon
     e = styled(c, r_sty)
     for rounded ∈ (false, true)
-        cs = CoordinateSystem("test", nm)
-        sm = test_sm()
+        local cs = CoordinateSystem("test", nm)
+        local sm = test_sm()
         place!(cs, e, SemanticMeta(:test))
         render!(sm, cs, rounded=rounded)
         @test length(SolidModels.gmsh.model.get_entities(0)) == (rounded ? 24 : 8)
@@ -1143,8 +1154,18 @@
     r2 = Rectangle(1μm, 1μm) + Point(0.5μm, 0.5μm)
     cs = CoordinateSystem("test", nm)
     sty = StyleDict()
-    sty[1] = Rounded(1μm; p0=[Point(0.0μm, 0.0μm)], inverse_selection=true)
-    sty[1, 1] = Rounded(0.5μm; p0=[Point(0.5μm, 0.5μm)], inverse_selection=true)
+    sty[1] = Rounded(
+        1μm;
+        p0=[Point(0.0μm, 0.0μm)],
+        inverse_selection=true,
+        selection_tolerance=1nm
+    )
+    sty[1, 1] = Rounded(
+        0.5μm;
+        p0=[Point(0.5μm, 0.5μm)],
+        inverse_selection=true,
+        selection_tolerance=1nm
+    )
     place!(cs, sty(difference2d(r1, r2)), :test)
     place!(cs, Rectangle(0.5μm, 0.5μm), :test)
     sm = test_sm()
@@ -1248,58 +1269,64 @@
         bad_tiles = union(tiles, ["foo"])
 
         sm = SolidModel("test", overwrite=true)
-        render!(
-            sm,
-            tiled_cs();
-            postrender_ops=[(
-                "tile",
-                SolidModels.union_geom!,
-                (bad_tiles, 2),
-                :remove_object => true,
-                :remove_tool => true
-            )]
-        )
-        @test length(SolidModels.gmsh.model.get_entities(0)) == 4
-        @test length(SolidModels.gmsh.model.get_entities(1)) == 4
-        @test length(SolidModels.gmsh.model.get_entities(2)) == 1
-        @test length(SolidModels.gmsh.model.get_entities(3)) == 0
-        @test SolidModels.hasgroup(sm, "tile", 2)
-        @test !any(SolidModels.hasgroup.(sm, tiles, 2))
-
-        sm = SolidModel("test", overwrite=true)
-        render!(
-            sm,
-            tiled_cs();
-            postrender_ops=[(
-                "tile",
-                SolidModels.union_geom!,
-                (bad_tiles[1:4], bad_tiles[5:end], 2, 2),
-                :remove_object => true,
-                :remove_tool => true
-            )]
-        )
-        @test length(SolidModels.gmsh.model.get_entities(0)) == 4
-        @test length(SolidModels.gmsh.model.get_entities(1)) == 4
-        @test length(SolidModels.gmsh.model.get_entities(2)) == 1
-        @test length(SolidModels.gmsh.model.get_entities(3)) == 0
-        @test SolidModels.hasgroup(sm, "tile", 2)
-        @test !any(SolidModels.hasgroup.(sm, tiles, 2))
-
-        sm = SolidModel("test", overwrite=true)
-        render!(
-            sm,
-            tiled_cs();
-            postrender_ops=[
-                (
-                    "diff",
-                    SolidModels.difference_geom!,
-                    (bad_tiles, ["tile11", "tile21", "tile12", "bar"], 2, 2),
+        with_expected_info("invalid arguments") do
+            return render!(
+                sm,
+                tiled_cs();
+                postrender_ops=[(
+                    "tile",
+                    SolidModels.union_geom!,
+                    (bad_tiles, 2),
                     :remove_object => true,
                     :remove_tool => true
-                ),
-                ("diff", SolidModels.union_geom!, ("diff", 2))
-            ]
-        )
+                )]
+            )
+        end
+        @test length(SolidModels.gmsh.model.get_entities(0)) == 4
+        @test length(SolidModels.gmsh.model.get_entities(1)) == 4
+        @test length(SolidModels.gmsh.model.get_entities(2)) == 1
+        @test length(SolidModels.gmsh.model.get_entities(3)) == 0
+        @test SolidModels.hasgroup(sm, "tile", 2)
+        @test !any(SolidModels.hasgroup.(sm, tiles, 2))
+
+        sm = SolidModel("test", overwrite=true)
+        with_expected_info("invalid arguments") do
+            return render!(
+                sm,
+                tiled_cs();
+                postrender_ops=[(
+                    "tile",
+                    SolidModels.union_geom!,
+                    (bad_tiles[1:4], bad_tiles[5:end], 2, 2),
+                    :remove_object => true,
+                    :remove_tool => true
+                )]
+            )
+        end
+        @test length(SolidModels.gmsh.model.get_entities(0)) == 4
+        @test length(SolidModels.gmsh.model.get_entities(1)) == 4
+        @test length(SolidModels.gmsh.model.get_entities(2)) == 1
+        @test length(SolidModels.gmsh.model.get_entities(3)) == 0
+        @test SolidModels.hasgroup(sm, "tile", 2)
+        @test !any(SolidModels.hasgroup.(sm, tiles, 2))
+
+        sm = SolidModel("test", overwrite=true)
+        with_expected_info("invalid arguments") do
+            return render!(
+                sm,
+                tiled_cs();
+                postrender_ops=[
+                    (
+                        "diff",
+                        SolidModels.difference_geom!,
+                        (bad_tiles, ["tile11", "tile21", "tile12", "bar"], 2, 2),
+                        :remove_object => true,
+                        :remove_tool => true
+                    ),
+                    ("diff", SolidModels.union_geom!, ("diff", 2))
+                ]
+            )
+        end
         @test length(SolidModels.gmsh.model.get_entities(0)) == 10
         @test length(SolidModels.gmsh.model.get_entities(1)) == 10
         @test length(SolidModels.gmsh.model.get_entities(2)) == 2
@@ -1308,45 +1335,47 @@
         @test !any(SolidModels.hasgroup.(sm, tiles, 2))
 
         sm = SolidModel("test", overwrite=true)
-        render!(
-            sm,
-            tiled_cs();
-            postrender_ops=[
-                (
-                    "int",
-                    SolidModels.intersect_geom!,
+        with_expected_info("invalid arguments") do
+            return render!(
+                sm,
+                tiled_cs();
+                postrender_ops=[
                     (
-                        [
-                            "tile00",
-                            "tile01",
-                            "tile10",
-                            "tile02",
-                            "tile12",
-                            "tile11",
-                            "tile21",
-                            "tile20",
-                            "foo"
-                        ],
-                        [
-                            "tile22",
-                            "tile21",
-                            "tile12",
-                            "tile02",
-                            "tile12",
-                            "tile11",
-                            "tile21",
-                            "tile20",
-                            "bar"
-                        ],
-                        2,
-                        2
+                        "int",
+                        SolidModels.intersect_geom!,
+                        (
+                            [
+                                "tile00",
+                                "tile01",
+                                "tile10",
+                                "tile02",
+                                "tile12",
+                                "tile11",
+                                "tile21",
+                                "tile20",
+                                "foo"
+                            ],
+                            [
+                                "tile22",
+                                "tile21",
+                                "tile12",
+                                "tile02",
+                                "tile12",
+                                "tile11",
+                                "tile21",
+                                "tile20",
+                                "bar"
+                            ],
+                            2,
+                            2
+                        ),
+                        :remove_object => true,
+                        :remove_tool => true
                     ),
-                    :remove_object => true,
-                    :remove_tool => true
-                ),
-                ("int", SolidModels.union_geom!, ("int", 2))
-            ]
-        )
+                    ("int", SolidModels.union_geom!, ("int", 2))
+                ]
+            )
+        end
         @test length(SolidModels.gmsh.model.get_entities(0)) == 10
         @test length(SolidModels.gmsh.model.get_entities(1)) == 10
         @test length(SolidModels.gmsh.model.get_entities(2)) == 1
@@ -1355,16 +1384,18 @@
         @test !any(SolidModels.hasgroup.(sm, tiles, 2))
 
         sm = SolidModel("test", overwrite=true)
-        render!(
-            sm,
-            tiled_cs(true);
-            postrender_ops=[(
-                "frag",
-                SolidModels.fragment_geom!,
-                (bad_tiles, 2),
-                :remove_object => true
-            )]
-        )
+        with_expected_info("invalid arguments") do
+            return render!(
+                sm,
+                tiled_cs(true);
+                postrender_ops=[(
+                    "frag",
+                    SolidModels.fragment_geom!,
+                    (bad_tiles, 2),
+                    :remove_object => true
+                )]
+            )
+        end
         @test length(SolidModels.gmsh.model.get_entities(0)) == 16
         @test length(SolidModels.gmsh.model.get_entities(1)) == 2 * 4 * 3
         @test length(SolidModels.gmsh.model.get_entities(2)) == 9
@@ -1844,12 +1875,14 @@
         place!(cs2, r4, SemanticMeta(:a))
         place!(cs2, r5, SemanticMeta(:b))
         sm3 = SolidModel("test_auto_union_compose", overwrite=true)
-        render!(
-            sm3,
-            cs2;
-            auto_union=true,
-            postrender_ops=[("combined", SolidModels.union_geom!, ("a", "b", 2, 2))]
-        )
+        with_expected_info("single entity") do
+            return render!(
+                sm3,
+                cs2;
+                auto_union=true,
+                postrender_ops=[("combined", SolidModels.union_geom!, ("a", "b", 2, 2))]
+            )
+        end
         @test SolidModels.hasgroup(sm3, "combined", 2)
         @test length(SolidModels.dimtags(sm3["combined", 2])) == 2
     end
@@ -1966,7 +1999,7 @@
     end
 end
 
-@testitem "Full turns render in SolidModel (#252)" setup = [CommonTestSetup] begin
+@testitem "Full turns render in SolidModel (#252)" setup = [CommonTestSetup, QuietGmshSetup] begin
     # A 360° turn previously reached OpenCASCADE as a collapsed 2-point polygon and
     # produced a silent zero-area surface; it now renders as two half-annulus surfaces.
     for (sty, nsurf, expected) in [
@@ -2021,6 +2054,7 @@ end
         # returned tag must be the lower one.
         import SpatialIndexing
         sm = SolidModel("get_or_add_point_tie"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
         k = SolidModels.kernel(sm)
         cache = SolidModels.PointsCache()
         # Symmetric pair around the origin.
@@ -2053,6 +2087,7 @@ end
         # back to a fresh `add_point` and drop the stale entry from the tree.
         import SpatialIndexing
         sm = SolidModel("get_or_add_point_stale"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
         k = SolidModels.kernel(sm)
         cache = SolidModels.PointsCache()
         stale = SolidModels._get_or_add_point!(

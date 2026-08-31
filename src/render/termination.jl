@@ -76,7 +76,12 @@ function __poly(f::Paths.Straight{T}, s::Paths.CPWOpenTermination) where {T}
 
         # Note, `min_side_len` is needed to make sure rounding happens consistently;
         # it can happen that length of the side is one grid unit smaller than expected.
-        return Polygons.Rounded(tr; p0=pts[[3, 4, 7, 8]], min_side_len=zero(tr))(
+        return Polygons.Rounded(
+            tr;
+            p0=pts[[3, 4, 7, 8]],
+            min_side_len=zero(tr),
+            selection_tolerance=DeviceLayout.onenanometer(T)
+        )(
             Polygon(pts)
         )
     end
@@ -131,8 +136,18 @@ function __poly(f::Paths.Straight{T}, s::Paths.CPWShortTermination) where {T}
     poly2 = Polygon([c0[1], c1[1], c1[2], c0[2]])
     iszero(tr) && return [poly1, poly2]
     round_idx = s.initial ? [1, 4] : [2, 3]
-    round1 = Polygons.Rounded(tr; p0=points(poly1)[round_idx], min_side_len=zero(T))
-    round2 = Polygons.Rounded(tr; p0=points(poly2)[round_idx], min_side_len=zero(T))
+    round1 = Polygons.Rounded(
+        tr;
+        p0=points(poly1)[round_idx],
+        min_side_len=zero(T),
+        selection_tolerance=DeviceLayout.onenanometer(T)
+    )
+    round2 = Polygons.Rounded(
+        tr;
+        p0=points(poly2)[round_idx],
+        min_side_len=zero(T),
+        selection_tolerance=DeviceLayout.onenanometer(T)
+    )
     return [round1(poly1), round2(poly2)]
 end
 
@@ -156,7 +171,12 @@ function __poly(f::Paths.Straight{T}, s::Paths.TraceTermination) where {T}
     poly = to_polygons(f, Paths.SimpleTrace(s.width))
     iszero(s.rounding) && return poly
     round_idx = s.initial ? [1, 4] : [2, 3]
-    return Polygons.Rounded(s.rounding; p0=points(poly)[round_idx], min_side_len=zero(T))(
+    return Polygons.Rounded(
+        s.rounding;
+        p0=points(poly)[round_idx],
+        min_side_len=zero(T),
+        selection_tolerance=DeviceLayout.onenanometer(T)
+    )(
         poly
     )
 end

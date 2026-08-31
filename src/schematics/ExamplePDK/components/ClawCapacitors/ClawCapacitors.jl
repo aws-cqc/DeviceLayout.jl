@@ -179,8 +179,12 @@ function _series_claw(cc)
                 gety(pt) == upperright(cutout_poly).y,
         points(cutout_poly)
     )
-    rounded =
-        Rounded(rounding; p0=points(cutout_poly)[interface_points], inverse_selection=true)
+    rounded = Rounded(
+        rounding;
+        p0=points(cutout_poly)[interface_points],
+        inverse_selection=true,
+        selection_tolerance=DeviceLayout.onenanometer(rounding)
+    )
     return rounded(cutout_poly)
 end
 

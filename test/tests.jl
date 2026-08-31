@@ -114,9 +114,14 @@ end
 @testitem "Preferences" setup = [CommonTestSetup] begin
     @test DeviceLayout.unit_preference == "PreferNanometers"
     @test_throws ArgumentError DeviceLayout.set_unit_preference!("Nanometers")
-    DeviceLayout.set_unit_preference!("PreferMicrons"; local_only=false) # triggers @info, just ignore
+    @test_logs (:info, r"New unit preference set") DeviceLayout.set_unit_preference!(
+        "PreferMicrons";
+        local_only=false
+    )
     @test DeviceLayout.load_preference(DeviceLayout, "units") == "PreferMicrons"
-    DeviceLayout.set_unit_preference!("PreferNanometers") # local_only => will override
+    @test_logs (:info, r"currently compiled setting") DeviceLayout.set_unit_preference!(
+        "PreferNanometers"
+    ) # local_only => will override
     @test DeviceLayout.load_preference(DeviceLayout, "units") == "PreferNanometers"
     # Delete units preference in generated LocalPreferences.toml; this ensures that
     # a second execution of this test block will pass when running locally.
@@ -129,7 +134,7 @@ end
     @test DeviceLayout.Graphics.get_color_scheme() == :glasbey_bw_minc_20_maxl_70_n256
     c = DeviceLayout.Graphics.lcolor(1)
     # Switch to dark
-    DeviceLayout.Graphics.set_theme!("dark")
+    @test_logs (:info, r"Color scheme set") DeviceLayout.Graphics.set_theme!("dark")
     @test DeviceLayout.Graphics.get_color_scheme() == :glasbey_bw_minc_20_minl_30_n256
     # Change takes place without restarting
     @test DeviceLayout.Graphics.lcolor(1) != c
@@ -901,7 +906,11 @@ end
         push!(top_casc.refs, CellReference(c_foo2, p(10.0μm, 0.0μm)))
         push!(top_casc.refs, CellReference(c_foo_1, p(20.0μm, 0.0μm)))
         casc_path = joinpath(tdir, "rename_casc.gds")
-        save(casc_path, top_casc; options=rename_opts)
+        @test_logs (:info, r"Renamed duplicate cell") (:info, r"Renamed duplicate cell") save(
+            casc_path,
+            top_casc;
+            options=rename_opts
+        )
         cells_casc = load(casc_path)
         casc_names = collect(keys(cells_casc))
         # All cell names must be unique (case-insensitively)
@@ -953,7 +962,12 @@ end
         main = Cell("main", nm)
         render!(main, Rectangle(10μm, 10μm), GDSMeta(-1, 0))
         path = joinpath(tdir, "bad_layer.gds")
-        @test_throws CapturedException save(path, main)
+        quiet_test_output(;
+            allowed_log=log ->
+                log.level == Logging.Warn && occursin("Layer -1", log.message)
+        ) do
+            @test_throws CapturedException save(path, main)
+        end
 
         # Layer 64 with strict GDSII spec limits should warn
         main = Cell("main", nm)
@@ -990,9 +1004,11 @@ end
         @test_logs (:warn, r"unimplemented record type 0x2202") load(
             joinpath(dirname(@__FILE__), "unimplemented_record.gds")
         )
-        @test_throws CapturedException load(
-            joinpath(dirname(@__FILE__), "badbytes_record.gds")
-        )
+        quiet_test_output() do
+            @test_throws CapturedException load(
+                joinpath(dirname(@__FILE__), "badbytes_record.gds")
+            )
+        end
         @test_logs (:warn, r"did not start with a BGNLIB") load(
             joinpath(dirname(@__FILE__), "no_bgnlib.gds")
         )
@@ -1001,23 +1017,27 @@ end
         )
 
         # Corrupt file tests: cells
-        @test_throws CapturedException load(
-            joinpath(dirname(@__FILE__), "badbytes_cell.gds")
-        )
-        @test_throws CapturedException load(
-            joinpath(dirname(@__FILE__), "unknown_cell.gds")
-        ) # unknown token in cell (0xffff)
-        @test_throws CapturedException load(
-            joinpath(dirname(@__FILE__), "unimplemented_cell.gds")
-        ) # unimplemented token in cell (0x0c00, TEXT)
+        quiet_test_output() do
+            @test_throws CapturedException load(
+                joinpath(dirname(@__FILE__), "badbytes_cell.gds")
+            )
+            @test_throws CapturedException load(
+                joinpath(dirname(@__FILE__), "unknown_cell.gds")
+            ) # unknown token in cell (0xffff)
+            @test_throws CapturedException load(
+                joinpath(dirname(@__FILE__), "unimplemented_cell.gds")
+            ) # unimplemented token in cell (0x0c00, TEXT)
+        end
 
         # Corrupt file tests: boundaries
-        @test_throws CapturedException load(
-            joinpath(dirname(@__FILE__), "badbytes_boundary.gds")
-        )
-        @test_throws CapturedException load(
-            joinpath(dirname(@__FILE__), "unknown_boundary.gds")
-        ) # unknown token in boundary (0xffff)
+        quiet_test_output() do
+            @test_throws CapturedException load(
+                joinpath(dirname(@__FILE__), "badbytes_boundary.gds")
+            )
+            @test_throws CapturedException load(
+                joinpath(dirname(@__FILE__), "unknown_boundary.gds")
+            ) # unknown token in boundary (0xffff)
+        end
 
         # Round-trip tests
         let c = Cell("main", nm), c2 = Cell("sub", nm)
@@ -1298,7 +1318,12 @@ end
         save(path, cs2)
         rm(path, force=true)
         # With intermediate cell
-        c = Cell(cs2)
+        c = @test_logs (:warn, r"Automatically converting") (
+            :warn,
+            r"Automatically converting"
+        ) (:warn, r"Automatically converting") (:warn, r"Automatically converting") Cell(
+            cs2
+        )
         save(path, c)
         rm(path, force=true)
     end

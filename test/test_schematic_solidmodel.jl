@@ -1,4 +1,4 @@
-@testitem "Schematic + SolidModel" setup = [CommonTestSetup] begin
+@testitem "Schematic + SolidModel" setup = [CommonTestSetup, QuietGmshSetup] begin
     using .SchematicDrivenLayout
     import .SchematicDrivenLayout: AbstractComponent
 
@@ -42,15 +42,35 @@
         u = base_shape(r)
 
         d[1] = Polygons.Rounded(r.d[1] / 4)
-        d[1, 1, 1, 1] = Polygons.Rounded(r.d[4] / 4, p0=u[1, 1, 1, 1].contour[[4]])
-        d[1, 2, 1, 1] = Polygons.Rounded(r.d[4] / 4, p0=u[1, 2, 1, 1].contour[[1]])
-        d[1, 3, 1, 1] = Polygons.Rounded(r.d[4] / 4, p0=u[1, 3, 1, 1].contour[[3]])
-        d[1, 4, 1, 1] = Polygons.Rounded(r.d[4] / 4, p0=u[1, 4, 1, 1].contour[[2]])
+        d[1, 1, 1, 1] = Polygons.Rounded(
+            r.d[4] / 4,
+            p0=u[1, 1, 1, 1].contour[[4]],
+            selection_tolerance=1nm
+        )
+        d[1, 2, 1, 1] = Polygons.Rounded(
+            r.d[4] / 4,
+            p0=u[1, 2, 1, 1].contour[[1]],
+            selection_tolerance=1nm
+        )
+        d[1, 3, 1, 1] = Polygons.Rounded(
+            r.d[4] / 4,
+            p0=u[1, 3, 1, 1].contour[[3]],
+            selection_tolerance=1nm
+        )
+        d[1, 4, 1, 1] = Polygons.Rounded(
+            r.d[4] / 4,
+            p0=u[1, 4, 1, 1].contour[[2]],
+            selection_tolerance=1nm
+        )
 
-        d[1, 1] = Polygons.Rounded(r.d[2] / 4, p0=u[1, 1].contour[[4]])
-        d[1, 2] = Polygons.Rounded(r.d[2] / 4, p0=u[1, 2].contour[[1]])
-        d[1, 3] = Polygons.Rounded(r.d[2] / 4, p0=u[1, 3].contour[[1]])
-        d[1, 4] = Polygons.Rounded(r.d[2] / 4, p0=u[1, 4].contour[[4]])
+        d[1, 1] =
+            Polygons.Rounded(r.d[2] / 4, p0=u[1, 1].contour[[4]], selection_tolerance=1nm)
+        d[1, 2] =
+            Polygons.Rounded(r.d[2] / 4, p0=u[1, 2].contour[[1]], selection_tolerance=1nm)
+        d[1, 3] =
+            Polygons.Rounded(r.d[2] / 4, p0=u[1, 3].contour[[1]], selection_tolerance=1nm)
+        d[1, 4] =
+            Polygons.Rounded(r.d[2] / 4, p0=u[1, 4].contour[[4]], selection_tolerance=1nm)
         return render!(cs, DeviceLayout.StyledEntity(u, d), BASE_NEGATIVE)
     end
 
@@ -70,7 +90,10 @@
     function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, r::NestedSquares)
         !r.rounded && return render!(cs, base_shape(r), BASE_NEGATIVE)
         p = base_shape(r)
-        u = Polygons.Rounded(r.d[end] / 4, p0=p[1].contour[[1, 3]])(p)
+        u =
+            Polygons.Rounded(r.d[end] / 4, p0=p[1].contour[[1, 3]], selection_tolerance=1nm)(
+                p
+            )
         return render!(cs, u, BASE_NEGATIVE)
     end
 
@@ -92,7 +115,8 @@
         p = base_shape(r)
         u = Polygons.Rounded(
             norm(upperright(r.p) - lowerleft(r.p)) / 5,
-            p0=p[1].contour[[1]]
+            p0=p[1].contour[[1]],
+            selection_tolerance=1nm
         )(
             p
         )
@@ -303,7 +327,8 @@
     end
 end
 
-@testitem "Schematic + SolidModel + Paths and Bridges" setup = [CommonTestSetup] begin
+@testitem "Schematic + SolidModel + Paths and Bridges" setup =
+    [CommonTestSetup, QuietGmshSetup] begin
     using .SchematicDrivenLayout
 
     reset_uniquename!()
@@ -406,7 +431,10 @@ end
         p_readout_node = add_node!(g, p_readout)
 
         ## Position the components
-        floorplan = plan(g; log_dir=nothing)
+        logger = TestLogger()
+        floorplan = with_logger(logger) do
+            return plan(g; log_dir=nothing)
+        end
 
         # Setup an optional "fine mesh" size field.
         refinement_style = OptionalStyle(
@@ -525,6 +553,7 @@ end
         sm = SolidModel("test", overwrite=true)
         # SolidModels.set_gmsh_option("")
         render!(sm, floorplan, target)
+        @test all(log -> log.level < Logging.Warn, logger.logs)
         cp_rendered = SolidModels.mesh_control_points()
         @test !isempty(cp_rendered)
         # Solid-model projections can preserve circular path turns that the default
@@ -544,8 +573,6 @@ end
         @test !SolidModels.hasgroup(sm, "writeable_area", 2)
         @test !SolidModels.hasgroup(sm, "base_negative", 2)
 
-        # Reduce the noise in the REPL
-        SolidModels.gmsh.option.setNumber("General.Verbosity", 0)
         SolidModels.reset_mesh_control!()
         @test_nowarn SolidModels.gmsh.model.mesh.generate(3)
 
@@ -612,7 +639,7 @@ end
     end
 end
 
-@testitem "Schematic + SolidModel + Overlap Path" setup = [CommonTestSetup] begin
+@testitem "Schematic + SolidModel + Overlap Path" setup = [CommonTestSetup, QuietGmshSetup] begin
     using .SchematicDrivenLayout
     import .SchematicDrivenLayout: AbstractComponent
 
@@ -729,7 +756,7 @@ end
     end
 end
 
-@testitem "Schematic + SolidModel + Wave ports" setup = [CommonTestSetup] begin
+@testitem "Schematic + SolidModel + Wave ports" setup = [CommonTestSetup, QuietGmshSetup] begin
     using .SchematicDrivenLayout
     import .SchematicDrivenLayout: AbstractComponent
     import .SchematicDrivenLayout.ExamplePDK: add_wave_ports!
@@ -1202,7 +1229,8 @@ end
     end
 end
 
-@testitem "Schematic + SolidModel + Problematic extrusions" setup = [CommonTestSetup] begin
+@testitem "Schematic + SolidModel + Problematic extrusions" setup =
+    [CommonTestSetup, QuietGmshSetup] begin
     using .SchematicDrivenLayout
 
     # Reproducer for Gmsh booleanOperator preserve-numbering and PLC error bugs:
@@ -1562,7 +1590,8 @@ end
     end
 end
 
-@testitem "Schematic + SolidModel + levelwise extrusion signs" setup = [CommonTestSetup] begin
+@testitem "Schematic + SolidModel + levelwise extrusion signs" setup =
+    [CommonTestSetup, QuietGmshSetup] begin
     using .SchematicDrivenLayout
 
     # A levelwise layer's thickness vector indexes levels 1, 2, ...; positive thickness is
