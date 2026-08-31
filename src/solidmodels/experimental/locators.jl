@@ -168,7 +168,7 @@ end
 
 After fragmentation, resolve Tag locators by finding the 2D surface entity that
 contains each locator's center point and creating a dedicated PG for it. The PG is named
-using `physical_group_name` with the Tag locator's layer, name, and index, and is
+using `pgname` with the Tag locator's layer, name, and index, and is
 registered in the final registry under the locator's layer.
 
 For each Tag PG, any pending deferred interfaces whose object references the parent
@@ -211,7 +211,7 @@ function add_tagged_pgs!(
             continue
         end
 
-        pg_name = physical_group_name(meta)
+        pg_name = pgname(meta)
 
         # Create PG in the solid model
         sm[pg_name] = Tuple{Int32, Int32}[(Int32(2), found_tag)]
