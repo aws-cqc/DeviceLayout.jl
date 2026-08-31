@@ -72,27 +72,20 @@ end
 
 function _map_artwork_meta(
     stack::SourceStack,
-    levels,
     level_increment::GDSMeta,
-    m::EntityMeta
+    apply_increment::Bool
 )
-    sl = sourcelayer(m, stack)
-    isnothing(sl.gds_meta) && return nothing
-    source_level = first(sl.level)
-    idx = findfirst(==(source_level), levels)
-    isnothing(idx) && return nothing
-
-    gds_meta = sl.gds_meta
-    if length(levels) > 1
-        delta = idx - 1
+    return m -> begin
+        sl = sourcelayer(m, stack)
+        isnothing(sl.gds_meta) && return nothing
+        apply_increment || return sl.gds_meta
+        delta = first(sl.level) - 1
         return GDSMeta(
-            gdslayer(gds_meta) + delta * gdslayer(level_increment),
-            datatype(gds_meta) + delta * datatype(level_increment)
+            gdslayer(sl.gds_meta) + delta * gdslayer(level_increment),
+            datatype(sl.gds_meta) + delta * datatype(level_increment)
         )
     end
-    return gds_meta
 end
-_map_artwork_meta(::SourceStack, ::Any, ::GDSMeta, ::DeviceLayout.Meta) = nothing
 
 """
     render!(
@@ -122,8 +115,9 @@ function render!(
     for meta in _entity_metas(cs)
         sourcelayer(meta, stack)
     end
-    mapper = meta -> _map_artwork_meta(stack, selected_levels, level_increment, meta)
-    return DeviceLayout.render!(cell, cs; map_meta=mapper, kwargs...)
+    apply_increment = length(levels) > 1
+    map_meta = _map_artwork_meta(stack, level_increment, apply_increment)
+    return DeviceLayout.render!(cell, cs; map_meta, kwargs...)
 end
 
 # ─── 2D PG deduplication ─────────────────────────────────────────────────────
@@ -475,7 +469,7 @@ function _map_meta(target::SolidModelTarget)
         meta isa EntityMeta || return nothing
         source_layer = sourcelayer(meta, target.stack)
         (!source_layer.solidmodel || meta.role isa Locator) && return nothing
-        return physical_group_name(meta)
+        return pgname(meta)
     end
 end
 
@@ -586,7 +580,7 @@ function render!(
                     return DeviceLayout.flatten(sch_copy.coordinate_system)
                 end
             # The flat geometry is the canonical stream of placed metadata occurrences.
-            # Collect compiler metadata and role-specific geometric facts in one pass.
+            # Collect compiler metadata and role-specific geometric info.
             lumped_port_directions = Dict{String, Vector{Float64}}()
             metas = EntityMeta[]
             locator_candidates = Tuple{Any, EntityMeta}[]
@@ -594,7 +588,7 @@ function render!(
                 meta isa EntityMeta || continue
                 push!(metas, meta)
                 if meta.role isa LumpedPort
-                    pg_name = physical_group_name(meta)
+                    pg_name = pgname(meta)
                     local_direction = DeviceLayout.extract_direction(entity)
                     isnothing(local_direction) && throw(
                         ArgumentError(
@@ -644,31 +638,21 @@ function render!(
 
             # Warn about source-layer volume overlaps before invoking the geometry kernel.
             _warn_potential_overlaps(registry, target.stack)
-            try
-                # The legacy renderer creates and fragments the geometry, then applies
-                # the non-interface physical-group operations produced by the compiler.
-                SolidModels.render!(
-                    sm,
-                    flat;
-                    preflattened=true,
-                    map_meta=_map_meta(target),
-                    postrender_ops=pg_operations,
-                    retained_physical_groups=retained_groups,
-                    zmap=meta -> layer_z(meta.layer, target.stack),
-                    kwargs...
-                )
-            catch e
-                if e isa ErrorException && contains(e.msg, "Could not fix wire")
-                    error(
-                        "OCC geometry failure: $(e.msg)\nThis typically indicates overlapping " *
-                        "entities. Subtract source layers that extrude into the same region."
-                    )
-                end
-                rethrow()
-            end
+            # Low-level renderer creates and fragments the geometry, then applies
+            # the non-interface physical-group operations produced by the compiler.
+            SolidModels.render!(
+                sm,
+                flat;
+                preflattened=true,
+                map_meta=_map_meta(target),
+                postrender_ops=pg_operations,
+                retained_physical_groups=retained_groups,
+                zmap=meta -> layer_z(meta.layer, target.stack),
+                kwargs...
+            )
 
             # Cache entity bounding boxes across both locator-resolution passes.
-            entity_bboxes = Dict{Int32, NTuple{6, Float64}}()
+            bbox_cache = Dict{Int32, NTuple{6, Float64}}()
 
             # Create tagged PGs first because this routine removes tagged surfaces from
             # their parent PGs and adds them to the deferred interfaces.
@@ -678,13 +662,13 @@ function render!(
                 registry,
                 locators,
                 deferred_interfaces,
-                entity_bboxes
+                bbox_cache
             )
             execute_deferred_interfaces!(sm, deferred_interfaces)
             # Downstream discovery assumes every realized PG has semantic registry data.
             _check_pgs_registered(sm, registry)
             terminal_result =
-                add_terminals!(sm, registry, target.stack, locators, entity_bboxes)
+                add_terminals!(sm, registry, target.stack, locators, bbox_cache)
 
             # First partition PGs by identical layer-membership signatures, then split
             # any remaining PG that spans multiple metal connected components. Keeping

@@ -76,7 +76,7 @@ function serialize_metadata(
                 meta = record.meta
                 role_dict = Dict{String, Any}("type" => string(meta.role))
                 if meta.role isa LumpedPort
-                    source_name = physical_group_name(meta)
+                    source_name = pgname(meta)
                     haskey(lumped_port_directions, source_name) || error(
                         "Internal metadata serialization error: LumpedPort record " *
                         "'$(record.name)' has no resolved direction for source identity " *
