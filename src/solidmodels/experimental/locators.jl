@@ -85,8 +85,8 @@ function add_terminals!(
         source_layer.material != METAL && continue
         state.dim != 2 && continue
         for record in state.pgs
-            if !isnothing(record.entity_meta)
-                role = record.entity_meta.role
+            if !isnothing(record.meta)
+                role = record.meta.role
                 (role isa Terminal || role isa Ground) && continue
             end
             push!(metal_pg_names, record.name)
@@ -109,9 +109,7 @@ function add_terminals!(
     cc_names = Vector{String}(undef, length(ccs))
     cc_locators = Dict{String, Vector{String}}()
     for (idx, cc) in enumerate(ccs)
-        cc_str = join(sort(["$(d),$(t)" for (d, t) in cc]), "&")
-        digest = sha1(cc_str)
-        cc_name = string(:METAL_CC) * "__" * bytes2hex(digest)[1:16]
+        cc_name = string(:METAL_CC) * "__" * pghash(cc)
         cc_names[idx] = cc_name
         sm[cc_name] = cc
         cc_locators[cc_name] = String[]
@@ -133,16 +131,16 @@ function add_terminals!(
     candidate_tags = Int32[dimtag[2] for dimtag in keys(tag_to_cc)]
     entity_rtree = _entity_rtree(candidate_tags, bbox_cache)
     for locator in terminal_locators
-        entity_meta = locator.meta
+        meta = locator.meta
         matched_tag = _containing_entity_tag(locator, entity_rtree)
         matched_cc_idx = iszero(matched_tag) ? 0 : tag_to_cc[(Int32(2), matched_tag)]
         if iszero(matched_cc_idx)
-            @warn "$(nameof(typeof(entity_meta.role))) locator '$(entity_meta.name)' at " *
+            @warn "$(nameof(typeof(meta.role))) locator '$(meta.name)' at " *
                   "$(locator.position) did not match any metal connected component"
-        elseif entity_meta.role isa Ground
+        elseif meta.role isa Ground
             push!(ground_cc_indices, matched_cc_idx)
         else
-            push!(cc_locators[cc_names[matched_cc_idx]], entity_meta.name)
+            push!(cc_locators[cc_names[matched_cc_idx]], meta.name)
         end
     end
 
@@ -191,13 +189,13 @@ function add_tagged_pgs!(
     layer_trees = Dict{Symbol, tree_type}()
 
     for locator in tag_locators
-        entity_meta = locator.meta
+        meta = locator.meta
         # A Tag is meaningful only within its declared source layer. Searching all 2D
         # groups could attach it to an unrelated coplanar or overlapping layer.
-        haskey(registry, entity_meta.layer) || continue
-        layer_state = registry[entity_meta.layer]
+        haskey(registry, meta.layer) || continue
+        layer_state = registry[meta.layer]
         layer_state.dim == 2 || continue
-        entity_rtree = get!(layer_trees, entity_meta.layer) do
+        entity_rtree = get!(layer_trees, meta.layer) do
             tags = Set{Int32}()
             for record in layer_state.pgs
                 SolidModels.hasgroup(sm, record.name, 2) || continue
@@ -208,12 +206,12 @@ function add_tagged_pgs!(
 
         found_tag = _containing_entity_tag(locator, entity_rtree)
         if found_tag == 0
-            @warn "Tag locator '$(entity_meta.name)' at $(locator.position) did not " *
+            @warn "Tag locator '$(meta.name)' at $(locator.position) did not " *
                   "match any 2D entity"
             continue
         end
 
-        pg_name = physical_group_name(entity_meta)
+        pg_name = physical_group_name(meta)
 
         # Create PG in the solid model
         sm[pg_name] = Tuple{Int32, Int32}[(Int32(2), found_tag)]
@@ -221,8 +219,8 @@ function add_tagged_pgs!(
         # Remove tagged entity from all other 2D PGs on the same layer and
         # duplicate deferred interfaces for the Tag PG
         parent_pg_names = String[]
-        if haskey(registry, entity_meta.layer) && registry[entity_meta.layer].dim == 2
-            for record in registry[entity_meta.layer].pgs
+        if haskey(registry, meta.layer) && registry[meta.layer].dim == 2
+            for record in registry[meta.layer].pgs
                 SolidModels.hasgroup(sm, record.name, 2) || continue
                 existing_dimtags = SolidModels.dimtags(sm[record.name, 2])
                 filtered = filter(dimtag -> dimtag[2] != found_tag, existing_dimtags)
@@ -249,13 +247,15 @@ function add_tagged_pgs!(
                     MetaGraphs.get_prop(deferred_interfaces, operation, :dest_layer)
                 _, tool_layer =
                     MetaGraphs.get_prop(deferred_interfaces, operation, :parent_layers)
-                dest_pg = generated_pg_name(
-                    dest_layer,
-                    pg_name,
-                    [tool_name];
-                    operation=:intersect,
-                    parameters=(2, tool_dim)
-                )
+                dest_pg =
+                    string(dest_layer) *
+                    "__" *
+                    operation_hash(
+                        pg_name,
+                        [tool_name];
+                        operation=:intersect,
+                        parameters=(2, tool_dim)
+                    )
                 generated_record_exists(registry, dest_layer, dest_pg) && continue
                 defer_interface!(
                     deferred_interfaces,
@@ -265,7 +265,7 @@ function add_tagged_pgs!(
                     2,
                     tool_dim,
                     dest_layer,
-                    entity_meta.layer,
+                    meta.layer,
                     tool_layer
                 )
                 push!(registry[dest_layer].pgs, PGRecord(dest_pg, dest_layer, nothing))
@@ -273,13 +273,13 @@ function add_tagged_pgs!(
         end
 
         # Add to registry
-        record = PGRecord(pg_name, entity_meta.layer, entity_meta)
-        if haskey(registry, entity_meta.layer)
-            push!(registry[entity_meta.layer].pgs, record)
+        record = PGRecord(pg_name, meta.layer, meta)
+        if haskey(registry, meta.layer)
+            push!(registry[meta.layer].pgs, record)
         else
-            registry[entity_meta.layer] = LayerState([record], 2)
+            registry[meta.layer] = LayerState([record], 2)
         end
-        push!(tag_records, (pg_name, entity_meta.name, entity_meta.layer))
+        push!(tag_records, (pg_name, meta.name, meta.layer))
     end
 
     return tag_records
