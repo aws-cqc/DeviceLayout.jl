@@ -12,9 +12,8 @@
 
     # Some consumers may take PG as contract
     for role in [Generic(), Terminal(), Ground(), Tag(), WavePort(), LumpedPort()]
-        @test SolidModelsExperimental.physical_group_name(
-            EntityMeta(:metal; name="name", role=role)
-        ) == "metal__name__i1__r$role"
+        @test SolidModelsExperimental.pgname(EntityMeta(:metal; name="name", role=role)) ==
+              "metal__name__i1__r$role"
     end
 
     instance_role_meta = EntityMeta(:metal; role=Terminal())
@@ -26,10 +25,9 @@
     @test layerindex(type_role_meta) == 3
     @test level(type_role_meta) == 1 # DeviceLayout.Meta interface
     @test name(type_role_meta) == "island"
-    @test SolidModelsExperimental.physical_group_name(type_role_meta) ==
-          "metal__island__i3__rTerminal"
+    @test SolidModelsExperimental.pgname(type_role_meta) == "metal__island__i3__rTerminal"
     @test SolidModelsExperimental.map_meta(type_role_meta) ==
-          SolidModelsExperimental.physical_group_name(type_role_meta)
+          SolidModelsExperimental.pgname(type_role_meta)
 
     simple_layer = SourceLayer(NULL; thickness=10.0nm)
     offset_layer = SourceLayer(NULL; thickness=15μm, height=5μm)
@@ -314,6 +312,7 @@ end
     using DeviceLayout.SolidModelsExperimental: PGRecord, LayerState, LayerRegistry
 
     sm = SolidModel("registry_validation"; overwrite=true)
+    SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
     tag = SolidModels.gmsh.model.occ.addRectangle(0.0, 0.0, 0.0, 1.0, 1.0)
     SolidModels.gmsh.model.occ.synchronize()
     sm["surface"] = [(Int32(2), Int32(tag))]
@@ -390,7 +389,7 @@ end
             (meta isa EntityMeta && meta.role isa LumpedPort) || continue
             angle = DeviceLayout.extract_direction(entity)
             turns = Float64(ustrip(°, angle)) / 180
-            directions[SolidModelsExperimental.physical_group_name(meta)] =
+            directions[SolidModelsExperimental.pgname(meta)] =
                 Float64[cospi(turns), sinpi(turns), 0.0]
         end
         return directions
@@ -403,19 +402,18 @@ end
     )
     local_meta = EntityMeta(:port; name="local", role=LumpedPort)
     place!(local_cs, nested_port, local_meta)
-    @test direction_map(local_cs)[SolidModelsExperimental.physical_group_name(local_meta)] ≈
+    @test direction_map(local_cs)[SolidModelsExperimental.pgname(local_meta)] ≈
           [cospi(1 / 6), 0.5, 0.0]
 
     transformed = CoordinateSystem("transformed_ports", μm)
     addref!(transformed, local_cs; rot=90°)
-    rotated =
-        direction_map(transformed)[SolidModelsExperimental.physical_group_name(local_meta)]
+    rotated = direction_map(transformed)[SolidModelsExperimental.pgname(local_meta)]
     @test rotated ≈ [-0.5, cospi(1 / 6), 0.0]
 
     reflected = CoordinateSystem("reflected_ports", μm)
     addref!(reflected, local_cs; rot=90°, xrefl=true)
     reflected_direction =
-        direction_map(reflected)[SolidModelsExperimental.physical_group_name(local_meta)]
+        direction_map(reflected)[SolidModelsExperimental.pgname(local_meta)]
     @test reflected_direction ≈ [0.5, cospi(1 / 6), 0.0]
 end
 
@@ -426,6 +424,7 @@ end
     using DeviceLayout.SolidModelsExperimental: PGRecord, LayerState, LayerRegistry
 
     sm = SolidModel("tag_layer"; overwrite=true)
+    SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
     first_tag = SolidModels.gmsh.model.occ.addRectangle(0.0, 0.0, 0.0, 10.0, 10.0)
     second_tag = SolidModels.gmsh.model.occ.addRectangle(0.0, 0.0, 0.0, 10.0, 10.0)
     SolidModels.gmsh.model.occ.synchronize()
@@ -453,8 +452,7 @@ end
         :b
     )
     tag_records = SolidModelsExperimental.add_tagged_pgs!(sm, registry, [locator], deferred)
-    tag_name =
-        SolidModelsExperimental.physical_group_name(EntityMeta(:a; name="tag", role=Tag()))
+    tag_name = SolidModelsExperimental.pgname(EntityMeta(:a; name="tag", role=Tag()))
     @test tag_records == [(tag_name, "tag", :a)]
     @test SolidModels.hasgroup(sm, tag_name, 2)
     @test SolidModels.entitytags(sm[tag_name, 2]) == [Int32(first_tag)]
@@ -473,6 +471,7 @@ end
     using DeviceLayout.SolidModelsExperimental
 
     sm = SolidModel("deferred_graph"; overwrite=true)
+    SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
     obj_tag = SolidModels.gmsh.model.occ.addBox(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
     tool_tag = SolidModels.gmsh.model.occ.addBox(1.0, 0.0, 0.0, 1.0, 1.0, 1.0)
     SolidModels.gmsh.model.occ.synchronize()
@@ -598,6 +597,7 @@ end
     add_node!(missing_graph, BasicComponent(missing_geometry); base_id="q1")
     missing_sch = plan(missing_graph; log_dir=nothing) |> check!
     missing_sm = SolidModel("missing_port_style"; overwrite=true)
+    SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
     @test_throws ArgumentError render!(missing_sm, missing_sch, target)
     @test isempty(SolidModels.dimgroupdict(missing_sm, 2))
 
@@ -665,6 +665,7 @@ end
         )
     )
     unitless_sm = SolidModel("unitless"; overwrite=true)
+    SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
     unitless_metadata = render!(unitless_sm, unitless_sch, unitless_target)
     @test unitless_metadata["metadata"]["assembly"]["levels"]["1"] == 2.0
     @test unitless_metadata["layers"]["surface"]["height"] == 3.0
