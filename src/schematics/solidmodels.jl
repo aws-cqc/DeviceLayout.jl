@@ -376,16 +376,16 @@ end
 function check_render_strict(sch::Schematic, strict)
     if strict == :error
         max_level_logged(sch, :render_solidmodel) >= Logging.Error && error(
-            "Encountered errors while rendering. See $(sch.logger.logname) for details. " *
+            "encountered errors while rendering. See $(sch.logger.logname) for details. " *
             "Render with `strict=:no` to continue anyway (not recommended except for debugging)."
         )
     elseif strict == :warn
         max_level_logged(sch, :render_solidmodel) >= Logging.Warn && error(
-            "Encountered warnings while rendering. See $(sch.logger.logname) for details. " *
+            "encountered warnings while rendering. See $(sch.logger.logname) for details. " *
             "Render with `strict=:error` to allow warnings while still failing on errors."
         )
     elseif strict != :no
-        @warn "Keyword `strict` in `render!` should be `:error`, `:warn`, or `:no` " *
+        @warn "keyword `strict` in `render!` should be `:error`, `:warn`, or `:no` " *
               "(got `:$strict`). Proceeding as though `strict=:no` were used."
     end
     return nothing
@@ -436,7 +436,7 @@ A large part that is already conformal inside can be imported faster by hand: an
 """
 function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, kwargs...)
     sch.checked[] || error(
-        "Cannot render an unchecked Schematic. Run check!(sch::Schematic), or override by setting sch.checked[] = true (not recommended!)"
+        "cannot render an unchecked Schematic. Run check!(sch::Schematic), or override by setting sch.checked[] = true (not recommended!)"
     )
     reopen_logfile(sch, :render_solidmodel)
     try

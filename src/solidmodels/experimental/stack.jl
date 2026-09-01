@@ -73,7 +73,7 @@ struct SourceStack{L <: SourceLayer, T <: Coordinate}
         all_unitless = all(c -> c isa Real, coordinates)
         all_unitful = all(c -> c isa Unitful.Quantity, coordinates)
         (all_unitless || all_unitful) ||
-            throw(ArgumentError("SourceStack cannot mix unitful and unitless coordinates"))
+            throw(ArgumentError("source stack cannot mix unitful and unitless coordinates"))
 
         # Check all referenced levels exist
         for (name, layer) in layers
@@ -81,7 +81,7 @@ struct SourceStack{L <: SourceLayer, T <: Coordinate}
                 if !haskey(levels, l)
                     throw(
                         ArgumentError(
-                            "Source layer $name references missing assembly level $l"
+                            "source layer $name references missing assembly level $l"
                         )
                     )
                 end
@@ -103,7 +103,7 @@ Return the source layer identified by an `EntityMeta`, layer name, or source lay
 """
 function sourcelayer(layer::Symbol, stack::SourceStack)
     haskey(stack.layers, layer) ||
-        throw(ArgumentError("layer $layer does not exist in SourceStack"))
+        throw(ArgumentError("layer $layer does not exist in source stack"))
     return stack.layers[layer]
 end
 sourcelayer(m::EntityMeta, stack::SourceStack) = sourcelayer(m.layer, stack)

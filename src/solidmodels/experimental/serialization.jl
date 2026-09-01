@@ -78,7 +78,7 @@ function serialize_metadata(
                 if meta.role isa LumpedPort
                     source_name = pgname(meta)
                     haskey(lumped_port_directions, source_name) || error(
-                        "Internal metadata serialization error: LumpedPort record " *
+                        "internal metadata serialization error: LumpedPort record " *
                         "'$(record.name)' has no resolved direction for source identity " *
                         "'$source_name'"
                     )
