@@ -6,6 +6,22 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - `StrictCompositeComponent`, a composite component interface where subcomponent slots and
+    graph nodes are declared up front in a type-level `composite_spec` and validated when the
+    graph is first built. The framework derives subcomponent construction (with automatic
+    shared/prefixed parameter forwarding, `ParameterSet` slot addressing by name, and per-slot
+    `_build_subcomponent` overrides) and declared-node graph population, so `_graph!` only adds
+    edges; `map_hooks` and hook fallback names are keyed by stable node ids instead of graph
+    node indices. Includes an `ExamplePDK` demonstrator, `ExampleStrictRectangleTransmon`.
+    The v1 `CompositeComponent` interface is unchanged.
+  - `add_node!` accepts an explicit `id::Symbol` keyword, erroring if the id is unavailable
+    instead of silently renaming.
+  - `@composite_variant` types support graph-node access by property (like `@variant` types
+    and other composite components), so `variant.subcomp_id` resolves to the corresponding
+    `ComponentNode` when the property is not a parameter name.
+
 ### Fixed
 
   - Curve recovery (`union2d_curved` and friends) preserves arcs from path nodes styled with

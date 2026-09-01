@@ -96,7 +96,12 @@ function composite_variant_expr(
             prop === :_graph && return getfield(comp, :_graph)
             prop === :_schematic && return getfield(comp, :_schematic)
             prop === :_hooks && return getfield(comp, :_hooks)
-            return getfield(getfield(comp, :parameters), prop)
+            params = getfield(comp, :parameters)
+            hasfield(typeof(params), prop) && return getfield(params, prop)
+            # Fall back to graph-node lookup (matching `@variant` above and
+            # `getproperty(::AbstractCompositeComponent, ::Symbol)`), so that node
+            # access like `cc.island` works on composite variants too.
+            return getproperty(graph(comp), prop)
         end
         Base.propertynames(comp::$escname) =
             union(parameter_names(comp), [:parameters, :_graph, :_schematic, :_hooks])

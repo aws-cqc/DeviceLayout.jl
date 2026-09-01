@@ -72,6 +72,14 @@ export Component,
     BasicComponent, ComponentNode, GDSComponent, RouteComponent, Spacer, WeatherVane
 export PLAN_SKIPS_EDGE
 export Schematic, SchematicGraph, BasicCompositeComponent, CompositeComponent
+export StrictCompositeComponent,
+    composite_spec,
+    validate_composite_spec,
+    slot_names,
+    slot_types,
+    node_ids,
+    node_slots,
+    slot_of_node
 export @component,
     @compdef,
     add_node!,
@@ -145,6 +153,7 @@ include("schematics.jl")
 include("components/components.jl")
 include("components/compdef.jl")
 include("components/composite_components.jl")
+include("components/strict_composite_components.jl")
 include("components/builtin_components.jl")
 include("parameter_set_extraction.jl")
 include("routes.jl")
