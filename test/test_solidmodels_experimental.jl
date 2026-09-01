@@ -177,13 +177,23 @@ end
     @test only(boundary_ops)[2] == SolidModels.get_boundary
 
     translate_ops, translate_registry, _ = SolidModelsExperimental.compile_ops(
-        [(:shifted, SolidModels.translate!, (:metal, 1μm, 0μm, 0μm), :copy => true)],
+        [(:shifted, SolidModels.translate!, (:metal, 1μm, 0μm, 0μm))],
         stack,
         registry
     )
     @test haskey(translate_registry, :metal)
     @test translate_registry[:shifted].dim == 2
     @test only(translate_ops)[2] == SolidModels.translate!
+    @test (:copy => true) in only(translate_ops)
+
+    move_ops, move_registry, _ = SolidModelsExperimental.compile_ops(
+        [(:moved, SolidModels.translate!, (:metal, 1μm, 0μm, 0μm), :copy => false)],
+        stack,
+        registry
+    )
+    @test haskey(move_registry, :metal)
+    @test move_registry[:moved].dim == 2
+    @test (:copy => false) in only(move_ops)
 
     two_translate_ops, two_translate_registry, _ = SolidModelsExperimental.compile_ops(
         [
@@ -195,9 +205,9 @@ end
         registry
     )
     shifted_names = getfield.(two_translate_registry[:shifted].pgs, :name)
-    @test length(shifted_names) == 2
+    @test length(shifted_names) == 3
     @test allunique(shifted_names)
-    @test count(operation -> operation[2] == SolidModels.translate!, two_translate_ops) == 2
+    @test count(operation -> operation[2] == SolidModels.translate!, two_translate_ops) == 3
 
     @test SolidModelsExperimental.operation_hash(
         "object",
@@ -244,17 +254,11 @@ end
         stack,
         append_registry
     )
-    println("append_registry:")
-    inspect_registry(append_registry)
-    println("union_registry:")
-    inspect_registry(union_registry)
     @test length(union_registry[:combined].pgs) == 2
     @test any(record -> record.name == existing_pg, union_registry[:combined].pgs)
     @test !haskey(union_registry, :metal)
     @test count(operation -> operation[2] == SolidModels.union_geom!, append_ops) == 1
     @test count(operation -> operation[2] == SolidModels.difference_geom!, append_ops) == 1
-    println("append_ops:")
-    inspect_ops(append_ops)
 
     wrong_dimension_registry = deepcopy(registry)
     wrong_dimension_registry[:shifted] =
