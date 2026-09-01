@@ -35,26 +35,17 @@ const _EXTERIOR_BOUNDARY_LAYERS = Dict(
 )
 
 """
-    exterior_boundaries(bounding_volume_layer::Symbol) -> Vector{Tuple}
+    exterior_boundaries(bounding_volume_layer::Symbol) -> Vector{Boundary}
 
 Return operations extracting all six axis-aligned exterior faces of
 `bounding_volume_layer` into `:EXTBND_XMIN`, `:EXTBND_XMAX`, `:EXTBND_YMIN`,
 `:EXTBND_YMAX`, `:EXTBND_ZMIN`, and `:EXTBND_ZMAX`.
 """
 function exterior_boundaries(bounding_volume_layer::Symbol)
-    operations = Tuple[]
+    operations = Boundary[]
     for direction in ("X", "Y", "Z"), position in ("min", "max")
         destination = _EXTERIOR_BOUNDARY_LAYERS[(direction, position)]
-        push!(
-            operations,
-            (
-                destination,
-                SolidModels.get_boundary,
-                (bounding_volume_layer,),
-                :direction => direction,
-                :position => position
-            )
-        )
+        push!(operations, Boundary(destination, bounding_volume_layer; direction, position))
     end
     return operations
 end
@@ -442,11 +433,11 @@ end
 """
     struct SolidModelTarget{L <: SourceLayer, T <: Coordinate} <: SchematicDrivenLayout.Target
         stack::SourceStack{L, T}
-        ops::Vector{Tuple}
+        ops::Vector{LayerOp}
     end
 
     SolidModelTarget(stack::SourceStack)
-    SolidModelTarget(stack::SourceStack, ops::AbstractVector{<:Tuple})
+    SolidModelTarget(stack::SourceStack, ops::AbstractVector{<:LayerOp})
 
 Opt-in schematic target for the simulation-agnostic solid-model pipeline.
 
@@ -455,13 +446,13 @@ is supplied by `render!` keywords.
 """
 struct SolidModelTarget{L <: SourceLayer, T <: Coordinate} <: SchematicDrivenLayout.Target
     stack::SourceStack{L, T}
-    ops::Vector{Tuple}
+    ops::Vector{LayerOp}
 end
 
 SolidModelTarget(stack::SourceStack{L, T}) where {L, T} =
-    SolidModelTarget{L, T}(stack, Tuple[])
-SolidModelTarget(stack::SourceStack{L, T}, ops::AbstractVector{<:Tuple}) where {L, T} =
-    SolidModelTarget{L, T}(stack, Tuple[ops...])
+    SolidModelTarget{L, T}(stack, LayerOp[])
+SolidModelTarget(stack::SourceStack{L, T}, ops::AbstractVector{<:LayerOp}) where {L, T} =
+    SolidModelTarget{L, T}(stack, LayerOp[ops...])
 
 function _map_meta(target::SolidModelTarget)
     return meta -> begin
@@ -473,11 +464,11 @@ function _map_meta(target::SolidModelTarget)
 end
 
 function _extrusions(stack::SourceStack, reg::LayerRegistry)
-    operations = Tuple[]
+    operations = LayerOp[]
     for (layer_name, source_layer) in stack.layers
         haskey(reg, layer_name) || continue
         iszero(thickness(source_layer, stack)) && continue
-        push!(operations, (layer_name, SolidModels.extrude_z!, ()))
+        push!(operations, Extrude(layer_name))
     end
     return operations
 end
@@ -827,6 +818,9 @@ export SolidModelTarget
 export METAL, DIELECTRIC, NULL
 export Generic, Terminal, Ground, Tag, WavePort, LumpedPort
 export SourceLayer, SourceStack, EntityMeta
+export LayerOp, BooleanOp
+export Extrude, Difference, Fuse, Interface, Restrict
+export Boundary, Translate, Remove, Revolve, Periodic
 export exterior_boundaries, serialize_metadata
 export inspect_registry, inspect_ops
 

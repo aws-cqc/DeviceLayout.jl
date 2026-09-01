@@ -68,54 +68,49 @@ chip must explicitly map to that chip's layer symbol.
 The target stores exactly the stack and layer-level operations:
 
 ```julia
-target = SolidModelsExperimental.SolidModelTarget(stack, Tuple[])
+target = SolidModelsExperimental.SolidModelTarget(stack, LayerOp[])
 metadata = render!(solid_model, checked_schematic, target)
 ```
 
 Source-layer extrusions are scheduled automatically. Target operations describe subsequent
 layer-level booleans, boundary extraction, restriction, translation, revolution, or periodic
-pairing and are compiled to physical-group operations. Each operation is a tuple
-`(destination::Symbol, operation, arguments::Tuple, keyword_pairs...)`. For example:
+pairing and are compiled to physical-group operations. Operations are immutable, typed
+objects; invalid argument and keyword types are rejected when they are constructed. For
+example:
 
 ```julia
-ops = Tuple[
-    (:vacuum, SolidModels.difference_geom!, (:bounding_volume, [:substrate])),
-    (
-        :xmin,
-        SolidModels.get_boundary,
-        (:vacuum,),
-        :direction => "X",
-        :position => "min"
-    ),
-    (:shifted_port, SolidModels.translate!, (:port, 10μm, 0μm, 0μm), :copy => true)
+ops = LayerOp[
+    Difference(:vacuum, :bounding_volume, :substrate),
+    Boundary(:xmin, :vacuum; direction="x", position="min"),
+    Translate(:shifted_port, :port, 10μm, 0μm, 0μm)
 ]
 target = SolidModelsExperimental.SolidModelTarget(stack, ops)
 ```
 
-The public operation grammar is:
+The public operation types are:
 
-| Operation | `arguments` | Supported keywords |
-|:--|:--|:--|
-| `SolidModels.extrude_z!` | `()`; `destination` must be a source-stack layer | none |
-| `SolidModels.difference_geom!` | `(object_layer, tool_layer_or_vector)` | `remove_object`, `remove_tool` |
-| `SolidModels.union_geom!` | one or more source-layer symbols | none; source replacement is compiler-controlled |
-| `SolidModels.intersect_geom!` | `(object_layer, tool_layer)` | none; resolved after fragmentation |
-| `SolidModels.restrict_to_volume!` | `(bounding_volume_layer,)` | none |
-| `SolidModels.get_boundary` | `(source_layer,)` | `combined`, `oriented`, `recursive`, `direction`, `position` |
-| `SolidModels.translate!` | `(source_layer, dx, dy, dz)` | `copy` |
-| `SolidModels.remove_group!` | `(source_layer,)` | `remove_entities` |
-| `SolidModels.revolve!` | `(source_layer, x, y, z, ax, ay, az, theta)` | none |
-| `SolidModels.set_periodic!` | `(first_layer, second_layer)` | none |
+| Type | Meaning |
+|:--|:--|
+| `Extrude(layer)` | Extrude a source-stack layer using its configured thickness. |
+| `Difference(destination, object, tools; remove_object, remove_tool)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector. |
+| `Fuse(destination, sources)` | Union grouped source layers. Sources must be a tuple or vector. |
+| `Interface(destination, object, tool)` | Resolve a deferred interface after fragmentation. |
+| `Restrict(volume)` | Restrict the model to one bounding-volume layer. |
+| `Boundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries. |
+| `Translate(destination, source, dx, dy, dz; copy)` | Translate or copy-translate a layer. |
+| `Remove(source; remove_entities)` | Remove a layer. |
+| `Revolve(destination, source, origin, axis, angle)` | Revolve a layer. |
+| `Periodic(first, second)` | Pair two periodic layers. |
 
 A destination equal to a source layer replaces that layer for boundary, translation,
 revolution, and single-source union operations. A new destination creates a generated layer;
 an existing unrelated destination appends distinct content-addressed physical groups.
 Difference also supports replacing its object or a tool layer. Multi-source union consumes
-its source layers, and intersection creates or appends a deferred interface layer. Generated
+its source layers, and `Interface` creates or appends a deferred interface layer. Generated
 destinations need not appear in `SourceStack`, but every referenced source must exist in the
-compiler registry when the operation is reached. Malformed arity, argument types, keyword
-pair syntax, unsupported operations, and unavailable source layers throw contextual
-`ArgumentError`s naming the operation and destination before Gmsh rendering begins.
+compiler registry when the operation is reached. Typed constructors reject malformed
+operations before compilation, while unavailable source layers and incompatible destination
+dimensions are rejected before Gmsh rendering begins.
 
 The schematic renderer builds a private geometry/reference copy. It does not mutate the
 input schematic or component geometry caches. Each graph-node placement prefixes nonempty
