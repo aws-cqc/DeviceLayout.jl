@@ -438,7 +438,7 @@ _geometry_resolution_context() =
 
 function with_geometry_resolution_context(f::F) where {F}
     on_error = function (component, err, backtrace)
-        @error "Failed to resolve component geometry for $(name(component))" exception =
+        @error "failed to resolve component geometry for $(name(component))" exception =
             (err, backtrace)
         return nothing
     end
