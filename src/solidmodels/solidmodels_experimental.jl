@@ -17,7 +17,6 @@ include("experimental/entitymeta.jl")
 include("experimental/stack.jl")
 include("experimental/compiler.jl")
 include("experimental/locators.jl")
-include("experimental/postprocess.jl")
 include("experimental/serialization.jl")
 using DeviceLayout.SchematicDrivenLayout
 using Logging: with_logger
@@ -632,7 +631,7 @@ function render!(
             layer_ops = vcat(_extrusions(target.stack, registry), target.ops)
             # Compile layer operations and defer interface discovery until after fragmentation.
             pg_operations, registry, deferred_interfaces =
-                compile_layer_ops(layer_ops, target.stack, registry)
+                compile_ops(layer_ops, target.stack, registry)
             # Preserve every compiled physical group needed by later finalization passes.
             retained_groups = _retained_physical_groups(registry)
 
@@ -657,13 +656,8 @@ function render!(
             # Create tagged PGs first because this routine removes tagged surfaces from
             # their parent PGs and adds them to the deferred interfaces.
             # Execute all interfaces next, then discover connected metal components.
-            tag_records = add_tagged_pgs!(
-                sm,
-                registry,
-                locators,
-                deferred_interfaces,
-                bbox_cache
-            )
+            tag_records =
+                add_tagged_pgs!(sm, registry, locators, deferred_interfaces, bbox_cache)
             execute_deferred_interfaces!(sm, deferred_interfaces)
             # Downstream discovery assumes every realized PG has semantic registry data.
             _check_pgs_registered(sm, registry)
@@ -709,11 +703,131 @@ function render!(
     end
 end
 
+"""
+    remap_to_visualization_pgs!(sm::SolidModel, metadata::AbstractDict)
+
+Replace the chopped 2D physical groups in `sm` with a smaller set of human-readable PGs
+set by the layer assignments in `metadata`.
+
+The resulting model is **not** Palace-compatible (entities will belong to multiple PGs,
+producing duplicated element lines).
+"""
+function remap_to_visualization_pgs!(sm::SolidModel, metadata::AbstractDict)
+    layers = get(metadata, "layers", Dict{String, Any}())
+    terminals = get(metadata, "terminals", Dict{String, Any}())
+    ground = get(metadata, "ground", Dict{String, Any}())
+    tagged = get(metadata, "tagged", Dict{String, Any}())
+    physical_groups = get(metadata, "physical_groups", Dict{String, Any}())
+
+    # PGs whose entity_meta is non-null already have useful names — keep them
+    # in place and never remove them.
+    keep_existing = Set{String}()
+    for (pg_name, pg_data) in physical_groups
+        if !isnothing(get(pg_data, "entity_meta", nothing))
+            push!(keep_existing, pg_name)
+        end
+    end
+
+    # Helper: union of entity tags across a list of chopped 2D PG names.
+    function _union_entity_tags(pg_names)
+        entity_tags = Set{Int32}()
+        for pg_name in pg_names
+            SolidModels.hasgroup(sm, pg_name, 2) || continue
+            for t in SolidModels.entitytags(sm[pg_name, 2])
+                push!(entity_tags, t)
+            end
+        end
+        return entity_tags
+    end
+
+    # Track which chopped PGs were absorbed and should be removed at the end.
+    absorbed = Set{String}()
+
+    # Pass 1: layers (skip METAL_CC and 3D layers).
+    for (layer_name, layer_data) in layers
+        layer_name == "METAL_CC" && continue
+        get(layer_data, "dim", 2) == 2 || continue
+        pg_names = get(layer_data, "pgs", String[])
+        entity_tags = _union_entity_tags(pg_names)
+        isempty(entity_tags) && continue
+        sm[layer_name] = [(Int32(2), t) for t in sort!(collect(entity_tags))]
+        for pg_name in pg_names
+            pg_name in keep_existing && continue
+            push!(absorbed, pg_name)
+        end
+    end
+
+    # Pass 2: terminals (one PG per CC, named after the locators).
+    for (cc_name, cc_data) in terminals
+        pg_names = get(cc_data, "pgs", String[])
+        locators = get(cc_data, "locators", String[])
+        if isempty(locators)
+            @warn "Terminal CC '$cc_name' has no locators; skipping in viz remap."
+            continue
+        end
+        if isempty(pg_names)
+            @warn "Terminal CC '$cc_name' has no PGs; skipping in viz remap."
+            continue
+        end
+        entity_tags = _union_entity_tags(pg_names)
+        isempty(entity_tags) && continue
+        new_name = "TERMINAL_" * join(locators, "+")
+        sm[new_name] = [(Int32(2), t) for t in sort!(collect(entity_tags))]
+        for pg_name in pg_names
+            pg_name in keep_existing && continue
+            push!(absorbed, pg_name)
+        end
+    end
+
+    # Pass 3: ground (single GROUND PG covering all ground CCs).
+    ground_entity_tags = Set{Int32}()
+    for (cc_name, cc_data) in ground
+        pg_names = get(cc_data, "pgs", String[])
+        if isempty(pg_names)
+            @warn "Ground CC '$cc_name' has no PGs; skipping in viz remap."
+            continue
+        end
+        union!(ground_entity_tags, _union_entity_tags(pg_names))
+        for pg_name in pg_names
+            pg_name in keep_existing && continue
+            push!(absorbed, pg_name)
+        end
+    end
+    if !isempty(ground_entity_tags)
+        sm["GROUND"] = [(Int32(2), t) for t in sort!(collect(ground_entity_tags))]
+    end
+
+    # Pass 4: tagged (one PG per tag, named TAG_<tag_name>).
+    for (tag_name, tag_data) in tagged
+        pg_names = get(tag_data, "pgs", String[])
+        if isempty(pg_names)
+            @warn "Tag '$tag_name' has no PGs; skipping in viz remap."
+            continue
+        end
+        entity_tags = _union_entity_tags(pg_names)
+        isempty(entity_tags) && continue
+        sm["TAG_" * tag_name] = [(Int32(2), t) for t in sort!(collect(entity_tags))]
+        for pg_name in pg_names
+            pg_name in keep_existing && continue
+            push!(absorbed, pg_name)
+        end
+    end
+
+    # Remove the absorbed chopped PGs (record only, leaving entities alone).
+    for pg_name in absorbed
+        SolidModels.hasgroup(sm, pg_name, 2) || continue
+        SolidModels.remove_group!(sm, pg_name, 2; recursive=false, remove_entities=false)
+    end
+
+    return sm
+end
+
 export SolidModelTarget
 
 export METAL, DIELECTRIC, NULL
 export Generic, Terminal, Ground, Tag, WavePort, LumpedPort
 export SourceLayer, SourceStack, EntityMeta
 export exterior_boundaries, serialize_metadata
+export inspect_registry, inspect_ops
 
 end # module SolidModelsExperimental
