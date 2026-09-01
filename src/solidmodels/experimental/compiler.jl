@@ -99,7 +99,7 @@ function defer_interface!(
 )
     key = (:interface, dest_pg)
     haskey(graph, key, :key) &&
-        throw(ArgumentError("Deferred interface '$dest_pg' is already defined"))
+        throw(ArgumentError("deferred interface '$dest_pg' is already defined"))
     obj = _pg_vertex!(graph, obj_pg, obj_dim)
     tool = _pg_vertex!(graph, tool_pg, tool_dim)
     Graphs.add_vertex!(
@@ -234,14 +234,14 @@ end
 
 function _operation_argument_error(idx::Integer, dest, msg::AbstractString)
     dest_repr = dest isa Symbol ? ":$dest" : repr(dest)
-    return ArgumentError("Layer operation $idx for destination $dest_repr $msg")
+    return ArgumentError("layer operation $idx for destination $dest_repr $msg")
 end
 
 function _require_destination_dimension(reg::LayerRegistry, dest::Symbol, dim::Int)
     if haskey(reg, dest) && reg[dest].dim != dim
         throw(
             ArgumentError(
-                "Destination layer :$dest has dimension $(reg[dest].dim), " *
+                "destination layer :$dest has dimension $(reg[dest].dim), " *
                 "so dimension $dim physical groups cannot be appended"
             )
         )
@@ -249,21 +249,25 @@ function _require_destination_dimension(reg::LayerRegistry, dest::Symbol, dim::I
     return nothing
 end
 
-function _validate_layer_operation(operation, operation_idx::Integer)
+function _validate_layer_operation(
+    operation,
+    operation_idx::Integer,
+    registry::LayerRegistry
+)
     operation isa Tuple || throw(
         ArgumentError(
-            "Layer operation $operation_idx must be a Tuple, got $(typeof(operation))"
+            "layer operation $operation_idx must be a Tuple, got $(typeof(operation))"
         )
     )
     length(operation) >= 3 || throw(
         ArgumentError(
-            "Layer operation $operation_idx must contain destination, function, and arguments"
+            "layer operation $operation_idx must contain destination layer, function, and arguments"
         )
     )
     dest, operation_fn, args = operation[1], operation[2], operation[3]
     dest isa Symbol || throw(
         ArgumentError(
-            "Layer operation $operation_idx has non-Symbol destination $(repr(dest))"
+            "layer operation $operation_idx has non-Symbol destination $(repr(dest))"
         )
     )
     args isa Tuple || throw(
@@ -300,9 +304,11 @@ function _validate_layer_operation(operation, operation_idx::Integer)
             )
         )
     allowed_keywords = Symbol[]
+    source_layers = Symbol[]
 
     if operation_fn == SolidModels.extrude_z!
         _require_arity(0)
+        push!(source_layers, dest)
     elseif operation_fn == SolidModels.difference_geom!
         append!(allowed_keywords, (:remove_object, :remove_tool))
         _require_arity(2)
@@ -318,6 +324,7 @@ function _validate_layer_operation(operation, operation_idx::Integer)
         all(tool -> tool isa Symbol, tools) || throw(
             _operation_argument_error(operation_idx, dest, "requires Symbol tool layers")
         )
+        append!(source_layers, (args[1], tools...))
     elseif operation_fn == SolidModels.union_geom!
         isempty(args) && throw(
             _operation_argument_error(
@@ -329,17 +336,21 @@ function _validate_layer_operation(operation, operation_idx::Integer)
         all(source -> source isa Symbol, args) || throw(
             _operation_argument_error(operation_idx, dest, "requires Symbol source layers")
         )
+        append!(source_layers, args)
     elseif operation_fn == SolidModels.intersect_geom!
         _require_arity(2)
         _require_symbol(args[1], "the object layer")
         _require_symbol(args[2], "the tool layer")
+        append!(source_layers, args)
     elseif operation_fn == SolidModels.restrict_to_volume!
         _require_arity(1)
         _require_symbol(args[1], "the bounding-volume layer")
+        push!(source_layers, args[1])
     elseif operation_fn == SolidModels.get_boundary
         append!(allowed_keywords, (:combined, :oriented, :recursive, :direction, :position))
         _require_arity(1)
         _require_symbol(args[1], "the source layer")
+        push!(source_layers, args[1])
     elseif operation_fn == SolidModels.translate!
         push!(allowed_keywords, :copy)
         _require_arity(4)
@@ -351,10 +362,12 @@ function _validate_layer_operation(operation, operation_idx::Integer)
                 "requires Coordinate translation offsets"
             )
         )
+        push!(source_layers, args[1])
     elseif operation_fn == SolidModels.remove_group!
         push!(allowed_keywords, :remove_entities)
         _require_arity(1)
         _require_symbol(args[1], "the source layer")
+        push!(source_layers, args[1])
     elseif operation_fn == SolidModels.revolve!
         _require_arity(8)
         _require_symbol(args[1], "the source layer")
@@ -365,10 +378,12 @@ function _validate_layer_operation(operation, operation_idx::Integer)
                 "requires seven Real revolution values"
             )
         )
+        push!(source_layers, args[1])
     elseif operation_fn == SolidModels.set_periodic!
         _require_arity(2)
         _require_symbol(args[1], "the first periodic layer")
         _require_symbol(args[2], "the second periodic layer")
+        append!(source_layers, args)
     else
         throw(
             _operation_argument_error(
@@ -428,6 +443,13 @@ function _validate_layer_operation(operation, operation_idx::Integer)
             )
         )
     end
+    for source_layer in source_layers
+        haskey(registry, source_layer) || throw(
+            ArgumentError(
+                "source layer :$source_layer is absent from the compiler registry"
+            )
+        )
+    end
     return nothing
 end
 
@@ -455,7 +477,7 @@ function compile_ops(ops::AbstractVector, stack::SourceStack, reg::LayerRegistry
     interior_solids = Dict{Symbol, Vector{String}}()
 
     for (operation_idx, operation) in enumerate(ops)
-        _validate_layer_operation(operation, operation_idx)
+        _validate_layer_operation(operation, operation_idx, reg_copy)
         # Flush interior solids before restrict_to_volume! (subtraction must precede
         # fragmentation). The BV layer is excluded from subtraction since carving
         # holes in it would clip away the shell surfaces during restrict.
@@ -520,7 +542,7 @@ function _compile_op!(
     elseif op_fn == SolidModels.set_periodic!
         _compile_set_periodic!(pg_ops, registry, args)
     else
-        throw(ArgumentError("Unsupported layer operation $op_fn for destination :$dest"))
+        throw(ArgumentError("unsupported layer operation $op_fn for destination :$dest"))
     end
 end
 
@@ -584,15 +606,9 @@ function _compile_extrude!(
     stack::SourceStack,
     layer_name::Symbol
 )
-    !haskey(registry, layer_name) && throw(
-        ArgumentError(
-            "Cannot extrude layer :$layer_name because it is absent from the " *
-            "compiler registry"
-        )
-    )
     !haskey(stack.layers, layer_name) && throw(
         ArgumentError(
-            "Cannot extrude generated layer :$layer_name because extrusion requires " *
+            "cannot extrude generated layer :$layer_name because extrusion requires " *
             "a SourceStack entry"
         )
     )
@@ -685,15 +701,6 @@ function _compile_difference!(
     tool_layers_raw = args[2]
     # Support both a single tool layer and a vector of tool layers.
     tool_layers = tool_layers_raw isa AbstractVector ? tool_layers_raw : (tool_layers_raw,)
-
-    !haskey(registry, object_layer) && throw(
-        ArgumentError("Object layer :$object_layer is absent from the compiler registry")
-    )
-    for tool_layer in tool_layers
-        !haskey(registry, tool_layer) && throw(
-            ArgumentError("Tool layer :$tool_layer is absent from the compiler registry")
-        )
-    end
 
     object_state = registry[object_layer]
     dim = object_state.dim
@@ -827,11 +834,6 @@ function _compile_union!(
 
     if length(source_layers) == 1
         source_layer = source_layers[1]
-        !haskey(registry, source_layer) && throw(
-            ArgumentError(
-                "Source layer :$source_layer is absent from the compiler registry"
-            )
-        )
         state = registry[source_layer]
 
         if dest == source_layer
@@ -894,13 +896,9 @@ function _compile_union!(
         all_pg_names = String[]
         dim = 0
         for source_layer in source_layers
-            !haskey(registry, source_layer) && throw(
-                ArgumentError(
-                    "Source layer :$source_layer is absent from the compiler registry"
-                )
-            )
-            append!(all_pg_names, [record.name for record in registry[source_layer].pgs])
-            dim = registry[source_layer].dim
+            state = registry[source_layer]
+            append!(all_pg_names, [record.name for record in state.pgs])
+            dim = state.dim
         end
 
         sorted_pg_names = sort(all_pg_names)
@@ -963,12 +961,6 @@ function _compile_intersect!(
     ::Any
 )
     obj_layer, tool_layer = args[1], args[2]
-    !haskey(registry, obj_layer) && throw(
-        ArgumentError("Object layer :$obj_layer is absent from the compiler registry")
-    )
-    !haskey(registry, tool_layer) &&
-        throw(ArgumentError("Tool layer :$tool_layer is absent from the compiler registry"))
-
     obj_state = registry[obj_layer]
     tool_state = registry[tool_layer]
     obj_dim = obj_state.dim
@@ -1027,15 +1019,10 @@ layer.
 """
 function _compile_restrict!(pg_ops::Vector{Tuple}, reg::LayerRegistry, args::Tuple)
     bv_layer = args[1]
-    !haskey(reg, bv_layer) && throw(
-        ArgumentError(
-            "Bounding volume layer :$bv_layer is absent from the compiler registry"
-        )
-    )
     bv_pgs = reg[bv_layer].pgs
     length(bv_pgs) == 1 || throw(
         ArgumentError(
-            "Bounding volume layer :$bv_layer must contain exactly one physical group"
+            "bounding volume layer :$bv_layer must contain exactly one physical group"
         )
     )
     bv_pg = bv_pgs[1].name
@@ -1053,9 +1040,6 @@ function _compile_get_boundary!(
     kwargs
 )
     source_layer = args[1]
-    !haskey(registry, source_layer) && throw(
-        ArgumentError("Source layer :$source_layer is absent from the compiler registry")
-    )
     state = registry[source_layer]
     dim = state.dim
 
@@ -1111,14 +1095,10 @@ function _compile_translate!(
 )
     source_layer = args[1]
     dx, dy, dz = args[2], args[3], args[4]
-    !haskey(registry, source_layer) && throw(
-        ArgumentError("Source layer :$source_layer is absent from the compiler registry")
-    )
+    state = registry[source_layer]
 
     kwargs_dict = _parse_kwargs(kwargs)
-    copy_entities = get(kwargs_dict, :copy, false)
-
-    state = registry[source_layer]
+    copy_entities = get(kwargs_dict, :copy, true)
 
     if dest == source_layer && !copy_entities
         # Replace mode (in-place translate)
@@ -1134,26 +1114,34 @@ function _compile_translate!(
             )
         end
     else
-        # Create/append mode (copy-translate)
+        # Create/append mode
         new_records = PGRecord[]
         for record in state.pgs
-            dest_name =
+            base_name =
                 string(dest) *
                 "__" *
                 operation_hash(
                     record.name,
                     String[];
                     operation=:translate,
-                    parameters=(dx, dy, dz)
+                    parameters=(dx, dy, dz, copy_entities)
                 )
-            generated_record_exists(registry, dest, dest_name, new_records) && continue
+            dest_name = base_name
+            suffix = 2
+            # Identical translations must all execute and remain represented in the registry,
+            # to match DeviceLayout's PG-level operation semantics. Add a local
+            # suffix when the content hash collides.
+            while generated_record_exists(registry, dest, dest_name, new_records)
+                dest_name = base_name * "__" * string(suffix)
+                suffix += 1
+            end
             push!(
                 pg_ops,
                 (
                     dest_name,
                     SolidModels.translate!,
                     (record.name, dx, dy, dz),
-                    :copy => true
+                    :copy => copy_entities
                 )
             )
             push!(new_records, PGRecord(dest_name, dest, nothing))
@@ -1173,9 +1161,6 @@ end
 
 function _compile_remove!(pg_ops::Vector{Tuple}, reg::LayerRegistry, args::Tuple, kwargs)
     layer_name = args[1]
-    !haskey(reg, layer_name) &&
-        throw(ArgumentError("Layer :$layer_name is absent from the compiler registry"))
-
     kwargs_dict = _parse_kwargs(kwargs)
     remove_entities = get(kwargs_dict, :remove_entities, true)
 
@@ -1206,10 +1191,6 @@ function _compile_revolve!(
 )
     source_layer = args[1]
     x, y, z, ax, ay, az, θ = args[2], args[3], args[4], args[5], args[6], args[7], args[8]
-    !haskey(registry, source_layer) && throw(
-        ArgumentError("Source layer :$source_layer is absent from the compiler registry")
-    )
-
     state = registry[source_layer]
     dim = state.dim
 
@@ -1264,13 +1245,6 @@ end
 
 function _compile_set_periodic!(pg_ops::Vector{Tuple}, reg::LayerRegistry, args::Tuple)
     layer_a, layer_b = args[1], args[2]
-    !haskey(reg, layer_a) && throw(
-        ArgumentError("Periodic layer :$layer_a is absent from the compiler registry")
-    )
-    !haskey(reg, layer_b) && throw(
-        ArgumentError("Periodic layer :$layer_b is absent from the compiler registry")
-    )
-
     records_a = reg[layer_a].pgs
     records_b = reg[layer_b].pgs
     length(records_a) == length(records_b) || throw(
