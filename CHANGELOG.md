@@ -6,8 +6,21 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Changed
+
+  - B-spline approximation of curves and offset curves (used in SolidModel and conformal
+    rendering) estimates candidate error at Gauss-Legendre nodes against the exact curve
+    and fits the candidate endpoint tangent magnitudes by least squares before
+    subdividing. Construction is several times faster and typically produces 2–5× fewer
+    subsegments at the same tolerance. Pass `errmetric=:dense` to
+    `Paths.bspline_approximation` for the previous behavior.
+
 ### Fixed
 
+  - B-spline approximation of an offset curve near or beyond a cusp (offset magnitude
+    approaching or exceeding the base curve's radius of curvature) could silently return
+    results exceeding the requested tolerance; such curves are now refined to tolerance
+    where possible and warn otherwise.
   - Curve recovery (`union2d_curved` and friends) preserves arcs from path nodes styled with
     `Plain` or `OptionalStyle` (as produced by `not_simulated`/`only_simulated` and friends),
     which previously fell back to discretization.
