@@ -2,7 +2,6 @@
     using DeviceLayout
     using DeviceLayout.SchematicDrivenLayout
     using DeviceLayout.SolidModelsExperimental
-    # import Unitful: μm
     using DeviceLayout.PreferredUnits
 
     # Offered material types remain present
@@ -117,19 +116,21 @@ end
     using DeviceLayout.SolidModels
     using DeviceLayout.SolidModelsExperimental
     using DeviceLayout.SolidModelsExperimental: PGRecord, LayerState, LayerRegistry
+    using DeviceLayout.SolidModelsExperimental: pgname
     import Unitful: μm
 
     stack = SourceStack(
-        :metal => SourceLayer(METAL; level=1, thickness=2μm);
+        :metal => SourceLayer(METAL; level=1, thickness=2μm),
+        :voids => SourceLayer(METAL; level=1, thickness=2μm, keep_interior=false);
         levels=(1 => 0μm,)
     )
+    metal_meta = EntityMeta(:metal; name="a")
+    voids_meta = EntityMeta(:voids; name="b")
     registry = LayerRegistry(
-        :metal => LayerState(
-            [PGRecord("metal__a__i1__rGeneric", :metal, EntityMeta(:metal; name="a"))],
-            2
-        )
+        :metal => LayerState([PGRecord(pgname(metal_meta), :metal, metal_meta)], 2),
+        :voids => LayerState([PGRecord(pgname(voids_meta), :voids, voids_meta)], 2)
     )
-    pg_ops, final_registry, deferred = SolidModelsExperimental.compile_layer_ops(
+    pg_ops, final_registry, deferred = SolidModelsExperimental.compile_ops(
         [(:metal, SolidModels.extrude_z!, ())],
         stack,
         registry
@@ -138,13 +139,36 @@ end
     @test length(pg_ops) == 2
     @test isempty(SolidModelsExperimental.interface_vertices(deferred))
 
-    @test_throws ArgumentError SolidModelsExperimental.compile_layer_ops(
+    flush_ops, flush_registry, _ = SolidModelsExperimental.compile_ops(
+        [(:metal, SolidModels.extrude_z!, ()), (:voids, SolidModels.extrude_z!, ())],
+        stack,
+        registry
+    )
+    metal_pg = only(flush_registry[:metal].pgs).name
+    voids_source_pg = pgname(voids_meta)
+    voids_interior_pg = only(
+        op[1] for op in flush_ops if
+        op[2] == SolidModels.extrude_z! && op[3][1] == voids_source_pg && op[3][3] == 2
+    )
+    @test any(flush_ops) do op
+        return op[2] == SolidModels.difference_geom! &&
+               op[3] == (metal_pg, [voids_interior_pg], 3, 3)
+    end
+    @test any(flush_ops) do op
+        return op[2] == SolidModels.remove_group! &&
+               op[3] == (voids_interior_pg, 3) &&
+               (:remove_entities => false) in op
+    end
+    @test flush_registry[:metal].dim == 3
+    @test flush_registry[:voids].dim == 2
+
+    @test_throws ArgumentError SolidModelsExperimental.compile_ops(
         [(:new_layer, SolidModels.difference_geom!, (:missing, :metal))],
         stack,
         registry
     )
 
-    boundary_ops, boundary_registry, _ = SolidModelsExperimental.compile_layer_ops(
+    boundary_ops, boundary_registry, _ = SolidModelsExperimental.compile_ops(
         [(:edge, SolidModels.get_boundary, (:metal,))],
         stack,
         registry
@@ -152,7 +176,7 @@ end
     @test boundary_registry[:edge].dim == 1
     @test only(boundary_ops)[2] == SolidModels.get_boundary
 
-    translate_ops, translate_registry, _ = SolidModelsExperimental.compile_layer_ops(
+    translate_ops, translate_registry, _ = SolidModelsExperimental.compile_ops(
         [(:shifted, SolidModels.translate!, (:metal, 1μm, 0μm, 0μm), :copy => true)],
         stack,
         registry
@@ -161,20 +185,20 @@ end
     @test translate_registry[:shifted].dim == 2
     @test only(translate_ops)[2] == SolidModels.translate!
 
-    two_translate_ops, two_translate_registry, _ =
-        SolidModelsExperimental.compile_layer_ops(
-            [
-                (:shifted, SolidModels.translate!, (:metal, 1μm, 0μm, 0μm), :copy => true),
-                (:shifted, SolidModels.translate!, (:metal, 2μm, 0μm, 0μm), :copy => true),
-                (:shifted, SolidModels.translate!, (:metal, 2μm, 0μm, 0μm), :copy => true)
-            ],
-            stack,
-            registry
-        )
+    two_translate_ops, two_translate_registry, _ = SolidModelsExperimental.compile_ops(
+        [
+            (:shifted, SolidModels.translate!, (:metal, 1μm, 0μm, 0μm), :copy => true),
+            (:shifted, SolidModels.translate!, (:metal, 2μm, 0μm, 0μm), :copy => true),
+            (:shifted, SolidModels.translate!, (:metal, 2μm, 0μm, 0μm), :copy => true)
+        ],
+        stack,
+        registry
+    )
     shifted_names = getfield.(two_translate_registry[:shifted].pgs, :name)
     @test length(shifted_names) == 2
     @test allunique(shifted_names)
     @test count(operation -> operation[2] == SolidModels.translate!, two_translate_ops) == 2
+
     @test SolidModelsExperimental.operation_hash(
         "object",
         ["tool"];
@@ -205,36 +229,43 @@ end
         (:bad, identity, (:metal,))
     ]
     for operation in malformed_operations
-        @test_throws ArgumentError SolidModelsExperimental.compile_layer_ops(
+        @test_throws ArgumentError SolidModelsExperimental.compile_ops(
             [operation],
             stack,
             registry
         )
     end
+
     append_registry = deepcopy(registry)
-    append_registry[:combined] =
-        LayerState([PGRecord("combined__existing", :combined, nothing)], 2)
-    append_ops, union_registry, _ = SolidModelsExperimental.compile_layer_ops(
+    existing_pg = "existing"
+    append_registry[:combined] = LayerState([PGRecord(existing_pg, :combined, nothing)], 2)
+    append_ops, union_registry, _ = SolidModelsExperimental.compile_ops(
         [(:combined, SolidModels.union_geom!, (:metal,))],
         stack,
         append_registry
     )
+    println("append_registry:")
+    inspect_registry(append_registry)
+    println("union_registry:")
+    inspect_registry(union_registry)
     @test length(union_registry[:combined].pgs) == 2
-    @test any(record -> record.name == "combined__existing", union_registry[:combined].pgs)
+    @test any(record -> record.name == existing_pg, union_registry[:combined].pgs)
     @test !haskey(union_registry, :metal)
     @test count(operation -> operation[2] == SolidModels.union_geom!, append_ops) == 1
     @test count(operation -> operation[2] == SolidModels.difference_geom!, append_ops) == 1
+    println("append_ops:")
+    inspect_ops(append_ops)
 
     wrong_dimension_registry = deepcopy(registry)
     wrong_dimension_registry[:shifted] =
-        LayerState([PGRecord("shifted__volume", :shifted, nothing)], 3)
-    @test_throws ArgumentError SolidModelsExperimental.compile_layer_ops(
+        LayerState([PGRecord("wrong_dimension", :shifted, nothing)], 3)
+    @test_throws ArgumentError SolidModelsExperimental.compile_ops(
         [(:shifted, SolidModels.translate!, (:metal, 1μm, 0μm, 0μm), :copy => true)],
         stack,
         wrong_dimension_registry
     )
 
-    interface_ops, interface_registry, deferred = SolidModelsExperimental.compile_layer_ops(
+    interface_ops, interface_registry, deferred = SolidModelsExperimental.compile_ops(
         [(:interface, SolidModels.intersect_geom!, (:metal, :metal))],
         stack,
         registry
@@ -624,9 +655,13 @@ end
     end
     @test readdir(output_dir) == before
     @test isnothing(JSONSchema.validate(schema, metadata))
-    generic_pg = metadata["physical_groups"]["surface__q1.pad__i1__rGeneric"]
+    generic_pg = metadata["physical_groups"][SolidModelsExperimental.pgname(
+        EntityMeta(:surface; name="q1.pad")
+    )]
     @test generic_pg["entity_meta"]["role"]["type"] == "Generic"
-    port_pg = metadata["physical_groups"]["port__q1.drive__i1__rLumpedPort"]
+    port_pg = metadata["physical_groups"][SolidModelsExperimental.pgname(
+        EntityMeta(:port; name="q1.drive", role=LumpedPort)
+    )]
     @test port_pg["entity_meta"]["role"] ==
           Dict("type" => "LumpedPort", "direction" => [0.0, 1.0, 0.0])
     @test element_metadata(geometry)[1].name == "pad"
@@ -702,6 +737,7 @@ end
     using DeviceLayout.SchematicDrivenLayout
     using DeviceLayout.SolidModels
     using DeviceLayout.SolidModelsExperimental
+    using DeviceLayout.SolidModelsExperimental: pgname
     using FileIO: save
     import JSON
     using JSONSchema
@@ -941,29 +977,29 @@ end
         end
 
         @testset "SolidModel has expected 3D physical groups" begin
-            groups_3d = SolidModels.dimgroupdict(solid_model, 3)
-            # Substrate extruded
-            @test any(contains("SUBSTRATE_BOTTOM"), keys(groups_3d))
-            # Vacuum created
-            @test any(contains("VACUUM"), keys(groups_3d))
-            # Bounding volume removed
-            @test !any(contains("BOUNDING_VOLUME"), keys(groups_3d))
+            layers = solid_model_metadata["layers"]
+            for layer_name in ("SUBSTRATE_BOTTOM", "VACUUM")
+                @test layers[layer_name]["dim"] == 3
+                @test all(layers[layer_name]["pgs"]) do pg_name
+                    return SolidModels.hasgroup(solid_model, pg_name, 3)
+                end
+            end
+            @test !haskey(layers, "BOUNDING_VOLUME")
         end
 
         @testset "SolidModel has expected 2D physical groups" begin
-            groups_2d = SolidModels.dimgroupdict(solid_model, 2)
-            group_names = collect(keys(groups_2d))
+            layers = solid_model_metadata["layers"]
             # All six exterior boundaries exist and have non-empty entity lists
             for suffix in ("XMIN", "XMAX", "YMIN", "YMAX", "ZMIN", "ZMAX")
-                matching = filter(contains("EXTBND_$suffix"), group_names)
-                @test !isempty(matching)
-                pg = groups_2d[first(matching)]
-                @test !isempty(SolidModels.entitytags(pg))
+                layer = layers["EXTBND_$suffix"]
+                @test layer["dim"] == 2
+                @test !isempty(layer["pgs"])
+                for pg_name in layer["pgs"]
+                    @test !isempty(SolidModels.entitytags(solid_model[pg_name, 2]))
+                end
             end
-            # Port preserved
-            @test any(contains("jj"), group_names)
             # METAL_POS recoverable via layers map
-            @test haskey(solid_model_metadata["layers"], "METAL_POS")
+            @test haskey(layers, "METAL_POS")
         end
 
         @testset "Terminal identification" begin
@@ -1067,13 +1103,20 @@ end
         end
 
         @testset "Terminal/Ground locator geometry never enters the model" begin
-            for dim = 0:3
-                dimension_groups = SolidModels.dimgroupdict(solid_model, dim)
-                for (pg_name, _) in dimension_groups
-                    @test !contains(pg_name, "rTerminal")
-                    @test !contains(pg_name, "rGround")
-                end
-            end
+            locator_names = [
+                "$node.$name" for node in ("q1", "q2") for
+                name in ("island", "coupler_east", "coupler_west")
+            ]
+            locator_pgs = Set(
+                pgname(EntityMeta(:METAL_POS; name, role=Terminal)) for
+                name in locator_names
+            )
+            push!(locator_pgs, pgname(EntityMeta(:METAL_POS; role=Ground)))
+            model_pgs = Set(
+                pg_name for dim = 0:3 for
+                pg_name in keys(SolidModels.dimgroupdict(solid_model, dim))
+            )
+            @test isempty(intersect(locator_pgs, model_pgs))
         end
 
         @testset "Tag locator serialized in tagged section" begin

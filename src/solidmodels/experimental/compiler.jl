@@ -11,6 +11,47 @@ end
 
 const LayerRegistry = Dict{Symbol, LayerState}
 
+function inspect_registry(registry::LayerRegistry; io::IO=stdout)
+    for (layer, state) in sort!(collect(registry); by=first)
+        println(io, layer, " (dim=", state.dim, ")")
+        for record in state.pgs
+            print(io, "  ", record.name, " [", record.layer, "]")
+            if !isnothing(record.meta)
+                meta = record.meta
+                print(
+                    io,
+                    " ",
+                    nameof(typeof(meta)),
+                    "(name=",
+                    repr(meta.name),
+                    ", index=",
+                    meta.index,
+                    ", role=",
+                    nameof(typeof(meta.role)),
+                    ")"
+                )
+            end
+            println(io)
+        end
+    end
+    return nothing
+end
+
+function inspect_ops(ops::AbstractVector; io::IO=stdout)
+    for (idx, op) in enumerate(ops)
+        print(io, idx, ": ")
+        show(io, op[1])
+        print(io, " = ", nameof(op[2]))
+        show(io, op[3])
+        for keyword in op[4:end]
+            print(io, "; ")
+            show(io, keyword)
+        end
+        println(io)
+    end
+    return nothing
+end
+
 function initial_registry(metas::AbstractVector{<:EntityMeta}, stack::SourceStack)
     registry = LayerRegistry()
     for meta in unique(metas)
@@ -168,11 +209,6 @@ function pghash(dimtags)
     return bytes2hex(sha1(content))[1:16]
 end
 
-"""
-    operation_hash(obj_pg, tool_pgs; operation, parameters=()) -> String
-
-Return the content hash for a generated layer operation.
-"""
 function operation_hash(
     obj_pg::String,
     tool_pgs::Vector{String};
@@ -398,8 +434,7 @@ end
 # ─── Layer-level operation compiler ──────────────────────────────────────────
 
 """
-    compile_layer_ops(layer_ops, stack, initial_registry)
-        -> (pg_ops, registry, deferred_interfaces)
+    compile_ops(ops, stack, registry) -> (pg_ops, registry, deferred_interfaces)
 
 Compile layer-level operations into physical-group-level operations suitable for passing
 to DeviceLayout's `_postrender!`.
@@ -411,19 +446,15 @@ Returns:
   - `deferred_interfaces::MetaGraphs.MetaDiGraph`: interface operations and unique PGs
     evaluated after fragmentation
 """
-function compile_layer_ops(
-    layer_ops::AbstractVector,
-    stack::SourceStack,
-    initial_registry::LayerRegistry
-)
-    registry = deepcopy(initial_registry)
+function compile_ops(ops::AbstractVector, stack::SourceStack, reg::LayerRegistry)
+    reg_copy = deepcopy(reg)
     pg_ops = Tuple[]
     deferred_interfaces = _deferred_interface_graph()
     # Interior solids from contour_only + !keep_interior extrusions, keyed by layer name.
     # These are subtracted from all 3D volumes before restrict_to_volume!.
     interior_solids = Dict{Symbol, Vector{String}}()
 
-    for (operation_idx, operation) in enumerate(layer_ops)
+    for (operation_idx, operation) in enumerate(ops)
         _validate_layer_operation(operation, operation_idx)
         # Flush interior solids before restrict_to_volume! (subtraction must precede
         # fragmentation). The BV layer is excluded from subtraction since carving
@@ -432,14 +463,14 @@ function compile_layer_ops(
             bounding_volume_layer = operation[3][1]
             _flush_interior_solids!(
                 pg_ops,
-                registry,
+                reg_copy,
                 interior_solids,
                 bounding_volume_layer
             )
         end
-        _compile_one_op!(
+        _compile_op!(
             pg_ops,
-            registry,
+            reg_copy,
             deferred_interfaces,
             interior_solids,
             stack,
@@ -450,12 +481,12 @@ function compile_layer_ops(
     # Flush any remaining interior solids (pipelines without restrict_to_volume!). If
     # restrict_to_volume! was previously compiled, the interior_solids array was already
     # emptied, so this call will do nothing.
-    _flush_interior_solids!(pg_ops, registry, interior_solids, nothing)
+    _flush_interior_solids!(pg_ops, reg_copy, interior_solids, nothing)
 
-    return pg_ops, registry, deferred_interfaces
+    return pg_ops, reg_copy, deferred_interfaces
 end
 
-function _compile_one_op!(
+function _compile_op!(
     pg_ops::Vector{Tuple},
     registry::LayerRegistry,
     deferred_interfaces::MetaGraphs.MetaDiGraph,
@@ -591,7 +622,7 @@ function _compile_extrude!(
     for record in state.pgs
         pg = record.name
         if source_layer.contour_only
-            # Extrude the contour (1D boundary of 2D surface) into a lateral shell
+            # Extrude the contour (1D boundary of 2D surface) to form a shell
             ctr_pg = pg * "__CTR"
             ext_pg = pg * "__CTREXT"
             push!(pg_ops, (ctr_pg, SolidModels.get_boundary, (pg, 2), :oriented => false))
