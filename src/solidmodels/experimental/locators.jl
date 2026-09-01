@@ -38,7 +38,7 @@ function _containing_entity_tag(locator::LocatorRecord, entity_rtree; tol=1e-6)
     end
     if count > 1
         error(
-            "Locator '$(locator.meta.name)' at $(locator.position) matched " *
+            "locator '$(locator.meta.name)' at $(locator.position) matched " *
             "$count entities; expected exactly 1 on a fragmented plane"
         )
     end
