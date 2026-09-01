@@ -386,7 +386,7 @@ function _check_pgs_registered(sm::SolidModel, registry::LayerRegistry)
         (name, dim) in registered || push!(unregistered, (name, dim))
     end
     isempty(unregistered) || error(
-        "Solid model contains physical groups absent from the layer registry: " *
+        "solid model contains physical groups absent from the layer registry: " *
         join(["'$name' (dimension $dim)" for (name, dim) in unregistered], ", ")
     )
     return nothing
@@ -550,10 +550,10 @@ function render!(
     strict=:error,
     kwargs...
 )
-    sch.checked[] || error("Cannot render an unchecked Schematic. Run check!(sch) first.")
+    sch.checked[] || error("cannot render an unchecked Schematic. Run check!(sch) first.")
     haskey(kwargs, :output_dir) && throw(
         ArgumentError(
-            "SolidModelsExperimental.render! has no output_dir keyword; write the returned metadata explicitly"
+            "experimental render! does not accept an output_dir keyword; write the returned metadata explicitly"
         )
     )
 
@@ -591,13 +591,13 @@ function render!(
                     local_direction = DeviceLayout.extract_direction(entity)
                     isnothing(local_direction) && throw(
                         ArgumentError(
-                            "Placed LumpedPort '$pg_name' has no WithDirection style; " *
+                            "placed LumpedPort '$pg_name' has no WithDirection style; " *
                             "annotate its geometry with `WithDirection(angle)`"
                         )
                     )
                     haskey(lumped_port_directions, pg_name) && throw(
                         ArgumentError(
-                            "Multiple placed LumpedPort occurrences in physical group " *
+                            "multiple placed LumpedPort occurrences in physical group " *
                             "'$pg_name'; assign distinct EntityMeta `name` or " *
                             "`index` values"
                         )
@@ -616,7 +616,7 @@ function render!(
                 meta.role isa Terminal && isempty(meta.name) && continue
                 meta.role isa Tag &&
                     isempty(meta.name) &&
-                    throw(ArgumentError("Tag locators must have a nonempty name"))
+                    throw(ArgumentError("tag locators must have a nonempty name"))
                 source_layer = sourcelayer(meta, target.stack)
                 source_layer.solidmodel || continue
                 r = center(bounds(entity))
