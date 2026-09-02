@@ -730,6 +730,8 @@ function _compile!(cmp::CompilerState, op::Fuse)
                 ]
                 if !isempty(existing_pgs)
                     for record in new_records
+                        # Ensure additions don't overlap with existing PGs in the
+                        # destination layer
                         push!(
                             cmp.ops,
                             (
@@ -750,28 +752,28 @@ function _compile!(cmp::CompilerState, op::Fuse)
         end
     else
         # Collapse mode: fuse all source PGs into one
-        all_pg_names = String[]
+        source_pg_names = String[]
         dim = 0
         for source_layer in op.sources
             state = cmp.reg[source_layer]
-            append!(all_pg_names, [record.name for record in state.pgs])
+            append!(source_pg_names, [record.name for record in state.pgs])
             dim = state.dim
         end
+        sort!(source_pg_names)
 
-        sorted_pg_names = sort(all_pg_names)
         dest_name =
             string(op.destination) *
             "__" *
             ophash(
-                first(sorted_pg_names),
-                sorted_pg_names[2:end];
+                first(source_pg_names),
+                source_pg_names[2:end];
                 operation=:union,
                 parameters=(dim,)
             )
         new_record = PGRecord(dest_name, op.destination, nothing)
         duplicate = generated_record_exists(cmp.reg, op.destination, dest_name)
         duplicate ||
-            push!(cmp.ops, (dest_name, SolidModels.union_geom!, (all_pg_names, dim)))
+            push!(cmp.ops, (dest_name, SolidModels.union_geom!, (source_pg_names, dim)))
 
         if haskey(cmp.reg, op.destination) && op.destination ∉ op.sources
             _require_destination_dimension(cmp.reg, op.destination, dim)
