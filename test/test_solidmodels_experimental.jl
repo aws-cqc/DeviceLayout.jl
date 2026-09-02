@@ -183,7 +183,7 @@ end
         @test reg[:shell].dim == 2
         @test only(reg[:shell].pgs).name == ext[1]
         @test !haskey(reg, :EXTBND_MISC) # no interior solids were flush (keep_interior=true)
-                        # so no external boundaries were added to EXTBND_MISC tracking layer
+        # so no external boundaries were added to EXTBND_MISC tracking layer
 
         # A hollow contour also creates a temporary interior and registers its boundary.
         ops, reg, _ = compile_ops([Extrude(:hollow_shell)], stack, registry)
@@ -349,8 +349,7 @@ end
         @test count(op -> op[2] == SolidModels.translate!, ops) == 3
 
         reg = deepcopy(registry)
-        reg[:shifted] =
-            LayerState([PGRecord("wrong_dimension", :shifted, nothing)], 3)
+        reg[:shifted] = LayerState([PGRecord("wrong_dimension", :shifted, nothing)], 3)
         @test_throws ArgumentError compile_ops(
             [Translate(:shifted, :metal, 1μm, 0μm, 0μm)],
             stack,
@@ -363,15 +362,84 @@ end
         @test_throws MethodError Fuse(:bad, :metal)
         @test_throws ArgumentError Fuse(:bad, Symbol[])
 
+        # A single source fused in place keeps its PG identity and registry entry.
+        ops, reg, _ = compile_ops([Fuse(:metal, (:metal,))], stack, registry)
+        op = only(ops)
+        @test op[1] == pgname(metal_meta)
+        @test op[2] == SolidModels.union_geom!
+        @test op[3] == (pgname(metal_meta), 2)
+        @test only(reg[:metal].pgs).meta == metal_meta
+
+        # Moving one source to a new destination preserves one record per source PG.
+        ops, reg, _ = compile_ops([Fuse(:combined, (:metal,))], stack, registry)
+        op = only(ops)
+        @test startswith(op[1], "combined")
+        @test op[2] == SolidModels.union_geom!
+        @test op[3] == (pgname(metal_meta), 2)
+        @test !haskey(reg, :metal)
+        @test only(reg[:combined].pgs).name == op[1]
+        # simply healing and moving preserves metadata
+        @test only(reg[:combined].pgs).meta == metal_meta
+
+        # Every PG in a single source is healed independently and retains its metadata.
+        reg = deepcopy(registry)
+        second_meta = EntityMeta(:metal; name="second")
+        push!(reg[:metal].pgs, PGRecord(pgname(second_meta), :metal, second_meta))
+        ops, reg, _ = compile_ops([Fuse(:combined, (:metal,))], stack, reg)
+        @test length(ops) == 2
+        @test Set(op[3] for op in ops) ==
+              Set([(pgname(metal_meta), 2), (pgname(second_meta), 2)])
+        @test Set(record.meta for record in reg[:combined].pgs) ==
+              Set([metal_meta, second_meta])
+        @test !haskey(reg, :metal)
+
+        # Appending a single source keeps the existing PG and makes the new one disjoint.
         reg = deepcopy(registry)
         existing_pg = "existing"
         reg[:combined] = LayerState([PGRecord(existing_pg, :combined, nothing)], 2)
         ops, reg, _ = compile_ops([Fuse(:combined, (:metal,))], stack, reg)
-        @test length(reg[:combined].pgs) == 2
-        @test any(record -> record.name == existing_pg, reg[:combined].pgs)
+        union_op = only(filter(op -> op[2] == SolidModels.union_geom!, ops))
+        difference_op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
+        @test union_op[3] == (pgname(metal_meta), 2)
+        @test difference_op[3] == (union_op[1], [existing_pg], 2, 2)
+        @test (:remove_object => true) in difference_op
+        @test (:remove_tool => false) in difference_op
+        @test Set(record.name for record in reg[:combined].pgs) ==
+              Set([existing_pg, union_op[1]])
         @test !haskey(reg, :metal)
-        @test count(op -> op[2] == SolidModels.union_geom!, ops) == 1
-        @test count(op -> op[2] == SolidModels.difference_geom!, ops) == 1
+
+        # Multiple sources collapse into one generated destination PG.
+        ops, reg, _ = compile_ops([Fuse(:combined, (:metal, :voids))], stack, registry)
+        op = only(ops)
+        @test startswith(op[1], "combined")
+        @test op[2] == SolidModels.union_geom!
+        @test op[3] == ([pgname(metal_meta), pgname(voids_meta)], 2)
+        @test !haskey(reg, :metal)
+        @test !haskey(reg, :voids)
+        @test only(reg[:combined].pgs).name == op[1]
+        @test isnothing(only(reg[:combined].pgs).meta)
+
+        # A source-layer destination is replaced by the collapsed result.
+        ops, reg, _ = compile_ops([Fuse(:metal, (:metal, :voids))], stack, registry)
+        op = only(ops)
+        @test startswith(op[1], "metal")
+        @test op[1] != pgname(metal_meta) # collapse renames PG, appends operation hash
+        @test op[3] == ([pgname(metal_meta), pgname(voids_meta)], 2)
+        @test !haskey(reg, :voids)
+        @test length(reg[:metal].pgs) == 1
+        @test only(reg[:metal].pgs).name == op[1]
+
+        # Multiple sources can also append to an unrelated existing destination.
+        reg = deepcopy(registry)
+        reg[:combined] = LayerState([PGRecord(existing_pg, :combined, nothing)], 2)
+        ops, reg, _ = compile_ops([Fuse(:combined, (:metal, :voids))], stack, reg)
+        union_op = only(filter(op -> op[2] == SolidModels.union_geom!, ops))
+        difference_op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
+        @test union_op[3] == ([pgname(metal_meta), pgname(voids_meta)], 2)
+        @test difference_op[3] == (union_op[1], [existing_pg], 2, 2)
+        @test length(reg[:combined].pgs) == 2
+        @test !haskey(reg, :metal)
+        @test !haskey(reg, :voids)
     end
 
     @testset "Interface" begin
