@@ -230,6 +230,7 @@ function discretization_grid(
     t_scale=1.0,
     rtol=nothing
 )
+    bnds[1] == bnds[2] && return [bnds[1]]
     dt = 0.01 * bnds[2]
     ts = zeros(100)
     ts[1] = bnds[1]

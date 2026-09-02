@@ -180,6 +180,41 @@
             end
         end
     end
+    @testset "B-spline channel-section endpoint clamping" begin
+        channel = Path(0.0μm, 0.0μm)
+        bspline!(
+            channel,
+            [Point(0.5, 0.5)mm, Point(1.0mm, 0.0μm)],
+            0°,
+            Paths.Trace(100μm),
+            auto_speed=true,
+            auto_curvature=true
+        )
+        ch = RouteChannel(channel)
+        L = pathlength(ch.node.seg)
+        start = L / 4
+
+        section = Paths.segment_channel_section(ch, start, L + 1μm, 0μm, 0μm)
+        @test p0(section.seg) ≈ ch.node.seg(start) atol = 1nm
+        @test p1(section.seg) ≈ p1(ch.node.seg) atol = 1nm
+
+        reversed_section = Paths.segment_channel_section(ch, L + 1μm, start, 0μm, 0μm)
+        @test p0(reversed_section.seg) ≈ p1(ch.node.seg) atol = 1nm
+        @test p1(reversed_section.seg) ≈ ch.node.seg(start) atol = 1nm
+
+        for (wireseg_start, wireseg_stop, expected_point) in (
+            (-2μm, -1μm, p0(ch.node.seg)),
+            (-1μm, -2μm, p0(ch.node.seg)),
+            (L + 1μm, L + 2μm, p1(ch.node.seg)),
+            (L + 2μm, L + 1μm, p1(ch.node.seg))
+        )
+            clamped_section =
+                Paths.segment_channel_section(ch, wireseg_start, wireseg_stop, 0μm, 0μm)
+            @test iszero(pathlength(clamped_section.seg))
+            @test p0(clamped_section.seg) ≈ expected_point atol = 1nm
+        end
+    end
+
     # Channel too short
     pa = Path(0.0nm, 0.0nm)
     straight!(pa, 100nm, Paths.Trace(0.1mm))
@@ -301,4 +336,57 @@
 
     ## Schematic-level routing
     test_schematic_single_channel()
+end
+
+@testitem "Channel Autorouter" setup = [CommonTestSetup] begin
+    import DeviceLayout.Paths: RouteChannel, ChannelRouter
+    using .SchematicDrivenLayout
+
+    function test_simple()
+        mypins = [
+            Point(4.0, 3.0),
+            Point(6.0, 3.0),
+            Point(4.0, 7.0),
+            Point(6.0, 7.0),
+            Point(3.0, 4.0),
+            Point(3.0, 6.0),
+            Point(7.0, 4.0),
+            Point(7.0, 6.0)
+        ]
+        dirs = [0, pi, 0, pi, pi / 2, -pi / 2, pi / 2, -pi / 2] .+ pi
+        pins = PointHook.(mypins, dirs)
+
+        space_paths = Path[]
+        for x0 in [1.0, 5.0, 9.0]
+            pa = Path(x0, 0.0, α0=90°)
+            straight!(pa, 10.0, Paths.Trace(2.0))
+            push!(space_paths, pa)
+        end
+        for y0 in [1.0, 5.0, 9.0]
+            pa = Path(0.0, y0)
+            straight!(pa, 10.0, Paths.Trace(2.0))
+            push!(space_paths, pa)
+        end
+
+        n_wires = 4
+        mynets = [(i, i + 4) for i = 1:n_wires]
+        ar = ChannelRouter(mynets, pins, RouteChannel.(space_paths))
+
+        Paths.assign_channels!(ar)
+        Paths.assign_tracks!(ar)
+
+        @test all(!isempty, ar.net_wires)
+        for channel in eachindex(ar.channel_segments)
+            assigned =
+                reduce(vcat, ar.channel_tracks[channel]; init=Paths.TrackWireSegment[])
+            @test Set(assigned) == Set(ar.channel_segments[channel])
+            @test length(assigned) == length(unique(assigned))
+        end
+
+        c = Paths.visualize_router_state(ar)
+        return c
+    end
+
+    # Runs without error
+    test_simple()
 end

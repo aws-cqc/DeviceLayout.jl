@@ -20,6 +20,9 @@ struct PointHook{T} <: Hook{T}
 end
 PointHook(p, in_direction) = PointHook{eltype(p)}(p, in_direction) # Otherwise can't infer if in_direction is in degrees
 PointHook(x, y, in_direction) = PointHook(Point(promote(x, y)...), in_direction)
+Base.convert(::Type{PointHook{T}}, h::PointHook{T}) where {T} = h
+Base.convert(::Type{PointHook{T}}, h::PointHook{S}) where {T, S} =
+    PointHook{T}(h.p, h.in_direction)
 
 """
     in_direction(h::Hook)
@@ -34,6 +37,13 @@ in_direction(h::Hook) = h.in_direction
 The outward-pointing angle opposite to the direction stored by the PointHook
 """
 out_direction(h::Hook) = in_direction(h) + 180°
+
+"""
+    getp(h::Hook)
+
+The point defining the position of `h`.
+"""
+getp(h::Hook) = h.p
 
 """
     compass(prefix=""; p0=Point(0μm, 0μm))
@@ -104,6 +114,10 @@ HandedPointHook(p0::Point, in_direction, rh::Bool) =
 HandedPointHook(x0::Coordinate, y0::Coordinate, in_direction, right_handed=true) =
     HandedPointHook(PointHook(x0, y0, in_direction), right_handed)
 
+Base.convert(::Type{HandedPointHook{T}}, h::HandedPointHook{T}) where {T} = h
+Base.convert(::Type{HandedPointHook{T}}, h::HandedPointHook{S}) where {T, S} =
+    HandedPointHook{T}(PointHook{T}(h.h.p, h.h.in_direction), h.right_handed)
+
 function transformation(h1::HandedPointHook, h2::HandedPointHook)
     f = transformation(h1.h, h2.h)
     h1.right_handed == h2.right_handed && return f
@@ -111,6 +125,8 @@ function transformation(h1::HandedPointHook, h2::HandedPointHook)
 end
 transformation(h1::PointHook, h2::HandedPointHook) = transformation(h1, h2.h)
 transformation(h1::HandedPointHook, h2::PointHook) = transformation(h1.h, h2)
+
+getp(h::HandedPointHook) = h.h.p
 
 function Base.getproperty(h::HandedPointHook, s::Symbol)
     if s in (:p, :in_direction)

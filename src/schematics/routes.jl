@@ -276,3 +276,37 @@ function _update_with_plan!(rule::Paths.SingleChannelRouting, route_node, sch)
     global_node = trans(rule.channel.node)
     return rule.global_channel = Paths.RouteChannel(Path([global_node]))
 end
+
+# AutoChannelRouting
+function _update_with_graph!(rule::Paths.AutoChannelRouting, route_node, graph; kwargs...)
+    push!(rule.router.net_wires, Paths.NetWire()) # So we know how many routes to expect in planning
+    return
+end
+# Only when planning
+function _update_with_plan!(rule::Paths.AutoChannelRouting{T}, route_node, sch) where {T}
+    pin_idx = length(rule.router.pins) + 1
+    route_hooks = hooks(route_node.component)
+    push!(rule.router.pins, PointHook{T}(route_hooks.p0.p, route_hooks.p0.in_direction))
+    push!(rule.router.pins, PointHook{T}(route_hooks.p1.p, route_hooks.p1.in_direction))
+    push!(rule.router.net_pins, (pin_idx, pin_idx + 1))
+    # If all paths have been added, go ahead and run autorouting
+    if length(rule.router.net_pins) == length(rule.router.net_wires)
+        g, ixns = Paths.build_channel_graph(
+            rule.router.pins,
+            getproperty.(rule.router.channels, :path),
+            T
+        )
+        # Populate the router's graph and intersection dict in-place
+        # (ChannelRouter is immutable, but its mutable fields can be mutated)
+        ar_g = rule.router.channel_graph
+        for _ = 1:(Paths.nv(g) - Paths.nv(ar_g))
+            Paths.add_vertex!(ar_g)
+        end
+        for e in edges(g)
+            Paths.add_edge!(ar_g, e.src, e.dst)
+        end
+        merge!(rule.router.channel_intersections, ixns)
+        Paths.assign_channels!(rule.router)
+        Paths.assign_tracks!(rule.router)
+    end
+end
