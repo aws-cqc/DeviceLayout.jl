@@ -250,7 +250,7 @@ function add_tagged_pgs!(
                 dest_pg =
                     string(dest_layer) *
                     "__" *
-                    operation_hash(
+                    ophash(
                         pg_name,
                         [tool_name];
                         operation=:intersect,
