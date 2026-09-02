@@ -387,12 +387,7 @@ function pghash(dimtags)
     return bytes2hex(sha1(content))[1:16]
 end
 
-function operation_hash(
-    obj_pg::String,
-    tool_pgs::Vector{String};
-    operation::Symbol,
-    parameters=()
-)
+function ophash(obj_pg::String, tool_pgs::Vector{String}; operation::Symbol, parameters=())
     content =
         join((string(operation), obj_pg, join(sort(tool_pgs), "&"), repr(parameters)), "\0")
     return bytes2hex(sha1(content))[1:16]
@@ -440,7 +435,13 @@ function _validate_source_layers(op::LayerOp, registry::LayerRegistry)
     return nothing
 end
 
-# ─── Layer-level operation compiler ──────────────────────────────────────────
+struct CompilerState{S <: SourceStack}
+    ops::Vector{Tuple}                       # Compiled physical-group operations
+    reg::LayerRegistry                       # Evolving layer-to-PG registry
+    dints::MetaGraphs.MetaDiGraph             # Deferred interface operations
+    intsol::Dict{Symbol, Vector{String}}      # Pending temporary interior solids
+    stack::S                                 # Source-layer geometry configuration
+end
 
 """
     compile_ops(ops::AbstractVector{<:LayerOp}, stack, registry)
@@ -451,19 +452,11 @@ to DeviceLayout's `_postrender!`.
 
 Returns:
 
-  - `pg_ops::Vector{Tuple}`: physical-group-level postrender operations
+  - `ops::Vector{Tuple}`: physical-group-level postrender operations
   - `registry::LayerRegistry`: final state of the layer registry
   - `deferred_interfaces::MetaGraphs.MetaDiGraph`: interface operations and unique PGs
     evaluated after fragmentation
 """
-struct CompilerState{S <: SourceStack}
-    ops::Vector{Tuple}                       # Compiled physical-group operations
-    reg::LayerRegistry                       # Evolving layer-to-PG registry
-    dints::MetaGraphs.MetaDiGraph             # Deferred interface operations
-    intsol::Dict{Symbol, Vector{String}}      # Pending temporary interior solids
-    stack::S                                 # Source-layer geometry configuration
-end
-
 function compile_ops(
     ops::AbstractVector{<:LayerOp},
     stack::SourceStack,
@@ -485,13 +478,9 @@ function compile_ops(
     return cmp.ops, cmp.reg, cmp.dints
 end
 
-"""
-    _flush_interior_solids!(cmp, bv_layer)
-
-Subtract pending interior solids from all 3D volumes in the registry (except the
-bounding volume if specified), then remove the interior solid PGs (keeping entities
-so they serve as fragmentation boundaries during `restrict_to_volume!`).
-"""
+# Subtract pending interior solids from all 3D volumes in the registry (except the
+# bounding volume if specified), then remove the interior solid PGs (keeping entities
+# so they serve as fragmentation boundaries during `restrict_to_volume!`).
 function _flush_interior_solids!(cmp::CompilerState, bv_layer::Union{Symbol, Nothing})
     isempty(cmp.intsol) && return nothing
 
@@ -530,8 +519,6 @@ function _flush_interior_solids!(cmp::CompilerState, bv_layer::Union{Symbol, Not
     empty!(cmp.intsol)
     return nothing
 end
-
-# ─── extrude_z! ──────────────────────────────────────────────────────────────
 
 function _compile!(cmp::CompilerState, op::Extrude)
     !haskey(cmp.stack.layers, op.destination) && throw(
@@ -616,129 +603,94 @@ function _compile!(cmp::CompilerState, op::Extrude)
     return nothing
 end
 
-# ─── difference_geom! ────────────────────────────────────────────────────────
-
 function _compile!(cmp::CompilerState, op::Difference)
     object_state = cmp.reg[op.object]
     dim = object_state.dim
-    tool_pg_names = String[]
-    for tool_layer in op.tools
-        for record in cmp.reg[tool_layer].pgs
-            push!(tool_pg_names, record.name)
-        end
-    end
-
-    # Determine mode
+    tool_pg_names =
+        String[record.name for tool_layer in op.tools for record in cmp.reg[tool_layer].pgs]
     mode = if op.destination == op.object
-        :replace
+        :replace_object
     elseif op.destination in op.tools
-        :replace
+        :replace_tool
     elseif haskey(cmp.reg, op.destination)
         :append
     else
         :create
     end
 
-    if mode == :replace && op.destination == op.object
-        for record in object_state.pgs
-            push!(
-                cmp.ops,
-                (
-                    record.name,
-                    SolidModels.difference_geom!,
-                    (record.name, tool_pg_names, dim, dim),
-                    :remove_object => true,
-                    :remove_tool => false
-                )
-            )
-        end
-    elseif mode == :replace && op.destination in op.tools
-        tool_state = cmp.reg[op.destination]
-        object_pg_names = [record.name for record in object_state.pgs]
-        for record in tool_state.pgs
-            push!(
-                cmp.ops,
-                (
-                    record.name,
-                    SolidModels.difference_geom!,
-                    (record.name, object_pg_names, dim, dim),
-                    :remove_object => true,
-                    :remove_tool => false
-                )
-            )
-        end
-    else
-        # Create or append mode.
-        new_records = PGRecord[]
-        for record in object_state.pgs
-            dest_name =
-                string(op.destination) *
-                "__" *
-                operation_hash(
-                    record.name,
-                    tool_pg_names;
-                    operation=:difference,
-                    parameters=(dim, op.remove_object, op.remove_tool)
-                )
-            generated_record_exists(cmp.reg, op.destination, dest_name, new_records) &&
-                continue
-            push!(
-                cmp.ops,
-                (
-                    dest_name,
-                    SolidModels.difference_geom!,
-                    (record.name, tool_pg_names, dim, dim),
-                    :remove_object => op.remove_object,
-                    :remove_tool => false
-                )
-            )
-            push!(new_records, PGRecord(dest_name, op.destination, nothing))
-        end
-
-        # Dedup if appending
-        if mode == :append
-            _require_destination_dimension(cmp.reg, op.destination, dim)
-            existing_pgs = [
-                record.name for
-                record in cmp.reg[op.destination].pgs if !islocator(record.meta)
-            ]
-            if !isempty(existing_pgs)
-                for record in new_records
-                    # Ensures that the result of the difference operation
-                    # doesn't overlap geometrically with existing objects
-                    # in the same layer (maybe redudant if we're fragmenting
-                    # later anyway?)
-                    push!(
-                        cmp.ops,
-                        (
-                            record.name,
-                            SolidModels.difference_geom!,
-                            (record.name, existing_pgs, dim, dim),
-                            :remove_object => true,
-                            :remove_tool => false
-                        )
-                    )
-                end
-            end
-            append!(cmp.reg[op.destination].pgs, new_records)
+    new_records = PGRecord[]
+    compiled = Tuple{PGRecord, String}[]
+    for record in object_state.pgs
+        dest_name = if mode == :replace_object
+            record.name
         else
-            cmp.reg[op.destination] = LayerState(new_records, dim)
+            string(op.destination) *
+            "__" *
+            ophash(
+                record.name,
+                tool_pg_names;
+                operation=:difference,
+                parameters=(dim, op.remove_object, op.remove_tool)
+            )
         end
+        if mode != :replace_object &&
+           generated_record_exists(cmp.reg, op.destination, dest_name, new_records)
+            continue
+        end
+        push!(compiled, (record, dest_name))
+        mode == :replace_object ||
+            push!(new_records, PGRecord(dest_name, op.destination, nothing))
     end
 
-    if op.remove_tool
-        for tool_layer in op.tools
-            tool_layer != op.destination && delete!(cmp.reg, tool_layer)
-        end
+    for (idx, (record, dest_name)) in enumerate(compiled)
+        push!(
+            cmp.ops,
+            (
+                dest_name,
+                SolidModels.difference_geom!,
+                (record.name, tool_pg_names, dim, dim),
+                :remove_object => op.remove_object,
+                :remove_tool => op.remove_tool && idx == length(compiled)
+            )
+        )
     end
-    if op.remove_object && op.destination != op.object
-        delete!(cmp.reg, op.object)
+
+    if mode == :append
+        _require_destination_dimension(cmp.reg, op.destination, dim)
+        existing_pgs = [
+            record.name for record in cmp.reg[op.destination].pgs if !islocator(record.meta)
+        ]
+        if !isempty(existing_pgs)
+            for record in new_records
+                # Keep newly appended PGs disjoint from existing PGs in the same layer.
+                push!(
+                    cmp.ops,
+                    (
+                        record.name,
+                        SolidModels.difference_geom!,
+                        (record.name, existing_pgs, dim, dim),
+                        :remove_object => true,
+                        :remove_tool => false
+                    )
+                )
+            end
+        end
+        append!(cmp.reg[op.destination].pgs, new_records)
+    elseif mode != :replace_object
+        cmp.reg[op.destination] = LayerState(new_records, dim)
+    end
+
+    if !isempty(compiled)
+        if op.remove_tool
+            for tool_layer in op.tools
+                tool_layer != op.destination && delete!(cmp.reg, tool_layer)
+            end
+        end
+        op.remove_object && op.destination != op.object && delete!(cmp.reg, op.object)
     end
 
     return nothing
 end
-
-# ─── Fuse ────────────────────────────────────────────────────────────────────
 
 function _compile!(cmp::CompilerState, op::Fuse)
     if length(op.sources) == 1
@@ -760,12 +712,7 @@ function _compile!(cmp::CompilerState, op::Fuse)
                 dest_name =
                     string(op.destination) *
                     "__" *
-                    operation_hash(
-                        record.name,
-                        String[];
-                        operation=:union,
-                        parameters=(state.dim,)
-                    )
+                    ophash(record.name, String[]; operation=:union, parameters=(state.dim,))
                 generated_record_exists(cmp.reg, op.destination, dest_name, new_records) &&
                     continue
                 push!(
@@ -814,7 +761,7 @@ function _compile!(cmp::CompilerState, op::Fuse)
         dest_name =
             string(op.destination) *
             "__" *
-            operation_hash(
+            ophash(
                 first(sorted_pg_names),
                 sorted_pg_names[2:end];
                 operation=:union,
@@ -859,8 +806,6 @@ function _compile!(cmp::CompilerState, op::Fuse)
     return nothing
 end
 
-# ─── Interface ───────────────────────────────────────────────────────────────
-
 function _compile!(cmp::CompilerState, op::Interface)
     obj_state = cmp.reg[op.object]
     tool_state = cmp.reg[op.tool]
@@ -873,7 +818,7 @@ function _compile!(cmp::CompilerState, op::Interface)
             dest_name =
                 string(op.destination) *
                 "__" *
-                operation_hash(
+                ophash(
                     obj_rec.name,
                     [tool_rec.name];
                     operation=:intersect,
@@ -915,12 +860,6 @@ function _compile!(cmp::CompilerState, op::Interface)
     return nothing
 end
 
-"""
-    _compile!(cmp, op::Restrict)
-
-Compile a restriction operation using the single physical group in the bounding-volume
-layer.
-"""
 function _compile!(cmp::CompilerState, op::Restrict)
     bv_pgs = cmp.reg[op.volume].pgs
     length(bv_pgs) == 1 || throw(
@@ -932,8 +871,6 @@ function _compile!(cmp::CompilerState, op::Restrict)
     push!(cmp.ops, ("restrict", SolidModels.restrict_to_volume!, (bv_pg,)))
     return nothing
 end
-
-# ─── Boundary ────────────────────────────────────────────────────────────────
 
 function _compile!(cmp::CompilerState, op::Boundary)
     kwargs = (
@@ -962,7 +899,7 @@ function _compile!(cmp::CompilerState, op::Boundary)
             dest_name =
                 string(op.destination) *
                 "__" *
-                operation_hash(
+                ophash(
                     record.name,
                     String[];
                     operation=:boundary,
@@ -995,8 +932,6 @@ function _compile!(cmp::CompilerState, op::Boundary)
     return nothing
 end
 
-# ─── translate! ──────────────────────────────────────────────────────────────
-
 function _compile!(cmp::CompilerState, op::Translate)
     state = cmp.reg[op.source]
 
@@ -1020,7 +955,7 @@ function _compile!(cmp::CompilerState, op::Translate)
             base_name =
                 string(op.destination) *
                 "__" *
-                operation_hash(
+                ophash(
                     record.name,
                     String[];
                     operation=:translate,
@@ -1057,8 +992,6 @@ function _compile!(cmp::CompilerState, op::Translate)
     return nothing
 end
 
-# ─── remove_group! ───────────────────────────────────────────────────────────
-
 function _compile!(cmp::CompilerState, op::Remove)
     state = cmp.reg[op.source]
     for record in state.pgs
@@ -1075,8 +1008,6 @@ function _compile!(cmp::CompilerState, op::Remove)
     delete!(cmp.reg, op.source)
     return nothing
 end
-
-# ─── revolve! ────────────────────────────────────────────────────────────────
 
 function _compile!(cmp::CompilerState, op::Revolve)
     state = cmp.reg[op.source]
@@ -1100,7 +1031,7 @@ function _compile!(cmp::CompilerState, op::Revolve)
             dest_name =
                 string(op.destination) *
                 "__" *
-                operation_hash(
+                ophash(
                     record.name,
                     String[];
                     operation=:revolve,
@@ -1129,8 +1060,6 @@ function _compile!(cmp::CompilerState, op::Revolve)
 
     return nothing
 end
-
-# ─── Periodic ────────────────────────────────────────────────────────────────
 
 function _compile!(cmp::CompilerState, op::Periodic)
     records_a = cmp.reg[op.first].pgs
