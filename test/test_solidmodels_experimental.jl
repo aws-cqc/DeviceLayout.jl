@@ -131,13 +131,13 @@ end
         :voids => LayerState([PGRecord(pgname(voids_meta), :voids, voids_meta)], 2)
     )
     pg_ops, final_registry, deferred =
-        SolidModelsExperimental.compile_ops(LayerOp[Extrude(:metal)], stack, registry)
+        SolidModelsExperimental.compile_ops([Extrude(:metal)], stack, registry)
     @test final_registry[:metal].dim == 3
     @test length(pg_ops) == 2
     @test isempty(SolidModelsExperimental.interface_vertices(deferred))
 
     flush_ops, flush_registry, _ = SolidModelsExperimental.compile_ops(
-        LayerOp[Extrude(:metal), Extrude(:voids)],
+        [Extrude(:metal), Extrude(:voids)],
         stack,
         registry
     )
@@ -160,21 +160,18 @@ end
     @test flush_registry[:voids].dim == 2
 
     @test_throws ArgumentError SolidModelsExperimental.compile_ops(
-        LayerOp[Difference(:new_layer, :missing, :metal)],
+        [Difference(:new_layer, :missing, :metal)],
         stack,
         registry
     )
 
-    boundary_ops, boundary_registry, _ = SolidModelsExperimental.compile_ops(
-        LayerOp[Boundary(:edge, :metal)],
-        stack,
-        registry
-    )
+    boundary_ops, boundary_registry, _ =
+        SolidModelsExperimental.compile_ops([Boundary(:edge, :metal)], stack, registry)
     @test boundary_registry[:edge].dim == 1
     @test only(boundary_ops)[2] == SolidModels.get_boundary
 
     translate_ops, translate_registry, _ = SolidModelsExperimental.compile_ops(
-        LayerOp[Translate(:shifted, :metal, 1μm, 0μm, 0μm)],
+        [Translate(:shifted, :metal, 1μm, 0μm, 0μm)],
         stack,
         registry
     )
@@ -184,7 +181,7 @@ end
     @test (:copy => true) in only(translate_ops)
 
     move_ops, move_registry, _ = SolidModelsExperimental.compile_ops(
-        LayerOp[Translate(:moved, :metal, 1μm, 0μm, 0μm; copy=false)],
+        [Translate(:moved, :metal, 1μm, 0μm, 0μm; copy=false)],
         stack,
         registry
     )
@@ -193,7 +190,7 @@ end
     @test (:copy => false) in only(move_ops)
 
     two_translate_ops, two_translate_registry, _ = SolidModelsExperimental.compile_ops(
-        LayerOp[
+        [
             Translate(:shifted, :metal, 1μm, 0μm, 0μm),
             Translate(:shifted, :metal, 2μm, 0μm, 0μm),
             Translate(:shifted, :metal, 2μm, 0μm, 0μm)
@@ -230,7 +227,7 @@ end
     existing_pg = "existing"
     append_registry[:combined] = LayerState([PGRecord(existing_pg, :combined, nothing)], 2)
     append_ops, union_registry, _ = SolidModelsExperimental.compile_ops(
-        LayerOp[Fuse(:combined, (:metal,))],
+        [Fuse(:combined, (:metal,))],
         stack,
         append_registry
     )
@@ -244,13 +241,13 @@ end
     wrong_dimension_registry[:shifted] =
         LayerState([PGRecord("wrong_dimension", :shifted, nothing)], 3)
     @test_throws ArgumentError SolidModelsExperimental.compile_ops(
-        LayerOp[Translate(:shifted, :metal, 1μm, 0μm, 0μm)],
+        [Translate(:shifted, :metal, 1μm, 0μm, 0μm)],
         stack,
         wrong_dimension_registry
     )
 
     interface_ops, interface_registry, deferred = SolidModelsExperimental.compile_ops(
-        LayerOp[Interface(:interface, :metal, :metal)],
+        [Interface(:interface, :metal, :metal)],
         stack,
         registry
     )
@@ -269,26 +266,23 @@ end
     ) == (:metal, :metal)
 
     revolve_ops, revolve_registry, _ = SolidModelsExperimental.compile_ops(
-        LayerOp[Revolve(:revolved, :metal, (0, 0, 0), (0, 0, 1), π)],
+        [Revolve(:revolved, :metal, (0, 0, 0), (0, 0, 1), π)],
         stack,
         registry
     )
     @test revolve_registry[:revolved].dim == 3
     @test only(revolve_ops)[2] == SolidModels.revolve!
 
-    periodic_ops, _, _ = SolidModelsExperimental.compile_ops(
-        LayerOp[Periodic(:metal, :voids)],
-        stack,
-        registry
-    )
+    periodic_ops, _, _ =
+        SolidModelsExperimental.compile_ops([Periodic(:metal, :voids)], stack, registry)
     @test only(periodic_ops)[2] == SolidModels.set_periodic!
 
     restrict_ops, _, _ =
-        SolidModelsExperimental.compile_ops(LayerOp[Restrict(:metal)], stack, registry)
+        SolidModelsExperimental.compile_ops([Restrict(:metal)], stack, registry)
     @test only(restrict_ops)[2] == SolidModels.restrict_to_volume!
 
     remove_ops, remove_registry, _ =
-        SolidModelsExperimental.compile_ops(LayerOp[Remove(:metal)], stack, registry)
+        SolidModelsExperimental.compile_ops([Remove(:metal)], stack, registry)
     @test !haskey(remove_registry, :metal)
     @test only(remove_ops)[2] == SolidModels.remove_group!
 
@@ -885,7 +879,7 @@ end
             levels=(0 => -500.0μm, 1 => 0.0μm)
         )
 
-        ops = LayerOp[
+        ops = [
             Difference(:METAL_POS, :CHIP_OUTLINE, :METAL_NEG; remove_object=true),
             Difference(:CUTOUT, :METAL_NEG, :PORTS; remove_object=true),
             Fuse(:METAL_POS, (:METAL_POS,)),

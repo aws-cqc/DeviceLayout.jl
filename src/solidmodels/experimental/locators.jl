@@ -85,7 +85,7 @@ function add_terminals!(
         source_layer.material != METAL && continue
         state.dim != 2 && continue
         for record in state.pgs
-            if !isnothing(record.meta)
+            if islocator(record.meta)
                 role = record.meta.role
                 (role isa Terminal || role isa Ground) && continue
             end
