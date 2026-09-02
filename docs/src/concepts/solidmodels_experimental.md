@@ -68,7 +68,7 @@ chip must explicitly map to that chip's layer symbol.
 The target stores exactly the stack and layer-level operations:
 
 ```julia
-target = SolidModelsExperimental.SolidModelTarget(stack, LayerOp[])
+target = SolidModelsExperimental.SolidModelTarget(stack)
 metadata = render!(solid_model, checked_schematic, target)
 ```
 
@@ -79,7 +79,7 @@ objects; invalid argument and keyword types are rejected when they are construct
 example:
 
 ```julia
-ops = LayerOp[
+ops = [
     Difference(:vacuum, :bounding_volume, :substrate),
     Boundary(:xmin, :vacuum; direction="x", position="min"),
     Translate(:shifted_port, :port, 10μm, 0μm, 0μm)
