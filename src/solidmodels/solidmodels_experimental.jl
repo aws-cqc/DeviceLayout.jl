@@ -458,7 +458,7 @@ function _map_meta(target::SolidModelTarget)
     return meta -> begin
         meta isa EntityMeta || return nothing
         source_layer = sourcelayer(meta, target.stack)
-        (!source_layer.solidmodel || meta.role isa Locator) && return nothing
+        (!source_layer.solidmodel || islocator(meta)) && return nothing
         return pgname(meta)
     end
 end
@@ -477,7 +477,7 @@ function _retained_physical_groups(reg::LayerRegistry)
     retained = Set{Tuple{String, Int}}()
     for state in values(reg)
         for record in state.pgs
-            !isnothing(record.meta) && record.meta.role isa Locator && continue
+            islocator(record.meta) && continue
             push!(retained, (record.name, state.dim))
         end
     end
@@ -596,7 +596,7 @@ function render!(
                     turns = Float64(ustrip(°, local_direction)) / 180
                     direction = Float64[cospi(turns), sinpi(turns), 0.0]
                     lumped_port_directions[pg_name] = direction
-                elseif meta.role isa Locator
+                elseif islocator(meta)
                     push!(locator_candidates, (entity, meta))
                 end
             end
@@ -818,7 +818,6 @@ export SolidModelTarget
 export METAL, DIELECTRIC, NULL
 export Generic, Terminal, Ground, Tag, WavePort, LumpedPort
 export SourceLayer, SourceStack, EntityMeta
-export LayerOp, BooleanOp
 export Extrude, Difference, Fuse, Interface, Restrict
 export Boundary, Translate, Remove, Revolve, Periodic
 export exterior_boundaries, serialize_metadata
