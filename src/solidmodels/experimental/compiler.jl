@@ -680,6 +680,7 @@ function _compile!(cmp::CompilerState, op::Difference)
         cmp.reg[op.destination] = LayerState(new_records, dim)
     end
 
+    # Flush removed references from registry
     if !isempty(compiled)
         if op.remove_tool
             for tool_layer in op.tools
