@@ -60,6 +60,9 @@ DeviceLayout.layerindex(m::EntityMeta) = m.index
 DeviceLayout.name(m::EntityMeta) = m.name
 Base.broadcastable(m::EntityMeta) = Ref(m)
 
+islocator(meta::EntityMeta) = meta.role isa Locator
+islocator(::Nothing) = false
+
 """
     pgname(m::EntityMeta) -> String
 
