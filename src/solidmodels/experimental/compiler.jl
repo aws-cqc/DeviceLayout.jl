@@ -234,7 +234,7 @@ function initial_registry(metas::AbstractVector{<:EntityMeta}, stack::SourceStac
     registry = LayerRegistry()
     for meta in unique(metas)
         source_layer = sourcelayer(meta, stack)
-        (!source_layer.solidmodel || meta.role isa Locator) && continue
+        (!source_layer.solidmodel || islocator(meta)) && continue
         record = PGRecord(pgname(meta), meta.layer, meta)
         state = get!(registry, meta.layer) do
             return LayerState(PGRecord[], 2)
@@ -457,11 +457,11 @@ Returns:
     evaluated after fragmentation
 """
 struct CompilerState{S <: SourceStack}
-    pg_ops::Vector{Tuple}
-    registry::LayerRegistry
-    deferred_interfaces::MetaGraphs.MetaDiGraph
-    interior_solids::Dict{Symbol, Vector{String}}
-    stack::S
+    ops::Vector{Tuple}                       # Compiled physical-group operations
+    reg::LayerRegistry                       # Evolving layer-to-PG registry
+    dints::MetaGraphs.MetaDiGraph             # Deferred interface operations
+    intsol::Dict{Symbol, Vector{String}}      # Pending temporary interior solids
+    stack::S                                 # Source-layer geometry configuration
 end
 
 function compile_ops(
@@ -469,7 +469,7 @@ function compile_ops(
     stack::SourceStack,
     registry::LayerRegistry
 )
-    state = CompilerState(
+    cmp = CompilerState(
         Tuple[],
         deepcopy(registry),
         _deferred_interface_graph(),
@@ -477,45 +477,35 @@ function compile_ops(
         stack
     )
     for op in ops
-        _validate_source_layers(op, state.registry)
-        op isa Restrict && _flush_interior_solids!(
-            state.pg_ops,
-            state.registry,
-            state.interior_solids,
-            op.volume
-        )
-        _compile!(state, op)
+        _validate_source_layers(op, cmp.reg)
+        op isa Restrict && _flush_interior_solids!(cmp, op.volume)
+        _compile!(cmp, op)
     end
-    _flush_interior_solids!(state.pg_ops, state.registry, state.interior_solids, nothing)
-    return state.pg_ops, state.registry, state.deferred_interfaces
+    _flush_interior_solids!(cmp, nothing)
+    return cmp.ops, cmp.reg, cmp.dints
 end
 
 """
-    _flush_interior_solids!(pg_ops, registry, interior_solids, bv_layer)
+    _flush_interior_solids!(cmp, bv_layer)
 
 Subtract pending interior solids from all 3D volumes in the registry (except the
 bounding volume if specified), then remove the interior solid PGs (keeping entities
 so they serve as fragmentation boundaries during `restrict_to_volume!`).
 """
-function _flush_interior_solids!(
-    pg_ops::Vector{Tuple},
-    registry::LayerRegistry,
-    interior_solids::Dict{Symbol, Vector{String}},
-    bv_layer::Union{Symbol, Nothing}
-)
-    isempty(interior_solids) && return nothing
+function _flush_interior_solids!(cmp::CompilerState, bv_layer::Union{Symbol, Nothing})
+    isempty(cmp.intsol) && return nothing
 
     interior_pg_names = String[]
-    for pgs in values(interior_solids)
+    for pgs in values(cmp.intsol)
         append!(interior_pg_names, pgs)
     end
 
-    for (layer_name, state) in registry
+    for (layer_name, state) in cmp.reg
         state.dim != 3 && continue
         layer_name == bv_layer && continue
         for record in state.pgs
             push!(
-                pg_ops,
+                cmp.ops,
                 (
                     record.name,
                     SolidModels.difference_geom!,
@@ -528,42 +518,37 @@ function _flush_interior_solids!(
     end
 
     # Remove interior solid PGs (keep entities so they act as fragmentation boundaries)
-    for pgs in values(interior_solids)
+    for pgs in values(cmp.intsol)
         for pg_name in pgs
             push!(
-                pg_ops,
+                cmp.ops,
                 ("_rm", SolidModels.remove_group!, (pg_name, 3), :remove_entities => false)
             )
         end
     end
 
-    empty!(interior_solids)
+    empty!(cmp.intsol)
     return nothing
 end
 
 # ─── extrude_z! ──────────────────────────────────────────────────────────────
 
-function _compile!(compiler::CompilerState, op::Extrude)
-    pg_ops = compiler.pg_ops
-    registry = compiler.registry
-    interior_solids = compiler.interior_solids
-    stack = compiler.stack
-    layer_name = op.destination
-    !haskey(stack.layers, layer_name) && throw(
+function _compile!(cmp::CompilerState, op::Extrude)
+    !haskey(cmp.stack.layers, op.destination) && throw(
         ArgumentError(
-            "cannot extrude generated layer :$layer_name because extrusion requires " *
+            "cannot extrude generated layer :$(op.destination) because extrusion requires " *
             "a SourceStack entry"
         )
     )
-    source_layer = stack.layers[layer_name]
-    dz = thickness(source_layer, stack)
+    source_layer = cmp.stack.layers[op.destination]
+    dz = thickness(source_layer, cmp.stack)
     iszero(dz) && return nothing
 
-    state = registry[layer_name]
+    state = cmp.reg[op.destination]
     new_records = PGRecord[]
 
     # Helper: register `bnd_pg` (the full boundary of an interior solid produced by a
-    # `keep_interior=false` extrusion) under the synthetic `:EXTBND_MISC` layer.
+    # `keep_interior=false` extrusion) under the generated `:EXTBND_MISC` layer.
     # After the interior solid is subtracted from surrounding volumes by
     # `_flush_interior_solids!`, this boundary becomes an exterior boundary of the final
     # mesh. Tagging it via `:EXTBND_MISC` lets `_deduplicate_2d_pgs!` split off any sub-PG
@@ -571,11 +556,11 @@ function _compile!(compiler::CompilerState, op::Extrude)
     # exterior-only (or shared with another layer) from sub-PGs whose faces are
     # purely interior interfaces, avoiding the "mixed boundary attribute" warning
     # that Palace emits for PGs containing both kinds of faces.
-    function _register_extbnd_misc!(bnd_pg, meta)
-        if !haskey(registry, :EXTBND_MISC)
-            registry[:EXTBND_MISC] = LayerState(PGRecord[], 2)
+    function _register_extbnd!(bnd_pg, meta)
+        if !haskey(cmp.reg, :EXTBND_MISC)
+            cmp.reg[:EXTBND_MISC] = LayerState(PGRecord[], 2)
         end
-        return push!(registry[:EXTBND_MISC].pgs, PGRecord(bnd_pg, :EXTBND_MISC, meta))
+        return push!(cmp.reg[:EXTBND_MISC].pgs, PGRecord(bnd_pg, :EXTBND_MISC, meta))
     end
 
     for record in state.pgs
@@ -584,90 +569,80 @@ function _compile!(compiler::CompilerState, op::Extrude)
             # Extrude the contour (1D boundary of 2D surface) to form a shell
             ctr_pg = pg * "__CTR"
             ext_pg = pg * "__CTREXT"
-            push!(pg_ops, (ctr_pg, SolidModels.get_boundary, (pg, 2), :oriented => false))
-            push!(pg_ops, (ext_pg, SolidModels.extrude_z!, (ctr_pg, dz, 1)))
-            push!(pg_ops, ("_rm", SolidModels.remove_group!, (ctr_pg, 1)))
+            push!(cmp.ops, (ctr_pg, SolidModels.get_boundary, (pg, 2), :oriented => false))
+            push!(cmp.ops, (ext_pg, SolidModels.extrude_z!, (ctr_pg, dz, 1)))
+            push!(cmp.ops, ("_rm", SolidModels.remove_group!, (ctr_pg, 1)))
             if !source_layer.keep_interior
                 # Also extrude the 2D surface into a solid for interior subtraction
                 int_pg = pg * "__INT"
                 intbnd_pg = pg * "__INTBND"
-                push!(pg_ops, (int_pg, SolidModels.extrude_z!, (pg, dz, 2)))
+                push!(cmp.ops, (int_pg, SolidModels.extrude_z!, (pg, dz, 2)))
                 push!(
-                    pg_ops,
+                    cmp.ops,
                     (intbnd_pg, SolidModels.get_boundary, (int_pg, 3), :oriented => false)
                 )
-                push!(pg_ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
-                push!(get!(interior_solids, layer_name, String[]), int_pg)
-                _register_extbnd_misc!(intbnd_pg, record.meta)
+                push!(cmp.ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
+                push!(get!(cmp.intsol, op.destination, String[]), int_pg)
+                _register_extbnd!(intbnd_pg, record.meta)
             else
-                push!(pg_ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
+                push!(cmp.ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
             end
-            push!(new_records, PGRecord(ext_pg, layer_name, record.meta))
+            push!(new_records, PGRecord(ext_pg, op.destination, record.meta))
         elseif !source_layer.keep_interior
             # Boundary-only extrusion: extrude to solid, extract boundary, discard interior.
             # The solid is registered for auto-subtraction from surrounding volumes.
             ext_pg = pg * "__EXN"
             bnd_pg = pg * "__EXTBND"
-            push!(pg_ops, (ext_pg, SolidModels.extrude_z!, (pg, dz, 2)))
+            push!(cmp.ops, (ext_pg, SolidModels.extrude_z!, (pg, dz, 2)))
             push!(
-                pg_ops,
+                cmp.ops,
                 (bnd_pg, SolidModels.get_boundary, (ext_pg, 3), :oriented => false)
             )
-            push!(pg_ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
-            push!(get!(interior_solids, layer_name, String[]), ext_pg)
-            push!(new_records, PGRecord(bnd_pg, layer_name, record.meta))
-            _register_extbnd_misc!(bnd_pg, record.meta)
+            push!(cmp.ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
+            push!(get!(cmp.intsol, op.destination, String[]), ext_pg)
+            push!(new_records, PGRecord(bnd_pg, op.destination, record.meta))
+            _register_extbnd!(bnd_pg, record.meta)
         else
             # Standard extrusion: 2D surface → 3D volume
             ext_pg = pg * "__EXN"
-            push!(pg_ops, (ext_pg, SolidModels.extrude_z!, (pg, dz, 2)))
-            push!(pg_ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
-            push!(new_records, PGRecord(ext_pg, layer_name, record.meta))
+            push!(cmp.ops, (ext_pg, SolidModels.extrude_z!, (pg, dz, 2)))
+            push!(cmp.ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
+            push!(new_records, PGRecord(ext_pg, op.destination, record.meta))
         end
     end
 
     new_dim = source_layer.contour_only ? 2 : (source_layer.keep_interior ? 3 : 2)
-    registry[layer_name] = LayerState(new_records, new_dim)
+    cmp.reg[op.destination] = LayerState(new_records, new_dim)
     return nothing
 end
 
 # ─── difference_geom! ────────────────────────────────────────────────────────
 
-function _compile!(compiler::CompilerState, op::Difference)
-    pg_ops = compiler.pg_ops
-    registry = compiler.registry
-    dest = op.destination
-    object_layer = op.object
-    tool_layers = op.tools
-
-    object_state = registry[object_layer]
+function _compile!(cmp::CompilerState, op::Difference)
+    object_state = cmp.reg[op.object]
     dim = object_state.dim
     tool_pg_names = String[]
-    for tool_layer in tool_layers
-        for record in registry[tool_layer].pgs
+    for tool_layer in op.tools
+        for record in cmp.reg[tool_layer].pgs
             push!(tool_pg_names, record.name)
         end
     end
 
     # Determine mode
-    dest_is_tool = dest in tool_layers
-    mode = if dest == object_layer
+    mode = if op.destination == op.object
         :replace
-    elseif dest_is_tool
+    elseif op.destination in op.tools
         :replace
-    elseif haskey(registry, dest)
+    elseif haskey(cmp.reg, op.destination)
         :append
     else
         :create
     end
 
-    remove_object = op.remove_object
-    remove_tool = op.remove_tool
-
-    if mode == :replace && dest == object_layer
+    if mode == :replace && op.destination == op.object
         for record in object_state.pgs
             push!(
-                pg_ops,
+                cmp.ops,
                 (
                     record.name,
                     SolidModels.difference_geom!,
@@ -677,12 +652,12 @@ function _compile!(compiler::CompilerState, op::Difference)
                 )
             )
         end
-    elseif mode == :replace && dest_is_tool
-        tool_state = registry[dest]
+    elseif mode == :replace && op.destination in op.tools
+        tool_state = cmp.reg[op.destination]
         object_pg_names = [record.name for record in object_state.pgs]
         for record in tool_state.pgs
             push!(
-                pg_ops,
+                cmp.ops,
                 (
                     record.name,
                     SolidModels.difference_geom!,
@@ -697,7 +672,7 @@ function _compile!(compiler::CompilerState, op::Difference)
         new_records = PGRecord[]
         for record in object_state.pgs
             dest_name =
-                string(dest) *
+                string(op.destination) *
                 "__" *
                 operation_hash(
                     record.name,
@@ -705,31 +680,36 @@ function _compile!(compiler::CompilerState, op::Difference)
                     operation=:difference,
                     parameters=(dim, op.remove_object, op.remove_tool)
                 )
-            generated_record_exists(registry, dest, dest_name, new_records) && continue
+            generated_record_exists(cmp.reg, op.destination, dest_name, new_records) &&
+                continue
             push!(
-                pg_ops,
+                cmp.ops,
                 (
                     dest_name,
                     SolidModels.difference_geom!,
                     (record.name, tool_pg_names, dim, dim),
-                    :remove_object => remove_object,
+                    :remove_object => op.remove_object,
                     :remove_tool => false
                 )
             )
-            push!(new_records, PGRecord(dest_name, dest, nothing))
+            push!(new_records, PGRecord(dest_name, op.destination, nothing))
         end
 
         # Dedup if appending
         if mode == :append
-            _require_destination_dimension(registry, dest, dim)
+            _require_destination_dimension(cmp.reg, op.destination, dim)
             existing_pgs = [
-                record.name for record in registry[dest].pgs if
-                isnothing(record.meta) || !(record.meta.role isa Locator)
+                record.name for
+                record in cmp.reg[op.destination].pgs if !islocator(record.meta)
             ]
             if !isempty(existing_pgs)
                 for record in new_records
+                    # Ensures that the result of the difference operation
+                    # doesn't overlap geometrically with existing objects
+                    # in the same layer (maybe redudant if we're fragmenting
+                    # later anyway?)
                     push!(
-                        pg_ops,
+                        cmp.ops,
                         (
                             record.name,
                             SolidModels.difference_geom!,
@@ -740,19 +720,19 @@ function _compile!(compiler::CompilerState, op::Difference)
                     )
                 end
             end
-            append!(registry[dest].pgs, new_records)
+            append!(cmp.reg[op.destination].pgs, new_records)
         else
-            registry[dest] = LayerState(new_records, dim)
+            cmp.reg[op.destination] = LayerState(new_records, dim)
         end
     end
 
-    if remove_tool
-        for tool_layer in tool_layers
-            tool_layer != dest && delete!(registry, tool_layer)
+    if op.remove_tool
+        for tool_layer in op.tools
+            tool_layer != op.destination && delete!(cmp.reg, tool_layer)
         end
     end
-    if remove_object && dest != object_layer
-        delete!(registry, object_layer)
+    if op.remove_object && op.destination != op.object
+        delete!(cmp.reg, op.object)
     end
 
     return nothing
@@ -760,21 +740,15 @@ end
 
 # ─── Fuse ────────────────────────────────────────────────────────────────────
 
-function _compile!(compiler::CompilerState, op::Fuse)
-    pg_ops = compiler.pg_ops
-    registry = compiler.registry
-    dest = op.destination
-    source_layers = op.sources
+function _compile!(cmp::CompilerState, op::Fuse)
+    if length(op.sources) == 1
+        state = cmp.reg[only(op.sources)]
 
-    if length(source_layers) == 1
-        source_layer = source_layers[1]
-        state = registry[source_layer]
-
-        if dest == source_layer
+        if op.destination == only(op.sources)
             # Self-heal mode
             for record in state.pgs
                 push!(
-                    pg_ops,
+                    cmp.ops,
                     (record.name, SolidModels.union_geom!, (record.name, state.dim))
                 )
             end
@@ -784,7 +758,7 @@ function _compile!(compiler::CompilerState, op::Fuse)
             new_records = PGRecord[]
             for record in state.pgs
                 dest_name =
-                    string(dest) *
+                    string(op.destination) *
                     "__" *
                     operation_hash(
                         record.name,
@@ -792,23 +766,24 @@ function _compile!(compiler::CompilerState, op::Fuse)
                         operation=:union,
                         parameters=(state.dim,)
                     )
-                generated_record_exists(registry, dest, dest_name, new_records) && continue
+                generated_record_exists(cmp.reg, op.destination, dest_name, new_records) &&
+                    continue
                 push!(
-                    pg_ops,
+                    cmp.ops,
                     (dest_name, SolidModels.union_geom!, (record.name, state.dim))
                 )
-                push!(new_records, PGRecord(dest_name, dest, record.meta))
+                push!(new_records, PGRecord(dest_name, op.destination, record.meta))
             end
-            if haskey(registry, dest)
-                _require_destination_dimension(registry, dest, state.dim)
+            if haskey(cmp.reg, op.destination)
+                _require_destination_dimension(cmp.reg, op.destination, state.dim)
                 existing_pgs = [
-                    record.name for record in registry[dest].pgs if
-                    !(!isnothing(record.meta) && record.meta.role isa Locator)
+                    record.name for
+                    record in cmp.reg[op.destination].pgs if !islocator(record.meta)
                 ]
                 if !isempty(existing_pgs)
                     for record in new_records
                         push!(
-                            pg_ops,
+                            cmp.ops,
                             (
                                 record.name,
                                 SolidModels.difference_geom!,
@@ -819,25 +794,25 @@ function _compile!(compiler::CompilerState, op::Fuse)
                         )
                     end
                 end
-                append!(registry[dest].pgs, new_records)
+                append!(cmp.reg[op.destination].pgs, new_records)
             else
-                registry[dest] = LayerState(new_records, state.dim)
+                cmp.reg[op.destination] = LayerState(new_records, state.dim)
             end
-            delete!(registry, source_layer)
+            delete!(cmp.reg, only(op.sources))
         end
     else
         # Collapse mode: fuse all source PGs into one
         all_pg_names = String[]
         dim = 0
-        for source_layer in source_layers
-            state = registry[source_layer]
+        for source_layer in op.sources
+            state = cmp.reg[source_layer]
             append!(all_pg_names, [record.name for record in state.pgs])
             dim = state.dim
         end
 
         sorted_pg_names = sort(all_pg_names)
         dest_name =
-            string(dest) *
+            string(op.destination) *
             "__" *
             operation_hash(
                 first(sorted_pg_names),
@@ -845,22 +820,22 @@ function _compile!(compiler::CompilerState, op::Fuse)
                 operation=:union,
                 parameters=(dim,)
             )
-        new_record = PGRecord(dest_name, dest, nothing)
-        duplicate = generated_record_exists(registry, dest, dest_name)
+        new_record = PGRecord(dest_name, op.destination, nothing)
+        duplicate = generated_record_exists(cmp.reg, op.destination, dest_name)
         duplicate ||
-            push!(pg_ops, (dest_name, SolidModels.union_geom!, (all_pg_names, dim)))
+            push!(cmp.ops, (dest_name, SolidModels.union_geom!, (all_pg_names, dim)))
 
-        if haskey(registry, dest) && dest ∉ source_layers
-            _require_destination_dimension(registry, dest, dim)
+        if haskey(cmp.reg, op.destination) && op.destination ∉ op.sources
+            _require_destination_dimension(cmp.reg, op.destination, dim)
             # Append. An exact duplicate operation is a no-op: recompiling it must not copy
             # geometry again or duplicate the layer's physical-group list.
             existing_pgs = [
-                record.name for record in registry[dest].pgs if
-                isnothing(record.meta) || !(record.meta.role isa Locator)
+                record.name for
+                record in cmp.reg[op.destination].pgs if !islocator(record.meta)
             ]
             if !duplicate && !isempty(existing_pgs)
                 push!(
-                    pg_ops,
+                    cmp.ops,
                     (
                         dest_name,
                         SolidModels.difference_geom!,
@@ -870,14 +845,14 @@ function _compile!(compiler::CompilerState, op::Fuse)
                     )
                 )
             end
-            duplicate || push!(registry[dest].pgs, new_record)
+            duplicate || push!(cmp.reg[op.destination].pgs, new_record)
         else
-            registry[dest] = LayerState([new_record], dim)
+            cmp.reg[op.destination] = LayerState([new_record], dim)
         end
 
         # Remove source layers from registry if they differ from dest
-        for source_layer in source_layers
-            source_layer != dest && delete!(registry, source_layer)
+        for source_layer in op.sources
+            source_layer != op.destination && delete!(cmp.reg, source_layer)
         end
     end
 
@@ -886,13 +861,9 @@ end
 
 # ─── Interface ───────────────────────────────────────────────────────────────
 
-function _compile!(compiler::CompilerState, op::Interface)
-    registry = compiler.registry
-    deferred_interfaces = compiler.deferred_interfaces
-    dest = op.destination
-    obj_layer, tool_layer = op.object, op.tool
-    obj_state = registry[obj_layer]
-    tool_state = registry[tool_layer]
+function _compile!(cmp::CompilerState, op::Interface)
+    obj_state = cmp.reg[op.object]
+    tool_state = cmp.reg[op.tool]
     obj_dim = obj_state.dim
     tool_dim = tool_state.dim
 
@@ -900,7 +871,7 @@ function _compile!(compiler::CompilerState, op::Interface)
     for obj_rec in obj_state.pgs
         for tool_rec in tool_state.pgs
             dest_name =
-                string(dest) *
+                string(op.destination) *
                 "__" *
                 operation_hash(
                     obj_rec.name,
@@ -908,22 +879,23 @@ function _compile!(compiler::CompilerState, op::Interface)
                     operation=:intersect,
                     parameters=(obj_dim, tool_dim)
                 )
-            generated_record_exists(registry, dest, dest_name, new_recs) && continue
+            generated_record_exists(cmp.reg, op.destination, dest_name, new_recs) &&
+                continue
             # All intersections are deferred to post-fragmentation. Same-dim
             # intersections find shared boundary entities (dim-1); mixed-dim
             # intersections find lo-dim entities on the hi-dim boundary.
             defer_interface!(
-                deferred_interfaces,
+                cmp.dints,
                 dest_name,
                 obj_rec.name,
                 tool_rec.name,
                 obj_dim,
                 tool_dim,
-                dest,
+                op.destination,
                 obj_rec.layer,
                 tool_rec.layer
             )
-            push!(new_recs, PGRecord(dest_name, dest, nothing))
+            push!(new_recs, PGRecord(dest_name, op.destination, nothing))
         end
     end
 
@@ -931,44 +903,39 @@ function _compile!(compiler::CompilerState, op::Interface)
     # Same-dim intersections (e.g. 3D∩3D) produce shared boundaries at dim-1.
     new_dim = obj_dim == tool_dim ? obj_dim - 1 : min(obj_dim, tool_dim)
 
-    if haskey(registry, dest) && dest != obj_layer && dest != tool_layer
-        _require_destination_dimension(registry, dest, new_dim)
-        append!(registry[dest].pgs, new_recs)
+    if haskey(cmp.reg, op.destination) &&
+       op.destination != op.object &&
+       op.destination != op.tool
+        _require_destination_dimension(cmp.reg, op.destination, new_dim)
+        append!(cmp.reg[op.destination].pgs, new_recs)
     else
-        registry[dest] = LayerState(new_recs, new_dim)
+        cmp.reg[op.destination] = LayerState(new_recs, new_dim)
     end
 
     return nothing
 end
 
 """
-    _compile!(compiler, op::Restrict)
+    _compile!(cmp, op::Restrict)
 
 Compile a restriction operation using the single physical group in the bounding-volume
 layer.
 """
-function _compile!(compiler::CompilerState, op::Restrict)
-    pg_ops = compiler.pg_ops
-    registry = compiler.registry
-    bv_layer = op.volume
-    bv_pgs = registry[bv_layer].pgs
+function _compile!(cmp::CompilerState, op::Restrict)
+    bv_pgs = cmp.reg[op.volume].pgs
     length(bv_pgs) == 1 || throw(
         ArgumentError(
-            "bounding volume layer :$bv_layer must contain exactly one physical group"
+            "bounding volume layer :$(op.volume) must contain exactly one physical group"
         )
     )
     bv_pg = bv_pgs[1].name
-    push!(pg_ops, ("restrict", SolidModels.restrict_to_volume!, (bv_pg,)))
+    push!(cmp.ops, ("restrict", SolidModels.restrict_to_volume!, (bv_pg,)))
     return nothing
 end
 
 # ─── Boundary ────────────────────────────────────────────────────────────────
 
-function _compile!(compiler::CompilerState, op::Boundary)
-    pg_ops = compiler.pg_ops
-    registry = compiler.registry
-    dest = op.destination
-    source_layer = op.source
+function _compile!(cmp::CompilerState, op::Boundary)
     kwargs = (
         :combined => op.combined,
         :oriented => op.oriented,
@@ -976,14 +943,14 @@ function _compile!(compiler::CompilerState, op::Boundary)
         :direction => op.direction,
         :position => op.position
     )
-    state = registry[source_layer]
+    state = cmp.reg[op.source]
     dim = state.dim
 
-    if dest == source_layer
+    if op.destination == op.source
         # Replace mode
         for record in state.pgs
             push!(
-                pg_ops,
+                cmp.ops,
                 (record.name, SolidModels.get_boundary, (record.name, dim), kwargs...)
             )
         end
@@ -993,7 +960,7 @@ function _compile!(compiler::CompilerState, op::Boundary)
         new_records = PGRecord[]
         for record in state.pgs
             dest_name =
-                string(dest) *
+                string(op.destination) *
                 "__" *
                 operation_hash(
                     record.name,
@@ -1008,19 +975,20 @@ function _compile!(compiler::CompilerState, op::Boundary)
                         op.position
                     )
                 )
-            generated_record_exists(registry, dest, dest_name, new_records) && continue
+            generated_record_exists(cmp.reg, op.destination, dest_name, new_records) &&
+                continue
             push!(
-                pg_ops,
+                cmp.ops,
                 (dest_name, SolidModels.get_boundary, (record.name, dim), kwargs...)
             )
-            push!(new_records, PGRecord(dest_name, dest, nothing))
+            push!(new_records, PGRecord(dest_name, op.destination, nothing))
         end
         new_dim = dim - 1
-        if haskey(registry, dest)
-            _require_destination_dimension(registry, dest, new_dim)
-            append!(registry[dest].pgs, new_records)
+        if haskey(cmp.reg, op.destination)
+            _require_destination_dimension(cmp.reg, op.destination, new_dim)
+            append!(cmp.reg[op.destination].pgs, new_records)
         else
-            registry[dest] = LayerState(new_records, new_dim)
+            cmp.reg[op.destination] = LayerState(new_records, new_dim)
         end
     end
 
@@ -1029,24 +997,18 @@ end
 
 # ─── translate! ──────────────────────────────────────────────────────────────
 
-function _compile!(compiler::CompilerState, op::Translate)
-    pg_ops = compiler.pg_ops
-    registry = compiler.registry
-    dest = op.destination
-    source_layer = op.source
-    dx, dy, dz = op.dx, op.dy, op.dz
-    state = registry[source_layer]
-    copy_entities = op.copy
+function _compile!(cmp::CompilerState, op::Translate)
+    state = cmp.reg[op.source]
 
-    if dest == source_layer && !copy_entities
+    if op.destination == op.source && !op.copy
         # Replace mode (in-place translate)
         for record in state.pgs
             push!(
-                pg_ops,
+                cmp.ops,
                 (
                     record.name,
                     SolidModels.translate!,
-                    (record.name, dx, dy, dz),
+                    (record.name, op.dx, op.dy, op.dz),
                     :copy => false
                 )
             )
@@ -1056,7 +1018,7 @@ function _compile!(compiler::CompilerState, op::Translate)
         new_records = PGRecord[]
         for record in state.pgs
             base_name =
-                string(dest) *
+                string(op.destination) *
                 "__" *
                 operation_hash(
                     record.name,
@@ -1069,26 +1031,26 @@ function _compile!(compiler::CompilerState, op::Translate)
             # Identical translations must all execute and remain represented in the registry,
             # to match DeviceLayout's PG-level operation semantics. Add a local
             # suffix when the content hash collides.
-            while generated_record_exists(registry, dest, dest_name, new_records)
+            while generated_record_exists(cmp.reg, op.destination, dest_name, new_records)
                 dest_name = base_name * "__" * string(suffix)
                 suffix += 1
             end
             push!(
-                pg_ops,
+                cmp.ops,
                 (
                     dest_name,
                     SolidModels.translate!,
-                    (record.name, dx, dy, dz),
-                    :copy => copy_entities
+                    (record.name, op.dx, op.dy, op.dz),
+                    :copy => op.copy
                 )
             )
-            push!(new_records, PGRecord(dest_name, dest, nothing))
+            push!(new_records, PGRecord(dest_name, op.destination, nothing))
         end
-        if haskey(registry, dest)
-            _require_destination_dimension(registry, dest, state.dim)
-            append!(registry[dest].pgs, new_records)
+        if haskey(cmp.reg, op.destination)
+            _require_destination_dimension(cmp.reg, op.destination, state.dim)
+            append!(cmp.reg[op.destination].pgs, new_records)
         else
-            registry[dest] = LayerState(new_records, state.dim)
+            cmp.reg[op.destination] = LayerState(new_records, state.dim)
         end
     end
 
@@ -1097,49 +1059,37 @@ end
 
 # ─── remove_group! ───────────────────────────────────────────────────────────
 
-function _compile!(compiler::CompilerState, op::Remove)
-    pg_ops = compiler.pg_ops
-    registry = compiler.registry
-    layer_name = op.source
-    remove_entities = op.remove_entities
-
-    state = registry[layer_name]
+function _compile!(cmp::CompilerState, op::Remove)
+    state = cmp.reg[op.source]
     for record in state.pgs
         push!(
-            pg_ops,
+            cmp.ops,
             (
                 "_rm",
                 SolidModels.remove_group!,
                 (record.name, state.dim),
-                :remove_entities => remove_entities
+                :remove_entities => op.remove_entities
             )
         )
     end
-    delete!(registry, layer_name)
+    delete!(cmp.reg, op.source)
     return nothing
 end
 
 # ─── revolve! ────────────────────────────────────────────────────────────────
 
-function _compile!(compiler::CompilerState, op::Revolve)
-    pg_ops = compiler.pg_ops
-    registry = compiler.registry
-    dest = op.destination
-    source_layer = op.source
-    x, y, z = op.origin
-    ax, ay, az = op.axis
-    θ = op.angle
-    state = registry[source_layer]
+function _compile!(cmp::CompilerState, op::Revolve)
+    state = cmp.reg[op.source]
     dim = state.dim
 
-    if dest == source_layer
+    if op.destination == op.source
         for record in state.pgs
             push!(
-                pg_ops,
+                cmp.ops,
                 (
                     record.name,
                     SolidModels.revolve!,
-                    (record.name, dim, x, y, z, ax, ay, az, θ)
+                    (record.name, dim, op.origin..., op.axis..., op.angle)
                 )
             )
         end
@@ -1148,7 +1098,7 @@ function _compile!(compiler::CompilerState, op::Revolve)
         new_records = PGRecord[]
         for record in state.pgs
             dest_name =
-                string(dest) *
+                string(op.destination) *
                 "__" *
                 operation_hash(
                     record.name,
@@ -1156,23 +1106,24 @@ function _compile!(compiler::CompilerState, op::Revolve)
                     operation=:revolve,
                     parameters=(dim, op.origin, op.axis, op.angle)
                 )
-            generated_record_exists(registry, dest, dest_name, new_records) && continue
+            generated_record_exists(cmp.reg, op.destination, dest_name, new_records) &&
+                continue
             push!(
-                pg_ops,
+                cmp.ops,
                 (
                     dest_name,
                     SolidModels.revolve!,
-                    (record.name, dim, x, y, z, ax, ay, az, θ)
+                    (record.name, dim, op.origin..., op.axis..., op.angle)
                 )
             )
-            push!(new_records, PGRecord(dest_name, dest, nothing))
+            push!(new_records, PGRecord(dest_name, op.destination, nothing))
         end
         new_dim = dim + 1
-        if haskey(registry, dest)
-            _require_destination_dimension(registry, dest, new_dim)
-            append!(registry[dest].pgs, new_records)
+        if haskey(cmp.reg, op.destination)
+            _require_destination_dimension(cmp.reg, op.destination, new_dim)
+            append!(cmp.reg[op.destination].pgs, new_records)
         else
-            registry[dest] = LayerState(new_records, new_dim)
+            cmp.reg[op.destination] = LayerState(new_records, new_dim)
         end
     end
 
@@ -1181,22 +1132,19 @@ end
 
 # ─── Periodic ────────────────────────────────────────────────────────────────
 
-function _compile!(compiler::CompilerState, op::Periodic)
-    pg_ops = compiler.pg_ops
-    registry = compiler.registry
-    layer_a, layer_b = op.first, op.second
-    records_a = registry[layer_a].pgs
-    records_b = registry[layer_b].pgs
+function _compile!(cmp::CompilerState, op::Periodic)
+    records_a = cmp.reg[op.first].pgs
+    records_b = cmp.reg[op.second].pgs
     length(records_a) == length(records_b) || throw(
         ArgumentError(
             "set_periodic! requires equal physical-group counts in layers " *
-            ":$layer_a and :$layer_b"
+            ":$(op.first) and :$(op.second)"
         )
     )
 
     for (record_a, record_b) in zip(records_a, records_b)
         push!(
-            pg_ops,
+            cmp.ops,
             (
                 "Periodic_$(record_a.name)",
                 SolidModels.set_periodic!,
