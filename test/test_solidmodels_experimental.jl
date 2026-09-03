@@ -866,9 +866,53 @@ end
     end
 
     @testset "Remove" begin
-        ops, reg, _ = compile_ops([Remove(:metal)], stack, registry)
+        @test Remove(:metal).remove_entities
+        @test !Remove(:metal; remove_entities=false).remove_entities
+
+        # Removing a layer emits one native operation per PG and deletes its registry entry.
+        ops, reg, dints = compile_ops([Remove(:metal)], stack, registry)
+        op = only(ops)
+        @test op[1] == "_rm"
+        @test op[2] == SolidModels.remove_group!
+        @test op[3] == (pgname(metal_meta), 2)
+        @test (:remove_entities => true) in op
         @test !haskey(reg, :metal)
-        @test only(ops)[2] == SolidModels.remove_group!
+        @test isempty(SolidModelsExperimental.interface_vertices(dints))
+        @test haskey(reg, :voids)
+
+        # Physical-group-only removal still deletes the layer registry entry.
+        ops, reg, _ = compile_ops([Remove(:metal; remove_entities=false)], stack, registry)
+        op = only(ops)
+        @test op[3] == (pgname(metal_meta), 2)
+        @test (:remove_entities => false) in op
+        @test !haskey(reg, :metal)
+
+        # Every PG in the layer is removed with the requested entity behavior.
+        reg = deepcopy(registry)
+        second_meta = EntityMeta(:metal; name="second")
+        push!(reg[:metal].pgs, PGRecord(pgname(second_meta), :metal, second_meta))
+        ops, reg, _ = compile_ops([Remove(:metal; remove_entities=false)], stack, reg)
+        @test length(ops) == 2
+        @test Set(op[3] for op in ops) ==
+              Set([(pgname(metal_meta), 2), (pgname(second_meta), 2)])
+        @test all(op -> (:remove_entities => false) in op, ops)
+        @test !haskey(reg, :metal)
+
+        # Missing and repeated removals are no-ops, matching remove_group! behavior.
+        ops, reg, _ = compile_ops([Remove(:missing)], stack, registry)
+        @test isempty(ops)
+        @test Set(keys(reg)) == Set(keys(registry))
+
+        ops, reg, _ = compile_ops([Remove(:metal), Remove(:metal)], stack, registry)
+        @test length(ops) == 1
+        @test !haskey(reg, :metal)
+
+        # Later operations cannot use a layer removed earlier in the sequence.
+        @test_throws ArgumentError compile_ops(
+            [Remove(:metal), Boundary(:edge, :metal)],
+            stack,
+            registry
+        )
     end
 end
 
