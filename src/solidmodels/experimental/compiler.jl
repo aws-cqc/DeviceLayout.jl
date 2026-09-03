@@ -50,7 +50,11 @@ Difference(dest::Symbol, object::Symbol, tools::AbstractVector{Symbol}) =
     Difference(dest, object, Tuple(tools))
 
 """
-`Fuse(destination, sources)` unions a grouped tuple or vector of source layers.
+    Fuse(source)
+    Fuse(destination, sources)
+
+Self-heal one source layer in place, or union a grouped tuple or vector of source layers
+into `destination`.
 """
 struct Fuse{N} <: BooleanOp
     destination::Symbol
@@ -62,6 +66,7 @@ struct Fuse{N} <: BooleanOp
 end
 Fuse(dest::Symbol, sources::NTuple{N, Symbol}) where {N} = Fuse{N}(dest, sources)
 Fuse(dest::Symbol, sources::AbstractVector{Symbol}) = Fuse(dest, Tuple(sources))
+Fuse(source::Symbol) = Fuse(source, (source,))
 
 """
 `Interface(destination, object, tool)` extracts a deferred geometric interface.
@@ -155,7 +160,8 @@ end
 Remove(source::Symbol; remove_entities::Bool=true) = Remove(source, remove_entities)
 
 """
-`Revolve(destination, source, origin, axis, angle)` revolves a layer.
+`Revolve(destination, source, origin, axis, angle)` sweeps a layer around an axis,
+retaining the swept entities at dimension `source_dimension + 1`.
 """
 struct Revolve <: LayerOp
     destination::Symbol
@@ -1072,6 +1078,8 @@ end
 function _compile!(cmp::CompilerState, op::Revolve)
     state = cmp.reg[op.source]
     dim = state.dim
+    dim < 3 || throw(ArgumentError("cannot revolve a 3D layer"))
+    new_dim = dim + 1
 
     if op.destination == op.source
         for record in state.pgs
@@ -1084,11 +1092,11 @@ function _compile!(cmp::CompilerState, op::Revolve)
                 )
             )
         end
-        state.dim = dim + 1
+        state.dim = new_dim
     else
         new_records = PGRecord[]
         for record in state.pgs
-            dest_name =
+            base_name =
                 string(op.destination) *
                 "__" *
                 ophash(
@@ -1097,8 +1105,12 @@ function _compile!(cmp::CompilerState, op::Revolve)
                     operation=:revolve,
                     parameters=(dim, op.origin, op.axis, op.angle)
                 )
-            generated_record_exists(cmp.reg, op.destination, dest_name, new_records) &&
-                continue
+            dest_name = base_name
+            suffix = 2
+            while generated_record_exists(cmp.reg, op.destination, dest_name, new_records)
+                dest_name = base_name * "__" * string(suffix)
+                suffix += 1
+            end
             push!(
                 cmp.ops,
                 (
@@ -1109,7 +1121,6 @@ function _compile!(cmp::CompilerState, op::Revolve)
             )
             push!(new_records, PGRecord(dest_name, op.destination, nothing))
         end
-        new_dim = dim + 1
         if haskey(cmp.reg, op.destination)
             _require_destination_dimension(cmp.reg, op.destination, new_dim)
             append!(cmp.reg[op.destination].pgs, new_records)

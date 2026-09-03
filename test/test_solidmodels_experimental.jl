@@ -392,11 +392,13 @@ end
 
     @testset "Fuse" begin
         @test Fuse(:dest, [:metal]).sources == (:metal,)
+        @test Fuse(:metal).sources == (:metal,)
+        @test Fuse(:metal).destination == :metal
         @test_throws MethodError Fuse(:bad, :metal)
         @test_throws ArgumentError Fuse(:bad, Symbol[])
 
         # A single source fused in place keeps its PG identity and registry entry.
-        ops, reg, _ = compile_ops([Fuse(:metal, (:metal,))], stack, registry)
+        ops, reg, _ = compile_ops([Fuse(:metal)], stack, registry)
         op = only(ops)
         @test op[1] == pgname(metal_meta)
         @test op[2] == SolidModels.union_geom!
@@ -537,13 +539,81 @@ end
     end
 
     @testset "Revolve" begin
-        ops, reg, _ = compile_ops(
-            [Revolve(:revolved, :metal, (0, 0, 0), (0, 0, 1), π)],
+        rev = Revolve(:revolved, :metal, (0, 0, 0), (0, 0, 1), π)
+        @test rev.origin === (0.0, 0.0, 0.0)
+        @test rev.axis === (0.0, 0.0, 1.0)
+        @test rev.angle === Float64(π)
+        @test_throws ArgumentError compile_ops(
+            [Revolve(:revolved, :missing, (0, 0, 0), (0, 0, 1), π)],
             stack,
             registry
         )
+
+        # The registry tracks the swept dimension; render cleanup removes lower-dimensional PGs.
+        ops, reg, _ = compile_ops([rev], stack, registry)
+        op = only(ops)
+        @test startswith(op[1], "revolved")
+        @test op[2] == SolidModels.revolve!
+        @test op[3] == (pgname(metal_meta), 2, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, Float64(π))
         @test reg[:revolved].dim == 3
-        @test only(ops)[2] == SolidModels.revolve!
+        @test only(reg[:revolved].pgs).name == op[1]
+        @test haskey(reg, :metal)
+
+        # In-place revolution advances the layer dimension while retaining its PG identity.
+        rev = Revolve(:metal, :metal, (1, 2, 3), (0, 1, 0), π / 2)
+        ops, reg, _ = compile_ops([rev], stack, registry)
+        op = only(ops)
+        @test op[2] == SolidModels.revolve!
+        @test op[1] == pgname(metal_meta)
+        @test op[3] == (pgname(metal_meta), 2, 1.0, 2.0, 3.0, 0.0, 1.0, 0.0, π / 2)
+        @test reg[:metal].dim == 3
+        @test only(reg[:metal].pgs).meta == metal_meta
+
+        # Every source PG is revolved and registered independently.
+        reg = deepcopy(registry)
+        second_meta = EntityMeta(:metal; name="second")
+        push!(reg[:metal].pgs, PGRecord(pgname(second_meta), :metal, second_meta))
+        ops, reg, _ =
+            compile_ops([Revolve(:revolved, :metal, (0, 0, 0), (1, 0, 0), π)], stack, reg)
+        @test length(ops) == 2
+        @test length(reg[:revolved].pgs) == 2
+        @test Set(op[3][1] for op in ops) == Set((pgname(metal_meta), pgname(second_meta)))
+
+        # Repeated identical revolutions execute and receive deterministic local suffixes.
+        rev = Revolve(:revolved, :metal, (0, 0, 0), (0, 0, 1), π)
+        ops, reg, _ = compile_ops([rev, rev], stack, registry)
+        @test length(ops) == 2
+        @test length(reg[:revolved].pgs) == 2
+        @test ops[2][1] == ops[1][1] * "__2"
+        @test reg[:revolved].pgs[1].name == ops[1][1]
+        @test reg[:revolved].pgs[2].name == ops[2][1]
+
+        # Lower-dimensional sources advance by exactly one dimension.
+        reg = deepcopy(registry)
+        line_meta = EntityMeta(:line)
+        reg[:line] = LayerState([PGRecord(pgname(line_meta), :line, line_meta)], 1)
+        ops, reg, _ =
+            compile_ops([Revolve(:surface, :line, (0, 0, 0), (0, 0, 1), π)], stack, reg)
+        @test only(ops)[3][2] == 1
+        @test reg[:surface].dim == 2
+
+        # OCC cannot sweep a volume into a fourth dimension.
+        reg = deepcopy(registry)
+        reg[:volume] = LayerState([PGRecord("volume", :volume, nothing)], 3)
+        @test_throws ArgumentError compile_ops(
+            [Revolve(:invalid, :volume, (0, 0, 0), (0, 0, 1), π)],
+            stack,
+            reg
+        )
+
+        # Existing destinations must have the swept dimension.
+        reg = deepcopy(registry)
+        reg[:revolved] = LayerState([PGRecord("existing", :revolved, nothing)], 2)
+        @test_throws ArgumentError compile_ops(
+            [Revolve(:revolved, :metal, (0, 0, 0), (0, 0, 1), π)],
+            stack,
+            reg
+        )
     end
 
     @testset "Periodic" begin
@@ -1109,7 +1179,7 @@ end
             Remove(:CHIP_OUTLINE),
             Difference(:CUTOUT, :METAL_NEG, :PORTS),
             Remove(:METAL_NEG),
-            Fuse(:METAL_POS, (:METAL_POS,)),
+            Fuse(:METAL_POS),
             Difference(:VACUUM, :BOUNDING_VOLUME, :SUBSTRATE_BOTTOM),
             Restrict(:BOUNDING_VOLUME),
             # Extract the six BOUNDING_VOLUME boundaries as EXTBND_XMIN,
