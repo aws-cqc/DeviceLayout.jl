@@ -92,7 +92,7 @@ The public operation types are:
 | Type | Meaning |
 |:--|:--|
 | `Extrude(layer)` | Extrude a source-stack layer using its configured thickness. |
-| `Difference(destination, object, tools; remove_object, remove_tool)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector. |
+| `Difference(destination, object, tools)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector. Follow it with `Remove` to remove inputs. |
 | `Fuse(destination, sources)` | Union grouped source layers. Sources must be a tuple or vector. |
 | `Interface(destination, object, tool)` | Resolve a deferred interface after fragmentation. |
 | `Restrict(volume)` | Restrict the model to one bounding-volume layer. |
