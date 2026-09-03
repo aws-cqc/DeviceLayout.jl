@@ -100,7 +100,7 @@ The public operation types are:
 | `Translate(destination, source, dx, dy, dz; copy)` | Translate or copy-translate a layer. |
 | `Remove(source; remove_entities)` | Remove a layer, or do nothing if it is absent. |
 | `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. Three-dimensional sources are unsupported. |
-| `Periodic(first, second)` | Pair two periodic layers. |
+| `Periodic(first, second)` | Pair two 2D periodic layers containing exactly one physical group each. |
 
 A destination equal to a source layer replaces that layer for boundary, translation,
 revolution, and single-source union operations. A new destination creates a generated layer;
