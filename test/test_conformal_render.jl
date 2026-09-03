@@ -689,12 +689,12 @@
         @test SolidModels.mutual_node!(groups2) == 0
     end
 
-    @testset "mutual_node! node_tol is unit-safe (nm regardless of input unit)" begin
-        # `node_tol` is documented in nm and must mean the same *physical*
-        # distance whether the input Points carry µm or nm units. Build the
-        # SAME geometry both ways and check the injection is identical. The
-        # foreign vertex B[5] sits 1 nm off A's right edge (x = 10 µm + 1 nm),
-        # inside the default 2 nm tolerance — so it injects regardless of unit.
+    @testset "mutual_node! atol is unit-safe (same physical distance regardless of input unit)" begin
+        # `atol` is a length. Whether input Points carry µm or nm units, the
+        # tolerance means the same *physical* distance. Build the SAME
+        # geometry both ways and check the injection is identical. The foreign
+        # vertex B[5] sits 1 nm off A's right edge (x = 10 µm + 1 nm), inside
+        # the default 2 nm tolerance — so it injects regardless of unit.
         # `u` is the point unit (nm or μm); `x_off` is the perpendicular
         # offset of the foreign vertex from A's right edge, in that same unit.
         function build_pair(u, x_off)

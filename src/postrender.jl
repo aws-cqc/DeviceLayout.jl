@@ -144,7 +144,25 @@ struct _VertexIndex{T}
     atol_nm::Float64
 end
 
+# Interpret unitful lengths as-is; bare `Real` coordinates mean microns, per
+# DeviceLayout's user-facing convention.
 _nm(x) = Float64(ustrip(Unitful.nm, x))
+_nm(x::Real) = Float64(1000 * x)
+
+# Perpendicular distance in nm from point `p` to the line segment (p1, p2).
+# For corner-shared dedup — a Real-valued helper used only when comparing which
+# adjacent edge a candidate is geometrically nearer to.
+function _perp_to_edge(p1, p2, p)
+    x1 = _nm(getx(p1))
+    y1 = _nm(gety(p1))
+    dx = _nm(getx(p2)) - x1
+    dy = _nm(gety(p2)) - y1
+    len_sq = dx * dx + dy * dy
+    len_sq <= 0 && return Inf
+    px = _nm(getx(p))
+    py = _nm(gety(p))
+    return abs((px - x1) * dy - (py - y1) * dx) / sqrt(len_sq)
+end
 
 # Build an index over `groups`, an iterable of `(owner_id, vertices)` pairs.
 # `atol` is a length; it sets both the padding of each vertex's query Rect and
@@ -205,14 +223,16 @@ function _query_bbox(idx::_VertexIndex, axmin, aymin, axmax, aymax, exclude_owne
     return hits
 end
 
-# Foreign points on the straight edge p1→p2, as `(t, Point)` sorted by parameter,
-# excluding endpoints (within `rtol` of an end) and this contour's own owner.
+# Foreign points on the straight edge p1→p2, as `(t, Point, i)` sorted by
+# parameter. `i` is the candidate's index in `idx.pts`, useful for cross-edge
+# dedup by the caller. Excludes candidates within `atol` Euclidean distance of
+# either endpoint (they would collapse onto an existing vertex under render-time
+# point merging) and this contour's own owner.
 function _points_on_straight(
     idx::_VertexIndex{T},
     p1::Point{T},
     p2::Point{T},
     exclude_owner::Int,
-    atol,
     rtol::Real
 ) where {T}
     x1 = _nm(getx(p1))
@@ -223,24 +243,32 @@ function _points_on_straight(
     dy = y2 - y1
     len_sq = dx * dx + dy * dy
     atol_nm = idx.atol_nm
-    len_sq <= (2 * atol_nm)^2 && return Tuple{Float64, Point{T}}[]  # degenerate
+    len_sq <= (2 * atol_nm)^2 && return Tuple{Float64, Point{T}, Int}[]  # degenerate
     len = sqrt(len_sq)
-    found = Tuple{Float64, Point{T}}[]
+    found = Tuple{Float64, Point{T}, Int}[]
+    atol_sq = atol_nm * atol_nm
     for i in _query_bbox(idx, x1, y1, x2, y2, exclude_owner)
         px = _nm(getx(idx.pts[i]))
         py = _nm(gety(idx.pts[i]))
         t = ((px - x1) * dx + (py - y1) * dy) / len_sq
-        (t <= rtol || t >= 1.0 - rtol) && continue           # interior only
         perp = abs((px - x1) * dy - (py - y1) * dx) / len
         perp > atol_nm && continue
-        push!(found, (t, idx.pts[i]))                        # reuse foreign Point
+        # Endpoint guard: exclude candidates within `atol` Euclidean distance of
+        # either endpoint (they collapse onto an existing vertex under render-time
+        # point merging). Absolute in physical distance — matches the atol-based
+        # merging convention elsewhere in DeviceLayout — while still admitting
+        # legitimate T-junctions a few nm inside a very short edge.
+        along = t * len
+        (along * along + perp * perp) <= atol_sq && continue
+        ((len - along)^2 + perp * perp) <= atol_sq && continue
+        push!(found, (t, idx.pts[i], i))                     # reuse foreign Point
     end
     sort!(found; by=first)
     # Drop candidates closer than atol *along* the edge to the previous kept one —
     # two near-coincident injections would make a sub-tolerance-length edge.
     isempty(found) && return found
     min_dt = atol_nm / len
-    kept = Tuple{Float64, Point{T}}[found[1]]
+    kept = Tuple{Float64, Point{T}, Int}[found[1]]
     for k = 2:length(found)
         found[k][1] - kept[end][1] < min_dt && continue
         push!(kept, found[k])
@@ -253,26 +281,20 @@ end
 # contour's own owner. The injected point is the EXACT point on the curve at that
 # arclength (`curve(s)`), not the possibly-off-curve candidate — so the
 # `CurvilinearPolygon` point/endpoint agreement is preserved.
-function _points_on_curve(
-    idx::_VertexIndex{T},
-    curve,
-    exclude_owner::Int,
-    atol,
-    rtol::Real
-) where {T}
+function _points_on_curve(idx::_VertexIndex{T}, curve, exclude_owner::Int) where {T}
     L = pathlength(curve)                      # a length, in the curve's unit
     L_nm = _nm(L)
-    L_nm <= 0 && return Tuple{typeof(L), Point{T}}[]
+    L_nm <= 0 && return Tuple{typeof(L), Point{T}, Int}[]
     disc = discretize_curve(curve, onenanometer(T); rtol=nothing)
-    isempty(disc) && return Tuple{typeof(L), Point{T}}[]
+    isempty(disc) && return Tuple{typeof(L), Point{T}, Int}[]
     atol_nm = idx.atol_nm
     # The polyline approximates the curve to within 1 nm, so widen the
     # perpendicular test by that slop before the exact on-curve residual check.
     perp_tol = atol_nm + 1.0
     tol2 = perp_tol * perp_tol
     seen = Set{Int}()
-    # (arclength as a length, arclength in nm) for the qualifying candidates.
-    found = Tuple{typeof(L), Float64}[]
+    # (arclength as a length, arclength in nm, candidate index) for qualifying candidates.
+    found = Tuple{typeof(L), Float64, Int}[]
     nd = length(disc)
     for j = 1:(nd - 1)
         ax = _nm(getx(disc[j]))
@@ -299,16 +321,16 @@ function _points_on_curve(
             cs_pt = curve(s)                   # exact point on the curve at s
             resid = hypot(_nm(getx(cs_pt) - getx(V)), _nm(gety(cs_pt) - gety(V)))
             resid > atol_nm && continue
-            push!(found, (s, s_nm))
+            push!(found, (s, s_nm, i))
         end
     end
-    isempty(found) && return Tuple{typeof(L), Point{T}}[]
+    isempty(found) && return Tuple{typeof(L), Point{T}, Int}[]
     sort!(found; by=x -> x[2])                 # by arclength = order of travel
-    out = Tuple{typeof(L), Point{T}}[]
+    out = Tuple{typeof(L), Point{T}, Int}[]
     prev = -Inf
-    for (s, s_nm) in found
+    for (s, s_nm, i) in found
         s_nm - prev < atol_nm && continue      # de-dup co-located along the curve
-        push!(out, (s, curve(s)))              # exact on-curve point
+        push!(out, (s, curve(s), i))           # exact on-curve point
         prev = s_nm
     end
     return out
@@ -335,7 +357,6 @@ function _node_contour(
     cpoly::CurvilinearPolygon{T},
     idx::_VertexIndex{T},
     exclude_owner::Int,
-    atol,
     rtol::Real
 ) where {T}
     pts = points(cpoly)
@@ -344,6 +365,89 @@ function _node_contour(
     curve_at = Dict{Int, Int}()   # start-vertex index → position in cpoly.curves
     for (k, csi) in enumerate(cpoly.curve_start_idx)
         curve_at[csi] = k
+    end
+    # First-pass: collect hits per edge with candidate indices, so pass 2 can
+    # apply corner-vertex dedup — a candidate landing on TWO adjacent edges of
+    # the same contour near their shared corner would inject twice, creating a
+    # zero-length loopback (identical non-consecutive vertices around the
+    # corner). Detection: candidate index seen on edge k-1 AND edge k, with the
+    # candidate within `atol` Euclidean of the shared vertex `pts[k]`.
+    atol_nm = idx.atol_nm
+    atol_sq = atol_nm * atol_nm
+    straight_hits = Dict{Int, Vector{Tuple{Float64, Point{T}, Int}}}()
+    curve_hits = Dict{Int, Vector{Tuple{Any, Point{T}, Int}}}()
+    for i = 1:n
+        if haskey(curve_at, i)
+            hits = _points_on_curve(idx, cpoly.curves[curve_at[i]], exclude_owner)
+            isempty(hits) || (
+                curve_hits[i] = Tuple{Any, Point{T}, Int}[
+                    (s, on_pt, ci) for (s, on_pt, ci) in hits
+                ]
+            )
+        else
+            p2 = pts[mod1(i + 1, n)]
+            hits = _points_on_straight(idx, pts[i], p2, exclude_owner, rtol)
+            isempty(hits) || (straight_hits[i] = hits)
+        end
+    end
+    # Build the corner-shared skip set: if a candidate ci was injected on both
+    # edge k-1 AND edge k (which share pts[k]), keep it on the edge where it's
+    # geometrically closer (smaller perp/on-curve residual) and skip it on the
+    # other. This eliminates the corner double-injection Greg reported (source
+    # vertex just off a sharp corner that lands within `atol` perp of BOTH
+    # adjacent edges), without affecting the common case where a candidate
+    # only touches one edge or where the two edges are non-adjacent.
+    # We use "closer to the shared corner vertex" as the tie-break because
+    # among two adjacent edges near a sharp corner, the edge whose interior
+    # the candidate ACTUALLY belongs to has the candidate farther from the
+    # shared corner (along its own arclength). Farther-from-corner = winner.
+    corner_skip = Set{Tuple{Int, Int}}()
+    for k = 1:n
+        prev_k = mod1(k - 1, n)
+        prev_hits_s = get(straight_hits, prev_k, nothing)
+        prev_hits_c = get(curve_hits, prev_k, nothing)
+        cur_hits_s = get(straight_hits, k, nothing)
+        cur_hits_c = get(curve_hits, k, nothing)
+        (prev_hits_s === nothing && prev_hits_c === nothing) && continue
+        (cur_hits_s === nothing && cur_hits_c === nothing) && continue
+        corner_x = _nm(getx(pts[k]))
+        corner_y = _nm(gety(pts[k]))
+        prev_indices = Set{Int}()
+        prev_hits_s !== nothing && (
+            for t in prev_hits_s
+                push!(prev_indices, t[3])
+            end
+        )
+        prev_hits_c !== nothing && (
+            for t in prev_hits_c
+                push!(prev_indices, t[3])
+            end
+        )
+        cur_iter = cur_hits_s !== nothing ? cur_hits_s : cur_hits_c
+        for tup in cur_iter
+            ci = tup[3]
+            (ci in prev_indices) || continue
+            # Only dedup if the candidate is close enough to the shared corner
+            # that both edges' perp checks trivially pass. Threshold: within
+            # 2·atol of the corner (candidate that's 2·atol away has ≤ atol
+            # perp only if it's essentially on-edge, not the corner-doubling
+            # case). Farther candidates on both edges are legitimately on both.
+            cx = _nm(getx(idx.pts[ci]))
+            cy = _nm(gety(idx.pts[ci]))
+            d2 = (cx - corner_x)^2 + (cy - corner_y)^2
+            d2 <= (2 * atol_nm)^2 || continue
+            # Winner = the edge whose interior the candidate is farther from
+            # the shared corner along that edge. Compute along-edge distances.
+            # For simplicity: pick the edge with SMALLER perp distance (that's
+            # the edge the candidate is more genuinely "on").
+            perp_prev = _perp_to_edge(pts[prev_k], pts[k], idx.pts[ci])
+            perp_cur = _perp_to_edge(pts[k], pts[mod1(k + 1, n)], idx.pts[ci])
+            if perp_prev <= perp_cur
+                push!(corner_skip, (ci, k))            # keep on prev, skip on cur
+            else
+                push!(corner_skip, (ci, prev_k))       # keep on cur, skip on prev
+            end
+        end
     end
     new_points = Point{T}[]
     new_curves = eltype(cpoly.curves)[]
@@ -354,7 +458,12 @@ function _node_contour(
         start_idx = length(new_points)
         if haskey(curve_at, i)
             seg = cpoly.curves[curve_at[i]]
-            splits = _points_on_curve(idx, seg, exclude_owner, atol, rtol)
+            all_hits = get(curve_hits, i, nothing)
+            splits = if all_hits === nothing
+                Tuple{Any, Point{T}, Int}[]
+            else
+                [h for h in all_hits if !((h[3], i) in corner_skip)]
+            end
             if isempty(splits)
                 push!(new_curves, seg)
                 push!(new_csi, start_idx)
@@ -364,7 +473,7 @@ function _node_contour(
                 remaining = seg
                 consumed = zero(pathlength(seg))
                 acc_idx = start_idx
-                for (s, on_pt) in splits
+                for (s, on_pt, _) in splits
                     sub1, sub2 = Paths.split(remaining, s - consumed)
                     push!(new_curves, sub1)
                     push!(new_csi, acc_idx)
@@ -378,10 +487,13 @@ function _node_contour(
                 push!(new_csi, acc_idx)
             end
         else
-            p2 = pts[mod1(i + 1, n)]
-            for (_, c) in _points_on_straight(idx, pts[i], p2, exclude_owner, atol, rtol)
-                push!(new_points, c)
-                n_injected += 1
+            all_hits = get(straight_hits, i, nothing)
+            if all_hits !== nothing
+                for (_, c, ci) in all_hits
+                    (ci, i) in corner_skip && continue
+                    push!(new_points, c)
+                    n_injected += 1
+                end
             end
         end
     end
@@ -395,18 +507,12 @@ function _node_contour(
 end
 
 # Node every contour (exterior + holes) of `region` against `idx`.
-function _node_region(
-    region::CurvilinearRegion{T},
-    idx,
-    exclude_owner,
-    atol,
-    rtol
-) where {T}
-    new_ext, n_ext = _node_contour(region.exterior, idx, exclude_owner, atol, rtol)
+function _node_region(region::CurvilinearRegion{T}, idx, exclude_owner, rtol) where {T}
+    new_ext, n_ext = _node_contour(region.exterior, idx, exclude_owner, rtol)
     new_holes = CurvilinearPolygon{T}[]
     n_holes = 0
     for h in region.holes
-        h_new, n_h = _node_contour(h, idx, exclude_owner, atol, rtol)
+        h_new, n_h = _node_contour(h, idx, exclude_owner, rtol)
         push!(new_holes, h_new)
         n_holes += n_h
     end
@@ -476,7 +582,7 @@ function split_t_junctions!(
     idx = _build_vertex_index(((0, candidates),), T; atol)
     total = 0
     for (ri, region) in enumerate(targets)
-        new_region, n = _node_region(region, idx, 0, atol, rtol)
+        new_region, n = _node_region(region, idx, 0, rtol)
         if n > 0
             targets[ri] = new_region
             total += n
@@ -510,16 +616,43 @@ function split_t_junctions!(
     isempty(candidates) && return 0
     idx = _build_vertex_index(((0, candidates),), T; atol)
     total = 0
+    atol_nm_poly = _nm(atol)
+    atol_sq_poly = atol_nm_poly * atol_nm_poly
     for (pi, poly) in enumerate(targets)
         pts = points(poly)
         n = length(pts)
         n < 3 && continue
+        # First pass: collect per-edge hits with candidate indices, for the
+        # corner-vertex dedup below.
+        edge_hits = Dict{Int, Vector{Tuple{Float64, Point{T}, Int}}}()
+        for i = 1:n
+            p2 = pts[mod1(i + 1, n)]
+            hits = _points_on_straight(idx, pts[i], p2, 0, rtol)
+            isempty(hits) || (edge_hits[i] = hits)
+        end
+        corner_skip = Set{Tuple{Int, Int}}()
+        for k = 1:n
+            prev_k = mod1(k - 1, n)
+            (haskey(edge_hits, prev_k) && haskey(edge_hits, k)) || continue
+            corner_x = _nm(getx(pts[k]))
+            corner_y = _nm(gety(pts[k]))
+            prev_indices = Set(t[3] for t in edge_hits[prev_k])
+            for (_, _, ci) in edge_hits[k]
+                (ci in prev_indices) || continue
+                cx = _nm(getx(idx.pts[ci]))
+                cy = _nm(gety(idx.pts[ci]))
+                ((cx - corner_x)^2 + (cy - corner_y)^2) <= atol_sq_poly || continue
+                push!(corner_skip, (ci, k))
+            end
+        end
         new_points = Point{T}[]
         inserted = 0
         for i = 1:n
             push!(new_points, pts[i])
-            p2 = pts[mod1(i + 1, n)]
-            for (_, c) in _points_on_straight(idx, pts[i], p2, 0, atol, rtol)
+            hits = get(edge_hits, i, nothing)
+            hits === nothing && continue
+            for (_, c, ci) in hits
+                (ci, i) in corner_skip && continue
                 push!(new_points, c)
                 inserted += 1
             end

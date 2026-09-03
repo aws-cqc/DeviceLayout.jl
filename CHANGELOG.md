@@ -6,6 +6,15 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - `split_t_junctions!` (exported from `DeviceLayout`) and `SolidModels.mutual_node!` inject
+    foreign vertices onto edges (straight or `Paths.Turn`/`Paths.BSpline`) using a shared
+    `RTree`-based noding core. `split_t_junctions!` is asymmetric (source-into-target) for
+    general 2D / GDS-gap use; `mutual_node!` is symmetric all-pairs, foreign-only, for making
+    adjacent physical groups conformal before `render_conformal!`. Curved edges are split
+    natively via `Paths.split`; no discretization.
+
 ### Fixed
 
   - Curve recovery (`union2d_curved` and friends) preserves arcs from path nodes styled with

@@ -568,4 +568,41 @@ end
         @test any(onA, points(tA[1].exterior))                 # via split_t_junctions!
         @test any(onA, points(groups[:a][1].exterior))         # via mutual_node!
     end
+
+    @testset "corner vertex within tolerance of two edges goes to one edge only" begin
+        # Regression for a 30° corner at the origin: with default atol=1nm, a source
+        # vertex sitting 1.5nm along the bottom edge is also within 0.75nm perpendicular
+        # of the second edge (30° above +x). Without corner-shared dedup this would
+        # inject the same candidate onto both edges of the target, producing identical
+        # non-consecutive vertices around the corner (a zero-length loopback).
+        T = typeof(1.0μm)
+        c30 = cosd(30) * 10.0μm
+        s30 = sind(30) * 10.0μm
+        # Target: closed triangle whose 30° corner is at the origin.
+        target = [
+            CurvilinearRegion(
+                CurvilinearPolygon(
+                    Point{T}[p(0.0μm, 0.0μm), p(10.0μm, 0.0μm), p(c30, s30)]
+                )
+            )
+        ]
+        # Source vertex 1.5nm = 0.0015μm along the bottom edge — within default atol
+        # of the second edge in perpendicular distance too.
+        source = [
+            CurvilinearRegion(
+                CurvilinearPolygon(
+                    Point{T}[p(0.0015μm, 0.0μm), p(0.1μm, -0.05μm), p(0.05μm, -0.05μm)]
+                )
+            )
+        ]
+        n = split_t_junctions!(target, source)
+        @test n == 1                                            # NOT 2 (pre-fix behaviour)
+        ext_pts = points(target[1].exterior)
+        @test length(ext_pts) == 4                              # 3 corners + 1 injection
+        near_candidate =
+            q ->
+                isapprox(getx(q), 0.0015μm; atol=1e-9μm) &&
+                    isapprox(gety(q), 0.0μm; atol=1e-9μm)
+        @test count(near_candidate, ext_pts) == 1               # not 2
+    end
 end

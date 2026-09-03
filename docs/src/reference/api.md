@@ -193,6 +193,7 @@
 ```@docs
     round_layer
     round_layer!
+    split_t_junctions!
 ```
 
 #### [Curvilinear geometry](@id api-curvilinear)
@@ -327,6 +328,7 @@ See [Shapes](./shapes.md).
     SolidModels.translate!
     SolidModels.union_geom!
     SolidModels.staple_bridge_postrendering
+    SolidModels.mutual_node!
 ```
 
 ### Meshing
