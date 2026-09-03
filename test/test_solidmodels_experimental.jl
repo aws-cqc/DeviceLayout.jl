@@ -246,26 +246,22 @@ end
         @test length(reg[:metal].pgs) == 1
         @test length(reg[:voids].pgs) == 1
 
-        ops, reg, _ = compile_ops(
-            [Difference(:cut, :metal, :voids; remove_object=true)],
-            stack,
-            registry
-        )
+        ops, reg, _ =
+            compile_ops([Difference(:cut, :metal, :voids), Remove(:metal)], stack, registry)
         op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
         @test startswith(op[1], "cut")
         @test op[3] == (pgname(metal_meta), [pgname(voids_meta)], 2, 2)
         @test (:remove_object => true) in op
+        @test all(op -> op[2] != SolidModels.remove_group!, ops) # removal was absorbed
         @test !haskey(reg, :metal)
 
-        ops, reg, _ = compile_ops(
-            [Difference(:cut, :metal, :voids; remove_tool=true)],
-            stack,
-            registry
-        )
+        ops, reg, _ =
+            compile_ops([Difference(:cut, :metal, :voids), Remove(:voids)], stack, registry)
         op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
         @test startswith(op[1], "cut")
         @test op[3] == (pgname(metal_meta), [pgname(voids_meta)], 2, 2)
         @test (:remove_tool => true) in op
+        @test all(op -> op[2] != SolidModels.remove_group!, ops) # removal was absorbed
         @test !haskey(reg, :voids)
 
         ops, reg, _ = compile_ops([Difference(:metal, :metal, :voids)], stack, registry)
@@ -277,7 +273,7 @@ end
         @test haskey(reg, :voids)
 
         ops, reg, _ = compile_ops(
-            [Difference(:metal, :metal, :voids; remove_tool=true)],
+            [Difference(:metal, :metal, :voids), Remove(:voids)],
             stack,
             registry
         )
@@ -301,12 +297,49 @@ end
             PGRecord(pgname(second_voids_meta), :voids, second_voids_meta)
         )
         ops, reg, _ =
-            compile_ops([Difference(:cut, :metal, :voids; remove_tool=true)], stack, reg)
+            compile_ops([Difference(:cut, :metal, :voids), Remove(:voids)], stack, reg)
         ops = filter(op -> op[2] == SolidModels.difference_geom!, ops)
         @test reg[:cut].dim == 2
         @test length(reg[:cut].pgs) == 2 # one for each metal object
         @test all(op -> startswith(op[3][1], "metal"), ops)
         @test all(op -> length(op[3][2]) == 2, ops) # two void PGs subtracted from each object
+        @test getindex.(ops, Ref(5)) == [:remove_tool => false, :remove_tool => true]
+
+        # Partial tool removal cannot be represented by OCC's all-tools removal flag,
+        # so Remove op is not abosrbed into preceding Difference
+        ops, reg, _ = compile_ops(
+            [Difference(:cut, :metal, (:voids, :shell)), Remove(:voids)],
+            stack,
+            registry
+        )
+        op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
+        @test (:remove_tool => false) in op
+        @test any(op -> op[2] == SolidModels.remove_group!, ops)
+        @test !haskey(reg, :voids)
+        @test haskey(reg, :shell)
+
+        # Removing the destination means removing the result, so it is not absorbed.
+        ops, reg, _ = compile_ops(
+            [Difference(:metal, :metal, :voids), Remove(:metal)],
+            stack,
+            registry
+        )
+        op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
+        @test (:remove_object => false) in op
+        @test any(op -> op[2] == SolidModels.remove_group!, ops)
+        @test !haskey(reg, :metal)
+
+        # A non-adjacent removal remains a separate operation (for now, until we
+        # implement a more compherensive compiler)
+        ops, reg, _ = compile_ops(
+            [Difference(:cut, :metal, :voids), Boundary(:edge, :metal), Remove(:metal)],
+            stack,
+            registry
+        )
+        op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
+        @test (:remove_object => false) in op
+        @test any(op -> op[2] == SolidModels.remove_group!, ops)
+        @test !haskey(reg, :metal)
     end
 
     @testset "Boundary" begin
@@ -1072,8 +1105,10 @@ end
         )
 
         ops = [
-            Difference(:METAL_POS, :CHIP_OUTLINE, :METAL_NEG; remove_object=true),
-            Difference(:CUTOUT, :METAL_NEG, :PORTS; remove_object=true),
+            Difference(:METAL_POS, :CHIP_OUTLINE, :METAL_NEG),
+            Remove(:CHIP_OUTLINE),
+            Difference(:CUTOUT, :METAL_NEG, :PORTS),
+            Remove(:METAL_NEG),
             Fuse(:METAL_POS, (:METAL_POS,)),
             Difference(:VACUUM, :BOUNDING_VOLUME, :SUBSTRATE_BOTTOM),
             Restrict(:BOUNDING_VOLUME),

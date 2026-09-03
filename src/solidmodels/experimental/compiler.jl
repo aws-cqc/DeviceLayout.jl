@@ -29,32 +29,25 @@ struct Extrude <: LayerOp
 end
 
 """
-    Difference(destination, object, tools; remove_object=false, remove_tool=false)
+    Difference(destination, object, tools)
 
 Subtract one tool layer, or a grouped tuple or vector of tool layers, from `object`.
+Use adjacent [`Remove`](@ref) operations to remove inputs.
 """
 struct Difference{N} <: BooleanOp
     destination::Symbol
     object::Symbol
     tools::NTuple{N, Symbol}
-    remove_object::Bool
-    remove_tool::Bool
-    function Difference{N}(destination, object, tools, remove_object, remove_tool) where {N}
+    function Difference{N}(destination, object, tools) where {N}
         iszero(N) && throw(ArgumentError("difference requires at least one tool layer"))
-        return new{N}(destination, object, tools, remove_object, remove_tool)
+        return new{N}(destination, object, tools)
     end
 end
-Difference(
-    dest::Symbol,
-    object::Symbol,
-    tools::NTuple{N, Symbol};
-    remove_object::Bool=false,
-    remove_tool::Bool=false
-) where {N} = Difference{N}(dest, object, tools, remove_object, remove_tool)
-Difference(dest::Symbol, object::Symbol, tool::Symbol; kwargs...) =
-    Difference(dest, object, (tool,); kwargs...)
-Difference(dest::Symbol, object::Symbol, tools::AbstractVector{Symbol}; kwargs...) =
-    Difference(dest, object, Tuple(tools); kwargs...)
+Difference(dest::Symbol, object::Symbol, tools::NTuple{N, Symbol}) where {N} =
+    Difference{N}(dest, object, tools)
+Difference(dest::Symbol, object::Symbol, tool::Symbol) = Difference(dest, object, (tool,))
+Difference(dest::Symbol, object::Symbol, tools::AbstractVector{Symbol}) =
+    Difference(dest, object, Tuple(tools))
 
 """
 `Fuse(destination, sources)` unions a grouped tuple or vector of source layers.
@@ -187,6 +180,16 @@ end
 struct Periodic <: LayerOp
     first::Symbol
     second::Symbol
+end
+
+# ─── Lowered operations ──────────────────────────────────────────────────────
+
+struct _LoweredDifference{N} <: BooleanOp
+    destination::Symbol
+    object::Symbol
+    tools::NTuple{N, Symbol}
+    remove_object::Bool
+    remove_tool::Bool
 end
 
 function inspect_registry(registry::LayerRegistry; io::IO=stdout)
@@ -426,6 +429,59 @@ source_layers(op::Remove) = (op.source,)
 source_layers(op::Revolve) = (op.source,)
 source_layers(op::Periodic) = (op.first, op.second)
 
+source_layers(op::_LoweredDifference) = (op.object, op.tools...)
+
+function _absorb_removals(ops::AbstractVector{<:LayerOp})
+    result = LayerOp[]
+    i = firstindex(ops)
+    while i <= lastindex(ops)
+        op = ops[i]
+        if !(op isa Difference)
+            push!(result, op)
+            i += 1
+            continue
+        end
+
+        j = i + 1
+        removals = Remove[]
+        while j <= lastindex(ops) && ops[j] isa Remove
+            push!(removals, ops[j])
+            j += 1
+        end
+
+        ambiguous = op.object in op.tools
+        remove_object =
+            !ambiguous &&
+            op.object != op.destination &&
+            any(r -> r.source == op.object && r.remove_entities, removals)
+        remove_tool =
+            !ambiguous &&
+            op.destination ∉ op.tools &&
+            all(tool -> any(r -> r.source == tool && r.remove_entities, removals), op.tools)
+        push!(
+            result,
+            _LoweredDifference(
+                op.destination,
+                op.object,
+                op.tools,
+                remove_object,
+                remove_tool
+            )
+        )
+
+        for removal in removals
+            absorbed =
+                removal.remove_entities && (
+                    remove_object && removal.source == op.object ||
+                    remove_tool && removal.source in op.tools
+                )
+            absorbed || push!(result, removal)
+        end
+        i = j
+    end
+    return result
+end
+
 function _validate_source_layers(op::LayerOp, registry::LayerRegistry)
     for source in source_layers(op)
         haskey(registry, source) || throw(
@@ -469,7 +525,8 @@ function compile_ops(
         Dict{Symbol, Vector{String}}(),
         stack
     )
-    for op in ops
+    optimized_ops = _absorb_removals(ops)
+    for op in optimized_ops
         _validate_source_layers(op, cmp.reg)
         op isa Restrict && _flush_interior_solids!(cmp, op.volume)
         _compile!(cmp, op)
@@ -603,7 +660,7 @@ function _compile!(cmp::CompilerState, op::Extrude)
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::Difference)
+function _compile!(cmp::CompilerState, op::_LoweredDifference)
     object_state = cmp.reg[op.object]
     dim = object_state.dim
     tool_pg_names =
