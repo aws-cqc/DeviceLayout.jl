@@ -887,14 +887,14 @@ function _compile!(cmp::CompilerState, op::Interface)
                 ophash(
                     obj_rec.name,
                     [tool_rec.name];
-                    operation=:intersect,
+                    operation=:interface,
                     parameters=(obj_dim, tool_dim)
                 )
             generated_record_exists(cmp.reg, op.destination, dest_name, new_recs) &&
                 continue
-            # All intersections are deferred to post-fragmentation. Same-dim
-            # intersections find shared boundary entities (dim-1); mixed-dim
-            # intersections find lo-dim entities on the hi-dim boundary.
+            # All interface calculations are deferred to post-fragmentation. Interfaces of
+            # same-dim entities are shared boundary entities (dim-1); interfaces of
+            # mixed-dim entities are lo-dim entities on the hi-dim boundary.
             defer_interface!(
                 cmp.dints,
                 dest_name,
@@ -910,8 +910,8 @@ function _compile!(cmp::CompilerState, op::Interface)
         end
     end
 
-    # Result dimension: mixed-dim intersections produce entities at min(d1, d2).
-    # Same-dim intersections (e.g. 3D∩3D) produce shared boundaries at dim-1.
+    # Result dimension: mixed-dim entites produce entities at min(d1, d2).
+    # Same-dim entities (e.g. 3D∩3D) produce shared boundaries at dim-1.
     new_dim = obj_dim == tool_dim ? obj_dim - 1 : min(obj_dim, tool_dim)
 
     if haskey(cmp.reg, op.destination) &&
