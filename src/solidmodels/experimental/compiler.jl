@@ -151,7 +151,8 @@ Translate(
 ) = Translate(destination, source, dx, dy, dz, copy)
 
 """
-`Remove(source; remove_entities=true)` removes a layer from the model.
+`Remove(source; remove_entities=true)` removes a layer from the model, or does nothing
+if the layer is absent.
 """
 struct Remove <: LayerOp
     source::Symbol
@@ -487,6 +488,8 @@ function _absorb_removals(ops::AbstractVector{<:LayerOp})
     end
     return result
 end
+
+_validate_source_layers(::Remove, ::LayerRegistry) = nothing
 
 function _validate_source_layers(op::LayerOp, registry::LayerRegistry)
     for source in source_layers(op)
@@ -1063,6 +1066,7 @@ function _compile!(cmp::CompilerState, op::Translate)
 end
 
 function _compile!(cmp::CompilerState, op::Remove)
+    haskey(cmp.reg, op.source) || return nothing
     state = cmp.reg[op.source]
     for record in state.pgs
         push!(
