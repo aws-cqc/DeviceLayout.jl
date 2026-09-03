@@ -78,9 +78,10 @@ struct Interface <: BooleanOp
 end
 
 """
-`Restrict(volume)` restricts the model to one bounding-volume layer.
+`RestrictTo(volume)` restricts the model to a 3D bounding-volume layer containing
+exactly one physical group.
 """
-struct Restrict <: LayerOp
+struct RestrictTo <: LayerOp
     volume::Symbol
 end
 
@@ -429,7 +430,7 @@ source_layers(op::Extrude) = (op.destination,)
 source_layers(op::Difference) = (op.object, op.tools...)
 source_layers(op::Fuse) = op.sources
 source_layers(op::Interface) = (op.object, op.tool)
-source_layers(op::Restrict) = (op.volume,)
+source_layers(op::RestrictTo) = (op.volume,)
 source_layers(op::Boundary) = (op.source,)
 source_layers(op::Translate) = (op.source,)
 source_layers(op::Remove) = (op.source,)
@@ -537,7 +538,7 @@ function compile_ops(
     optimized_ops = _absorb_removals(ops)
     for op in optimized_ops
         _validate_source_layers(op, cmp.reg)
-        op isa Restrict && _flush_interior_solids!(cmp, op.volume)
+        op isa RestrictTo && _flush_interior_solids!(cmp, op.volume)
         _compile!(cmp, op)
     end
     _flush_interior_solids!(cmp, nothing)
@@ -929,8 +930,10 @@ function _compile!(cmp::CompilerState, op::Interface)
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::Restrict)
-    bv_pgs = cmp.reg[op.volume].pgs
+function _compile!(cmp::CompilerState, op::RestrictTo)
+    state = cmp.reg[op.volume]
+    state.dim == 3 || throw(ArgumentError("bounding volume layer :$(op.volume) must be 3D"))
+    bv_pgs = state.pgs
     length(bv_pgs) == 1 || throw(
         ArgumentError(
             "bounding volume layer :$(op.volume) must contain exactly one physical group"

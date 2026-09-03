@@ -95,7 +95,7 @@ The public operation types are:
 | `Difference(destination, object, tools)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector. Follow it with `Remove` to remove inputs. |
 | `Fuse(source)` or `Fuse(destination, sources)` | Self-heal one source in place, or union grouped source layers into a destination. Multiple sources must be a tuple or vector. |
 | `Interface(destination, object, tool)` | Resolve a deferred interface after fragmentation. |
-| `Restrict(volume)` | Restrict the model to one bounding-volume layer. |
+| `RestrictTo(volume)` | Restrict the model to a 3D bounding-volume layer containing exactly one physical group. |
 | `Boundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries. |
 | `Translate(destination, source, dx, dy, dz; copy)` | Translate or copy-translate a layer. |
 | `Remove(source; remove_entities)` | Remove a layer, or do nothing if it is absent. |
