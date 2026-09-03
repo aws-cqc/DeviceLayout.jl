@@ -98,7 +98,7 @@ The public operation types are:
 | `Restrict(volume)` | Restrict the model to one bounding-volume layer. |
 | `Boundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries. |
 | `Translate(destination, source, dx, dy, dz; copy)` | Translate or copy-translate a layer. |
-| `Remove(source; remove_entities)` | Remove a layer. |
+| `Remove(source; remove_entities)` | Remove a layer, or do nothing if it is absent. |
 | `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. Three-dimensional sources are unsupported. |
 | `Periodic(first, second)` | Pair two periodic layers. |
 
