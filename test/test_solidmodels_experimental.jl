@@ -860,9 +860,39 @@ end
         @test only(ops)[2] == SolidModels.set_periodic!
     end
 
-    @testset "Restrict" begin
-        ops, _, _ = compile_ops([Restrict(:metal)], stack, registry)
-        @test only(ops)[2] == SolidModels.restrict_to_volume!
+    @testset "RestrictTo" begin
+        @test_throws ArgumentError compile_ops([RestrictTo(:missing)], stack, registry)
+
+        # Restriction requires a 3D bounding-volume layer.
+        @test_throws ArgumentError compile_ops([RestrictTo(:metal)], stack, registry)
+
+        volume_meta = EntityMeta(:volume)
+        volume_pg = PGRecord(pgname(volume_meta), :volume, volume_meta)
+        reg = deepcopy(registry)
+        reg[:volume] = LayerState([volume_pg], 3)
+        ops, out_reg, dints = compile_ops([RestrictTo(:volume)], stack, reg)
+        op = only(ops)
+        @test op[1] == "restrict"
+        @test op[2] == SolidModels.restrict_to_volume!
+        @test op[3] == (pgname(volume_meta),)
+        @test out_reg[:volume].dim == 3
+        @test only(out_reg[:volume].pgs) == volume_pg
+        @test Set(keys(out_reg)) == Set(keys(reg))
+        @test isempty(SolidModelsExperimental.interface_vertices(dints))
+
+        # Repeated restrictions execute independently without changing registry state.
+        ops, out_reg, _ =
+            compile_ops([RestrictTo(:volume), RestrictTo(:volume)], stack, reg)
+        @test length(ops) == 2
+        @test all(op -> op[2] == SolidModels.restrict_to_volume!, ops)
+        @test all(op -> op[3] == (pgname(volume_meta),), ops)
+        @test only(out_reg[:volume].pgs) == volume_pg
+
+        # A multi-PG layer cannot map to the native single-PG restriction operation.
+        reg = deepcopy(reg)
+        second_meta = EntityMeta(:volume; name="second")
+        push!(reg[:volume].pgs, PGRecord(pgname(second_meta), :volume, second_meta))
+        @test_throws ArgumentError compile_ops([RestrictTo(:volume)], stack, reg)
     end
 
     @testset "Remove" begin
@@ -1464,7 +1494,7 @@ end
             Remove(:METAL_NEG),
             Fuse(:METAL_POS),
             Difference(:VACUUM, :BOUNDING_VOLUME, :SUBSTRATE_BOTTOM),
-            Restrict(:BOUNDING_VOLUME),
+            RestrictTo(:BOUNDING_VOLUME),
             # Extract the six BOUNDING_VOLUME boundaries as EXTBND_XMIN,
             # EXTBND_XMAX, and so on.
             exterior_boundaries(:BOUNDING_VOLUME)...,
