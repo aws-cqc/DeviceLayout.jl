@@ -343,11 +343,110 @@ end
     end
 
     @testset "Boundary" begin
+        op = Boundary(
+            :edge,
+            :metal;
+            combined=false,
+            oriented=false,
+            recursive=true,
+            direction="Z",
+            position="MAX"
+        )
+        @test !op.combined
+        @test !op.oriented
+        @test op.recursive
+        @test op.direction == "z"
+        @test op.position == "max"
         @test_throws ArgumentError Boundary(:bad, :metal; direction="diagonal")
+        @test_throws ArgumentError Boundary(:bad, :metal; position="middle")
+        @test_throws ArgumentError compile_ops([Boundary(:edge, :missing)], stack, registry)
 
-        ops, reg, _ = compile_ops([Boundary(:edge, :metal)], stack, registry)
+        # Creating a boundary preserves the source and registers a layer one dimension lower.
+        ops, reg, _ = compile_ops([op], stack, registry)
+        op = only(ops)
+        @test op[2] == SolidModels.get_boundary
+        @test op[3] == (pgname(metal_meta), 2)
+        @test (:combined => false) in op
+        @test (:oriented => false) in op
+        @test (:recursive => true) in op
+        @test (:direction => "z") in op
+        @test (:position => "max") in op
         @test reg[:edge].dim == 1
+        @test only(reg[:edge].pgs).name == op[1]
+        @test only(reg[:edge].pgs).meta === nothing
+        @test haskey(reg, :metal)
+
+        # Every source PG produces one boundary operation and registry record.
+        reg = deepcopy(registry)
+        second_meta = EntityMeta(:metal; name="second")
+        push!(reg[:metal].pgs, PGRecord(pgname(second_meta), :metal, second_meta))
+        ops, reg, _ = compile_ops([Boundary(:edge, :metal)], stack, reg)
+        @test length(ops) == 2
+        @test Set(op[3] for op in ops) ==
+              Set([(pgname(metal_meta), 2), (pgname(second_meta), 2)])
+        @test length(reg[:edge].pgs) == 2
+        @test Set(record.name for record in reg[:edge].pgs) == Set(op[1] for op in ops)
+
+        # Repeated identical boundaries execute with deterministic local suffixes.
+        bnd = Boundary(:edge, :metal)
+        ops, reg, _ = compile_ops([bnd, bnd], stack, registry)
+        @test length(ops) == 2
+        @test ops[2][1] == ops[1][1] * "__2"
+        @test length(reg[:edge].pgs) == 2
+        @test reg[:edge].pgs[1].name == ops[1][1]
+        @test reg[:edge].pgs[2].name == ops[2][1]
+
+        # Distinct boundaries append to an existing compatible destination.
+        ops, reg, _ = compile_ops(
+            [
+                Boundary(:edge, :metal; direction="x"),
+                Boundary(:edge, :voids; direction="y")
+            ],
+            stack,
+            registry
+        )
+        @test length(ops) == 2
+        @test reg[:edge].dim == 1
+        @test length(reg[:edge].pgs) == 2
+        @test Set(op[3][1] for op in ops) == Set((pgname(metal_meta), pgname(voids_meta)))
+
+        reg = deepcopy(registry)
+        existing = PGRecord("existing", :edge, nothing)
+        reg[:edge] = LayerState([existing], 1)
+        ops, reg, _ = compile_ops([Boundary(:edge, :metal)], stack, reg)
         @test only(ops)[2] == SolidModels.get_boundary
+        @test reg[:edge].pgs[1] == existing
+        @test length(reg[:edge].pgs) == 2
+
+        # In-place extraction retains PG identity and metadata while lowering dimension.
+        ops, reg, _ = compile_ops([Boundary(:metal, :metal)], stack, registry)
+        op = only(ops)
+        @test op[1] == pgname(metal_meta)
+        @test op[3] == (pgname(metal_meta), 2)
+        @test reg[:metal].dim == 1
+        @test only(reg[:metal].pgs).meta == metal_meta
+
+        # Repeated in-place extraction executes at each dimension without going below 0D.
+        bnd = Boundary(:metal, :metal)
+        ops, reg, _ = compile_ops([bnd, bnd, bnd], stack, registry)
+        @test length(ops) == 3
+        @test getindex.(ops, Ref(3)) ==
+              [(pgname(metal_meta), 2), (pgname(metal_meta), 1), (pgname(metal_meta), 0)]
+        @test reg[:metal].dim == 0
+        @test all(op -> op[1] == pgname(metal_meta), ops)
+
+        # An out-of-place 0D boundary remains a valid, potentially unrealized 0D layer.
+        reg = deepcopy(registry)
+        point_meta = EntityMeta(:point)
+        reg[:point] = LayerState([PGRecord(pgname(point_meta), :point, point_meta)], 0)
+        ops, reg, _ = compile_ops([Boundary(:empty, :point)], stack, reg)
+        @test only(ops)[3] == (pgname(point_meta), 0)
+        @test reg[:empty].dim == 0
+
+        # Existing unrelated destinations must have the boundary dimension.
+        reg = deepcopy(registry)
+        reg[:edge] = LayerState([PGRecord("wrong_dimension", :edge, nothing)], 2)
+        @test_throws ArgumentError compile_ops([Boundary(:edge, :metal)], stack, reg)
     end
 
     @testset "Translate" begin
