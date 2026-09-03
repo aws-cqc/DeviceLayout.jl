@@ -856,8 +856,65 @@ end
     end
 
     @testset "Periodic" begin
-        ops, _, _ = compile_ops([Periodic(:metal, :voids)], stack, registry)
-        @test only(ops)[2] == SolidModels.set_periodic!
+        periodic = Periodic(:metal, :voids)
+        @test periodic.first == :metal
+        @test periodic.second == :voids
+        @test_throws ArgumentError compile_ops(
+            [Periodic(:missing, :voids)],
+            stack,
+            registry
+        )
+        @test_throws ArgumentError compile_ops(
+            [Periodic(:metal, :missing)],
+            stack,
+            registry
+        )
+
+        # A pair of single-PG 2D layers maps directly to the native operation.
+        ops, reg, dints = compile_ops([periodic], stack, registry)
+        op = only(ops)
+        @test op[1] == "Periodic_$(pgname(metal_meta))"
+        @test op[2] == SolidModels.set_periodic!
+        @test op[3] == (pgname(metal_meta), pgname(voids_meta), 2, 2)
+        @test reg[:metal].dim == 2
+        @test only(reg[:metal].pgs).meta == metal_meta
+        @test reg[:voids].dim == 2
+        @test only(reg[:voids].pgs).meta == voids_meta
+        @test isempty(SolidModelsExperimental.interface_vertices(dints))
+
+        # Repeated periodic operations execute without changing registry state.
+        ops, reg, _ = compile_ops([periodic, periodic], stack, registry)
+        @test length(ops) == 2
+        @test all(op -> op[2] == SolidModels.set_periodic!, ops)
+        @test all(op -> op[3] == (pgname(metal_meta), pgname(voids_meta), 2, 2), ops)
+        @test only(reg[:metal].pgs).meta == metal_meta
+        @test only(reg[:voids].pgs).meta == voids_meta
+
+        # Native periodic pairing supports only surface groups.
+        reg = deepcopy(registry)
+        reg[:metal].dim = 1
+        @test_throws ArgumentError compile_ops([periodic], stack, reg)
+
+        reg = deepcopy(registry)
+        reg[:voids].dim = 3
+        @test_throws ArgumentError compile_ops([periodic], stack, reg)
+
+        # Positional pairing of multiple PG records is intentionally unsupported.
+        reg = deepcopy(registry)
+        second_metal_meta = EntityMeta(:metal; name="second")
+        push!(
+            reg[:metal].pgs,
+            PGRecord(pgname(second_metal_meta), :metal, second_metal_meta)
+        )
+        @test_throws ArgumentError compile_ops([periodic], stack, reg)
+
+        reg = deepcopy(registry)
+        second_voids_meta = EntityMeta(:voids; name="second")
+        push!(
+            reg[:voids].pgs,
+            PGRecord(pgname(second_voids_meta), :voids, second_voids_meta)
+        )
+        @test_throws ArgumentError compile_ops([periodic], stack, reg)
     end
 
     @testset "RestrictTo" begin
