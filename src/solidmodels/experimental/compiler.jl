@@ -948,6 +948,7 @@ function _compile!(cmp::CompilerState, op::Boundary)
     )
     state = cmp.reg[op.source]
     dim = state.dim
+    new_dim = max(dim - 1, 0)
 
     if op.destination == op.source
         # Replace mode
@@ -957,12 +958,12 @@ function _compile!(cmp::CompilerState, op::Boundary)
                 (record.name, SolidModels.get_boundary, (record.name, dim), kwargs...)
             )
         end
-        state.dim = dim - 1
+        state.dim = new_dim
     else
         # Create/append mode
         new_records = PGRecord[]
         for record in state.pgs
-            dest_name =
+            base_name =
                 string(op.destination) *
                 "__" *
                 ophash(
@@ -978,15 +979,18 @@ function _compile!(cmp::CompilerState, op::Boundary)
                         op.position
                     )
                 )
-            generated_record_exists(cmp.reg, op.destination, dest_name, new_records) &&
-                continue
+            dest_name = base_name
+            suffix = 2
+            while generated_record_exists(cmp.reg, op.destination, dest_name, new_records)
+                dest_name = base_name * "__" * string(suffix)
+                suffix += 1
+            end
             push!(
                 cmp.ops,
                 (dest_name, SolidModels.get_boundary, (record.name, dim), kwargs...)
             )
             push!(new_records, PGRecord(dest_name, op.destination, nothing))
         end
-        new_dim = dim - 1
         if haskey(cmp.reg, op.destination)
             _require_destination_dimension(cmp.reg, op.destination, new_dim)
             append!(cmp.reg[op.destination].pgs, new_records)
