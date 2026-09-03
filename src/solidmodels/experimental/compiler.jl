@@ -944,7 +944,58 @@ function _compile!(cmp::CompilerState, op::RestrictTo)
     return nothing
 end
 
+# Compile the shared replace and create/append modes for one-source layer operations.
+function _compile_unary_layer_op!(
+    lower,
+    cmp::CompilerState,
+    destination::Symbol,
+    source::Symbol,
+    destination_dim::Int;
+    replace::Bool,
+    hash_operation::Symbol,
+    hash_parameters
+)
+    state = cmp.reg[source]
+    if replace
+        for record in state.pgs
+            push!(cmp.ops, lower(record.name, record))
+        end
+        state.dim = destination_dim
+        return nothing
+    end
+
+    new_records = PGRecord[]
+    for record in state.pgs
+        base_name =
+            string(destination) *
+            "__" *
+            ophash(
+                record.name,
+                String[];
+                operation=hash_operation,
+                parameters=hash_parameters
+            )
+        dest_name = base_name
+        suffix = 2
+        while generated_record_exists(cmp.reg, destination, dest_name, new_records)
+            dest_name = base_name * "__" * string(suffix)
+            suffix += 1
+        end
+        push!(cmp.ops, lower(dest_name, record))
+        push!(new_records, PGRecord(dest_name, destination, nothing))
+    end
+
+    if haskey(cmp.reg, destination)
+        _require_destination_dimension(cmp.reg, destination, destination_dim)
+        append!(cmp.reg[destination].pgs, new_records)
+    else
+        cmp.reg[destination] = LayerState(new_records, destination_dim)
+    end
+    return nothing
+end
+
 function _compile!(cmp::CompilerState, op::Boundary)
+    dim = cmp.reg[op.source].dim
     kwargs = (
         :combined => op.combined,
         :oriented => op.oriented,
@@ -952,120 +1003,44 @@ function _compile!(cmp::CompilerState, op::Boundary)
         :direction => op.direction,
         :position => op.position
     )
-    state = cmp.reg[op.source]
-    dim = state.dim
-    new_dim = max(dim - 1, 0)
-
-    if op.destination == op.source
-        # Replace mode
-        for record in state.pgs
-            push!(
-                cmp.ops,
-                (record.name, SolidModels.get_boundary, (record.name, dim), kwargs...)
-            )
-        end
-        state.dim = new_dim
-    else
-        # Create/append mode
-        new_records = PGRecord[]
-        for record in state.pgs
-            base_name =
-                string(op.destination) *
-                "__" *
-                ophash(
-                    record.name,
-                    String[];
-                    operation=:boundary,
-                    parameters=(
-                        dim,
-                        op.combined,
-                        op.oriented,
-                        op.recursive,
-                        op.direction,
-                        op.position
-                    )
-                )
-            dest_name = base_name
-            suffix = 2
-            while generated_record_exists(cmp.reg, op.destination, dest_name, new_records)
-                dest_name = base_name * "__" * string(suffix)
-                suffix += 1
-            end
-            push!(
-                cmp.ops,
-                (dest_name, SolidModels.get_boundary, (record.name, dim), kwargs...)
-            )
-            push!(new_records, PGRecord(dest_name, op.destination, nothing))
-        end
-        if haskey(cmp.reg, op.destination)
-            _require_destination_dimension(cmp.reg, op.destination, new_dim)
-            append!(cmp.reg[op.destination].pgs, new_records)
-        else
-            cmp.reg[op.destination] = LayerState(new_records, new_dim)
-        end
+    return _compile_unary_layer_op!(
+        cmp,
+        op.destination,
+        op.source,
+        max(dim - 1, 0);
+        replace=op.destination == op.source,
+        hash_operation=:boundary,
+        hash_parameters=(
+            dim,
+            op.combined,
+            op.oriented,
+            op.recursive,
+            op.direction,
+            op.position
+        )
+    ) do destination, record
+        return (destination, SolidModels.get_boundary, (record.name, dim), kwargs...)
     end
-
-    return nothing
 end
 
 function _compile!(cmp::CompilerState, op::Translate)
-    state = cmp.reg[op.source]
-
-    if op.destination == op.source && !op.copy
-        # Replace mode (in-place translate)
-        for record in state.pgs
-            push!(
-                cmp.ops,
-                (
-                    record.name,
-                    SolidModels.translate!,
-                    (record.name, op.dx, op.dy, op.dz),
-                    :copy => false
-                )
-            )
-        end
-    else
-        # Create/append mode
-        new_records = PGRecord[]
-        for record in state.pgs
-            base_name =
-                string(op.destination) *
-                "__" *
-                ophash(
-                    record.name,
-                    String[];
-                    operation=:translate,
-                    parameters=(op.dx, op.dy, op.dz, op.copy)
-                )
-            dest_name = base_name
-            suffix = 2
-            # Identical translations must all execute and remain represented in the registry,
-            # to match DeviceLayout's PG-level operation semantics. Add a local
-            # suffix when the content hash collides.
-            while generated_record_exists(cmp.reg, op.destination, dest_name, new_records)
-                dest_name = base_name * "__" * string(suffix)
-                suffix += 1
-            end
-            push!(
-                cmp.ops,
-                (
-                    dest_name,
-                    SolidModels.translate!,
-                    (record.name, op.dx, op.dy, op.dz),
-                    :copy => op.copy
-                )
-            )
-            push!(new_records, PGRecord(dest_name, op.destination, nothing))
-        end
-        if haskey(cmp.reg, op.destination)
-            _require_destination_dimension(cmp.reg, op.destination, state.dim)
-            append!(cmp.reg[op.destination].pgs, new_records)
-        else
-            cmp.reg[op.destination] = LayerState(new_records, state.dim)
-        end
+    dim = cmp.reg[op.source].dim
+    return _compile_unary_layer_op!(
+        cmp,
+        op.destination,
+        op.source,
+        dim;
+        replace=op.destination == op.source && !op.copy,
+        hash_operation=:translate,
+        hash_parameters=(op.dx, op.dy, op.dz, op.copy)
+    ) do destination, record
+        return (
+            destination,
+            SolidModels.translate!,
+            (record.name, op.dx, op.dy, op.dz),
+            :copy => op.copy
+        )
     end
-
-    return nothing
 end
 
 function _compile!(cmp::CompilerState, op::Remove)
@@ -1087,60 +1062,23 @@ function _compile!(cmp::CompilerState, op::Remove)
 end
 
 function _compile!(cmp::CompilerState, op::Revolve)
-    state = cmp.reg[op.source]
-    dim = state.dim
+    dim = cmp.reg[op.source].dim
     dim < 3 || throw(ArgumentError("cannot revolve a 3D layer"))
-    new_dim = dim + 1
-
-    if op.destination == op.source
-        for record in state.pgs
-            push!(
-                cmp.ops,
-                (
-                    record.name,
-                    SolidModels.revolve!,
-                    (record.name, dim, op.origin..., op.axis..., op.angle)
-                )
-            )
-        end
-        state.dim = new_dim
-    else
-        new_records = PGRecord[]
-        for record in state.pgs
-            base_name =
-                string(op.destination) *
-                "__" *
-                ophash(
-                    record.name,
-                    String[];
-                    operation=:revolve,
-                    parameters=(dim, op.origin, op.axis, op.angle)
-                )
-            dest_name = base_name
-            suffix = 2
-            while generated_record_exists(cmp.reg, op.destination, dest_name, new_records)
-                dest_name = base_name * "__" * string(suffix)
-                suffix += 1
-            end
-            push!(
-                cmp.ops,
-                (
-                    dest_name,
-                    SolidModels.revolve!,
-                    (record.name, dim, op.origin..., op.axis..., op.angle)
-                )
-            )
-            push!(new_records, PGRecord(dest_name, op.destination, nothing))
-        end
-        if haskey(cmp.reg, op.destination)
-            _require_destination_dimension(cmp.reg, op.destination, new_dim)
-            append!(cmp.reg[op.destination].pgs, new_records)
-        else
-            cmp.reg[op.destination] = LayerState(new_records, new_dim)
-        end
+    return _compile_unary_layer_op!(
+        cmp,
+        op.destination,
+        op.source,
+        dim + 1;
+        replace=op.destination == op.source,
+        hash_operation=:revolve,
+        hash_parameters=(dim, op.origin, op.axis, op.angle)
+    ) do destination, record
+        return (
+            destination,
+            SolidModels.revolve!,
+            (record.name, dim, op.origin..., op.axis..., op.angle)
+        )
     end
-
-    return nothing
 end
 
 function _compile!(cmp::CompilerState, op::Periodic)
