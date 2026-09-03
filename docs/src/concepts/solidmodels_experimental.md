@@ -93,13 +93,13 @@ The public operation types are:
 |:--|:--|
 | `Extrude(layer)` | Extrude a source-stack layer using its configured thickness. |
 | `Difference(destination, object, tools)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector. Follow it with `Remove` to remove inputs. |
-| `Fuse(destination, sources)` | Union grouped source layers. Sources must be a tuple or vector. |
+| `Fuse(source)` or `Fuse(destination, sources)` | Self-heal one source in place, or union grouped source layers into a destination. Multiple sources must be a tuple or vector. |
 | `Interface(destination, object, tool)` | Resolve a deferred interface after fragmentation. |
 | `Restrict(volume)` | Restrict the model to one bounding-volume layer. |
 | `Boundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries. |
 | `Translate(destination, source, dx, dy, dz; copy)` | Translate or copy-translate a layer. |
 | `Remove(source; remove_entities)` | Remove a layer. |
-| `Revolve(destination, source, origin, axis, angle)` | Revolve a layer. |
+| `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. Three-dimensional sources are unsupported. |
 | `Periodic(first, second)` | Pair two periodic layers. |
 
 A destination equal to a source layer replaces that layer for boundary, translation,
