@@ -478,16 +478,156 @@ end
     end
 
     @testset "Interface" begin
+        @test_throws ArgumentError compile_ops(
+            [Interface(:interface, :missing, :metal)],
+            stack,
+            registry
+        )
+        @test_throws ArgumentError compile_ops(
+            [Interface(:interface, :metal, :missing)],
+            stack,
+            registry
+        )
+
+        # Same-dimensional inputs produce a deferred boundary one dimension lower.
         ops, reg, dints =
             compile_ops([Interface(:interface, :metal, :metal)], stack, registry)
         @test isempty(ops)
         @test reg[:interface].dim == 1
+        @test only(reg[:interface].pgs).meta === nothing
+        @test only(reg[:interface].pgs).name ==
+              "interface__" * SolidModelsExperimental.ophash(
+            pgname(metal_meta),
+            [pgname(metal_meta)];
+            operation=:interface,
+            parameters=(2, 2)
+        )
         op = only(SolidModelsExperimental.interface_vertices(dints))
+        obj, tool = SolidModelsExperimental.operation_pgs(dints, op)
+        @test obj == tool
+        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, obj, :name) ==
+              pgname(metal_meta)
+        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, obj, :dim) == 2
+        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :dest_pg) ==
+              only(reg[:interface].pgs).name
         @test SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :dest_layer) ==
               :interface
         @test SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :parent_layers) ==
               (:metal, :metal)
+        @test haskey(reg, :metal)
 
+        # Mixed-dimensional inputs produce an interface at the lower dimension.
+        reg = deepcopy(registry)
+        volume_meta = EntityMeta(:volume)
+        reg[:volume] = LayerState([PGRecord(pgname(volume_meta), :volume, volume_meta)], 3)
+        ops, reg, dints = compile_ops([Interface(:surface, :metal, :volume)], stack, reg)
+        @test isempty(ops)
+        @test reg[:surface].dim == 2
+        op = only(SolidModelsExperimental.interface_vertices(dints))
+        obj, tool = SolidModelsExperimental.operation_pgs(dints, op)
+        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, obj, :dim) == 2
+        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, tool, :dim) == 3
+        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :parent_layers) ==
+              (:metal, :volume)
+
+        # Behavior is symmetric
+        delete!(reg, :surface)
+        ops, reg, dints = compile_ops([Interface(:surface, :volume, :metal)], stack, reg)
+        @test isempty(ops)
+        @test reg[:surface].dim == 2
+        op = only(SolidModelsExperimental.interface_vertices(dints))
+        obj, tool = SolidModelsExperimental.operation_pgs(dints, op)
+        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, obj, :dim) == 3
+        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, tool, :dim) == 2
+        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :parent_layers) ==
+              (:volume, :metal)
+
+        # Every object-tool PG pair produces one deferred interface and registry record.
+        reg = deepcopy(registry)
+        second_metal_meta = EntityMeta(:metal; name="second")
+        push!(
+            reg[:metal].pgs,
+            PGRecord(pgname(second_metal_meta), :metal, second_metal_meta)
+        )
+        volume_meta = EntityMeta(:volume; name="first")
+        second_volume_meta = EntityMeta(:volume; name="second")
+        reg[:volume] = LayerState(
+            [
+                PGRecord(pgname(volume_meta), :volume, volume_meta),
+                PGRecord(pgname(second_volume_meta), :volume, second_volume_meta)
+            ],
+            3
+        )
+        ops, reg, dints = compile_ops([Interface(:surface, :metal, :volume)], stack, reg)
+        dops = SolidModelsExperimental.interface_vertices(dints)
+        @test isempty(ops)
+        @test length(dops) == 4
+        @test length(reg[:surface].pgs) == 4
+        @test Set(
+            SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :dest_pg) for op in dops
+        ) == Set(record.name for record in reg[:surface].pgs)
+        @test all(dops) do op
+            return SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :parent_layers) ==
+                   (:metal, :volume)
+        end
+
+        # Repeated identical interfaces are deduplicated.
+        ops, reg, dints = compile_ops(
+            [Interface(:interface, :metal, :voids), Interface(:interface, :metal, :voids)],
+            stack,
+            registry
+        )
+        @test isempty(ops)
+        @test length(SolidModelsExperimental.interface_vertices(dints)) == 1
+        @test length(reg[:interface].pgs) == 1
+
+        # Distinct interfaces append to an existing compatible destination.
+        ops, reg, dints = compile_ops(
+            [Interface(:interface, :metal, :voids), Interface(:interface, :metal, :shell)],
+            stack,
+            registry
+        )
+        @test isempty(ops)
+        @test reg[:interface].dim == 1
+        @test length(reg[:interface].pgs) == 2
+        @test length(SolidModelsExperimental.interface_vertices(dints)) == 2
+
+        reg = deepcopy(registry)
+        existing = PGRecord("existing", :interface, nothing)
+        reg[:interface] = LayerState([existing], 1)
+        ops, reg, dints = compile_ops([Interface(:interface, :metal, :voids)], stack, reg)
+        @test isempty(ops)
+        @test reg[:interface].pgs[1] == existing
+        @test length(reg[:interface].pgs) == 2
+        @test length(SolidModelsExperimental.interface_vertices(dints)) == 1
+
+        # An aliased destination replaces the corresponding source layer.
+        ops, reg, dints = compile_ops([Interface(:metal, :metal, :voids)], stack, registry)
+        @test isempty(ops)
+        @test reg[:metal].dim == 1
+        @test only(reg[:metal].pgs).layer == :metal
+        @test haskey(reg, :voids)
+        op = only(SolidModelsExperimental.interface_vertices(dints))
+        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :parent_layers) ==
+              (:metal, :voids)
+
+        ops, reg, _ = compile_ops([Interface(:voids, :metal, :voids)], stack, registry)
+        @test isempty(ops)
+        @test reg[:voids].dim == 1
+        @test only(reg[:voids].pgs).layer == :voids
+        @test haskey(reg, :metal)
+
+        # Existing unrelated destinations must have the interface dimension.
+        reg = deepcopy(registry)
+        reg[:interface] = LayerState([PGRecord("existing", :interface, nothing)], 2)
+        @test_throws ArgumentError compile_ops(
+            [Interface(:interface, :metal, :voids)],
+            stack,
+            reg
+        )
+
+        # Deferred PG vertices are reused, and duplicate destination identities fail
+        # without leaving orphan vertices.
         dints = SolidModelsExperimental._deferred_interface_graph()
         SolidModelsExperimental.defer_interface!(
             dints,
@@ -535,7 +675,7 @@ end
             :new_a,
             :new_b
         )
-        @test SolidModelsExperimental.Graphs.nv(dints) == 5 # no orphan PGs after rejection
+        @test SolidModelsExperimental.Graphs.nv(dints) == 5
     end
 
     @testset "Revolve" begin
