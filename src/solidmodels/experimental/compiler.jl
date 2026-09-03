@@ -183,7 +183,7 @@ function Revolve(
 end
 
 """
-`Periodic(first, second)` pairs two periodic layers.
+`Periodic(first, second)` pairs two 2D periodic layers containing one physical group each.
 """
 struct Periodic <: LayerOp
     first::Symbol
@@ -1144,25 +1144,18 @@ function _compile!(cmp::CompilerState, op::Revolve)
 end
 
 function _compile!(cmp::CompilerState, op::Periodic)
-    records_a = cmp.reg[op.first].pgs
-    records_b = cmp.reg[op.second].pgs
-    length(records_a) == length(records_b) || throw(
-        ArgumentError(
-            "set_periodic! requires equal physical-group counts in layers " *
-            ":$(op.first) and :$(op.second)"
-        )
+    first_state = cmp.reg[op.first]
+    second_state = cmp.reg[op.second]
+    first_state.dim == 2 && second_state.dim == 2 ||
+        throw(ArgumentError("periodic layers must both be 2D"))
+    length(first_state.pgs) == 1 && length(second_state.pgs) == 1 ||
+        throw(ArgumentError("periodic layers must each contain exactly one physical group"))
+
+    first_pg = only(first_state.pgs).name
+    second_pg = only(second_state.pgs).name
+    push!(
+        cmp.ops,
+        ("Periodic_$first_pg", SolidModels.set_periodic!, (first_pg, second_pg, 2, 2))
     )
-
-    for (record_a, record_b) in zip(records_a, records_b)
-        push!(
-            cmp.ops,
-            (
-                "Periodic_$(record_a.name)",
-                SolidModels.set_periodic!,
-                (record_a.name, record_b.name, 2, 2)
-            )
-        )
-    end
-
     return nothing
 end
