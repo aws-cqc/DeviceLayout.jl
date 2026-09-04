@@ -119,6 +119,48 @@ end
     using DeviceLayout.SolidModelsExperimental: compile_ops, pgname
     import Unitful: μm
 
+    # Debugging helpers
+    function inspect_registry(registry::LayerRegistry; io::IO=stdout)
+        for (layer, state) in sort!(collect(registry); by=first)
+            println(io, layer, " (dim=", state.dim, ")")
+            for record in state.pgs
+                print(io, "  ", record.name, " [", record.layer, "]")
+                if !isnothing(record.meta)
+                    meta = record.meta
+                    print(
+                        io,
+                        " ",
+                        nameof(typeof(meta)),
+                        "(name=",
+                        repr(meta.name),
+                        ", index=",
+                        meta.index,
+                        ", role=",
+                        nameof(typeof(meta.role)),
+                        ")"
+                    )
+                end
+                println(io)
+            end
+        end
+        return nothing
+    end
+
+    function inspect_ops(ops::AbstractVector; io::IO=stdout)
+        for (idx, op) in enumerate(ops)
+            print(io, idx, ": ")
+            show(io, op[1])
+            print(io, " = ", nameof(op[2]))
+            show(io, op[3])
+            for keyword in op[4:end]
+                print(io, "; ")
+                show(io, keyword)
+            end
+            println(io)
+        end
+        return nothing
+    end
+
     stack = SourceStack(
         :metal => SourceLayer(METAL; level=1, thickness=2μm),
         :voids => SourceLayer(NULL; level=1, thickness=2μm, keep_interior=false),
