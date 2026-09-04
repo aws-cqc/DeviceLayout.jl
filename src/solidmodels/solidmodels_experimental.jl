@@ -269,6 +269,16 @@ function _split_shared_cc_pgs!(
     return nothing
 end
 
+# Remove compiler records that not point to a real physical group in the model. Keep empty
+# layer states so their known dimensions remain available to downstream metadata handling.
+function _prune_unrealized_pgs!(registry::LayerRegistry, sm::SolidModel)
+    for state in values(registry)
+        pgs = SolidModels.dimgroupdict(sm, state.dim)
+        filter!(record -> haskey(pgs, record.name), state.pgs)
+    end
+    return registry
+end
+
 function _check_pgs_registered(sm::SolidModel, registry::LayerRegistry)
     registered =
         Set((record.name, state.dim) for state in values(registry) for record in state.pgs)
@@ -525,6 +535,7 @@ function render!(
             tag_records =
                 add_tagged_pgs!(sm, registry, locators, deferred_interfaces, bbox_cache)
             execute_deferred_interfaces!(sm, deferred_interfaces)
+            _prune_unrealized_pgs!(registry, sm)
             # Downstream discovery assumes every realized PG has semantic registry data.
             _check_pgs_registered(sm, registry)
             terminal_result =
@@ -681,14 +692,5 @@ function remap_to_visualization_pgs!(sm::SolidModel, metadata::AbstractDict)
 
     return sm
 end
-
-export SolidModelTarget
-
-export METAL, DIELECTRIC, NULL
-export Generic, Terminal, Ground, Tag, WavePort, LumpedPort
-export SourceLayer, SourceStack, EntityMeta
-export Extrude, Difference, Fuse, Heal, Interface, RestrictTo
-export Boundary, Translate, Remove, Revolve, Periodic
-export exterior_boundaries, serialize_metadata
 
 end # module SolidModelsExperimental

@@ -35,26 +35,26 @@ function extrusions(stack::SourceStack, reg::LayerRegistry)
 end
 
 """
-    Difference(destination, object, tools)
+    Cut(destination, object, tools)
 
 Subtract one tool layer, or a grouped tuple or vector of tool layers, from `object`.
 Non-destination inputs remain available unless consumed by adjacent [`Remove`](@ref)
 operations.
 """
-struct Difference{N} <: BooleanOp
+struct Cut{N} <: BooleanOp
     destination::Symbol
     object::Symbol
     tools::NTuple{N, Symbol}
-    function Difference{N}(destination, object, tools) where {N}
+    function Cut{N}(destination, object, tools) where {N}
         iszero(N) && throw(ArgumentError("difference requires at least one tool layer"))
         return new{N}(destination, object, tools)
     end
 end
-Difference(dest::Symbol, object::Symbol, tools::NTuple{N, Symbol}) where {N} =
-    Difference{N}(dest, object, tools)
-Difference(dest::Symbol, object::Symbol, tool::Symbol) = Difference(dest, object, (tool,))
-Difference(dest::Symbol, object::Symbol, tools::AbstractVector{Symbol}) =
-    Difference(dest, object, Tuple(tools))
+Cut(dest::Symbol, object::Symbol, tools::NTuple{N, Symbol}) where {N} =
+    Cut{N}(dest, object, tools)
+Cut(dest::Symbol, object::Symbol, tool::Symbol) = Cut(dest, object, (tool,))
+Cut(dest::Symbol, object::Symbol, tools::AbstractVector{Symbol}) =
+    Cut(dest, object, Tuple(tools))
 
 """
     Fuse(source)
@@ -94,13 +94,28 @@ end
 Heal(source::Symbol) = Heal(source, source)
 
 """
-    Interface(destination, object, tool)
+    Intersect(destination, object, tool)
 
-Create a deferred interface between `object` and `tool`. Resolve it after fragmentation
-from shared boundary entities. Same-dimensional inputs produce an interface one dimension
-lower; mixed-dimensional inputs produce an interface at the lower input dimension.
+Compute the intersection of `object` and `tool`. All physical-group pairings are
+intersected independently, so the output can contain up to `|object| × |tool|` physical
+groups. The destination dimension is the lower input dimension. Non-destination inputs
+remain available unless consumed by adjacent [`Remove`](@ref) operations. Generated
+destination identity collisions are rejected.
 """
-struct Interface <: BooleanOp
+struct Intersect <: BooleanOp
+    destination::Symbol
+    object::Symbol
+    tool::Symbol
+end
+
+"""
+    GetInterface(destination, object, tool)
+
+Compute the interface between `object` and `tool`. Same-dimensional inputs produce an
+interface one dimension lower; mixed-dimensional inputs produce an interface at the lower
+input dimension.
+"""
+struct GetInterface <: BooleanOp
     destination::Symbol
     object::Symbol
     tool::Symbol
@@ -116,13 +131,13 @@ struct RestrictTo <: LayerOp
 end
 
 """
-    Boundary(destination, source; combined=true, oriented=true, recursive=false,
+    GetBoundary(destination, source; combined=true, oriented=true, recursive=false,
              direction="all", position="all")
 
 Extract the boundary of `source` into `destination`. Use `direction` and `position` to
 select axis-aligned boundary entities.
 """
-struct Boundary <: LayerOp
+struct GetBoundary <: LayerOp
     destination::Symbol
     source::Symbol
     combined::Bool
@@ -130,7 +145,7 @@ struct Boundary <: LayerOp
     recursive::Bool
     direction::String
     position::String
-    function Boundary(
+    function GetBoundary(
         destination::Symbol,
         source::Symbol,
         combined::Bool,
@@ -148,7 +163,7 @@ struct Boundary <: LayerOp
         return new(destination, source, combined, oriented, recursive, direction, position)
     end
 end
-function Boundary(
+function GetBoundary(
     destination::Symbol,
     source::Symbol;
     combined::Bool=true,
@@ -157,7 +172,15 @@ function Boundary(
     direction::AbstractString="all",
     position::AbstractString="all"
 )
-    return Boundary(destination, source, combined, oriented, recursive, direction, position)
+    return GetBoundary(
+        destination,
+        source,
+        combined,
+        oriented,
+        recursive,
+        direction,
+        position
+    )
 end
 
 const _EXTERIOR_BOUNDARY_LAYERS = Dict(
@@ -170,17 +193,20 @@ const _EXTERIOR_BOUNDARY_LAYERS = Dict(
 )
 
 """
-    exterior_boundaries(bounding_volume_layer::Symbol) -> Vector{Boundary}
+    exterior_boundaries(bounding_volume_layer::Symbol) -> Vector{GetBoundary}
 
 Return operations extracting all six axis-aligned exterior faces of
 `bounding_volume_layer` into `:EXTBND_XMIN`, `:EXTBND_XMAX`, `:EXTBND_YMIN`,
 `:EXTBND_YMAX`, `:EXTBND_ZMIN`, and `:EXTBND_ZMAX`.
 """
 function exterior_boundaries(bounding_volume_layer::Symbol)
-    operations = Boundary[]
+    operations = GetBoundary[]
     for direction in ("X", "Y", "Z"), position in ("min", "max")
         destination = _EXTERIOR_BOUNDARY_LAYERS[(direction, position)]
-        push!(operations, Boundary(destination, bounding_volume_layer; direction, position))
+        push!(
+            operations,
+            GetBoundary(destination, bounding_volume_layer; direction, position)
+        )
     end
     return operations
 end
@@ -245,19 +271,27 @@ function Revolve(
 end
 
 """
-    Periodic(first, second)
+    SetPeriodic(first, second)
 
 Pair two parallel, axis-aligned 2D periodic layers containing exactly one physical group
 each.
 """
-struct Periodic <: LayerOp
+struct SetPeriodic <: LayerOp
     first::Symbol
     second::Symbol
 end
 
 # ─── Lowered operations ──────────────────────────────────────────────────────
 
-struct _LoweredDifference{N} <: BooleanOp
+struct _LoweredIntersect <: BooleanOp
+    destination::Symbol
+    object::Symbol
+    tool::Symbol
+    remove_object::Bool
+    remove_tool::Bool
+end
+
+struct _LoweredCut{N} <: BooleanOp
     destination::Symbol
     object::Symbol
     tools::NTuple{N, Symbol}
@@ -455,22 +489,47 @@ function _require_destination_dimension(reg::LayerRegistry, dest::Symbol, dim::I
 end
 
 source_layers(op::Extrude) = (op.destination,)
-source_layers(op::Difference) = (op.object, op.tools...)
+source_layers(op::Cut) = (op.object, op.tools...)
+source_layers(op::Intersect) = (op.object, op.tool)
 source_layers(op::Fuse) = op.sources
 source_layers(op::Heal) = (op.source,)
-source_layers(op::Interface) = (op.object, op.tool)
+source_layers(op::GetInterface) = (op.object, op.tool)
 source_layers(op::RestrictTo) = (op.volume,)
-source_layers(op::Boundary) = (op.source,)
+source_layers(op::GetBoundary) = (op.source,)
 source_layers(op::Translate) = (op.source,)
 source_layers(op::Remove) = (op.source,)
 source_layers(op::Revolve) = (op.source,)
-source_layers(op::Periodic) = (op.first, op.second)
+source_layers(op::SetPeriodic) = (op.first, op.second)
 
-source_layers(op::_LoweredDifference) = (op.object, op.tools...)
+source_layers(op::_LoweredCut) = (op.object, op.tools...)
+source_layers(op::_LoweredIntersect) = (op.object, op.tool)
 source_layers(op::_LoweredFuse) = op.sources
 source_layers(op::_LoweredHeal) = (op.source,)
 
-function _lower_with_removals(op::Difference, removals::Vector{Remove})
+function _lower_with_removals(op::Intersect, removals::Vector{Remove})
+    ambiguous = op.object == op.tool
+    remove_object =
+        !ambiguous &&
+        op.object != op.destination &&
+        any(r -> r.source == op.object && r.remove_entities, removals)
+    remove_tool =
+        !ambiguous &&
+        op.tool != op.destination &&
+        any(r -> r.source == op.tool && r.remove_entities, removals)
+    absorbed = Set{Symbol}()
+    remove_object && push!(absorbed, op.object)
+    remove_tool && push!(absorbed, op.tool)
+    return _LoweredIntersect(
+        op.destination,
+        op.object,
+        op.tool,
+        remove_object,
+        remove_tool
+    ),
+    absorbed
+end
+
+function _lower_with_removals(op::Cut, removals::Vector{Remove})
     ambiguous = op.object in op.tools
     remove_object =
         !ambiguous &&
@@ -483,13 +542,7 @@ function _lower_with_removals(op::Difference, removals::Vector{Remove})
     absorbed = Set{Symbol}()
     remove_object && push!(absorbed, op.object)
     remove_tool && union!(absorbed, op.tools)
-    return _LoweredDifference(
-        op.destination,
-        op.object,
-        op.tools,
-        remove_object,
-        remove_tool
-    ),
+    return _LoweredCut(op.destination, op.object, op.tools, remove_object, remove_tool),
     absorbed
 end
 
@@ -516,7 +569,7 @@ function _absorb_removals(ops::AbstractVector{<:LayerOp})
     i = firstindex(ops)
     while i <= lastindex(ops)
         op = ops[i]
-        if !(op isa Union{Difference, Fuse, Heal})
+        if !(op isa Union{Cut, Intersect, Fuse, Heal})
             push!(result, op)
             i += 1
             continue
@@ -707,7 +760,7 @@ function _compile!(cmp::CompilerState, op::Extrude)
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::_LoweredDifference)
+function _compile!(cmp::CompilerState, op::_LoweredCut)
     object_state = cmp.reg[op.object]
     dim = object_state.dim
     tool_pg_names =
@@ -901,7 +954,7 @@ function _compile!(cmp::CompilerState, op::_LoweredHeal)
         if !isempty(existing_pgs)
             for record in new_records
                 # Ensure added PGs don't have any overlap with existing PGs in the
-                # destination laye
+                # destination layer
                 push!(
                     cmp.ops,
                     (
@@ -922,7 +975,83 @@ function _compile!(cmp::CompilerState, op::_LoweredHeal)
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::Interface)
+function _compile!(cmp::CompilerState, op::_LoweredIntersect)
+    object_state = cmp.reg[op.object]
+    tool_state = cmp.reg[op.tool]
+    isempty(object_state.pgs) &&
+        throw(ArgumentError("intersect object layer must contain a physical group"))
+    isempty(tool_state.pgs) &&
+        throw(ArgumentError("intersect tool layer must contain a physical group"))
+
+    destination_dim = min(object_state.dim, tool_state.dim)
+    append_mode =
+        haskey(cmp.reg, op.destination) &&
+        op.destination != op.object &&
+        op.destination != op.tool
+    append_mode && _require_destination_dimension(cmp.reg, op.destination, destination_dim)
+    existing_pgs =
+        append_mode ?
+        [record.name for record in cmp.reg[op.destination].pgs if !islocator(record.meta)] :
+        String[]
+
+    new_records = PGRecord[]
+    for (obj_idx, obj_rec) in enumerate(object_state.pgs)
+        for (tool_idx, tool_rec) in enumerate(tool_state.pgs)
+            dest_name =
+                string(op.destination) *
+                "__" *
+                ophash(
+                    obj_rec.name,
+                    [tool_rec.name];
+                    operation=:intersect,
+                    parameters=(object_state.dim, tool_state.dim)
+                )
+            remove_object = op.remove_object && tool_idx == length(tool_state.pgs)
+            remove_tool = op.remove_tool && obj_idx == length(object_state.pgs)
+            generated_record_exists(cmp.reg, op.destination, dest_name, new_records) &&
+                throw(
+                    ArgumentError(
+                        "physical group '$dest_name' at the Intersect destination layer"
+                        * " $(op.destination) already exists"
+                    )
+                )
+            push!(
+                cmp.ops,
+                (
+                    dest_name,
+                    SolidModels.intersect_geom!,
+                    (obj_rec.name, tool_rec.name, object_state.dim, tool_state.dim),
+                    :remove_object => remove_object,
+                    :remove_tool => remove_tool
+                )
+            )
+            if append_mode && !isempty(existing_pgs)
+                push!(
+                    cmp.ops,
+                    (
+                        dest_name,
+                        SolidModels.difference_geom!,
+                        (dest_name, existing_pgs, destination_dim, destination_dim),
+                        :remove_object => true,
+                        :remove_tool => false
+                    )
+                )
+            end
+            push!(new_records, PGRecord(dest_name, op.destination, nothing))
+        end
+    end
+
+    if append_mode
+        append!(cmp.reg[op.destination].pgs, new_records)
+    else
+        cmp.reg[op.destination] = LayerState(new_records, destination_dim)
+    end
+    op.remove_object && op.object != op.destination && delete!(cmp.reg, op.object)
+    op.remove_tool && op.tool != op.destination && delete!(cmp.reg, op.tool)
+    return nothing
+end
+
+function _compile!(cmp::CompilerState, op::GetInterface)
     obj_state = cmp.reg[op.object]
     tool_state = cmp.reg[op.tool]
     obj_dim = obj_state.dim
@@ -1040,7 +1169,7 @@ function _compile_unary_layer_op!(
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::Boundary)
+function _compile!(cmp::CompilerState, op::GetBoundary)
     dim = cmp.reg[op.source].dim
     kwargs = (
         :combined => op.combined,
@@ -1127,7 +1256,7 @@ function _compile!(cmp::CompilerState, op::Revolve)
     end
 end
 
-function _compile!(cmp::CompilerState, op::Periodic)
+function _compile!(cmp::CompilerState, op::SetPeriodic)
     first_state = cmp.reg[op.first]
     second_state = cmp.reg[op.second]
     first_state.dim == 2 && second_state.dim == 2 ||
