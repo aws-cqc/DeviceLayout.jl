@@ -1,22 +1,46 @@
-"""
-    @enum Material METAL DIELECTRIC NULL
-
-Material classification for source layers.
-"""
+# Material classification for source layers.
 @enum Material METAL DIELECTRIC NULL
 
-"""
-    abstract type Role
-
-Supertype for functional roles attached to [`EntityMeta`](@ref).
-"""
+# Internal hierarchy for functional roles attached to EntityMeta.
 abstract type Role end
+
+"""
+    Generic()
+
+Generic role for geometry without specialized terminal, locator, or port behavior.
+"""
 struct Generic <: Role end
+
 abstract type Locator <: Role end
+
+"""
+    Terminal()
+
+Locator role identifying a named electrostatic terminal on a connected metal component.
+"""
 struct Terminal <: Locator end
+
+"""
+    Ground()
+
+Locator role designating a connected metal component as ground.
+"""
 struct Ground <: Locator end
+
+"""
+    Tag()
+
+Locator role assigning a name to the surface containing the locator position.
+"""
 struct Tag <: Locator end
+
 abstract type Port <: Role end
+
+"""
+    WavePort()
+
+Role for geometry representing a wave port.
+"""
 struct WavePort <: Port end
 
 """
@@ -32,9 +56,11 @@ Base.show(io::IO, r::Role) = print(io, nameof(typeof(r)))
 """
     EntityMeta(layer::Symbol; name="", index=1, role=Generic())
 
-Experimental entity metadata for the simulation-agnostic solid-model pipeline. `layer`
-is resolved exclusively through a [`SourceStack`](@ref). The standard `level(::Meta) = 1`
-default is intentionally retained; z placement comes from the stack.
+Experimental entity metadata for the simulation-agnostic solid-model pipeline. Resolve
+`layer` exclusively through a [`SourceStack`](@ref); `name`, `index`, and `role` determine
+physical-group identity and behavior. `role` may be a role instance or role type. The
+standard `level(::Meta) = 1` default is intentionally retained because z placement comes
+from the stack.
 """
 struct EntityMeta <: DeviceLayout.Meta
     layer::Symbol
@@ -63,11 +89,7 @@ Base.broadcastable(m::EntityMeta) = Ref(m)
 islocator(meta::EntityMeta) = meta.role isa Locator
 islocator(::Nothing) = false
 
-"""
-    pgname(m::EntityMeta) -> String
-
-Return the stable physical-group name for `m`.
-"""
+# Return the stable physical-group name for an EntityMeta.
 function pgname(m::EntityMeta)
     return string(m.layer, "__", m.name, "__i", m.index, "__r", m.role)
 end
