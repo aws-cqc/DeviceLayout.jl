@@ -509,6 +509,7 @@ end
         @test op[1] != pgname(metal_meta)
         @test op[2] == SolidModels.union_geom!
         @test op[3] == ([pgname(metal_meta)], 2)
+        @test (:remove_object => true) in op
         @test only(reg[:metal].pgs).name == op[1]
         @test isnothing(only(reg[:metal].pgs).meta)
 
@@ -519,7 +520,8 @@ end
         ops, reg, _ = compile_ops([Fuse(:combined, (:metal,))], stack, reg)
         op = only(ops)
         @test op[3] == (sort([pgname(metal_meta), pgname(second_meta)]), 2)
-        @test !haskey(reg, :metal)
+        @test (:remove_object => false) in op
+        @test haskey(reg, :metal)
         @test length(reg[:combined].pgs) == 1
         @test only(reg[:combined].pgs).name == op[1]
         @test isnothing(only(reg[:combined].pgs).meta)
@@ -530,8 +532,9 @@ end
         @test startswith(op[1], "combined__")
         @test op[2] == SolidModels.union_geom!
         @test op[3] == (sort([pgname(metal_meta), pgname(voids_meta)]), 2)
-        @test !haskey(reg, :metal)
-        @test !haskey(reg, :voids)
+        @test (:remove_object => false) in op
+        @test haskey(reg, :metal)
+        @test haskey(reg, :voids)
         @test only(reg[:combined].pgs).name == op[1]
 
         # An existing destination must be an explicit source and is collapsed with them.
@@ -541,6 +544,31 @@ end
         @test op[3] == (sort([pgname(metal_meta), pgname(voids_meta)]), 2)
         @test length(reg[:metal].pgs) == 1
         @test only(reg[:metal].pgs).name == op[1]
+        @test (:remove_object => false) in op
+        @test haskey(reg, :voids)
+
+        # Explicit removal controls source lifetime and is folded only when all
+        # non-destination sources are removed.
+        ops, reg, _ = compile_ops(
+            [Fuse(:combined, (:metal, :voids)), Remove(:metal)],
+            stack,
+            registry
+        )
+        union_op = only(filter(op -> op[2] == SolidModels.union_geom!, ops))
+        @test (:remove_object => false) in union_op
+        @test any(op -> op[2] == SolidModels.remove_group!, ops)
+        @test !haskey(reg, :metal)
+        @test haskey(reg, :voids)
+
+        ops, reg, _ = compile_ops(
+            [Fuse(:combined, (:metal, :voids)), Remove(:metal), Remove(:voids)],
+            stack,
+            registry
+        )
+        union_op = only(ops)
+        @test union_op[2] == SolidModels.union_geom!
+        @test (:remove_object => true) in union_op
+        @test !haskey(reg, :metal)
         @test !haskey(reg, :voids)
 
         # Sources must be dimensionally homogeneous and contain at least one PG.
@@ -567,6 +595,7 @@ end
         @test op[1] == pgname(metal_meta)
         @test op[2] == SolidModels.union_geom!
         @test op[3] == (pgname(metal_meta), 2)
+        @test (:remove_object => true) in op
         @test only(reg[:metal].pgs).meta == metal_meta
 
         reg = deepcopy(registry)
@@ -578,7 +607,7 @@ end
         @test Set(record.meta for record in reg[:metal].pgs) ==
               Set((metal_meta, second_meta))
 
-        # Assign mode changes only the layer prefix and moves the source records.
+        # Assign mode changes only the layer prefix and preserves the source records.
         ops, reg, _ = compile_ops([Heal(:combined, :metal)], stack, registry)
         op = only(ops)
         expected_name = replace(pgname(metal_meta), "metal__" => "combined__"; count=1)
@@ -586,7 +615,8 @@ end
         @test op[3] == (pgname(metal_meta), 2)
         @test only(reg[:combined].pgs).name == expected_name
         @test only(reg[:combined].pgs).meta == metal_meta
-        @test !haskey(reg, :metal)
+        @test (:remove_object => false) in op
+        @test haskey(reg, :metal)
 
         reg = deepcopy(registry)
         push!(reg[:metal].pgs, PGRecord(pgname(second_meta), :metal, second_meta))
@@ -597,6 +627,7 @@ end
               Set((expected_name, expected_second))
         @test Set(record.meta for record in reg[:combined].pgs) ==
               Set((metal_meta, second_meta))
+        @test haskey(reg, :metal)
 
         # Assigning to an existing destination appends disjoint, identity-preserving PGs.
         reg = deepcopy(registry)
@@ -611,6 +642,15 @@ end
         @test (:remove_tool => false) in difference_op
         @test Set(record.name for record in reg[:combined].pgs) ==
               Set((existing_pg, expected_name))
+        @test (:remove_object => false) in union_op
+        @test haskey(reg, :metal)
+
+        # An adjacent explicit removal is folded into the native heal operation.
+        ops, reg, _ =
+            compile_ops([Heal(:combined, :metal), Remove(:metal)], stack, registry)
+        op = only(ops)
+        @test op[2] == SolidModels.union_geom!
+        @test (:remove_object => true) in op
         @test !haskey(reg, :metal)
 
         # Identity collisions and noncanonical source names fail rather than being renamed.
