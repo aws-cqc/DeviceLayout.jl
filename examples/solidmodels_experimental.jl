@@ -1,8 +1,9 @@
-# Minimal example of the experimental solid model pipeline. 
+# Minimal example of the experimental solid model pipeline.
 using DeviceLayout
 using DeviceLayout.SchematicDrivenLayout
 using DeviceLayout.SolidModels
-using DeviceLayout.SolidModelsExperimental
+using DeviceLayout.SolidModelsExperimental:
+    EntityMeta, LumpedPort, NULL, SolidModelTarget, SourceLayer, SourceStack
 using FileIO
 import JSON
 import Unitful: μm
@@ -29,7 +30,7 @@ stack = SourceStack(
     :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(11, 0));
     levels=(1 => 0μm,)
 )
-target = SolidModelsExperimental.SolidModelTarget(stack)
+target = SolidModelTarget(stack)
 
 solid_model = SolidModel("solidmodels_experimental"; overwrite=true)
 metadata = render!(solid_model, schematic, target)

@@ -12,11 +12,23 @@ Palace configuration, and downstream translation are intentionally outside Devic
 
 ## Entity metadata and source stacks
 
-Geometry participating in this pipeline uses `SolidModelsExperimental.EntityMeta`:
+Geometry participating in this pipeline uses `EntityMeta`:
 
 ```julia
 using DeviceLayout
-using DeviceLayout.SolidModelsExperimental
+using DeviceLayout.SolidModelsExperimental:
+    Cut,
+    DIELECTRIC,
+    EntityMeta,
+    GetBoundary,
+    LumpedPort,
+    METAL,
+    NULL,
+    SolidModelTarget,
+    SourceLayer,
+    SourceStack,
+    Terminal,
+    Translate
 import JSON
 using Unitful: μm, °
 
@@ -68,7 +80,7 @@ chip must explicitly map to that chip's layer symbol.
 The target stores exactly the stack and layer-level operations:
 
 ```julia
-target = SolidModelsExperimental.SolidModelTarget(stack)
+target = SolidModelTarget(stack)
 metadata = render!(solid_model, checked_schematic, target)
 ```
 
@@ -80,11 +92,11 @@ example:
 
 ```julia
 ops = [
-    Difference(:vacuum, :bounding_volume, :substrate),
-    Boundary(:xmin, :vacuum; direction="x", position="min"),
+    Cut(:vacuum, :bounding_volume, :substrate),
+    GetBoundary(:xmin, :vacuum; direction="x", position="min"),
     Translate(:shifted_port, :port, 10μm, 0μm, 0μm)
 ]
-target = SolidModelsExperimental.SolidModelTarget(stack, ops)
+target = SolidModelTarget(stack, ops)
 ```
 
 The public operation types are:
@@ -92,16 +104,17 @@ The public operation types are:
 | Type | Meaning |
 |:--|:--|
 | `Extrude(layer)` | Extrude a source-stack layer using its configured thickness. |
-| `Difference(destination, object, tools)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector. Follow it with `Remove` to remove inputs. |
+| `Cut(destination, object, tools)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector. Follow it with `Remove` to remove inputs. |
 | `Fuse(source)` or `Fuse(destination, sources)` | Collapse every PG in one or more source layers into one generated destination PG. Existing destinations must be included among the grouped sources; other sources remain unless removed explicitly later. |
 | `Heal(source)` or `Heal(destination, source)` | Union each PG in one source independently, preserving its identity and metadata. Assign mode replaces only the layer-name prefix, preserves the source, and may append to an existing destination. |
-| `Interface(destination, object, tool)` | Resolve a deferred interface after fragmentation. |
+| `SolidModelsExperimental.Intersect(destination, object, tool)` | Compute pairwise OCC intersections across the object and tool PGs. Follow it with `Remove` to consume either input layer. |
+| `GetInterface(destination, object, tool)` | Resolve a deferred interface after fragmentation. |
 | `RestrictTo(volume)` | Restrict the model to a 3D bounding-volume layer containing exactly one physical group. |
-| `Boundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries. |
+| `GetBoundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries. |
 | `Translate(destination, source, dx, dy, dz; copy)` | Translate or copy-translate a layer. |
 | `Remove(source; remove_entities)` | Remove a layer, or do nothing if it is absent. |
 | `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. Three-dimensional sources are unsupported. |
-| `Periodic(first, second)` | Pair two 2D periodic layers containing exactly one physical group each. |
+| `SetPeriodic(first, second)` | Pair two 2D periodic layers containing exactly one physical group each. |
 
 `Fuse` always collapses all source PGs into one new identity. For example,
 `Fuse(:metal)` replaces one layer in place, while
@@ -114,8 +127,8 @@ while preserving both the source layer and existing destination records. Follow 
 out-of-place operation with `Remove` to consume source layers explicitly.
 
 A destination equal to a source layer also replaces that layer for boundary, translation,
-and revolution operations. Difference supports replacing its object or a tool layer, and
-`Interface` creates or appends a deferred interface layer. Generated destinations need not
+and revolution operations. Cut supports replacing its object or a tool layer, and
+`GetInterface` creates or appends a deferred interface layer. Generated destinations need not
 appear in `SourceStack`, but every referenced source must exist in the compiler registry when
 the operation is reached. Typed constructors reject malformed operations before compilation,
 while unavailable source layers and incompatible destination dimensions are rejected before
