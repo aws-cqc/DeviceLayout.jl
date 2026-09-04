@@ -818,7 +818,7 @@ export SolidModelTarget
 export METAL, DIELECTRIC, NULL
 export Generic, Terminal, Ground, Tag, WavePort, LumpedPort
 export SourceLayer, SourceStack, EntityMeta
-export Extrude, Difference, Fuse, Interface, RestrictTo
+export Extrude, Difference, Fuse, Heal, Interface, RestrictTo
 export Boundary, Translate, Remove, Revolve, Periodic
 export exterior_boundaries, serialize_metadata
 export inspect_registry, inspect_ops
