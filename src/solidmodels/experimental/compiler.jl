@@ -73,8 +73,8 @@ Fuse(source::Symbol) = Fuse(source, (source,))
     Heal(source)
     Heal(destination, source)
 
-Heal (i.e. self-union) every physical group in one source layer independently, preserving its identity and
-metadata, optionally under a new layer namespace.
+Heal (i.e. self-union) every physical group in one source layer independently, preserving
+its identity and metadata.
 """
 struct Heal <: LayerOp
     destination::Symbol
@@ -212,6 +212,18 @@ struct _LoweredDifference{N} <: BooleanOp
     tools::NTuple{N, Symbol}
     remove_object::Bool
     remove_tool::Bool
+end
+
+struct _LoweredFuse{N} <: BooleanOp
+    destination::Symbol
+    sources::NTuple{N, Symbol}
+    remove_sources::Bool
+end
+
+struct _LoweredHeal <: LayerOp
+    destination::Symbol
+    source::Symbol
+    remove_source::Bool
 end
 
 function inspect_registry(registry::LayerRegistry; io::IO=stdout)
@@ -453,13 +465,56 @@ source_layers(op::Revolve) = (op.source,)
 source_layers(op::Periodic) = (op.first, op.second)
 
 source_layers(op::_LoweredDifference) = (op.object, op.tools...)
+source_layers(op::_LoweredFuse) = op.sources
+source_layers(op::_LoweredHeal) = (op.source,)
+
+function _lower_with_removals(op::Difference, removals::Vector{Remove})
+    ambiguous = op.object in op.tools
+    remove_object =
+        !ambiguous &&
+        op.object != op.destination &&
+        any(r -> r.source == op.object && r.remove_entities, removals)
+    remove_tool =
+        !ambiguous &&
+        op.destination ∉ op.tools &&
+        all(tool -> any(r -> r.source == tool && r.remove_entities, removals), op.tools)
+    absorbed = Set{Symbol}()
+    remove_object && push!(absorbed, op.object)
+    remove_tool && union!(absorbed, op.tools)
+    return _LoweredDifference(
+        op.destination,
+        op.object,
+        op.tools,
+        remove_object,
+        remove_tool
+    ),
+    absorbed
+end
+
+function _lower_with_removals(op::Fuse, removals::Vector{Remove})
+    removable = filter(source -> source != op.destination, op.sources)
+    remove_sources = all(
+        source -> any(r -> r.source == source && r.remove_entities, removals),
+        removable
+    )
+    absorbed = remove_sources ? Set{Symbol}(removable) : Set{Symbol}()
+    return _LoweredFuse(op.destination, op.sources, remove_sources), absorbed
+end
+
+function _lower_with_removals(op::Heal, removals::Vector{Remove})
+    remove_source =
+        op.destination != op.source &&
+        any(r -> r.source == op.source && r.remove_entities, removals)
+    absorbed = remove_source ? Set{Symbol}((op.source,)) : Set{Symbol}()
+    return _LoweredHeal(op.destination, op.source, remove_source), absorbed
+end
 
 function _absorb_removals(ops::AbstractVector{<:LayerOp})
     result = LayerOp[]
     i = firstindex(ops)
     while i <= lastindex(ops)
         op = ops[i]
-        if !(op isa Difference)
+        if !(op isa Union{Difference, Fuse, Heal})
             push!(result, op)
             i += 1
             continue
@@ -472,33 +527,10 @@ function _absorb_removals(ops::AbstractVector{<:LayerOp})
             j += 1
         end
 
-        ambiguous = op.object in op.tools
-        remove_object =
-            !ambiguous &&
-            op.object != op.destination &&
-            any(r -> r.source == op.object && r.remove_entities, removals)
-        remove_tool =
-            !ambiguous &&
-            op.destination ∉ op.tools &&
-            all(tool -> any(r -> r.source == tool && r.remove_entities, removals), op.tools)
-        push!(
-            result,
-            _LoweredDifference(
-                op.destination,
-                op.object,
-                op.tools,
-                remove_object,
-                remove_tool
-            )
-        )
-
+        lowered, absorbed = _lower_with_removals(op, removals)
+        push!(result, lowered)
         for removal in removals
-            absorbed =
-                removal.remove_entities && (
-                    remove_object && removal.source == op.object ||
-                    remove_tool && removal.source in op.tools
-                )
-            absorbed || push!(result, removal)
+            removal.remove_entities && removal.source in absorbed || push!(result, removal)
         end
         i = j
     end
@@ -775,7 +807,7 @@ function _compile!(cmp::CompilerState, op::_LoweredDifference)
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::Fuse)
+function _compile!(cmp::CompilerState, op::_LoweredFuse)
     haskey(cmp.reg, op.destination) &&
         op.destination ∉ op.sources &&
         throw(
@@ -796,9 +828,19 @@ function _compile!(cmp::CompilerState, op::Fuse)
         string(op.destination) *
         "__" *
         ophash(first(source_pgs), source_pgs[2:end]; operation=:union, parameters=(dim,))
-    push!(cmp.ops, (dest_name, SolidModels.union_geom!, (source_pgs, dim)))
-    for source in op.sources
-        source != op.destination && delete!(cmp.reg, source)
+    push!(
+        cmp.ops,
+        (
+            dest_name,
+            SolidModels.union_geom!,
+            (source_pgs, dim),
+            :remove_object => op.remove_sources
+        )
+    )
+    if op.remove_sources
+        for source in op.sources
+            source != op.destination && delete!(cmp.reg, source)
+        end
     end
     cmp.reg[op.destination] =
         LayerState([PGRecord(dest_name, op.destination, nothing)], dim)
@@ -815,11 +857,19 @@ function _replace_layer_prefix(name::String, source::Symbol, destination::Symbol
     return string(destination, "__", chop(name; head=length(prefix), tail=0))
 end
 
-function _compile!(cmp::CompilerState, op::Heal)
+function _compile!(cmp::CompilerState, op::_LoweredHeal)
     state = cmp.reg[op.source]
     if op.destination == op.source
         for record in state.pgs
-            push!(cmp.ops, (record.name, SolidModels.union_geom!, (record.name, state.dim)))
+            push!(
+                cmp.ops,
+                (
+                    record.name,
+                    SolidModels.union_geom!,
+                    (record.name, state.dim),
+                    :remove_object => true
+                )
+            )
         end
         return nothing
     end
@@ -844,7 +894,15 @@ function _compile!(cmp::CompilerState, op::Heal)
     )
 
     for (record, new_record) in zip(state.pgs, new_records)
-        push!(cmp.ops, (new_record.name, SolidModels.union_geom!, (record.name, state.dim)))
+        push!(
+            cmp.ops,
+            (
+                new_record.name,
+                SolidModels.union_geom!,
+                (record.name, state.dim),
+                :remove_object => op.remove_source
+            )
+        )
     end
     if haskey(cmp.reg, op.destination)
         existing_pgs = [
@@ -870,7 +928,7 @@ function _compile!(cmp::CompilerState, op::Heal)
     else
         cmp.reg[op.destination] = LayerState(new_records, state.dim)
     end
-    delete!(cmp.reg, op.source)
+    op.remove_source && delete!(cmp.reg, op.source)
     return nothing
 end
 
