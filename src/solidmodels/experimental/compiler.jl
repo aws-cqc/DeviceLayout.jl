@@ -24,6 +24,16 @@ struct Extrude <: LayerOp
     destination::Symbol
 end
 
+function extrusions(stack::SourceStack, reg::LayerRegistry)
+    operations = LayerOp[]
+    for (layer_name, source_layer) in stack.layers
+        haskey(reg, layer_name) || continue
+        iszero(thickness(source_layer, stack)) && continue
+        push!(operations, Extrude(layer_name))
+    end
+    return operations
+end
+
 """
     Difference(destination, object, tools)
 
@@ -148,6 +158,31 @@ function Boundary(
     position::AbstractString="all"
 )
     return Boundary(destination, source, combined, oriented, recursive, direction, position)
+end
+
+const _EXTERIOR_BOUNDARY_LAYERS = Dict(
+    ("X", "min") => :EXTBND_XMIN,
+    ("X", "max") => :EXTBND_XMAX,
+    ("Y", "min") => :EXTBND_YMIN,
+    ("Y", "max") => :EXTBND_YMAX,
+    ("Z", "min") => :EXTBND_ZMIN,
+    ("Z", "max") => :EXTBND_ZMAX
+)
+
+"""
+    exterior_boundaries(bounding_volume_layer::Symbol) -> Vector{Boundary}
+
+Return operations extracting all six axis-aligned exterior faces of
+`bounding_volume_layer` into `:EXTBND_XMIN`, `:EXTBND_XMAX`, `:EXTBND_YMIN`,
+`:EXTBND_YMAX`, `:EXTBND_ZMIN`, and `:EXTBND_ZMAX`.
+"""
+function exterior_boundaries(bounding_volume_layer::Symbol)
+    operations = Boundary[]
+    for direction in ("X", "Y", "Z"), position in ("min", "max")
+        destination = _EXTERIOR_BOUNDARY_LAYERS[(direction, position)]
+        push!(operations, Boundary(destination, bounding_volume_layer; direction, position))
+    end
+    return operations
 end
 
 """
