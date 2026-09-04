@@ -442,8 +442,7 @@ include("render.jl")
 include("postrender.jl")
 include("conformal/conformal.jl")
 
-using .ConformalRender:
-    render_conformal!, ConformalRenderContext, add_conformal_loop!, mutual_node!
-export render_conformal!, ConformalRenderContext, add_conformal_loop!, mutual_node!
+using .ConformalRender: render_conformal!, ConformalRenderContext, add_conformal_loop!
+export render_conformal!, ConformalRenderContext, add_conformal_loop!
 
 end # module

@@ -78,11 +78,6 @@ import SpatialIndexing
 import SpatialIndexing: RTree
 
 export render_conformal!, ConformalRenderContext, add_conformal_loop!
-export mutual_node!
-
-# Symmetric all-pairs noding — a thin wrapper over the shared RTree-based core in
-# `src/postrender.jl` (also behind `DeviceLayout.split_t_junctions!`).
-include("noding.jl")
 
 """
 Entry in `endpoint_curve_index`: the signed OCC tag of the curve, plus a

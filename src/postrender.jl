@@ -109,30 +109,36 @@ end
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Vertex noding: injecting foreign vertices onto edges to make shared boundaries
-# conformal. Two public entry points share one RTree-based core:
+# conformal. `split_t_junctions!` has three methods sharing one RTree-based core:
 #
 #   - `split_t_junctions!(targets, sources...)` — asymmetric. Inject the
-#     `sources` vertices that lie on `targets` edges. A general 2D-geometry
-#     operation (also closes ~1 nm grid-snap gaps in GDS output).
-#   - `mutual_node!(groups)` — symmetric all-pairs (in the ConformalRender
-#     submodule). Inject, into each group's edges, the vertices owned by *other*
-#     groups. Prepares adjacent physical groups for `render_conformal!`.
+#     `sources` vertices that lie on `targets` edges. General 2D operation (also
+#     closes ~1 nm grid-snap gaps in GDS output).
+#   - `split_t_junctions!(regions)` — self-noding. Every region's vertices
+#     become sources for every other region's edges. Shorthand for the same
+#     regions on both sides.
+#   - `split_t_junctions!(groups::AbstractDict)` — symmetric all-pairs.
+#     For each group, inject the vertices owned by *other* groups onto its
+#     edges. Prepares adjacent physical groups for `render_conformal!`.
 #
 # The core (`_VertexIndex` + `_node_contour`) does the geometry once: it projects
 # candidate points onto straight edges (perpendicular distance) and curved edges
 # (`Paths.Turn`/`Paths.BSpline`, via `pathlength_nearest`), splits curves natively
 # with `Paths.split` at the exact on-curve point, guards endpoints, and drops
-# near-coincident duplicates. A per-candidate "owner" tag lets `mutual_node!`
-# restrict injection to foreign vertices while `split_t_junctions!` accepts all.
+# near-coincident duplicates. A per-candidate "owner" tag lets the Dict method
+# restrict injection to foreign vertices while the other methods accept all.
 
-# A spatial index of candidate vertices for on-edge queries. Each unique vertex
-# (deduplicated on an integer-nm grid so bit-identical copies collapse) is stored
-# as an `atol`-padded `Rect` in an `RTree`, following the `mbr_spatial_index`
-# idiom in `src/entities.jl`. `owner[i]` tags which group contributed vertex `i`
-# (used by `mutual_node!`); `pts[i]` is the original `Point` (reused verbatim so
-# an injected copy is bit-identical to its partner and the render-time point
-# merge unifies them). Coordinates are indexed in nm so `atol` means the same
-# physical distance regardless of the input unit.
+# A spatial index of candidate vertices for on-edge queries. Each vertex is
+# stored as an `atol`-padded `Rect` in an `RTree` (see `mbr_spatial_index`
+# idiom in `src/entities.jl`), and only the RTree query is authoritative for
+# on-edge coincidence: it returns every candidate whose padded Rect intersects
+# the padded edge bbox, which is a strict superset of the true within-`atol`
+# hits (further filtered by perpendicular/on-curve residual in `_points_on_*`).
+# `owner[i]` tags which group contributed vertex `i` (used to filter out
+# same-group vertices in the Dict method); `pts[i]` is the original `Point`
+# (reused verbatim so an injected copy is bit-identical to its partner and the
+# render-time point merge unifies them). Coordinates are indexed in nm so
+# `atol` means the same physical distance regardless of the input unit.
 struct _VertexIndex{T}
     tree::SpatialIndexing.RTree{
         Float64,
@@ -165,11 +171,17 @@ function _perp_to_edge(p1, p2, p)
 end
 
 # Build an index over `groups`, an iterable of `(owner_id, vertices)` pairs.
-# `atol` is a length; it sets both the padding of each vertex's query Rect and
-# the coincidence tolerance. Vertices within `atol` of an existing indexed vertex
-# collapse onto it (first owner wins the `pts` slot; later owners are OR-ed into
-# a shared slot only when they hash to the same nm cell — exact grid coincidence,
-# which is what bit-identical Clipper output produces).
+# `atol` is a length; it sets the padding of each vertex's query Rect and the
+# effective coincidence tolerance for on-edge tests downstream. Correctness is
+# provided by the RTree query in `_query_bbox` (all within-`atol` candidates
+# are returned) plus the perpendicular/on-curve residual in `_points_on_*`,
+# NOT by the nm-cell hash: two candidates within `atol` of each other can hash
+# to adjacent cells (opposite side of a cell boundary), and two candidates in
+# the same cell can be up to `sqrt(2)*atol` apart. The hash is a best-effort
+# fast path for bit-identical Clipper output on a group's own edges, where
+# multiple copies of the same integer-nm point collapse to a single slot;
+# other near-coincident cases are handled downstream by the per-edge dedup in
+# `_points_on_straight`/`_points_on_curve`.
 function _build_vertex_index(groups, ::Type{T}; atol) where {T}
     atol_nm = _nm(atol)
     cell = max(atol_nm, 1.0)
@@ -185,9 +197,11 @@ function _build_vertex_index(groups, ::Type{T}; atol) where {T}
                 push!(owner, oid)
                 slot[key] = length(pts)
             end
-            # else: a vertex already occupies this cell; keep the first Point.
-            # (owner stays the first contributor; foreign-eligibility below still
-            # holds because a shared vertex is by definition not "foreign".)
+            # else: a vertex already hashes to this nm cell — keep the first Point.
+            # A shared-cell duplicate is treated as the same candidate for
+            # owner-filter purposes: shared vertices between groups are not
+            # "foreign" and shouldn't be injected across a boundary they already
+            # sit on.
         end
     end
     tree = SpatialIndexing.RTree{Float64, 2}(Int)
@@ -232,8 +246,7 @@ function _points_on_straight(
     idx::_VertexIndex{T},
     p1::Point{T},
     p2::Point{T},
-    exclude_owner::Int,
-    rtol::Real
+    exclude_owner::Int
 ) where {T}
     x1 = _nm(getx(p1))
     y1 = _nm(gety(p1))
@@ -251,6 +264,10 @@ function _points_on_straight(
         px = _nm(getx(idx.pts[i]))
         py = _nm(gety(idx.pts[i]))
         t = ((px - x1) * dx + (py - y1) * dy) / len_sq
+        # RTree query padding lets candidates OUTSIDE the segment (before p1 or
+        # after p2) reach here; drop those explicitly so the endpoint check
+        # below only judges candidates that project onto the segment interior.
+        (t < 0 || t > 1) && continue
         perp = abs((px - x1) * dy - (py - y1) * dx) / len
         perp > atol_nm && continue
         # Endpoint guard: exclude candidates within `atol` Euclidean distance of
@@ -277,24 +294,24 @@ function _points_on_straight(
 end
 
 # Foreign points on a curved edge (`Paths.Turn`, `Paths.BSpline`, …), as
-# `(arclength, on-curve Point)` sorted along travel, excluding endpoints and this
-# contour's own owner. The injected point is the EXACT point on the curve at that
-# arclength (`curve(s)`), not the possibly-off-curve candidate — so the
-# `CurvilinearPolygon` point/endpoint agreement is preserved.
+# `(arclength, on-curve Point, candidate index)` sorted along travel, excluding
+# endpoints and this contour's own owner. The injected point is the EXACT point
+# on the curve at that arclength (`curve(s)`), not the possibly-off-curve
+# candidate — so the `CurvilinearPolygon` point/endpoint agreement is preserved.
 function _points_on_curve(idx::_VertexIndex{T}, curve, exclude_owner::Int) where {T}
     L = pathlength(curve)                      # a length, in the curve's unit
     L_nm = _nm(L)
-    L_nm <= 0 && return Tuple{typeof(L), Point{T}, Int}[]
+    L_nm <= 0 && return Tuple{T, Point{T}, Int}[]
     disc = discretize_curve(curve, onenanometer(T); rtol=nothing)
-    isempty(disc) && return Tuple{typeof(L), Point{T}, Int}[]
+    isempty(disc) && return Tuple{T, Point{T}, Int}[]
     atol_nm = idx.atol_nm
     # The polyline approximates the curve to within 1 nm, so widen the
     # perpendicular test by that slop before the exact on-curve residual check.
     perp_tol = atol_nm + 1.0
     tol2 = perp_tol * perp_tol
     seen = Set{Int}()
-    # (arclength as a length, arclength in nm, candidate index) for qualifying candidates.
-    found = Tuple{typeof(L), Float64, Int}[]
+    # (arclength as `T`, arclength in nm, candidate index) for qualifying candidates.
+    found = Tuple{T, Float64, Int}[]
     nd = length(disc)
     for j = 1:(nd - 1)
         ax = _nm(getx(disc[j]))
@@ -321,12 +338,12 @@ function _points_on_curve(idx::_VertexIndex{T}, curve, exclude_owner::Int) where
             cs_pt = curve(s)                   # exact point on the curve at s
             resid = hypot(_nm(getx(cs_pt) - getx(V)), _nm(gety(cs_pt) - gety(V)))
             resid > atol_nm && continue
-            push!(found, (s, s_nm, i))
+            push!(found, (convert(T, s), s_nm, i))
         end
     end
-    isempty(found) && return Tuple{typeof(L), Point{T}, Int}[]
+    isempty(found) && return Tuple{T, Point{T}, Int}[]
     sort!(found; by=x -> x[2])                 # by arclength = order of travel
-    out = Tuple{typeof(L), Point{T}, Int}[]
+    out = Tuple{T, Point{T}, Int}[]
     prev = -Inf
     for (s, s_nm, i) in found
         s_nm - prev < atol_nm && continue      # de-dup co-located along the curve
@@ -348,98 +365,73 @@ function _collect_region_vertices!(
     return pts
 end
 
-# Rebuild one contour, injecting foreign vertices onto its edges. Straight edges
-# get the foreign point verbatim; `Paths.Turn`/`Paths.BSpline` curves are split at
-# the foreign arclength via `Paths.split`, staying native. `exclude_owner` (0 for
-# none) restricts injection to vertices NOT solely owned by this contour's group.
-# Returns `(new_cpoly, n_injected)`.
-function _node_contour(
-    cpoly::CurvilinearPolygon{T},
+# Collect per-edge candidate hits for a closed contour, and index-only sets for
+# corner-adjacency lookup. Returns `(straight_hits, curve_hits, index_sets)`.
+# `edge_extractor(k)` returns `pts[k], pts[k+1]` for straight edges (indexed by
+# start vertex). Curves are indexed by start vertex too, via `curve_at`.
+function _collect_contour_hits(
+    pts::Vector{Point{T}},
+    curve_at::Dict{Int, Int},
+    curves,
     idx::_VertexIndex{T},
-    exclude_owner::Int,
-    rtol::Real
+    exclude_owner::Int
 ) where {T}
-    pts = points(cpoly)
     n = length(pts)
-    n < 3 && return cpoly, 0
-    curve_at = Dict{Int, Int}()   # start-vertex index → position in cpoly.curves
-    for (k, csi) in enumerate(cpoly.curve_start_idx)
-        curve_at[csi] = k
-    end
-    # First-pass: collect hits per edge with candidate indices, so pass 2 can
-    # apply corner-vertex dedup — a candidate landing on TWO adjacent edges of
-    # the same contour near their shared corner would inject twice, creating a
-    # zero-length loopback (identical non-consecutive vertices around the
-    # corner). Detection: candidate index seen on edge k-1 AND edge k, with the
-    # candidate within `atol` Euclidean of the shared vertex `pts[k]`.
-    atol_nm = idx.atol_nm
-    atol_sq = atol_nm * atol_nm
     straight_hits = Dict{Int, Vector{Tuple{Float64, Point{T}, Int}}}()
-    curve_hits = Dict{Int, Vector{Tuple{Any, Point{T}, Int}}}()
+    curve_hits = Dict{Int, Vector{Tuple{T, Point{T}, Int}}}()
+    index_sets = Dict{Int, Set{Int}}()
     for i = 1:n
         if haskey(curve_at, i)
-            hits = _points_on_curve(idx, cpoly.curves[curve_at[i]], exclude_owner)
-            isempty(hits) || (
-                curve_hits[i] = Tuple{Any, Point{T}, Int}[
-                    (s, on_pt, ci) for (s, on_pt, ci) in hits
-                ]
-            )
+            hits = _points_on_curve(idx, curves[curve_at[i]], exclude_owner)
+            if !isempty(hits)
+                curve_hits[i] = hits
+                index_sets[i] = Set{Int}(h[3] for h in hits)
+            end
         else
             p2 = pts[mod1(i + 1, n)]
-            hits = _points_on_straight(idx, pts[i], p2, exclude_owner, rtol)
-            isempty(hits) || (straight_hits[i] = hits)
+            hits = _points_on_straight(idx, pts[i], p2, exclude_owner)
+            if !isempty(hits)
+                straight_hits[i] = hits
+                index_sets[i] = Set{Int}(h[3] for h in hits)
+            end
         end
     end
-    # Build the corner-shared skip set: if a candidate ci was injected on both
-    # edge k-1 AND edge k (which share pts[k]), keep it on the edge where it's
-    # geometrically closer (smaller perp/on-curve residual) and skip it on the
-    # other. This eliminates the corner double-injection Greg reported (source
-    # vertex just off a sharp corner that lands within `atol` perp of BOTH
-    # adjacent edges), without affecting the common case where a candidate
-    # only touches one edge or where the two edges are non-adjacent.
-    # We use "closer to the shared corner vertex" as the tie-break because
-    # among two adjacent edges near a sharp corner, the edge whose interior
-    # the candidate ACTUALLY belongs to has the candidate farther from the
-    # shared corner (along its own arclength). Farther-from-corner = winner.
+    return straight_hits, curve_hits, index_sets
+end
+
+# Build a corner-adjacency skip set for a closed contour: if the same
+# candidate `ci` was hit on edge `prev_k` AND edge `k` (which share vertex
+# `pts[k]`), and `ci` sits within `2·atol` of that shared corner, keep it on
+# whichever edge is geometrically nearer in perpendicular distance and skip
+# it on the other. Returned as `Set{(candidate_index, edge_index)}`.
+#
+# The problematic case: a candidate a few nm off a sharp corner can be within
+# `atol` perpendicular of BOTH adjacent edges. Without this filter it would
+# inject twice, producing identical non-consecutive vertices around the corner
+# (a zero-length loopback in the CurvilinearPolygon). Non-adjacent edges
+# hosting the same candidate keep both injections — those are legitimate
+# parallel T-junctions on real geometry, not corner artifacts.
+function _corner_skip_set(
+    pts::Vector{Point{T}},
+    index_sets::Dict{Int, Set{Int}},
+    idx::_VertexIndex{T}
+) where {T}
+    n = length(pts)
+    atol_nm = idx.atol_nm
+    corner_range_sq = (2 * atol_nm)^2
     corner_skip = Set{Tuple{Int, Int}}()
     for k = 1:n
         prev_k = mod1(k - 1, n)
-        prev_hits_s = get(straight_hits, prev_k, nothing)
-        prev_hits_c = get(curve_hits, prev_k, nothing)
-        cur_hits_s = get(straight_hits, k, nothing)
-        cur_hits_c = get(curve_hits, k, nothing)
-        (prev_hits_s === nothing && prev_hits_c === nothing) && continue
-        (cur_hits_s === nothing && cur_hits_c === nothing) && continue
+        (haskey(index_sets, prev_k) && haskey(index_sets, k)) || continue
+        prev_indices = index_sets[prev_k]
+        cur_indices = index_sets[k]
         corner_x = _nm(getx(pts[k]))
         corner_y = _nm(gety(pts[k]))
-        prev_indices = Set{Int}()
-        prev_hits_s !== nothing && (
-            for t in prev_hits_s
-                push!(prev_indices, t[3])
-            end
-        )
-        prev_hits_c !== nothing && (
-            for t in prev_hits_c
-                push!(prev_indices, t[3])
-            end
-        )
-        cur_iter = cur_hits_s !== nothing ? cur_hits_s : cur_hits_c
-        for tup in cur_iter
-            ci = tup[3]
+        for ci in cur_indices
             (ci in prev_indices) || continue
-            # Only dedup if the candidate is close enough to the shared corner
-            # that both edges' perp checks trivially pass. Threshold: within
-            # 2·atol of the corner (candidate that's 2·atol away has ≤ atol
-            # perp only if it's essentially on-edge, not the corner-doubling
-            # case). Farther candidates on both edges are legitimately on both.
             cx = _nm(getx(idx.pts[ci]))
             cy = _nm(gety(idx.pts[ci]))
-            d2 = (cx - corner_x)^2 + (cy - corner_y)^2
-            d2 <= (2 * atol_nm)^2 || continue
-            # Winner = the edge whose interior the candidate is farther from
-            # the shared corner along that edge. Compute along-edge distances.
-            # For simplicity: pick the edge with SMALLER perp distance (that's
-            # the edge the candidate is more genuinely "on").
+            ((cx - corner_x)^2 + (cy - corner_y)^2) <= corner_range_sq || continue
             perp_prev = _perp_to_edge(pts[prev_k], pts[k], idx.pts[ci])
             perp_cur = _perp_to_edge(pts[k], pts[mod1(k + 1, n)], idx.pts[ci])
             if perp_prev <= perp_cur
@@ -449,6 +441,61 @@ function _node_contour(
             end
         end
     end
+    return corner_skip
+end
+
+# Split `curve` (a `Paths.Turn`/`Paths.BSpline`) at each interior arclength in
+# `splits`, appending sub-curves + on-curve breakpoints into `new_curves`/
+# `new_points`/`new_csi`. `start_idx` is the position of the curve's start
+# vertex in `new_points`. Returns the injection count.
+function _emit_split_curve!(
+    new_curves,
+    new_points::Vector{Point{T}},
+    new_csi::Vector{Int},
+    curve,
+    splits::Vector{<:Tuple{T, Point{T}, Int}},
+    start_idx::Int
+) where {T}
+    remaining = curve
+    consumed = zero(pathlength(curve))
+    acc_idx = start_idx
+    n_inj = 0
+    for (s, on_pt, _) in splits
+        sub1, sub2 = Paths.split(remaining, s - consumed)
+        push!(new_curves, sub1)
+        push!(new_csi, acc_idx)
+        push!(new_points, on_pt)
+        acc_idx = length(new_points)
+        remaining = sub2
+        consumed = s
+        n_inj += 1
+    end
+    push!(new_curves, remaining)
+    push!(new_csi, acc_idx)
+    return n_inj
+end
+
+# Rebuild one contour, injecting foreign vertices onto its edges. Straight edges
+# get the foreign point verbatim; `Paths.Turn`/`Paths.BSpline` curves are split at
+# the foreign arclength via `Paths.split`, staying native. `exclude_owner` (0 for
+# none) restricts injection to vertices NOT solely owned by this contour's group.
+# Returns `(new_cpoly, n_injected)`.
+function _node_contour(
+    cpoly::CurvilinearPolygon{T},
+    idx::_VertexIndex{T},
+    exclude_owner::Int
+) where {T}
+    pts = points(cpoly)
+    n = length(pts)
+    n < 3 && return cpoly, 0
+    curve_at = Dict{Int, Int}()   # start-vertex index → position in cpoly.curves
+    for (k, csi) in enumerate(cpoly.curve_start_idx)
+        curve_at[csi] = k
+    end
+    straight_hits, curve_hits, index_sets =
+        _collect_contour_hits(pts, curve_at, cpoly.curves, idx, exclude_owner)
+    isempty(straight_hits) && isempty(curve_hits) && return cpoly, 0
+    corner_skip = _corner_skip_set(pts, index_sets, idx)
     new_points = Point{T}[]
     new_curves = eltype(cpoly.curves)[]
     new_csi = Int[]
@@ -460,40 +507,30 @@ function _node_contour(
             seg = cpoly.curves[curve_at[i]]
             all_hits = get(curve_hits, i, nothing)
             splits = if all_hits === nothing
-                Tuple{Any, Point{T}, Int}[]
+                Tuple{T, Point{T}, Int}[]
             else
-                [h for h in all_hits if !((h[3], i) in corner_skip)]
+                Tuple{T, Point{T}, Int}[h for h in all_hits if !((h[3], i) in corner_skip)]
             end
             if isempty(splits)
                 push!(new_curves, seg)
                 push!(new_csi, start_idx)
             else
-                # Split successively at each interior arclength, working in
-                # remaining-arclength coordinates as the head is peeled off.
-                remaining = seg
-                consumed = zero(pathlength(seg))
-                acc_idx = start_idx
-                for (s, on_pt, _) in splits
-                    sub1, sub2 = Paths.split(remaining, s - consumed)
-                    push!(new_curves, sub1)
-                    push!(new_csi, acc_idx)
-                    push!(new_points, on_pt)
-                    acc_idx = length(new_points)
-                    remaining = sub2
-                    consumed = s
-                    n_injected += 1
-                end
-                push!(new_curves, remaining)
-                push!(new_csi, acc_idx)
+                n_injected += _emit_split_curve!(
+                    new_curves,
+                    new_points,
+                    new_csi,
+                    seg,
+                    splits,
+                    start_idx
+                )
             end
         else
             all_hits = get(straight_hits, i, nothing)
-            if all_hits !== nothing
-                for (_, c, ci) in all_hits
-                    (ci, i) in corner_skip && continue
-                    push!(new_points, c)
-                    n_injected += 1
-                end
+            all_hits === nothing && continue
+            for (_, c, ci) in all_hits
+                (ci, i) in corner_skip && continue
+                push!(new_points, c)
+                n_injected += 1
             end
         end
     end
@@ -507,12 +544,12 @@ function _node_contour(
 end
 
 # Node every contour (exterior + holes) of `region` against `idx`.
-function _node_region(region::CurvilinearRegion{T}, idx, exclude_owner, rtol) where {T}
-    new_ext, n_ext = _node_contour(region.exterior, idx, exclude_owner, rtol)
+function _node_region(region::CurvilinearRegion{T}, idx, exclude_owner) where {T}
+    new_ext, n_ext = _node_contour(region.exterior, idx, exclude_owner)
     new_holes = CurvilinearPolygon{T}[]
     n_holes = 0
     for h in region.holes
-        h_new, n_h = _node_contour(h, idx, exclude_owner, rtol)
+        h_new, n_h = _node_contour(h, idx, exclude_owner)
         push!(new_holes, h_new)
         n_holes += n_h
     end
@@ -521,8 +558,42 @@ function _node_region(region::CurvilinearRegion{T}, idx, exclude_owner, rtol) wh
     return CurvilinearRegion{T}(new_ext, new_holes), total
 end
 
+# Node a plain Polygon: collect straight-edge hits, apply corner-skip, rebuild.
+# Returns `(new_polygon, n_injected)`.
+function _node_polygon(poly::Polygon{T}, idx::_VertexIndex{T}, exclude_owner::Int) where {T}
+    pts = points(poly)
+    n = length(pts)
+    n < 3 && return poly, 0
+    edge_hits = Dict{Int, Vector{Tuple{Float64, Point{T}, Int}}}()
+    index_sets = Dict{Int, Set{Int}}()
+    for i = 1:n
+        p2 = pts[mod1(i + 1, n)]
+        hits = _points_on_straight(idx, pts[i], p2, exclude_owner)
+        if !isempty(hits)
+            edge_hits[i] = hits
+            index_sets[i] = Set{Int}(h[3] for h in hits)
+        end
+    end
+    isempty(edge_hits) && return poly, 0
+    corner_skip = _corner_skip_set(pts, index_sets, idx)
+    new_points = Point{T}[]
+    inserted = 0
+    for i = 1:n
+        push!(new_points, pts[i])
+        hits = get(edge_hits, i, nothing)
+        hits === nothing && continue
+        for (_, c, ci) in hits
+            (ci, i) in corner_skip && continue
+            push!(new_points, c)
+            inserted += 1
+        end
+    end
+    inserted == 0 && return poly, 0
+    return Polygon{T}(new_points), inserted
+end
+
 """
-    split_t_junctions!(targets, sources...; atol=onenanometer(T), rtol=1e-6) -> Int
+    split_t_junctions!(targets, sources...; atol=2nm) -> Int
 
 Inject every vertex of the `sources` that lies on an edge of `targets` into that
 edge, so a boundary shared between the two groups has matching vertices on both
@@ -547,15 +618,14 @@ rather than the product of edge and vertex counts.
 Fixing T junctions avoids ~1 nm gaps from manufacturing-grid snapping in GDS
 output and "vertex lies in segment" PLC errors when meshing a solid model.
 
-# Keywords
-
-  - `atol`: coincidence tolerance (a length). A source vertex within `atol` of a
-    target edge (perpendicular distance for straight edges, on-curve residual for
-    curves) is considered to lie on it. Defaults to `onenanometer(T)`, matching
-    the default render discretization tolerance and the GDS 1 nm grid.
-  - `rtol`: relative endpoint guard, as a fraction of edge/curve length. Splits
-    within `rtol` of an endpoint are skipped, since those coincide with an
-    existing vertex. Defaults to `1e-6`.
+`atol` sets the perpendicular distance between point and edge within which a
+point is injected, and defaults to two nanometers. It must be ≥ the maximum
+coordinate drift between two groups' copies of the same logical vertex and ≪
+the minimum feature size. Curves are internally discretized with 1 nm tolerance
+to calculate point-edge distances (approximate for curves other than circular
+arcs). The 2 nm default covers the typical drift caused by this discretization
+while remaining far below any real feature. By DeviceLayout convention, lengths
+without units are presumed to be in microns.
 
 # Example
 
@@ -568,8 +638,7 @@ split_t_junctions!(targets, sources)
 function split_t_junctions!(
     targets::AbstractVector{CurvilinearRegion{T}},
     sources...;
-    atol=onenanometer(T),
-    rtol::Real=1e-6
+    atol=onenanometer(T) * 2
 ) where {T}
     isempty(targets) && return 0
     candidates = Point{T}[]
@@ -582,7 +651,7 @@ function split_t_junctions!(
     idx = _build_vertex_index(((0, candidates),), T; atol)
     total = 0
     for (ri, region) in enumerate(targets)
-        new_region, n = _node_region(region, idx, 0, rtol)
+        new_region, n = _node_region(region, idx, 0)
         if n > 0
             targets[ri] = new_region
             total += n
@@ -592,7 +661,18 @@ function split_t_junctions!(
 end
 
 """
-    split_t_junctions!(targets::AbstractVector{<:Polygon}, sources...; atol, rtol) -> Int
+    split_t_junctions!(regions::AbstractVector{CurvilinearRegion}; atol=2nm) -> Int
+
+Self-noding: inject each region's vertices onto every other region's edges in
+the same collection. Equivalent to `split_t_junctions!(regions, regions; atol=atol)`.
+"""
+split_t_junctions!(
+    regions::AbstractVector{CurvilinearRegion{T}};
+    atol=onenanometer(T) * 2
+) where {T} = split_t_junctions!(regions, regions; atol)
+
+"""
+    split_t_junctions!(targets::AbstractVector{<:Polygon}, sources...; atol=2nm) -> Int
 
 [`Polygon`](@ref)-vector method of [`split_t_junctions!`](@ref): inject `sources`
 vertices that lie on `targets` polygon edges. Useful for eliminating T junctions
@@ -603,8 +683,7 @@ the number of vertices inserted.
 function split_t_junctions!(
     targets::AbstractVector{<:Polygon{T}},
     sources...;
-    atol=onenanometer(T),
-    rtol::Real=1e-6
+    atol=onenanometer(T) * 2
 ) where {T}
     isempty(targets) && return 0
     candidates = Point{T}[]
@@ -616,51 +695,91 @@ function split_t_junctions!(
     isempty(candidates) && return 0
     idx = _build_vertex_index(((0, candidates),), T; atol)
     total = 0
-    atol_nm_poly = _nm(atol)
-    atol_sq_poly = atol_nm_poly * atol_nm_poly
     for (pi, poly) in enumerate(targets)
-        pts = points(poly)
-        n = length(pts)
-        n < 3 && continue
-        # First pass: collect per-edge hits with candidate indices, for the
-        # corner-vertex dedup below.
-        edge_hits = Dict{Int, Vector{Tuple{Float64, Point{T}, Int}}}()
-        for i = 1:n
-            p2 = pts[mod1(i + 1, n)]
-            hits = _points_on_straight(idx, pts[i], p2, 0, rtol)
-            isempty(hits) || (edge_hits[i] = hits)
-        end
-        corner_skip = Set{Tuple{Int, Int}}()
-        for k = 1:n
-            prev_k = mod1(k - 1, n)
-            (haskey(edge_hits, prev_k) && haskey(edge_hits, k)) || continue
-            corner_x = _nm(getx(pts[k]))
-            corner_y = _nm(gety(pts[k]))
-            prev_indices = Set(t[3] for t in edge_hits[prev_k])
-            for (_, _, ci) in edge_hits[k]
-                (ci in prev_indices) || continue
-                cx = _nm(getx(idx.pts[ci]))
-                cy = _nm(gety(idx.pts[ci]))
-                ((cx - corner_x)^2 + (cy - corner_y)^2) <= atol_sq_poly || continue
-                push!(corner_skip, (ci, k))
-            end
-        end
-        new_points = Point{T}[]
-        inserted = 0
-        for i = 1:n
-            push!(new_points, pts[i])
-            hits = get(edge_hits, i, nothing)
-            hits === nothing && continue
-            for (_, c, ci) in hits
-                (ci, i) in corner_skip && continue
-                push!(new_points, c)
-                inserted += 1
-            end
-        end
-        if inserted > 0
-            targets[pi] = Polygon{T}(new_points)
-            total += inserted
+        new_poly, n = _node_polygon(poly, idx, 0)
+        if n > 0
+            targets[pi] = new_poly
+            total += n
         end
     end
     return total
+end
+
+"""
+    split_t_junctions!(regions::AbstractVector{<:Polygon}; atol=2nm) -> Int
+
+Self-noding [`Polygon`](@ref)-vector method. Equivalent to
+`split_t_junctions!(regions, regions; atol=atol)`.
+"""
+split_t_junctions!(
+    regions::AbstractVector{<:Polygon{T}};
+    atol=onenanometer(T) * 2
+) where {T} = split_t_junctions!(regions, regions; atol)
+
+"""
+    split_t_junctions!(groups::AbstractDict{Symbol, <:AbstractVector}; atol=2nm) -> Int
+
+Symmetric all-pairs form: for each entry in `groups`, inject onto its regions'
+edges the vertices owned by *other* groups. Every group is noded against every
+other in a single pass over a shared spatial index — the caller does not need
+to know the adjacency graph. Both sides of every shared boundary end up with
+the identical ordered vertex sequence, which is what
+[`SolidModels.render_conformal!`](@ref) needs its shared-edge cache to resolve
+a boundary to one OCC curve on both sides.
+
+Modifies each group's regions in place and returns the total number of
+vertices injected across all groups. Foreign-only (never injects a group's own
+vertices back onto itself) avoids re-perturbing the within-group vertex sets
+that Clipper has already made consistent for each group's own edges.
+
+`atol` has the same meaning and default (2 nm) as the two-argument method
+above.
+
+```julia
+groups = Dict(:metal => metal_regions, :ground => gnd_regions, :ports => port_regions)
+split_t_junctions!(groups; atol=2nm)
+```
+"""
+function split_t_junctions!(
+    groups::AbstractDict{Symbol, <:AbstractVector};
+    atol=nothing
+) where {}
+    isempty(groups) && return 0
+    T = _noding_coordinate_type(groups)
+    isnothing(T) && return 0
+    atol_length = isnothing(atol) ? onenanometer(T) * 2 : atol
+    # Sort keys so ownership assignment is independent of Dict iteration order —
+    # makes group→owner mapping deterministic across runs.
+    names = sort!(collect(keys(groups)))
+    owner_of = Dict(name => i for (i, name) in enumerate(names))
+    indexed = Tuple{Int, Vector{Point{T}}}[]
+    for name in names
+        verts = Point{T}[]
+        for region in groups[name]
+            _collect_region_vertices!(verts, region)
+        end
+        push!(indexed, (owner_of[name], verts))
+    end
+    idx = _build_vertex_index(indexed, T; atol=atol_length)
+    total = 0
+    for name in names
+        regions = groups[name]
+        oid = owner_of[name]
+        for (ri, region) in enumerate(regions)
+            new_region, n = _node_region(region, idx, oid)
+            if n > 0
+                regions[ri] = new_region
+                total += n
+            end
+        end
+    end
+    return total
+end
+
+# Coordinate type of the first non-empty group, or `nothing` if all are empty.
+function _noding_coordinate_type(groups::AbstractDict{Symbol, <:AbstractVector})
+    for (_, regions) in groups
+        isempty(regions) || return coordinatetype(regions[1])
+    end
+    return nothing
 end
