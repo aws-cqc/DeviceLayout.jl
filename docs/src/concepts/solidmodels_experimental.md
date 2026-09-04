@@ -93,8 +93,8 @@ The public operation types are:
 |:--|:--|
 | `Extrude(layer)` | Extrude a source-stack layer using its configured thickness. |
 | `Difference(destination, object, tools)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector. Follow it with `Remove` to remove inputs. |
-| `Fuse(source)` or `Fuse(destination, sources)` | Collapse every PG in one or more source layers into one generated destination PG. Existing destinations must be included among the grouped sources. |
-| `Heal(source)` or `Heal(destination, source)` | Union each PG in one source independently, preserving its identity and metadata. Assign mode replaces only the layer-name prefix and may append to an existing destination. |
+| `Fuse(source)` or `Fuse(destination, sources)` | Collapse every PG in one or more source layers into one generated destination PG. Existing destinations must be included among the grouped sources; other sources remain unless removed explicitly later. |
+| `Heal(source)` or `Heal(destination, source)` | Union each PG in one source independently, preserving its identity and metadata. Assign mode replaces only the layer-name prefix, preserves the source, and may append to an existing destination. |
 | `Interface(destination, object, tool)` | Resolve a deferred interface after fragmentation. |
 | `RestrictTo(volume)` | Restrict the model to a 3D bounding-volume layer containing exactly one physical group. |
 | `Boundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries. |
@@ -107,9 +107,10 @@ The public operation types are:
 `Fuse(:metal)` collapses one layer in place, while
 `Fuse(:metal, (:metal, :added_metal))` explicitly includes an existing destination among
 the layers being collapsed. `Heal(:metal)` instead heals each PG in place without changing
-its identity. `Heal(:clean_metal, :metal)` moves those healed PGs to another layer by
-replacing only their `metal__` name prefix; assigning to an existing destination appends the
-healed PGs while preserving existing records.
+its identity. `Heal(:clean_metal, :metal)` assigns healed PGs to another layer by replacing
+only their `metal__` name prefix; assigning to an existing destination appends the healed PGs
+while preserving both the source layer and existing destination records. Follow either
+out-of-place operation with `Remove` to consume source layers explicitly.
 
 A destination equal to a source layer also replaces that layer for boundary, translation,
 and revolution operations. Difference supports replacing its object or a tool layer, and
