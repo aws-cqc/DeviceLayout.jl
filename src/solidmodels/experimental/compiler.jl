@@ -53,20 +53,34 @@ Difference(dest::Symbol, object::Symbol, tools::AbstractVector{Symbol}) =
     Fuse(source)
     Fuse(destination, sources)
 
-Self-heal one source layer in place, or union a grouped tuple or vector of source layers
-into `destination`.
+Collapse every physical group in one or more source layers into one generated physical
+group in `destination`.
 """
 struct Fuse{N} <: BooleanOp
     destination::Symbol
     sources::NTuple{N, Symbol}
     function Fuse{N}(destination, sources) where {N}
         iszero(N) && throw(ArgumentError("fuse requires at least one source layer"))
+        allunique(sources) || throw(ArgumentError("fuse source layers must be unique"))
         return new{N}(destination, sources)
     end
 end
 Fuse(dest::Symbol, sources::NTuple{N, Symbol}) where {N} = Fuse{N}(dest, sources)
 Fuse(dest::Symbol, sources::AbstractVector{Symbol}) = Fuse(dest, Tuple(sources))
 Fuse(source::Symbol) = Fuse(source, (source,))
+
+"""
+    Heal(source)
+    Heal(destination, source)
+
+Heal (i.e. self-union) every physical group in one source layer independently, preserving its identity and
+metadata, optionally under a new layer namespace.
+"""
+struct Heal <: LayerOp
+    destination::Symbol
+    source::Symbol
+end
+Heal(source::Symbol) = Heal(source, source)
 
 """
 `Interface(destination, object, tool)` extracts a deferred geometric interface.
@@ -429,6 +443,7 @@ end
 source_layers(op::Extrude) = (op.destination,)
 source_layers(op::Difference) = (op.object, op.tools...)
 source_layers(op::Fuse) = op.sources
+source_layers(op::Heal) = (op.source,)
 source_layers(op::Interface) = (op.object, op.tool)
 source_layers(op::RestrictTo) = (op.volume,)
 source_layers(op::Boundary) = (op.source,)
@@ -761,118 +776,101 @@ function _compile!(cmp::CompilerState, op::_LoweredDifference)
 end
 
 function _compile!(cmp::CompilerState, op::Fuse)
-    if length(op.sources) == 1
-        state = cmp.reg[only(op.sources)]
-
-        if op.destination == only(op.sources)
-            # Self-heal mode
-            for record in state.pgs
-                push!(
-                    cmp.ops,
-                    (record.name, SolidModels.union_geom!, (record.name, state.dim))
-                )
-            end
-        else
-            # Self-heal and move into a generated destination. If that destination already
-            # exists independently, append distinct records without discarding its state.
-            new_records = PGRecord[]
-            for record in state.pgs
-                dest_name =
-                    string(op.destination) *
-                    "__" *
-                    ophash(record.name, String[]; operation=:union, parameters=(state.dim,))
-                generated_record_exists(cmp.reg, op.destination, dest_name, new_records) &&
-                    continue
-                push!(
-                    cmp.ops,
-                    (dest_name, SolidModels.union_geom!, (record.name, state.dim))
-                )
-                push!(new_records, PGRecord(dest_name, op.destination, record.meta))
-            end
-            if haskey(cmp.reg, op.destination)
-                _require_destination_dimension(cmp.reg, op.destination, state.dim)
-                existing_pgs = [
-                    record.name for
-                    record in cmp.reg[op.destination].pgs if !islocator(record.meta)
-                ]
-                if !isempty(existing_pgs)
-                    for record in new_records
-                        # Ensure additions don't overlap with existing PGs in the
-                        # destination layer
-                        push!(
-                            cmp.ops,
-                            (
-                                record.name,
-                                SolidModels.difference_geom!,
-                                (record.name, existing_pgs, state.dim, state.dim),
-                                :remove_object => true,
-                                :remove_tool => false
-                            )
-                        )
-                    end
-                end
-                append!(cmp.reg[op.destination].pgs, new_records)
-            else
-                cmp.reg[op.destination] = LayerState(new_records, state.dim)
-            end
-            delete!(cmp.reg, only(op.sources))
-        end
-    else
-        # Collapse mode: fuse all source PGs into one
-        source_pg_names = String[]
-        dim = 0
-        for source_layer in op.sources
-            state = cmp.reg[source_layer]
-            append!(source_pg_names, [record.name for record in state.pgs])
-            dim = state.dim
-        end
-        sort!(source_pg_names)
-
-        dest_name =
-            string(op.destination) *
-            "__" *
-            ophash(
-                first(source_pg_names),
-                source_pg_names[2:end];
-                operation=:union,
-                parameters=(dim,)
+    haskey(cmp.reg, op.destination) &&
+        op.destination ∉ op.sources &&
+        throw(
+            ArgumentError(
+                "a Fuse destination that already exists must be included among its sources"
             )
-        new_record = PGRecord(dest_name, op.destination, nothing)
-        duplicate = generated_record_exists(cmp.reg, op.destination, dest_name)
-        duplicate ||
-            push!(cmp.ops, (dest_name, SolidModels.union_geom!, (source_pg_names, dim)))
+        )
 
-        if haskey(cmp.reg, op.destination) && op.destination ∉ op.sources
-            _require_destination_dimension(cmp.reg, op.destination, dim)
-            # Append. An exact duplicate operation is a no-op: recompiling it must not copy
-            # geometry again or duplicate the layer's physical-group list.
-            existing_pgs = [
-                record.name for
-                record in cmp.reg[op.destination].pgs if !islocator(record.meta)
-            ]
-            if !duplicate && !isempty(existing_pgs)
+    dims = unique([cmp.reg[source].dim for source in op.sources])
+    length(dims) == 1 ||
+        throw(ArgumentError("fuse source layers must have equal dimensions"))
+    dim = only(dims)
+    source_pgs =
+        sort!([record.name for source in op.sources for record in cmp.reg[source].pgs])
+    isempty(source_pgs) && throw(ArgumentError("fuse requires at least one physical group"))
+
+    dest_name =
+        string(op.destination) *
+        "__" *
+        ophash(first(source_pgs), source_pgs[2:end]; operation=:union, parameters=(dim,))
+    push!(cmp.ops, (dest_name, SolidModels.union_geom!, (source_pgs, dim)))
+    for source in op.sources
+        source != op.destination && delete!(cmp.reg, source)
+    end
+    cmp.reg[op.destination] =
+        LayerState([PGRecord(dest_name, op.destination, nothing)], dim)
+    return nothing
+end
+
+function _replace_layer_prefix(name::String, source::Symbol, destination::Symbol)
+    prefix = string(source, "__")
+    startswith(name, prefix) || throw(
+        ArgumentError(
+            "physical-group name '$name' does not begin with layer prefix '$prefix'"
+        )
+    )
+    return string(destination, "__", chop(name; head=length(prefix), tail=0))
+end
+
+function _compile!(cmp::CompilerState, op::Heal)
+    state = cmp.reg[op.source]
+    if op.destination == op.source
+        for record in state.pgs
+            push!(cmp.ops, (record.name, SolidModels.union_geom!, (record.name, state.dim)))
+        end
+        return nothing
+    end
+
+    haskey(cmp.reg, op.destination) &&
+        _require_destination_dimension(cmp.reg, op.destination, state.dim)
+    new_records = [
+        PGRecord(
+            _replace_layer_prefix(record.name, op.source, op.destination),
+            op.destination,
+            record.meta
+        ) for record in state.pgs
+    ]
+    existing_names =
+        haskey(cmp.reg, op.destination) ?
+        Set(record.name for record in cmp.reg[op.destination].pgs) : Set{String}()
+    collision = findfirst(record -> record.name in existing_names, new_records)
+    isnothing(collision) || throw(
+        ArgumentError(
+            "healed physical-group name '$(new_records[collision].name)' already exists"
+        )
+    )
+
+    for (record, new_record) in zip(state.pgs, new_records)
+        push!(cmp.ops, (new_record.name, SolidModels.union_geom!, (record.name, state.dim)))
+    end
+    if haskey(cmp.reg, op.destination)
+        existing_pgs = [
+            record.name for record in cmp.reg[op.destination].pgs if !islocator(record.meta)
+        ]
+        if !isempty(existing_pgs)
+            for record in new_records
+                # Ensure added PGs don't have any overlap with existing PGs in the
+                # destination laye
                 push!(
                     cmp.ops,
                     (
-                        dest_name,
+                        record.name,
                         SolidModels.difference_geom!,
-                        (dest_name, existing_pgs, dim, dim),
+                        (record.name, existing_pgs, state.dim, state.dim),
                         :remove_object => true,
                         :remove_tool => false
                     )
                 )
             end
-            duplicate || push!(cmp.reg[op.destination].pgs, new_record)
-        else
-            cmp.reg[op.destination] = LayerState([new_record], dim)
         end
-
-        # Remove source layers from registry if they differ from dest
-        for source_layer in op.sources
-            source_layer != op.destination && delete!(cmp.reg, source_layer)
-        end
+        append!(cmp.reg[op.destination].pgs, new_records)
+    else
+        cmp.reg[op.destination] = LayerState(new_records, state.dim)
     end
-
+    delete!(cmp.reg, op.source)
     return nothing
 end
 
