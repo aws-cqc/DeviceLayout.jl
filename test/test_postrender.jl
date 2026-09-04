@@ -530,10 +530,11 @@ end
         )
     end
 
-    @testset "shared core: split_t_junctions! and mutual_node! agree on a fixture" begin
-        # Both are thin wrappers over the same RTree noding core. On a shared
-        # fixture, the asymmetric split_t_junctions!(A, B) must inject into A
-        # exactly what the symmetric mutual_node! injects into A from B.
+    @testset "shared core: (targets, sources) and Dict method agree on a fixture" begin
+        # All methods are thin wrappers over the same RTree noding core. On a
+        # shared fixture, the asymmetric split_t_junctions!(A, B) must inject
+        # into A exactly what the symmetric split_t_junctions!(::Dict) injects
+        # into A from B.
         T = typeof(1.0μm)
         mkA() = CurvilinearRegion(
             CurvilinearPolygon(
@@ -559,21 +560,22 @@ end
         tA = [mkA()]
         n_asym = split_t_junctions!(tA, [mkB()])
         groups = Dict(:a => [mkA()], :b => [mkB()])
-        SolidModels.mutual_node!(groups)
+        split_t_junctions!(groups)
         onA =
             q ->
                 isapprox(getx(q), 10.0μm; atol=1e-6μm) &&
                     isapprox(gety(q), 5.0μm; atol=1e-6μm)
         @test n_asym == 1
-        @test any(onA, points(tA[1].exterior))                 # via split_t_junctions!
-        @test any(onA, points(groups[:a][1].exterior))         # via mutual_node!
+        @test any(onA, points(tA[1].exterior))                 # via (targets, sources)
+        @test any(onA, points(groups[:a][1].exterior))         # via Dict method
     end
 
     @testset "corner vertex within tolerance of two edges goes to one edge only" begin
-        # Regression for a 30° corner at the origin: with default atol=1nm, a source
-        # vertex sitting 1.5nm along the bottom edge is also within 0.75nm perpendicular
-        # of the second edge (30° above +x). Without corner-shared dedup this would
-        # inject the same candidate onto both edges of the target, producing identical
+        # Regression for a 30° corner at the origin: a source vertex 3 nm along
+        # the bottom edge is also within 1.5 nm perpendicular of the second edge
+        # (30° above +x), so both edges' perp tests admit it at the default
+        # 2 nm atol. Without corner-shared dedup this would inject the same
+        # candidate onto both edges of the target, producing identical
         # non-consecutive vertices around the corner (a zero-length loopback).
         T = typeof(1.0μm)
         c30 = cosd(30) * 10.0μm
@@ -586,12 +588,12 @@ end
                 )
             )
         ]
-        # Source vertex 1.5nm = 0.0015μm along the bottom edge — within default atol
-        # of the second edge in perpendicular distance too.
+        # Source vertex 3 nm = 0.003 μm along the bottom edge — within default
+        # 2 nm atol of the second edge in perpendicular distance too.
         source = [
             CurvilinearRegion(
                 CurvilinearPolygon(
-                    Point{T}[p(0.0015μm, 0.0μm), p(0.1μm, -0.05μm), p(0.05μm, -0.05μm)]
+                    Point{T}[p(0.003μm, 0.0μm), p(0.1μm, -0.05μm), p(0.05μm, -0.05μm)]
                 )
             )
         ]
@@ -601,8 +603,310 @@ end
         @test length(ext_pts) == 4                              # 3 corners + 1 injection
         near_candidate =
             q ->
-                isapprox(getx(q), 0.0015μm; atol=1e-9μm) &&
+                isapprox(getx(q), 0.003μm; atol=1e-9μm) &&
                     isapprox(gety(q), 0.0μm; atol=1e-9μm)
         @test count(near_candidate, ext_pts) == 1               # not 2
+    end
+
+    @testset "self-noding (single-vector method) is equivalent to (v, v)" begin
+        # A ring of two boxes that meet at x=10 with A carrying an extra vertex
+        # at (10, 5) on the seam and B not — self-noding must inject (10, 5)
+        # onto B's left edge.
+        T = typeof(1.0μm)
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[
+                    p(0μm, 0μm),
+                    p(10μm, 0μm),
+                    p(10μm, 5μm),
+                    p(10μm, 10μm),
+                    p(0μm, 10μm)
+                ]
+            )
+        )
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[p(10μm, 0μm), p(20μm, 0μm), p(20μm, 10μm), p(10μm, 10μm)]
+            )
+        )
+        regions = [A, B]
+        n = split_t_junctions!(regions)                          # single-argument form
+        @test n == 1                                             # A's extra vertex → B
+        # B (index 2) picked up (10, 5).
+        b_pts = points(regions[2].exterior)
+        @test any(
+            q ->
+                isapprox(getx(q), 10μm; atol=1e-6μm) && isapprox(gety(q), 5μm; atol=1e-6μm),
+            b_pts
+        )
+    end
+
+    # ─── AbstractDict (symmetric all-pairs) method ─────────────────────────
+
+    @testset "Dict method makes two adjacent groups symmetric on a shared edge" begin
+        T = typeof(1.0μm)
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[p(0μm, 0μm), p(10μm, 0μm), p(10μm, 10μm), p(0μm, 10μm)]
+            )
+        )
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[
+                    p(10μm, 0μm),
+                    p(20μm, 0μm),
+                    p(20μm, 10μm),
+                    p(10μm, 10μm),
+                    p(10μm, 5μm)
+                ]
+            )
+        )
+        groups = Dict(:a => [A], :b => [B])
+        n = split_t_junctions!(groups)
+        @test n == 1
+        a_pts = points(groups[:a][1].exterior)
+        @test any(
+            q ->
+                isapprox(getx(q), 10μm; atol=1e-6μm) && isapprox(gety(q), 5μm; atol=1e-6μm),
+            a_pts
+        )
+        @test length(a_pts) == 5
+        b_pts = points(groups[:b][1].exterior)
+        @test any(
+            q ->
+                isapprox(getx(q), 10μm; atol=1e-6μm) && isapprox(gety(q), 5μm; atol=1e-6μm),
+            b_pts
+        )
+    end
+
+    @testset "Dict method is idempotent" begin
+        T = typeof(1.0μm)
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[p(0μm, 0μm), p(10μm, 0μm), p(10μm, 10μm), p(0μm, 10μm)]
+            )
+        )
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[
+                    p(10μm, 0μm),
+                    p(20μm, 0μm),
+                    p(20μm, 10μm),
+                    p(10μm, 10μm),
+                    p(10μm, 5μm)
+                ]
+            )
+        )
+        groups = Dict(:a => [A], :b => [B])
+        @test split_t_junctions!(groups) == 1
+        @test split_t_junctions!(groups) == 0
+    end
+
+    @testset "Dict method no-op when groups don't touch" begin
+        T = typeof(1.0μm)
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[p(0μm, 0μm), p(10μm, 0μm), p(10μm, 10μm), p(0μm, 10μm)]
+            )
+        )
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[
+                    p(100μm, 100μm),
+                    p(110μm, 100μm),
+                    p(110μm, 110μm),
+                    p(100μm, 110μm)
+                ]
+            )
+        )
+        groups = Dict(:a => [A], :b => [B])
+        @test split_t_junctions!(groups) == 0
+    end
+
+    @testset "Dict method splits a Turn at a foreign vertex on the arc" begin
+        T = typeof(1.0μm)
+        R = 10.0μm
+        turn = Paths.Turn(90°, R, α0=90°, p0=p(R, 0.0μm))
+        A = CurvilinearRegion(
+            CurvilinearPolygon(Point{T}[p(R, 0.0μm), p(0.0μm, R), p(R, R)], [turn], [1])
+        )
+        mid = p(R * cos(π / 4), R * sin(π / 4))
+        B = CurvilinearRegion(
+            CurvilinearPolygon(Point{T}[mid, p(20.0μm, 20.0μm), p(20.0μm, 0.0μm)])
+        )
+        groups = Dict(:a => [A], :b => [B])
+        n = split_t_junctions!(groups)
+        @test n >= 1
+        @test length(groups[:a][1].exterior.curves) >= 2
+        @test all(c -> c isa Paths.Turn, groups[:a][1].exterior.curves)
+    end
+
+    @testset "Dict method injects across three groups meeting at a boundary" begin
+        T = typeof(1.0μm)
+        bottom = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[
+                    p(0μm, 0μm),
+                    p(10μm, 0μm),
+                    p(10μm, 10μm),
+                    p(5μm, 10μm),
+                    p(0μm, 10μm)
+                ]
+            )
+        )
+        middle = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[p(0μm, 10μm), p(10μm, 10μm), p(10μm, 20μm), p(0μm, 20μm)]
+            )
+        )
+        groups = Dict(:bottom => [bottom], :middle => [middle])
+        n = split_t_junctions!(groups)
+        @test n == 1
+        @test any(
+            q ->
+                isapprox(getx(q), 5μm; atol=1e-6μm) && isapprox(gety(q), 10μm; atol=1e-6μm),
+            points(groups[:middle][1].exterior)
+        )
+    end
+
+    @testset "Dict method empty groups is a no-op" begin
+        T = typeof(1.0μm)
+        groups = Dict{Symbol, Vector{CurvilinearRegion{T}}}()
+        @test split_t_junctions!(groups) == 0
+        groups2 = Dict(:a => CurvilinearRegion{T}[])
+        @test split_t_junctions!(groups2) == 0
+    end
+
+    @testset "Dict method atol is unit-safe (same physical distance regardless of input unit)" begin
+        function build_pair(u, x_off)
+            T = typeof(1.0u)
+            A = CurvilinearRegion(
+                CurvilinearPolygon(
+                    Point{T}[
+                        Point(0.0u, 0.0u),
+                        Point(10000.0u, 0.0u),
+                        Point(10000.0u, 10000.0u),
+                        Point(0.0u, 10000.0u)
+                    ]
+                )
+            )
+            B = CurvilinearRegion(
+                CurvilinearPolygon(
+                    Point{T}[
+                        Point(10000.0u, 0.0u),
+                        Point(20000.0u, 0.0u),
+                        Point(20000.0u, 10000.0u),
+                        Point(10000.0u, 10000.0u),
+                        Point((10000.0 + x_off)u, 5000.0u)
+                    ]
+                )
+            )
+            return Dict(:a => [A], :b => [B])
+        end
+        @test split_t_junctions!(build_pair(nm, 1.0)) == 1
+        @test split_t_junctions!(build_pair(μm, 0.001)) == 1
+        @test split_t_junctions!(build_pair(nm, 5.0)) == 0
+        @test split_t_junctions!(build_pair(μm, 0.005)) == 0
+    end
+
+    @testset "Dict method dedups near-coincident foreign vertices on an edge" begin
+        T = typeof(1.0nm)
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[
+                    Point(0.0nm, 0.0nm),
+                    Point(10000.0nm, 0.0nm),
+                    Point(10000.0nm, 10000.0nm),
+                    Point(0.0nm, 10000.0nm)
+                ]
+            )
+        )
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[
+                    Point(0.0nm, -10000.0nm),
+                    Point(10000.0nm, -10000.0nm),
+                    Point(10000.0nm, 0.0nm),
+                    Point(5001.0nm, 0.0nm),
+                    Point(5000.0nm, 0.0nm),
+                    Point(0.0nm, 0.0nm)
+                ]
+            )
+        )
+        groups = Dict(:a => [A], :b => [B])
+        @test split_t_junctions!(groups) == 1
+    end
+
+    @testset "Dict method keeps two well-separated foreign vertices on one edge" begin
+        T = typeof(1.0μm)
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[p(0μm, 0μm), p(20μm, 0μm), p(20μm, 20μm), p(0μm, 20μm)]
+            )
+        )
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[
+                    p(0μm, -20μm),
+                    p(20μm, -20μm),
+                    p(20μm, 0μm),
+                    p(15μm, 0μm),
+                    p(5μm, 0μm),
+                    p(0μm, 0μm)
+                ]
+            )
+        )
+        groups = Dict(:a => [A], :b => [B])
+        @test split_t_junctions!(groups) == 2
+        a_pts = points(groups[:a][1].exterior)
+        @test any(
+            q -> isapprox(getx(q), 5μm; atol=1e-6μm) && isapprox(gety(q), 0μm; atol=1e-6μm),
+            a_pts
+        )
+        @test any(
+            q ->
+                isapprox(getx(q), 15μm; atol=1e-6μm) && isapprox(gety(q), 0μm; atol=1e-6μm),
+            a_pts
+        )
+    end
+
+    @testset "Dict method injects a foreign vertex into a hole edge" begin
+        T = typeof(1.0μm)
+        ext = CurvilinearPolygon(
+            Point{T}[p(0μm, 0μm), p(30μm, 0μm), p(30μm, 30μm), p(0μm, 30μm)]
+        )
+        hole = CurvilinearPolygon(
+            Point{T}[p(10μm, 10μm), p(10μm, 20μm), p(20μm, 20μm), p(20μm, 10μm)]
+        )
+        A = CurvilinearRegion(ext, [hole])
+        B = CurvilinearRegion(
+            CurvilinearPolygon(Point{T}[p(20μm, 15μm), p(25μm, 12μm), p(25μm, 18μm)])
+        )
+        groups = Dict(:a => [A], :b => [B])
+        n = split_t_junctions!(groups)
+        @test n >= 1
+        hole_pts = points(groups[:a][1].holes[1])
+        @test any(
+            q ->
+                isapprox(getx(q), 20μm; atol=1e-6μm) &&
+                    isapprox(gety(q), 15μm; atol=1e-6μm),
+            hole_pts
+        )
+    end
+
+    @testset "Dict method leaves an untouched curve intact (no foreign split)" begin
+        T = typeof(1.0μm)
+        R = 10.0μm
+        turn = Paths.Turn(90°, R, α0=90°, p0=p(R, 0.0μm))
+        A = CurvilinearRegion(
+            CurvilinearPolygon(Point{T}[p(R, 0.0μm), p(0.0μm, R), p(R, R)], [turn], [1])
+        )
+        B = CurvilinearRegion(
+            CurvilinearPolygon(Point{T}[p(100μm, 100μm), p(110μm, 100μm), p(110μm, 110μm)])
+        )
+        groups = Dict(:a => [A], :b => [B])
+        @test split_t_junctions!(groups) == 0
+        @test length(groups[:a][1].exterior.curves) == 1
+        @test groups[:a][1].exterior.curves[1] isa Paths.Turn
     end
 end
