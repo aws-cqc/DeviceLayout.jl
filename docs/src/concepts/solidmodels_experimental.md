@@ -93,7 +93,8 @@ The public operation types are:
 |:--|:--|
 | `Extrude(layer)` | Extrude a source-stack layer using its configured thickness. |
 | `Difference(destination, object, tools)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector. Follow it with `Remove` to remove inputs. |
-| `Fuse(source)` or `Fuse(destination, sources)` | Self-heal one source in place, or union grouped source layers into a destination. Multiple sources must be a tuple or vector. |
+| `Fuse(source)` or `Fuse(destination, sources)` | Collapse every PG in one or more source layers into one generated destination PG. Existing destinations must be included among the grouped sources. |
+| `Heal(source)` or `Heal(destination, source)` | Union each PG in one source independently, preserving its identity and metadata. Assign mode replaces only the layer-name prefix and may append to an existing destination. |
 | `Interface(destination, object, tool)` | Resolve a deferred interface after fragmentation. |
 | `RestrictTo(volume)` | Restrict the model to a 3D bounding-volume layer containing exactly one physical group. |
 | `Boundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries. |
@@ -102,15 +103,21 @@ The public operation types are:
 | `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. Three-dimensional sources are unsupported. |
 | `Periodic(first, second)` | Pair two 2D periodic layers containing exactly one physical group each. |
 
-A destination equal to a source layer replaces that layer for boundary, translation,
-revolution, and single-source union operations. A new destination creates a generated layer;
-an existing unrelated destination appends distinct content-addressed physical groups.
-Difference also supports replacing its object or a tool layer. Multi-source union consumes
-its source layers, and `Interface` creates or appends a deferred interface layer. Generated
-destinations need not appear in `SourceStack`, but every referenced source must exist in the
-compiler registry when the operation is reached. Typed constructors reject malformed
-operations before compilation, while unavailable source layers and incompatible destination
-dimensions are rejected before Gmsh rendering begins.
+`Fuse` always consumes all source PGs and creates one new identity. For example,
+`Fuse(:metal)` collapses one layer in place, while
+`Fuse(:metal, (:metal, :added_metal))` explicitly includes an existing destination among
+the layers being collapsed. `Heal(:metal)` instead heals each PG in place without changing
+its identity. `Heal(:clean_metal, :metal)` moves those healed PGs to another layer by
+replacing only their `metal__` name prefix; assigning to an existing destination appends the
+healed PGs while preserving existing records.
+
+A destination equal to a source layer also replaces that layer for boundary, translation,
+and revolution operations. Difference supports replacing its object or a tool layer, and
+`Interface` creates or appends a deferred interface layer. Generated destinations need not
+appear in `SourceStack`, but every referenced source must exist in the compiler registry when
+the operation is reached. Typed constructors reject malformed operations before compilation,
+while unavailable source layers and incompatible destination dimensions are rejected before
+Gmsh rendering begins.
 
 The schematic renderer builds a private geometry/reference copy. It does not mutate the
 input schematic or component geometry caches. Each graph-node placement prefixes nonempty
