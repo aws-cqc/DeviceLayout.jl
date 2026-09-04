@@ -103,10 +103,8 @@ end
     missing = CoordinateSystem("missing", μm)
     place!(missing, Rectangle(1μm, 1μm), EntityMeta(:unknown; name="bad", index=4))
     @test_throws ArgumentError render!(Cell("missing", μm), missing, stack)
-    registry = SolidModelsExperimental.initial_registry(
-        SolidModelsExperimental._entity_metas(cs),
-        stack
-    )
+    registry =
+        SolidModelsExperimental.initial_registry(EntityMeta[element_metadata(cs)...], stack)
     @test !haskey(registry, :art_only)
     @test haskey(registry, :second)
 end

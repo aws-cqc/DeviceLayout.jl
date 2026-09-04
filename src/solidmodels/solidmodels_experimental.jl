@@ -11,10 +11,11 @@ using DeviceLayout: Coordinate, GDSMeta, μm, ustrip
 using ..SolidModels
 using ..SolidModels: SolidModel, _stp_float
 
-import DeviceLayout: datatype, gdslayer, layer, layerindex, name, render!
+import DeviceLayout: layer, layerindex, name, render!
 
 include("experimental/entitymeta.jl")
 include("experimental/stack.jl")
+include("experimental/artwork.jl")
 include("experimental/compiler.jl")
 include("experimental/locators.jl")
 include("experimental/serialization.jl")
@@ -24,91 +25,6 @@ using Logging: with_logger
 import DeviceLayout: element_metadata, elements
 import DeviceLayout.SchematicDrivenLayout:
     Schematic, check_render_strict, close_logfile, reopen_logfile
-
-const _EXTERIOR_BOUNDARY_LAYERS = Dict(
-    ("X", "min") => :EXTBND_XMIN,
-    ("X", "max") => :EXTBND_XMAX,
-    ("Y", "min") => :EXTBND_YMIN,
-    ("Y", "max") => :EXTBND_YMAX,
-    ("Z", "min") => :EXTBND_ZMIN,
-    ("Z", "max") => :EXTBND_ZMAX
-)
-
-"""
-    exterior_boundaries(bounding_volume_layer::Symbol) -> Vector{Boundary}
-
-Return operations extracting all six axis-aligned exterior faces of
-`bounding_volume_layer` into `:EXTBND_XMIN`, `:EXTBND_XMAX`, `:EXTBND_YMIN`,
-`:EXTBND_YMAX`, `:EXTBND_ZMIN`, and `:EXTBND_ZMAX`.
-"""
-function exterior_boundaries(bounding_volume_layer::Symbol)
-    operations = Boundary[]
-    for direction in ("X", "Y", "Z"), position in ("min", "max")
-        destination = _EXTERIOR_BOUNDARY_LAYERS[(direction, position)]
-        push!(operations, Boundary(destination, bounding_volume_layer; direction, position))
-    end
-    return operations
-end
-
-function _entity_metas(cs)
-    metas = EntityMeta[]
-    for (subcs, _) in DeviceLayout.traversal(cs)
-        for meta in element_metadata(subcs)
-            meta isa EntityMeta && push!(metas, meta)
-        end
-    end
-    return metas
-end
-
-function _map_artwork_meta(
-    stack::SourceStack,
-    level_increment::GDSMeta,
-    apply_increment::Bool
-)
-    return m -> begin
-        sl = sourcelayer(m, stack)
-        isnothing(sl.gds_meta) && return nothing
-        apply_increment || return sl.gds_meta
-        delta = first(sl.level) - 1
-        return GDSMeta(
-            gdslayer(sl.gds_meta) + delta * gdslayer(level_increment),
-            datatype(sl.gds_meta) + delta * datatype(level_increment)
-        )
-    end
-end
-
-"""
-    render!(
-        cell,
-        cs,
-        stack::SourceStack;
-        levels=[1],
-        level_increment=GDSMeta(0, 0),
-        kwargs...
-    )
-
-Render `EntityMeta` artwork using the GDS mapping stored in `stack`. Layers with
-`isnothing(gds_meta)` are omitted independently of `solidmodel` visibility. Metadata
-indices do not alter datatypes.
-"""
-function render!(
-    cell::DeviceLayout.Cell,
-    cs,
-    stack::SourceStack;
-    levels=[1],
-    level_increment=GDSMeta(0, 0),
-    kwargs...
-)
-    selected_levels = collect(levels)
-    isempty(selected_levels) &&
-        throw(ArgumentError("levels must contain at least one level"))
-    for meta in _entity_metas(cs)
-        sourcelayer(meta, stack)
-    end
-    apply_increment = length(levels) > 1
-    map_meta = _map_artwork_meta(stack, level_increment, apply_increment)
-    return DeviceLayout.render!(cell, cs; map_meta, kwargs...)
-end
 
 # ─── 2D PG deduplication ─────────────────────────────────────────────────────
 
@@ -435,16 +351,6 @@ function _map_meta(target::SolidModelTarget)
     end
 end
 
-function _extrusions(stack::SourceStack, reg::LayerRegistry)
-    operations = LayerOp[]
-    for (layer_name, source_layer) in stack.layers
-        haskey(reg, layer_name) || continue
-        iszero(thickness(source_layer, stack)) && continue
-        push!(operations, Extrude(layer_name))
-    end
-    return operations
-end
-
 function _retained_physical_groups(reg::LayerRegistry)
     retained = Set{Tuple{String, Int}}()
     for state in values(reg)
@@ -588,7 +494,7 @@ function render!(
             # Seed compiler state with the physical groups produced directly by artwork.
             registry = initial_registry(metas, target.stack)
             # Prepend required source-layer extrusions to the user-supplied operation schedule.
-            layer_ops = vcat(_extrusions(target.stack, registry), target.ops)
+            layer_ops = vcat(extrusions(target.stack, registry), target.ops)
             # Compile layer operations and defer interface discovery until after fragmentation.
             pg_operations, registry, deferred_interfaces =
                 compile_ops(layer_ops, target.stack, registry)
