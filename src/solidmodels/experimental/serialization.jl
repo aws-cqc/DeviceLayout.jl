@@ -37,7 +37,8 @@ end
         lumped_port_directions
     ) -> Dict{String, Any}
 
-Serialize the finalized solid model metadata to a JSON-compatible dictionary.
+Serialize the finalized solid model to a schema-version `1.0.0`, JSON-compatible
+metadata dictionary. Length values are expressed in micrometers.
 """
 function serialize_metadata(
     registry::LayerRegistry,
