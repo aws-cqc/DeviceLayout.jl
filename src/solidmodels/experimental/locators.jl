@@ -45,26 +45,9 @@ function _containing_entity_tag(locator::LocatorRecord, entity_rtree; tol=1e-6)
     return found_tag
 end
 
-"""
-    add_terminals!(
-        sm::SolidModel,
-        registry::LayerRegistry,
-        stack::SourceStack,
-        locators::Vector{LocatorRecord},
-        bbox_cache::Dict{Int32, NTuple{6, Float64}}
-    )
-
-Identify electrostatic terminals and ground via connected components of metal surfaces.
-Locator positions are matched to CCs using exact point-in-surface queries
-(`gmsh.model.isInside`). Ground locators designate the CCs reported as ground. CCs with
-no locators at all emit a warning.
-
-Returns a named tuple `(terminals, ground, cc_entity_tags)` where:
-
-  - `terminals::Dict{String, Vector{String}}`: CC name → locator names (non-ground CCs only)
-  - `ground::Vector{String}`: CC names designated as ground
-  - `cc_entity_tags::Dict{String, Vector{Int32}}`: CC name → surface entity tags
-"""
+# Identify electrostatic terminals and ground from connected metal components. Locator
+# positions are matched with exact point-in-surface queries. Return terminal locator names,
+# ground component names, and the surface tags in each connected component.
 function add_terminals!(
     sm::SolidModel,
     registry::LayerRegistry,
@@ -162,20 +145,9 @@ end
 
 # ─── Tag locator resolution ──────────────────────────────────────────────────
 
-"""
-    add_tagged_pgs!(sm, registry, locators, deferred_interfaces, bbox_cache)
-        -> Vector{Tuple{String, String, Symbol}}
-
-After fragmentation, resolve Tag locators by finding the 2D surface entity that
-contains each locator's center point and creating a dedicated PG for it. The PG is named
-using `pgname` with the Tag locator's layer, name, and index, and is
-registered in the final registry under the locator's layer.
-
-For each Tag PG, any pending deferred interfaces whose object references the parent
-PG are duplicated with the Tag PG as object, so that `execute_deferred_interfaces!`
-naturally produces per-Tag interface PGs via the cross product. Return records containing
-each resolved Tag PG name, locator name, and layer.
-"""
+# Resolve Tag locators after fragmentation by creating a dedicated PG for the containing
+# 2D entity. Duplicate deferred interfaces that reference the parent PG so each Tag receives
+# corresponding interface PGs. Return the resolved PG name, locator name, and layer.
 function add_tagged_pgs!(
     sm::SolidModel,
     registry::LayerRegistry,

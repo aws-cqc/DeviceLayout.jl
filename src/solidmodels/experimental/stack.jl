@@ -3,9 +3,14 @@
                 contour_only=false, keep_interior=true, gds_meta=nothing,
                 solidmodel=true)
 
-Describes one symbol-keyed source layer. `isnothing(gds_meta)` hides the layer only
-from artwork; `solidmodel=false` hides it only from solid-model geometry and metadata.
-A paired level derives its effective thickness from its [`SourceStack`](@ref).
+Describe one symbol-keyed source layer. Set `material` to `METAL`, `DIELECTRIC`, or
+`NULL` to classify the solid-model region.
+`level` selects an assembly level; a pair extrudes between two levels and derives its
+effective thickness from the [`SourceStack`](@ref). `height` offsets the selected level,
+while `thickness` sets the explicit extrusion distance for a single level. `contour_only`
+creates a swept shell, and `keep_interior=false` retains only boundary geometry.
+`gds_meta=nothing` hides the layer only from artwork; `solidmodel=false` hides it only from
+solid-model geometry and metadata.
 """
 struct SourceLayer{T <: Coordinate}
     material::Material
@@ -51,7 +56,8 @@ end
 """
     SourceStack(layer_pairs...; levels)
 
-Collection of source layers and assembly-level z coordinates. Length coordinates must be
+Collect symbol-keyed [`SourceLayer`](@ref) pairs and assembly-level z coordinates. Every
+level referenced by a source layer must be present in `levels`. Length coordinates must be
 either all unitful or all unitless.
 """
 struct SourceStack{L <: SourceLayer, T <: Coordinate}
@@ -96,11 +102,7 @@ function SourceStack(layer_pairs::Pair{Symbol, <:SourceLayer}...; levels)
     return SourceStack(Dict(layer_pairs), Dict(levels))
 end
 
-"""
-    sourcelayer(layer, stack::SourceStack)
-
-Return the source layer identified by an `EntityMeta`, layer name, or source layer.
-"""
+# Return the source layer identified by a layer symbol or EntityMeta.
 function sourcelayer(layer::Symbol, stack::SourceStack)
     haskey(stack.layers, layer) ||
         throw(ArgumentError("layer $layer does not exist in source stack"))
@@ -108,21 +110,13 @@ function sourcelayer(layer::Symbol, stack::SourceStack)
 end
 sourcelayer(m::EntityMeta, stack::SourceStack) = sourcelayer(m.layer, stack)
 
-"""
-    layer_z(layer, stack::SourceStack)
-
-Return the source z coordinate for a layer name or source layer.
-"""
+# Return the source z coordinate for a layer symbol or SourceLayer.
 function layer_z(layer::SourceLayer, stack::SourceStack)
     return stack.levels[first(layer.level)] + first(layer.height)
 end
 layer_z(layer::Symbol, stack::SourceStack) = layer_z(sourcelayer(layer, stack), stack)
 
-"""
-    thickness(sl::SourceLayer, stack::SourceStack)
-
-Return a source layer's explicit or level-pair-derived extrusion thickness.
-"""
+# Return a source layer's explicit or level-pair-derived extrusion thickness.
 function thickness(layer::SourceLayer, stack::SourceStack)
     layer.level isa Pair || return layer.thickness
     source_z = stack.levels[first(layer.level)] + first(layer.height)

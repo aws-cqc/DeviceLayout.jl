@@ -112,21 +112,9 @@ end
 
 # ─── 2D PG deduplication ─────────────────────────────────────────────────────
 
-"""
-    _deduplicate_2d_pgs!(sm, registry)
-
-Ensure each mesh face belongs to exactly one 2D physical group by splitting PGs that
-span multiple layers into layer-homogeneous sub-PGs.
-
-For each 2D entity, computes its "membership signature" (the set of layers whose PGs
-contain it). PGs where all entities share a single signature are left unchanged. PGs
-with mixed signatures are split into sub-PGs, one per distinct signature. Each sub-PG
-is then cross-referenced into all layers of its signature, and duplicate entity
-assignments are removed from the original PGs.
-
-After this step, the mesh has non-overlapping 2D elements and each layer's PG list in
-the registry can recover its full original surface.
-"""
+# Split 2D PGs with mixed layer-membership signatures into layer-homogeneous sub-PGs.
+# Cross-reference each sub-PG from every layer in its signature so the registry can recover
+# each layer's complete surface without assigning mesh faces to overlapping PGs.
 function _deduplicate_2d_pgs!(sm::SolidModel, registry::LayerRegistry)
     # Phase 1: Build entity → layer membership map
     pg_to_layer = Dict{String, Symbol}()
@@ -286,12 +274,8 @@ function _deduplicate_2d_pgs!(sm::SolidModel, registry::LayerRegistry)
     return split_results
 end
 
-"""
-    _split_shared_cc_pgs!(sm, registry, split_results, cc_entity_tags)
-
-Split any 2D PG containing entities from multiple CCs into content-addressed sub-PGs and
-update the registry and prior layer-partition results to reference them.
-"""
+# Split 2D PGs spanning multiple connected components into content-addressed sub-PGs and
+# update the registry and prior layer-partition results.
 function _split_shared_cc_pgs!(
     sm::SolidModel,
     registry::LayerRegistry,
@@ -383,13 +367,8 @@ function _check_pgs_registered(sm::SolidModel, registry::LayerRegistry)
     return nothing
 end
 
-"""
-    _warn_potential_overlaps(registry::LayerRegistry, stack::SourceStack)
-
-Emit warnings for 3D source layers with non-NULL material that remain in the final
-registry and have overlapping z-ranges. This pattern often leads to overlapping volumes
-that crash the OCC kernel during fragmentation.
-"""
+# Warn when non-NULL 3D source layers remaining in the registry have overlapping z-ranges,
+# a pattern that can create overlapping volumes and fail during OCC fragmentation.
 function _warn_potential_overlaps(registry::LayerRegistry, stack::SourceStack)
     # Collect all 3D source layers with material in the final registry
     extruded_source_layers = Set{Symbol}()
@@ -431,18 +410,11 @@ function _warn_potential_overlaps(registry::LayerRegistry, stack::SourceStack)
 end
 
 """
-    struct SolidModelTarget{L <: SourceLayer, T <: Coordinate} <: SchematicDrivenLayout.Target
-        stack::SourceStack{L, T}
-        ops::Vector{LayerOp}
-    end
+    SolidModelTarget(stack)
+    SolidModelTarget(stack, operations)
 
-    SolidModelTarget(stack::SourceStack)
-    SolidModelTarget(stack::SourceStack, ops::AbstractVector{<:LayerOp})
-
-Opt-in schematic target for the simulation-agnostic solid-model pipeline.
-
-The target stores the source `stack` and layer-level operations `ops`. Rendering behavior
-is supplied by `render!` keywords.
+Opt-in schematic target for the simulation-agnostic solid-model pipeline. Store the
+[`SourceStack`](@ref) and ordered layer operations used by schematic [`render!`](@ref).
 """
 struct SolidModelTarget{L <: SourceLayer, T <: Coordinate} <: SchematicDrivenLayout.Target
     stack::SourceStack{L, T}
@@ -490,14 +462,9 @@ function _prefixed_meta(m::EntityMeta, prefix::String)
 end
 _prefixed_meta(m::DeviceLayout.Meta, ::String) = m
 
-"""
-    _prefix_placement_names!(sch::Schematic)
-
-Create placement-specific metadata copies under each graph node. A node prefix is applied
-recursively to its component geometry, but not to child graph-node coordinate systems;
-those receive their own stable node prefix. This deliberately implements the v1 top-level
-prefix contract rather than arbitrary-depth composite paths.
-"""
+# Create placement-specific metadata copies under each graph node. Apply a node prefix
+# recursively within its component geometry, while child graph nodes receive their own
+# stable prefix. This implements the v1 top-level prefix contract.
 function _prefix_placement_names!(sch::Schematic)
     ref_to_node_id = IdDict{Any, String}(ref => node.id for (node, ref) in sch.ref_dict)
     for (node, node_ref) in sch.ref_dict
@@ -531,8 +498,10 @@ end
     ) -> Dict{String, Any}
 
 Build and render a private working copy of `sch`, finalize post-fragmentation discovery,
-and return schema-v1 metadata. This method performs no metadata or model artifact I/O;
-write the returned dictionary explicitly when persistence is desired.
+and return schema-version `1.0.0` metadata. Set `strict=:error` to fail on logged errors,
+`strict=:warn` to fail on warnings or errors, or `strict=:no` to continue after recoverable
+diagnostics. This method performs no metadata or model artifact I/O; write the returned
+dictionary explicitly when persistence is desired.
 """
 function render!(
     sm::SolidModel,
@@ -694,15 +663,9 @@ function render!(
     end
 end
 
-"""
-    remap_to_visualization_pgs!(sm::SolidModel, metadata::AbstractDict)
-
-Replace the chopped 2D physical groups in `sm` with a smaller set of human-readable PGs
-set by the layer assignments in `metadata`.
-
-The resulting model is **not** Palace-compatible (entities will belong to multiple PGs,
-producing duplicated element lines).
-"""
+# Replace chopped 2D PGs with a smaller human-readable set derived from serialized layer
+# assignments. The result is for visualization only and is not Palace-compatible because
+# entities can belong to multiple PGs.
 function remap_to_visualization_pgs!(sm::SolidModel, metadata::AbstractDict)
     layers = get(metadata, "layers", Dict{String, Any}())
     terminals = get(metadata, "terminals", Dict{String, Any}())

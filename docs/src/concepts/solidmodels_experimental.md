@@ -103,10 +103,11 @@ The public operation types are:
 | `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. Three-dimensional sources are unsupported. |
 | `Periodic(first, second)` | Pair two 2D periodic layers containing exactly one physical group each. |
 
-`Fuse` always consumes all source PGs and creates one new identity. For example,
-`Fuse(:metal)` collapses one layer in place, while
+`Fuse` always collapses all source PGs into one new identity. For example,
+`Fuse(:metal)` replaces one layer in place, while
 `Fuse(:metal, (:metal, :added_metal))` explicitly includes an existing destination among
-the layers being collapsed. `Heal(:metal)` instead heals each PG in place without changing
+the layers being collapsed and leaves `:added_metal` available unless a following `Remove`
+consumes it. `Heal(:metal)` instead heals each PG in place without changing
 its identity. `Heal(:clean_metal, :metal)` assigns healed PGs to another layer by replacing
 only their `metal__` name prefix; assigning to an existing destination appends the healed PGs
 while preserving both the source layer and existing destination records. Follow either
