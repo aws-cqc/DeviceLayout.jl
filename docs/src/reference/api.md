@@ -193,6 +193,7 @@
 ```@docs
     round_layer
     round_layer!
+    split_t_junctions!
 ```
 
 #### [Curvilinear geometry](@id api-curvilinear)

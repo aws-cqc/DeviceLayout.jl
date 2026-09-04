@@ -6,6 +6,16 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - `split_t_junctions!` (exported from `DeviceLayout`) injects foreign vertices onto edges
+    (straight or `Paths.Turn`/`Paths.BSpline`) using an `RTree`-based noding core, with three
+    methods: asymmetric `(targets, sources...)` for general 2D / GDS-gap use, single-argument
+    `(regions)` for self-noding shorthand, and symmetric all-pairs `(groups::AbstractDict)`
+    that injects each group's vertices onto every other group's edges — the form needed to
+    make adjacent physical groups conformal before `render_conformal!`. Curved edges are split
+    natively via `Paths.split`; no discretization.
+
 ### Fixed
 
   - Curve recovery (`union2d_curved` and friends) preserves arcs from path nodes styled with
