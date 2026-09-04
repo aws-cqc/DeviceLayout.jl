@@ -11,18 +11,14 @@ end
 
 const LayerRegistry = Dict{Symbol, LayerState}
 
-"""
-Supertype for typed layer-level solid-model operations.
-"""
+# Internal supertypes for typed layer-level operations.
 abstract type LayerOp end
-
-"""
-Supertype for layer-level Boolean operations.
-"""
 abstract type BooleanOp <: LayerOp end
 
 """
-`Extrude(layer)` extrudes a source layer using its `SourceStack` thickness.
+    Extrude(layer)
+
+Extrude a source layer using the thickness and contour behavior in its [`SourceLayer`](@ref).
 """
 struct Extrude <: LayerOp
     destination::Symbol
@@ -32,7 +28,8 @@ end
     Difference(destination, object, tools)
 
 Subtract one tool layer, or a grouped tuple or vector of tool layers, from `object`.
-Use adjacent [`Remove`](@ref) operations to remove inputs.
+Non-destination inputs remain available unless consumed by adjacent [`Remove`](@ref)
+operations.
 """
 struct Difference{N} <: BooleanOp
     destination::Symbol
@@ -54,7 +51,10 @@ Difference(dest::Symbol, object::Symbol, tools::AbstractVector{Symbol}) =
     Fuse(destination, sources)
 
 Collapse every physical group in one or more source layers into one generated physical
-group in `destination`.
+group in `destination`. Group multiple sources in a tuple or vector. An existing destination
+must be included among the sources. Out-of-place sources remain available unless consumed by
+adjacent [`Remove`](@ref) operations. The collapsed result has a new identity and no
+per-source entity metadata.
 """
 struct Fuse{N} <: BooleanOp
     destination::Symbol
@@ -73,8 +73,9 @@ Fuse(source::Symbol) = Fuse(source, (source,))
     Heal(source)
     Heal(destination, source)
 
-Heal (i.e. self-union) every physical group in one source layer independently, preserving
-its identity and metadata.
+Self-union every physical group in one source layer independently, preserving its identity
+and metadata. In-place healing replaces the source geometry. Assign mode changes only the
+layer-name prefix and preserves the source unless consumed by an adjacent [`Remove`](@ref).
 """
 struct Heal <: LayerOp
     destination::Symbol
@@ -83,7 +84,11 @@ end
 Heal(source::Symbol) = Heal(source, source)
 
 """
-`Interface(destination, object, tool)` extracts a deferred geometric interface.
+    Interface(destination, object, tool)
+
+Create a deferred interface between `object` and `tool`. Resolve it after fragmentation
+from shared boundary entities. Same-dimensional inputs produce an interface one dimension
+lower; mixed-dimensional inputs produce an interface at the lower input dimension.
 """
 struct Interface <: BooleanOp
     destination::Symbol
@@ -92,8 +97,9 @@ struct Interface <: BooleanOp
 end
 
 """
-`RestrictTo(volume)` restricts the model to a 3D bounding-volume layer containing
-exactly one physical group.
+    RestrictTo(volume)
+
+Restrict the model to a 3D bounding-volume layer containing exactly one physical group.
 """
 struct RestrictTo <: LayerOp
     volume::Symbol
@@ -103,7 +109,8 @@ end
     Boundary(destination, source; combined=true, oriented=true, recursive=false,
              direction="all", position="all")
 
-Extract the boundary of a source layer.
+Extract the boundary of `source` into `destination`. Use `direction` and `position` to
+select axis-aligned boundary entities.
 """
 struct Boundary <: LayerOp
     destination::Symbol
@@ -146,7 +153,8 @@ end
 """
     Translate(destination, source, dx, dy, dz; copy=true)
 
-Translate a layer, copying its entities by default.
+Translate `source` by `(dx, dy, dz)` into `destination`. Copy the entities before
+translation when `copy=true`.
 """
 struct Translate{X <: Coordinate, Y <: Coordinate, Z <: Coordinate} <: LayerOp
     destination::Symbol
@@ -166,8 +174,10 @@ Translate(
 ) = Translate(destination, source, dx, dy, dz, copy)
 
 """
-`Remove(source; remove_entities=true)` removes a layer from the model, or does nothing
-if the layer is absent.
+    Remove(source; remove_entities=true)
+
+Remove a layer from the model, or do nothing if it is absent. Preserve its geometric
+entities and remove only its physical groups when `remove_entities=false`.
 """
 struct Remove <: LayerOp
     source::Symbol
@@ -176,8 +186,11 @@ end
 Remove(source::Symbol; remove_entities::Bool=true) = Remove(source, remove_entities)
 
 """
-`Revolve(destination, source, origin, axis, angle)` sweeps a layer around an axis,
-retaining the swept entities at dimension `source_dimension + 1`.
+    Revolve(destination, source, origin, axis, angle)
+
+Sweep `source` through `angle` radians around the axis passing through `origin` in the
+specified axis direction. The destination dimension is one greater than the source
+dimension; 3D sources are unsupported.
 """
 struct Revolve <: LayerOp
     destination::Symbol
@@ -197,7 +210,10 @@ function Revolve(
 end
 
 """
-`Periodic(first, second)` pairs two 2D periodic layers containing one physical group each.
+    Periodic(first, second)
+
+Pair two parallel, axis-aligned 2D periodic layers containing exactly one physical group
+each.
 """
 struct Periodic <: LayerOp
     first::Symbol
@@ -302,18 +318,10 @@ function operation_pgs(graph::MetaGraphs.MetaDiGraph, operation::Integer)
     only(Graphs.outneighbors(graph, operation))
 end
 
-"""
-    execute_deferred_interfaces!(sm, deferred_interfaces)
-
-After fragmentation, compute interface PGs as set intersections of entity memberships.
-
-Handles two cases:
-
-  - Same-dimension (for example, 3D∩3D or 2D∩2D): the interface is the set of shared
-    boundary entities at dimension `dim - 1` (faces for volumes, curves for surfaces).
-  - Mixed-dimension (for example, 2D∩3D): the interface is the set of lower-dimensional
-    entities in one PG that are also boundary faces of entities in the other PG.
-"""
+# After fragmentation, compute interface PGs as set intersections of entity memberships.
+# Same-dimensional inputs produce shared boundary entities at dimension `dim - 1`;
+# mixed-dimensional inputs produce lower-dimensional entities on the higher-dimensional
+# boundary.
 function execute_deferred_interfaces!(sm::SolidModel, interfs::MetaGraphs.MetaDiGraph)
     Graphs.nv(interfs) == 0 && return nothing
 
@@ -515,20 +523,8 @@ struct CompilerState{S <: SourceStack}
     stack::S                                 # Source-layer geometry configuration
 end
 
-"""
-    compile_ops(ops::AbstractVector{<:LayerOp}, stack, registry)
-        -> (pg_ops, registry, deferred_interfaces)
-
-Compile layer-level operations into physical-group-level operations suitable for passing
-to DeviceLayout's `_postrender!`.
-
-Returns:
-
-  - `ops::Vector{Tuple}`: physical-group-level postrender operations
-  - `registry::LayerRegistry`: final state of the layer registry
-  - `deferred_interfaces::MetaGraphs.MetaDiGraph`: interface operations and unique PGs
-    evaluated after fragmentation
-"""
+# Compile layer operations into physical-group postrender operations, the final layer
+# registry, and the deferred-interface graph evaluated after fragmentation.
 function compile_ops(
     ops::AbstractVector{<:LayerOp},
     stack::SourceStack,
