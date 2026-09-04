@@ -27,7 +27,7 @@ end
         kwargs...
     )
 
-Render [`EntityMeta`](@ref) artwork using the GDS mapping stored in `stack`. Layers with
+Render `EntityMeta` artwork using the GDS mapping stored in `stack`. Layers with
 `gds_meta=nothing` are omitted independently of `solidmodel` visibility. Metadata indices
 do not alter datatypes.
 """
