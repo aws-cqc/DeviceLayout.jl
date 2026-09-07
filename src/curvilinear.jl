@@ -1580,7 +1580,7 @@ function _arc_arc_coordtype(::Type{T1}, ::Type{T2}) where {T1 <: Length, T2 <: L
         V = float(promote_type(T1, T2))
         zero(V)
         return V
-    catch
+    catch # upstream bug guard: `zero(V)` errors for same unit, mixed context on Unitful.jl <1.29
         N = float(promote_type(numtype(T1), numtype(T2)))
         return typeof(one(N) * unit(DeviceLayout.onemicron(T1)))
     end
