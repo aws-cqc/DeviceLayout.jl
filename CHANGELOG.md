@@ -6,12 +6,15 @@ The format of this changelog is based on
 
 ## Unreleased
 
+## 1.18.1 (2026-09-07)
+
 ### Fixed
 
   - Curve recovery (`union2d_curved` and friends) preserves arcs from path nodes styled with
     `Plain` or `OptionalStyle` (as produced by `not_simulated`/`only_simulated` and friends),
     which previously fell back to discretization.
   - The `Rounded` style now works on `Paths.Node` with `Straight` or `Turn` segments
+  - Fixed KeyError in `_collect_mesh_control_points!` when a group emits no samples
 
 ## 1.18.0 (2026-08-24)
 
