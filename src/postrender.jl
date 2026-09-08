@@ -173,35 +173,20 @@ end
 # Build an index over `groups`, an iterable of `(owner_id, vertices)` pairs.
 # `atol` is a length; it sets the padding of each vertex's query Rect and the
 # effective coincidence tolerance for on-edge tests downstream. Correctness is
-# provided by the RTree query in `_query_bbox` (all within-`atol` candidates
-# are returned) plus the perpendicular/on-curve residual in `_points_on_*`,
-# NOT by the nm-cell hash: two candidates within `atol` of each other can hash
-# to adjacent cells (opposite side of a cell boundary), and two candidates in
-# the same cell can be up to `sqrt(2)*atol` apart. The hash is a best-effort
-# fast path for bit-identical Clipper output on a group's own edges, where
-# multiple copies of the same integer-nm point collapse to a single slot;
-# other near-coincident cases are handled downstream by the per-edge dedup in
-# `_points_on_straight`/`_points_on_curve`.
+# provided entirely by the RTree query in `_query_bbox` (which returns every
+# candidate within `atol` of an edge's bbox) plus the perpendicular/on-curve
+# residual filter in `_points_on_*`, and by the along-edge min-gap dedup on
+# the hits. Duplicate coincident points from the caller therefore round-trip
+# harmlessly — the downstream dedup keeps one — so we index every vertex
+# verbatim rather than trying to pre-dedup here.
 function _build_vertex_index(groups, ::Type{T}; atol) where {T}
     atol_nm = _nm(atol)
-    cell = max(atol_nm, 1.0)
-    slot = Dict{Tuple{Int, Int}, Int}()   # nm-grid key → index into pts/owner
     pts = Point{T}[]
     owner = Int[]
     for (oid, verts) in groups
         for p in verts
-            key = (round(Int, _nm(getx(p)) / cell), round(Int, _nm(gety(p)) / cell))
-            i = get(slot, key, 0)
-            if i == 0
-                push!(pts, p)
-                push!(owner, oid)
-                slot[key] = length(pts)
-            end
-            # else: a vertex already hashes to this nm cell — keep the first Point.
-            # A shared-cell duplicate is treated as the same candidate for
-            # owner-filter purposes: shared vertices between groups are not
-            # "foreign" and shouldn't be injected across a boundary they already
-            # sit on.
+            push!(pts, p)
+            push!(owner, oid)
         end
     end
     tree = SpatialIndexing.RTree{Float64, 2}(Int)
@@ -353,7 +338,9 @@ function _points_on_curve(idx::_VertexIndex{T}, curve, exclude_owner::Int) where
     return out
 end
 
-# Collect every vertex of a region (exterior + holes) into `pts`.
+# Collect every vertex of a region (exterior + holes) into `pts`. A plain
+# `Polygon` is a single-contour region with no holes; both methods let the same
+# node-and-emit machinery accept either shape without duplication.
 function _collect_region_vertices!(
     pts::Vector{Point{T}},
     region::CurvilinearRegion{T}
@@ -365,10 +352,17 @@ function _collect_region_vertices!(
     return pts
 end
 
-# Collect per-edge candidate hits for a closed contour, and index-only sets for
-# corner-adjacency lookup. Returns `(straight_hits, curve_hits, index_sets)`.
-# `edge_extractor(k)` returns `pts[k], pts[k+1]` for straight edges (indexed by
-# start vertex). Curves are indexed by start vertex too, via `curve_at`.
+function _collect_region_vertices!(pts::Vector{Point{T}}, poly::Polygon{T}) where {T}
+    append!(pts, points(poly))
+    return pts
+end
+
+# Collect per-edge candidate hits for a closed contour. Each edge is keyed by
+# the index of its start vertex (`pts[k]` → `pts[k+1]`); a curve is present
+# when `haskey(curve_at, k)`, otherwise the edge is a straight segment.
+# Returns `(straight_hits, curve_hits, index_sets)`, where `index_sets[k]` is
+# the set of candidate indices seen on edge `k` — used by `_corner_skip_set`
+# to find candidates that landed on both adjacent edges of a shared corner.
 function _collect_contour_hits(
     pts::Vector{Point{T}},
     curve_at::Dict{Int, Int},
@@ -399,11 +393,11 @@ function _collect_contour_hits(
     return straight_hits, curve_hits, index_sets
 end
 
-# Build a corner-adjacency skip set for a closed contour: if the same
-# candidate `ci` was hit on edge `prev_k` AND edge `k` (which share vertex
-# `pts[k]`), and `ci` sits within `2·atol` of that shared corner, keep it on
-# whichever edge is geometrically nearer in perpendicular distance and skip
-# it on the other. Returned as `Set{(candidate_index, edge_index)}`.
+# Build a corner-adjacency skip set for a closed contour: whenever the same
+# candidate `ci` was hit on both edge `prev_k` AND edge `k` (which share
+# vertex `pts[k]`), keep it on whichever edge is geometrically nearer in
+# perpendicular distance and skip it on the other. Returned as
+# `Set{(candidate_index, edge_index)}`.
 #
 # The problematic case: a candidate a few nm off a sharp corner can be within
 # `atol` perpendicular of BOTH adjacent edges. Without this filter it would
@@ -417,21 +411,14 @@ function _corner_skip_set(
     idx::_VertexIndex{T}
 ) where {T}
     n = length(pts)
-    atol_nm = idx.atol_nm
-    corner_range_sq = (2 * atol_nm)^2
     corner_skip = Set{Tuple{Int, Int}}()
     for k = 1:n
         prev_k = mod1(k - 1, n)
         (haskey(index_sets, prev_k) && haskey(index_sets, k)) || continue
         prev_indices = index_sets[prev_k]
         cur_indices = index_sets[k]
-        corner_x = _nm(getx(pts[k]))
-        corner_y = _nm(gety(pts[k]))
         for ci in cur_indices
             (ci in prev_indices) || continue
-            cx = _nm(getx(idx.pts[ci]))
-            cy = _nm(gety(idx.pts[ci]))
-            ((cx - corner_x)^2 + (cy - corner_y)^2) <= corner_range_sq || continue
             perp_prev = _perp_to_edge(pts[prev_k], pts[k], idx.pts[ci])
             perp_cur = _perp_to_edge(pts[k], pts[mod1(k + 1, n)], idx.pts[ci])
             if perp_prev <= perp_cur
@@ -487,7 +474,10 @@ function _node_contour(
 ) where {T}
     pts = points(cpoly)
     n = length(pts)
-    n < 3 && return cpoly, 0
+    # A `CurvilinearPolygon` with `n == 2` is legitimate when both edges are
+    # curves (a full-turn Turn is split into two half-turns to avoid the n == 1
+    # degenerate); `n < 2` is the actual degenerate threshold.
+    n < 2 && return cpoly, 0
     curve_at = Dict{Int, Int}()   # start-vertex index → position in cpoly.curves
     for (k, csi) in enumerate(cpoly.curve_start_idx)
         curve_at[csi] = k
@@ -543,7 +533,9 @@ function _node_contour(
     return CurvilinearPolygon{T}(new_points, new_curves, new_csi), n_injected
 end
 
-# Node every contour (exterior + holes) of `region` against `idx`.
+# Node every contour (exterior + holes) of `region` against `idx`. A plain
+# `Polygon` is treated as a single-contour region via `_node_polygon`, so both
+# shapes plug into the same driver in the public API.
 function _node_region(region::CurvilinearRegion{T}, idx, exclude_owner) where {T}
     new_ext, n_ext = _node_contour(region.exterior, idx, exclude_owner)
     new_holes = CurvilinearPolygon{T}[]
@@ -557,6 +549,8 @@ function _node_region(region::CurvilinearRegion{T}, idx, exclude_owner) where {T
     total == 0 && return region, 0
     return CurvilinearRegion{T}(new_ext, new_holes), total
 end
+
+_node_region(poly::Polygon, idx, exclude_owner) = _node_polygon(poly, idx, exclude_owner)
 
 # Node a plain Polygon: collect straight-edge hits, apply corner-skip, rebuild.
 # Returns `(new_polygon, n_injected)`.
@@ -689,14 +683,14 @@ function split_t_junctions!(
     candidates = Point{T}[]
     for group in sources
         for poly in group
-            append!(candidates, points(poly))
+            _collect_region_vertices!(candidates, poly)
         end
     end
     isempty(candidates) && return 0
     idx = _build_vertex_index(((0, candidates),), T; atol)
     total = 0
     for (pi, poly) in enumerate(targets)
-        new_poly, n = _node_polygon(poly, idx, 0)
+        new_poly, n = _node_region(poly, idx, 0)
         if n > 0
             targets[pi] = new_poly
             total += n
@@ -717,7 +711,7 @@ split_t_junctions!(
 ) where {T} = split_t_junctions!(regions, regions; atol)
 
 """
-    split_t_junctions!(groups::AbstractDict{Symbol, <:AbstractVector}; atol=2nm) -> Int
+    split_t_junctions!(groups::AbstractDict; atol=2nm) -> Int
 
 Symmetric all-pairs form: for each entry in `groups`, inject onto its regions'
 edges the vertices owned by *other* groups. Every group is noded against every
@@ -726,6 +720,12 @@ to know the adjacency graph. Both sides of every shared boundary end up with
 the identical ordered vertex sequence, which is what
 [`SolidModels.render_conformal!`](@ref) needs its shared-edge cache to resolve
 a boundary to one OCC curve on both sides.
+
+The key type only needs to be sortable (deterministic ownership across
+runs); the values are iterables of [`CurvilinearRegion`](@ref) or
+[`Polygon`](@ref) in the same collection — the same conformal noding applies
+to plain 2D-layout groups (GDS-gap fix) as to curved-boolean groups (conformal
+render prep).
 
 Modifies each group's regions in place and returns the total number of
 vertices injected across all groups. Foreign-only (never injects a group's own
@@ -740,10 +740,7 @@ groups = Dict(:metal => metal_regions, :ground => gnd_regions, :ports => port_re
 split_t_junctions!(groups; atol=2nm)
 ```
 """
-function split_t_junctions!(
-    groups::AbstractDict{Symbol, <:AbstractVector};
-    atol=nothing
-) where {}
+function split_t_junctions!(groups::AbstractDict; atol=nothing)
     isempty(groups) && return 0
     T = _noding_coordinate_type(groups)
     isnothing(T) && return 0
@@ -777,7 +774,7 @@ function split_t_junctions!(
 end
 
 # Coordinate type of the first non-empty group, or `nothing` if all are empty.
-function _noding_coordinate_type(groups::AbstractDict{Symbol, <:AbstractVector})
+function _noding_coordinate_type(groups::AbstractDict)
     for (_, regions) in groups
         isempty(regions) || return coordinatetype(regions[1])
     end

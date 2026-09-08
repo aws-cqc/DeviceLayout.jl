@@ -909,4 +909,53 @@ end
         @test length(groups[:a][1].exterior.curves) == 1
         @test groups[:a][1].exterior.curves[1] isa Paths.Turn
     end
+
+    @testset "Dict method works with `Vector{Polygon}` values" begin
+        # The `AbstractDict` method also nodes plain-`Polygon` groups (the
+        # `_collect_region_vertices!(::Polygon)` + `_node_region(::Polygon)`
+        # plumbing routes both through the same code path).
+        T = typeof(1.0μm)
+        A = Polygon(Point{T}[p(0μm, 0μm), p(10μm, 0μm), p(10μm, 10μm), p(0μm, 10μm)])
+        B = Polygon(
+            Point{T}[
+                p(10μm, 0μm),
+                p(20μm, 0μm),
+                p(20μm, 10μm),
+                p(10μm, 10μm),
+                p(10μm, 5μm)
+            ]
+        )
+        groups = Dict(:a => [A], :b => [B])
+        n = split_t_junctions!(groups)
+        @test n == 1
+        @test any(
+            q ->
+                isapprox(getx(q), 10μm; atol=1e-6μm) && isapprox(gety(q), 5μm; atol=1e-6μm),
+            points(groups[:a][1])
+        )
+    end
+
+    @testset "Dict method key type only needs to be sortable" begin
+        # `AbstractDict` docs promise any sortable key type — verify a
+        # `String`-keyed dict works exactly like the `Symbol`-keyed one.
+        T = typeof(1.0μm)
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[p(0μm, 0μm), p(10μm, 0μm), p(10μm, 10μm), p(0μm, 10μm)]
+            )
+        )
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[
+                    p(10μm, 0μm),
+                    p(20μm, 0μm),
+                    p(20μm, 10μm),
+                    p(10μm, 10μm),
+                    p(10μm, 5μm)
+                ]
+            )
+        )
+        groups = Dict("a" => [A], "b" => [B])
+        @test split_t_junctions!(groups) == 1
+    end
 end
