@@ -10,12 +10,15 @@ using PrecompileTools
     end
 else
     @setup_workload begin
+        # Workload uses ExamplePDK, but ExamplePDK changes are still not breaking
+        # Just change the workload along with ExamplePDK as necessary
         using .SchematicDrivenLayout
         using .SchematicDrivenLayout.ExamplePDK
         using .SchematicDrivenLayout.ExamplePDK.LayerVocabulary
         using .ExamplePDK.ChipTemplates,
             .ExamplePDK.Transmons, .ExamplePDK.ReadoutResonators
         import FileIO: File, @format_str, add_format
+        import Logging: with_logger
         # FileIO formats are normally registered in `__init__`, which has not run yet.
         # Registrations made here live in FileIO's global registry, which is not part
         # of this package's image, so `__init__` still registers them on load.
@@ -43,7 +46,9 @@ else
             pa.metadata = SemanticMeta(:test)
 
             addref!(cs, sref(pa, rot=45°))
-            c = Cell(cs)
+            with_logger(Base.NullLogger()) do
+                return c = Cell(cs)
+            end
 
             # Schematic-driven layout: chip, launchers, transmon, tapped resonator, and one
             # route per built-in rule, rendered to GDS and to an image.
@@ -119,6 +124,8 @@ else
                 layercolors=colors
             )
         end
+        # Reset any DeviceLayout-owned globals touched by workload
+        reset_uniquename!()
         # Don't bake stale Clipper handles into the package image
         global _clip = nothing
         global _coffset = nothing

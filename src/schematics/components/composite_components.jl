@@ -292,7 +292,7 @@ function _flatten(g::SchematicGraph, depth)
             # vertex properties are lost, except for additional_hooks, which get assigned to root
             add_hooks = additional_hooks(g, node)
             !isempty(add_hooks) &&
-                set_prop!(g2.graph, nv0 + 1, :additional_hooks, add_hooks)
+                set_props!(g2.graph, nv0 + 1, Dict(:additional_hooks => add_hooks))
         else
             g2.node_dict[Symbol(node.id)] = node
             push!(g2.nodes, node)
