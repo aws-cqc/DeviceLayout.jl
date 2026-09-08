@@ -9,6 +9,9 @@
         onenanometer,
         ClippedPolygon,
         difference2d,
+        union2d_curved,
+        difference2d_curved,
+        split_t_junctions!,
         Paths,
         Path,
         LineSegment,
@@ -22,6 +25,7 @@
         ConformalRenderContext,
         add_conformal_loop!,
         render_conformal!,
+        render_conformal_groups!,
         kernel,
         gmsh,
         hasgroup
@@ -541,6 +545,115 @@
         gmsh.option.setNumber("General.Verbosity", 0)
         render_conformal!(sm, cs)
         @test hasgroup(sm, "l1", 2)
+        gmsh.finalize()
+    end
+
+    # ─── render_conformal_groups! (group → conformal surfaces) ─────────────
+
+    @testset "render_conformal_groups! renders groups with shared physical groups" begin
+        # Metal box sitting exactly in a ground-plane hole: their common
+        # boundary must render as ONE OCC curve on both sides. The two Clipper
+        # booleans below produce region groups a caller might build from a
+        # multi-layer layout — this is the input shape render_conformal_groups!
+        # is designed for.
+        gnd = difference2d_curved(
+            Rectangle(Point(0.0μm, 0.0μm), Point(100.0μm, 100.0μm)),
+            Rectangle(Point(30.0μm, 30.0μm), Point(70.0μm, 70.0μm))
+        )
+        metal = union2d_curved(Rectangle(Point(30.0μm, 30.0μm), Point(70.0μm, 70.0μm)))
+        groups = Dict(:ground => collect(gnd), :metal => collect(metal))
+
+        sm = SolidModel("rcg_basic"; overwrite=true)
+        tags = render_conformal_groups!(sm, groups)
+
+        @test haskey(tags, :ground) && haskey(tags, :metal)
+        @test hasgroup(sm, "ground", 2)
+        @test hasgroup(sm, "metal", 2)
+        @test length(tags[:metal]) == 1
+        @test length(tags[:ground]) == 1
+
+        # Conformality: the shared boundary is the metal box perimeter (4
+        # edges). Each of those edges must be adjacent to BOTH the metal face
+        # and a ground face — i.e. shared. Count edges with >=2 adjacent faces.
+        gmsh.model.occ.synchronize()
+        shared = 0
+        for (dim, tag) in gmsh.model.getEntities(1)
+            up, _ = gmsh.model.getAdjacencies(dim, tag)
+            length(up) >= 2 && (shared += 1)
+        end
+        @test shared == 4
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal_groups! end-to-end to .xao" begin
+        # The full pipeline a downstream caller runs: Clipper booleans →
+        # split_t_junctions!(::AbstractDict) → render_conformal_groups! →
+        # save(.xao). A T-junction is deliberately introduced (a notch in the
+        # ground hole that the metal box doesn't have) so the noding pass has
+        # work to do.
+        gnd_hole = DeviceLayout.union2d(
+            Rectangle(Point(30.0μm, 30.0μm), Point(70.0μm, 70.0μm)),
+            Rectangle(Point(48.0μm, 70.0μm), Point(52.0μm, 74.0μm))
+        )
+        gnd = difference2d_curved(
+            Rectangle(Point(0.0μm, 0.0μm), Point(100.0μm, 100.0μm)),
+            gnd_hole
+        )
+        metal = union2d_curved(Rectangle(Point(30.0μm, 30.0μm), Point(70.0μm, 70.0μm)))
+        groups = Dict(:ground => collect(gnd), :metal => collect(metal))
+
+        split_t_junctions!(groups)
+
+        sm = SolidModel("rcg_xao"; overwrite=true)
+        render_conformal_groups!(sm, groups)
+        @test hasgroup(sm, "ground", 2)
+        @test hasgroup(sm, "metal", 2)
+
+        mktempdir() do dir
+            xao = joinpath(dir, "rcg.xao")
+            DeviceLayout.save(xao, sm)
+            @test isfile(xao)
+            @test filesize(xao) > 0
+        end
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal_groups! zmap positions groups at different z" begin
+        a = union2d_curved(Rectangle(Point(0.0μm, 0.0μm), Point(10.0μm, 10.0μm)))
+        b = union2d_curved(Rectangle(Point(0.0μm, 0.0μm), Point(10.0μm, 10.0μm)))
+        groups = Dict(:bottom => collect(a), :top => collect(b))
+        sm = SolidModel("rcg_zmap"; overwrite=true)
+        render_conformal_groups!(sm, groups; zmap=name -> (name === :top ? 5.0μm : 0.0μm))
+        gmsh.model.occ.synchronize()
+        # bottom face at z=0, top face at z=5 → two distinct z-planes present.
+        zs = Set{Float64}()
+        for (_, tag) in gmsh.model.getEntities(2)
+            bb = gmsh.model.getBoundingBox(2, tag)
+            push!(zs, round(bb[3]; digits=6) + 0.0)
+        end
+        @test any(z -> isapprox(z, 0.0; atol=1e-6), zs)
+        @test any(z -> isapprox(z, 5.0; atol=1e-6), zs)
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal_groups! rejects GmshNative kernel" begin
+        sm = SolidModel("rcg_native", SolidModels.GmshNative(); overwrite=true)
+        box = union2d_curved(Rectangle(Point(0.0μm, 0.0μm), Point(10.0μm, 10.0μm)))
+        @test_throws ErrorException render_conformal_groups!(sm, Dict(:m => collect(box)))
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal_groups! skips empty groups" begin
+        T = typeof(1.0μm)
+        empty_regs = CurvilinearRegion{T}[]
+        box = collect(union2d_curved(Rectangle(Point(0.0μm, 0.0μm), Point(10.0μm, 10.0μm))))
+        groups = Dict(:empty => empty_regs, :box => box)
+        sm = SolidModel("rcg_empty"; overwrite=true)
+        tags = render_conformal_groups!(sm, groups)
+        @test !haskey(tags, :empty)
+        @test haskey(tags, :box)
+        @test hasgroup(sm, "box", 2)
+        @test !hasgroup(sm, "empty", 2)
         gmsh.finalize()
     end
 end

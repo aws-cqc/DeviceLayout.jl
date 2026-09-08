@@ -53,10 +53,12 @@ using ..SolidModels:
     kernel,
     STP_UNIT,
     POINT_MERGE_ATOL,
+    PointsCache,
     _render_orchestrator!,
     _fragment_three_pass!,
     _add_curve!,
-    _get_or_add_point!
+    _get_or_add_point!,
+    _synchronize!
 import DeviceLayout
 import DeviceLayout:
     AbstractCoordinateSystem,
@@ -77,7 +79,8 @@ import Unitful: ustrip, Length, @u_str, °
 import SpatialIndexing
 import SpatialIndexing: RTree
 
-export render_conformal!, ConformalRenderContext, add_conformal_loop!
+export render_conformal!,
+    render_conformal_groups!, ConformalRenderContext, add_conformal_loop!
 
 """
 Entry in `endpoint_curve_index`: the signed OCC tag of the curve, plus a
@@ -834,6 +837,83 @@ function render_conformal!(
         (fragment!)=fragment_backstop ? _fragment_three_pass! : (_) -> nothing,
         kwargs...
     )
+end
+
+"""
+    render_conformal_groups!(sm, groups; zmap=nothing, context, atol) -> Dict
+
+Render a `Dict{Symbol, <:AbstractVector{<:CurvilinearRegion}}` of named region
+groups into `sm` with conformal shared edges, and create one physical group
+per key. Returns a `Dict{Symbol, Vector{Int32}}` of the dim-2 surface tags per
+group.
+
+This is the group-oriented counterpart to [`render_conformal!`](@ref). Where
+`render_conformal!` drives off a `CoordinateSystem` (flatten → per-metadata
+emit), this consumes region groups a caller has already produced from Clipper
+booleans ([`union2d_curved`](@ref), [`difference2d_curved`](@ref)) and made
+conformal with [`split_t_junctions!`](@ref DeviceLayout.split_t_junctions!)
+(the `AbstractDict` method is the natural fit here). It shares a single
+edge/curve cache ([`ConformalRenderContext`](@ref)) and point cache across
+every group, so a boundary shared between two groups resolves to one OCC curve
+entity — exactly the invariant that makes the result conformal without a
+post-render fragment pass.
+
+Each region contributes one plane surface (its exterior loop minus its hole
+loops). `zmap` maps a group name to its z-height (default: all at z = 0).
+
+```julia
+groups = Dict(
+    :ground => difference2d_curved(gnd_outer, gnd_holes),
+    :metal  => union2d_curved(metal_features)
+)
+split_t_junctions!(groups)
+sm = SolidModel("device"; overwrite=true)
+render_conformal_groups!(sm, groups)
+DeviceLayout.save("device.xao", sm)
+```
+"""
+function render_conformal_groups!(
+    sm::SolidModel,
+    groups::AbstractDict{Symbol, <:AbstractVector};
+    zmap=nothing,
+    context::ConformalRenderContext=ConformalRenderContext(),
+    atol=nothing
+)
+    k = kernel(sm)
+    k isa OpenCascade || error(
+        "render_conformal_groups! is only implemented for OpenCascade kernel; " *
+        "got $(typeof(k)). Use render! instead."
+    )
+    points_cache = PointsCache()
+    group_tags = Dict{Symbol, Vector{Int32}}()
+    for (name, regions) in groups
+        isempty(regions) && continue
+        z = isnothing(zmap) ? zero(coordinatetype(regions[1])) : zmap(name)
+        tags = Int32[]
+        for region in regions
+            loop_atol = isnothing(atol) ? onenanometer(coordinatetype(region)) : atol
+            outer = _add_conformal_loop!(
+                context,
+                region.exterior,
+                k,
+                z;
+                points_cache,
+                atol=loop_atol
+            )
+            holes = [
+                _add_conformal_loop!(context, h, k, z; points_cache, atol=loop_atol) for
+                h in region.holes
+            ]
+            push!(tags, Int32(k.add_plane_surface([outer; holes...])))
+        end
+        group_tags[name] = tags
+    end
+    _synchronize!(sm)
+    for (name, tags) in group_tags
+        isempty(tags) && continue
+        sm[name] = [(Int32(2), t) for t in tags]
+    end
+    return group_tags
 end
 
 end # module ConformalRender

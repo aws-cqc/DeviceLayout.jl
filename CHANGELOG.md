@@ -15,6 +15,14 @@ The format of this changelog is based on
     that injects each group's vertices onto every other group's edges — the form needed to
     make adjacent physical groups conformal before `render_conformal!`. Curved edges are split
     natively via `Paths.split`; no discretization.
+  - `SolidModels.render_conformal_groups!(sm, groups::AbstractDict; zmap, context, atol)`
+    renders a `Dict{Symbol, <:AbstractVector{<:CurvilinearRegion}}` of named region groups
+    into a `SolidModel` with conformal shared edges, creating one physical group per key.
+    This is the group-oriented counterpart to `render_conformal!` for callers that have
+    already produced region groups from Clipper booleans and made them conformal with
+    `split_t_junctions!(::AbstractDict)`. It shares one `ConformalRenderContext` and one
+    `PointsCache` across every group, so a boundary shared between two groups resolves to
+    one OCC curve entity — conformal by construction, without a post-render fragment pass.
 
 ## 1.18.1 (2026-09-07)
 
