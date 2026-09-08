@@ -18,6 +18,17 @@ The format of this changelog is based on
     make adjacent physical groups conformal before `render_conformal!`. Curved edges are split
     natively via `Paths.split`; no discretization.
 
+### Fixed
+
+  - `render_conformal!` now handles `Ellipse` primitives (including circles
+    produced by `Circle` and by autofill patterns). Previously `to_primitives`
+    kept ellipses as native OCC primitives, but the conformal-emit dispatch had
+    no `Ellipse` method, so `render_conformal!` on any `CoordinateSystem`
+    containing an ellipse fell through to the generic vector path and errored.
+    The new method mirrors stock `render!`'s ellipse path (native
+    `add_ellipse`); a smooth closed curve has nothing to share with neighbours,
+    so no cache involvement is needed.
+
 ### Changed
 
   - Added a precompile workload for the schematic workflow. Precompilation will take longer, but
