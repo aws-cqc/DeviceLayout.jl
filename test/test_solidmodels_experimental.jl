@@ -223,7 +223,7 @@ end
     )
 
     @testset "Utils" begin
-        @test SolidModelsExperimental.ophash("object", ["tool"]; operation=:difference) !=
+        @test SolidModelsExperimental.ophash("object", ["tool"]; operation=:cut) !=
               SolidModelsExperimental.ophash("object", ["tool"]; operation=:intersect)
 
         @test length(exterior_boundaries(:volume)) == 6
@@ -313,7 +313,7 @@ end
         @test op[3] == (pgname(metal_meta), [pgname(voids_meta)], 2, 2)
         @test startswith(op[1], "voids") # destination layer
         # destination layer is now generated, so its name contains the op hash
-        @test op[3] != pgname(voids_meta)
+        @test op[1] != pgname(voids_meta)
         @test (:remove_object => false) in op
         @test (:remove_tool => false) in op
         @test length(reg[:metal].pgs) == 1
@@ -375,7 +375,7 @@ end
         @test getindex.(ops, Ref(5)) == [:remove_tool => false, :remove_tool => true]
 
         # Partial tool removal cannot be represented by OCC's all-tools removal flag,
-        # so Remove op is not abosrbed into preceding Cut
+        # so the Remove operation is not absorbed into the preceding Cut.
         ops, reg, _ = compile_ops(
             [Cut(:cut, :metal, (:voids, :shell)), Remove(:voids)],
             stack,
@@ -395,8 +395,8 @@ end
         @test any(op -> op[2] == SolidModels.remove_group!, ops)
         @test !haskey(reg, :metal)
 
-        # A non-adjacent removal remains a separate operation (for now, until we
-        # implement a more compherensive compiler)
+        # A non-adjacent removal remains a separate operation until a more comprehensive
+        # compiler can prove that folding it is safe.
         ops, reg, _ = compile_ops(
             [Cut(:cut, :metal, :voids), GetBoundary(:edge, :metal), Remove(:metal)],
             stack,
@@ -406,6 +406,44 @@ end
         @test (:remove_object => false) in op
         @test any(op -> op[2] == SolidModels.remove_group!, ops)
         @test !haskey(reg, :metal)
+
+        # Independent repeats request the same generated identity and are rejected.
+        cut = Cut(:cut, :metal, :voids)
+        @test_throws ArgumentError compile_ops([cut, cut], stack, registry)
+        @test_throws ArgumentError compile_ops([cut, cut, Remove(:metal)], stack, registry)
+
+        # Replace-object repeats operate on the previous result under the same PG identity.
+        ops, reg, _ = compile_ops(
+            [Cut(:metal, :metal, :voids), Cut(:metal, :metal, :voids)],
+            stack,
+            registry
+        )
+        @test length(ops) == 2
+        @test all(op -> op[1] == pgname(metal_meta), ops)
+        @test all(op -> op[3] == (pgname(metal_meta), [pgname(voids_meta)], 2, 2), ops)
+        @test only(reg[:metal].pgs).name == pgname(metal_meta)
+
+        # Replace-tool repeats use the first difference as the second call's tool.
+        ops, reg, _ = compile_ops(
+            [Cut(:voids, :metal, :voids), Cut(:voids, :metal, :voids)],
+            stack,
+            registry
+        )
+        @test length(ops) == 2
+        @test ops[2][3] == (pgname(metal_meta), [ops[1][1]], 2, 2)
+        @test ops[2][1] != ops[1][1]
+        @test only(reg[:voids].pgs).name == ops[2][1]
+
+        # Explicit chains consume a named result from the preceding Cut.
+        ops, reg, _ = compile_ops(
+            [Cut(:first, :metal, :voids), Cut(:second, :first, :shell)],
+            stack,
+            registry
+        )
+        @test length(ops) == 2
+        @test ops[2][3] == (ops[1][1], [pgname(shell_meta)], 2, 2)
+        @test haskey(reg, :first)
+        @test haskey(reg, :second)
     end
 
     @testset "GetBoundary" begin
@@ -996,7 +1034,7 @@ end
               "interface__" * SolidModelsExperimental.ophash(
             pgname(metal_meta),
             [pgname(metal_meta)];
-            operation=:interface,
+            operation=:get_interface,
             parameters=(2, 2)
         )
         op = only(SolidModelsExperimental.interface_vertices(dints))
