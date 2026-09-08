@@ -225,7 +225,7 @@ function add_tagged_pgs!(
                     ophash(
                         pg_name,
                         [tool_name];
-                        operation=:intersect,
+                        operation=:get_interface,
                         parameters=(2, tool_dim)
                     )
                 generated_record_exists(registry, dest_layer, dest_pg) && continue
