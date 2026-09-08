@@ -15,6 +15,12 @@ The format of this changelog is based on
     that injects each group's vertices onto every other group's edges — the form needed to
     make adjacent physical groups conformal before `render_conformal!`. Curved edges are split
     natively via `Paths.split`; no discretization.
+  - Added a precompile workload for the schematic workflow. Precompilation will take longer, but
+  first execution in all subsequent new Julia sessions will be faster.
+  - `Route` and `RouteComponent` now have their concrete `RouteRule` type as a second type parameter
+  (after coordinate type). This should not have functional consequences for ordinary usage, but it
+  does mean that `Route{T}` and `RouteComponent{T}` are no longer concrete, and their `RouteRule` cannot
+  be changed in-place to a different type.
 
 ## 1.18.1 (2026-09-07)
 

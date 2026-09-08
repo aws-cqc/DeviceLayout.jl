@@ -11,7 +11,7 @@ import MetaGraphs:
     add_vertex!,
     add_edge!,
     rem_vertex!,
-    set_prop!
+    set_props!
 
 # If an edge has the property :plan_skips_edge => true, skip it in the plan! function
 PLAN_SKIPS_EDGE = :plan_skips_edge
@@ -272,8 +272,10 @@ function fuse!(
     h1sym = Symbol(uniquename("attach_" * first(nodehook2).id, counter=g.namecounter))
 
     add_hooks = additional_hooks(g, node1)
+    # `set_props!` rather than `set_prop!`: `:additional_hooks` is never an indexing
+    # property, and inferring the indexing branch (Dict{Symbol,Hook} equality) is slow.
     isempty(add_hooks) &&
-        set_prop!(g.graph, indexof(node1, g), :additional_hooks, add_hooks)
+        set_props!(g.graph, indexof(node1, g), Dict(:additional_hooks => add_hooks))
     add_hooks[h1sym] = hook1
 
     return fuse!(g, node1 => h1sym, nodehook2; kwargs...)
@@ -291,7 +293,7 @@ function fuse!(
 
     add_hooks = additional_hooks(g, node2)
     isempty(add_hooks) &&
-        set_prop!(g.graph, indexof(node2, g), :additional_hooks, add_hooks)
+        set_props!(g.graph, indexof(node2, g), Dict(:additional_hooks => add_hooks))
     add_hooks[h2sym] = hook2
 
     return fuse!(g, nodehook1, node2 => h2sym; kwargs...)

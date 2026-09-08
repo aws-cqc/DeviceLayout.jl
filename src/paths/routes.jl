@@ -1,5 +1,5 @@
 """
-    abstract type RouteRule end
+    abstract type RouteRule
 
 Controls how a `Route` is turned into a `Path`.
 
@@ -125,7 +125,7 @@ CompoundRouteRule(rules::Vector{RouteRule}) =
     CompoundRouteRule(rules, ones(Int, length(rules)))
 
 """
-    mutable struct Route{S<:Coordinate}
+    mutable struct Route{S<:Coordinate, R <: RouteRule}
     Route(rule, startpoint::Point{S}, endpoint::Point, start_direction, end_direction; waypoints=Point{S}[], waydirs=[])
     Route(rule, path0::Path, endpoint::Point, end_direction)
 
@@ -143,8 +143,8 @@ If `waydirs` is not `nothing`, it should have the same length as `waypoints`. If
 is provided and is not ignored by the `RouteRule` (check the specific rule documentation),
 then `waypoints[i]` will be reached with the path pointing along `waydirs[i]`.
 """
-mutable struct Route{S <: Coordinate}
-    rule::RouteRule
+mutable struct Route{S <: Coordinate, R <: RouteRule}
+    rule::R
     p0::Point{S}
     p1::Point{S}
     α0::typeof(1.0°)
@@ -160,7 +160,7 @@ Route(
     end_direction;
     waypoints=Point{S}[],
     waydirs=[]
-) where {S} = Route{float(S)}(
+) where {S} = Route{float(S), typeof(rule)}(
     rule,
     startpoint,
     endpoint,
@@ -174,7 +174,7 @@ Route(rule, path0::Path, endpoint::Point, end_direction; kwargs...) =
     Route(rule, p1(path0), endpoint, α1(path0), end_direction; kwargs...)
 
 @inline Base.eltype(::Route{T}) where {T} = T
-@inline Base.eltype(::Type{Route{T}}) where {T} = T
+@inline Base.eltype(::Type{<:Route{T}}) where {T} = T
 
 """
     p0(r::Route)
