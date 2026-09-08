@@ -39,14 +39,14 @@ end
 
 Subtract one tool layer, or a grouped tuple or vector of tool layers, from `object`.
 Non-destination inputs remain available unless consumed by adjacent [`Remove`](@ref)
-operations.
+operations. Generated destination identity collisions are rejected.
 """
 struct Cut{N} <: BooleanOp
     destination::Symbol
     object::Symbol
     tools::NTuple{N, Symbol}
     function Cut{N}(destination, object, tools) where {N}
-        iszero(N) && throw(ArgumentError("difference requires at least one tool layer"))
+        iszero(N) && throw(ArgumentError("Cut requires at least one tool layer"))
         return new{N}(destination, object, tools)
     end
 end
@@ -70,8 +70,8 @@ struct Fuse{N} <: BooleanOp
     destination::Symbol
     sources::NTuple{N, Symbol}
     function Fuse{N}(destination, sources) where {N}
-        iszero(N) && throw(ArgumentError("fuse requires at least one source layer"))
-        allunique(sources) || throw(ArgumentError("fuse source layers must be unique"))
+        iszero(N) && throw(ArgumentError("Fuse requires at least one source layer"))
+        allunique(sources) || throw(ArgumentError("Fuse source layers must be unique"))
         return new{N}(destination, sources)
     end
 end
@@ -157,9 +157,9 @@ struct GetBoundary <: LayerOp
         direction = lowercase(direction)
         position = lowercase(position)
         direction in ("all", "x", "y", "z") ||
-            throw(ArgumentError("direction must be all, x, y, or z"))
+            throw(ArgumentError("GetBoundary direction must be all, x, y, or z"))
         position in ("all", "min", "max") ||
-            throw(ArgumentError("position must be all, min, or max"))
+            throw(ArgumentError("GetBoundary position must be all, min, or max"))
         return new(destination, source, combined, oriented, recursive, direction, position)
     end
 end
@@ -358,7 +358,7 @@ function defer_interface!(
 )
     key = (:interface, dest_pg)
     haskey(graph, key, :key) &&
-        throw(ArgumentError("deferred interface '$dest_pg' is already defined"))
+        throw(ArgumentError("GetInterface destination '$dest_pg' is already defined"))
     obj = _pg_vertex!(graph, obj_pg, obj_dim)
     tool = _pg_vertex!(graph, tool_pg, tool_dim)
     Graphs.add_vertex!(
@@ -476,11 +476,16 @@ function generated_record_exists(
     return haskey(reg, dest) && any(record -> record.name == name, reg[dest].pgs)
 end
 
-function _require_destination_dimension(reg::LayerRegistry, dest::Symbol, dim::Int)
+function _require_destination_dimension(
+    reg::LayerRegistry,
+    dest::Symbol,
+    dim::Int,
+    operation_name::AbstractString
+)
     if haskey(reg, dest) && reg[dest].dim != dim
         throw(
             ArgumentError(
-                "destination layer :$dest has dimension $(reg[dest].dim), " *
+                "$operation_name destination layer :$dest has dimension $(reg[dest].dim), " *
                 "so dimension $dim physical groups cannot be appended"
             )
         )
@@ -680,7 +685,7 @@ end
 function _compile!(cmp::CompilerState, op::Extrude)
     !haskey(cmp.stack.layers, op.destination) && throw(
         ArgumentError(
-            "cannot extrude generated layer :$(op.destination) because extrusion requires " *
+            "Extrude cannot process generated layer :$(op.destination) because it requires " *
             "a SourceStack entry"
         )
     )
@@ -783,16 +788,13 @@ function _compile!(cmp::CompilerState, op::_LoweredCut)
         else
             string(op.destination) *
             "__" *
-            ophash(
-                record.name,
-                tool_pg_names;
-                operation=:difference,
-                parameters=(dim, op.remove_object, op.remove_tool)
-            )
+            ophash(record.name, tool_pg_names; operation=:cut, parameters=(dim,))
         end
         if mode != :replace_object &&
            generated_record_exists(cmp.reg, op.destination, dest_name, new_records)
-            continue
+            throw(
+                ArgumentError("Cut destination physical group '$dest_name' already exists")
+            )
         end
         push!(compiled, (record, dest_name))
         mode == :replace_object ||
@@ -813,7 +815,7 @@ function _compile!(cmp::CompilerState, op::_LoweredCut)
     end
 
     if mode == :append
-        _require_destination_dimension(cmp.reg, op.destination, dim)
+        _require_destination_dimension(cmp.reg, op.destination, dim, "Cut")
         existing_pgs = [
             record.name for record in cmp.reg[op.destination].pgs if !islocator(record.meta)
         ]
@@ -855,22 +857,22 @@ function _compile!(cmp::CompilerState, op::_LoweredFuse)
         op.destination ∉ op.sources &&
         throw(
             ArgumentError(
-                "a Fuse destination that already exists must be included among its sources"
+                "Fuse destination that already exists must be included among its sources"
             )
         )
 
     dims = unique([cmp.reg[source].dim for source in op.sources])
     length(dims) == 1 ||
-        throw(ArgumentError("fuse source layers must have equal dimensions"))
+        throw(ArgumentError("Fuse source layers must have equal dimensions"))
     dim = only(dims)
     source_pgs =
         sort!([record.name for source in op.sources for record in cmp.reg[source].pgs])
-    isempty(source_pgs) && throw(ArgumentError("fuse requires at least one physical group"))
+    isempty(source_pgs) && throw(ArgumentError("Fuse requires at least one physical group"))
 
     dest_name =
         string(op.destination) *
         "__" *
-        ophash(first(source_pgs), source_pgs[2:end]; operation=:union, parameters=(dim,))
+        ophash(first(source_pgs), source_pgs[2:end]; operation=:fuse, parameters=(dim,))
     push!(
         cmp.ops,
         (
@@ -894,7 +896,7 @@ function _replace_layer_prefix(name::String, source::Symbol, destination::Symbol
     prefix = string(source, "__")
     startswith(name, prefix) || throw(
         ArgumentError(
-            "physical-group name '$name' does not begin with layer prefix '$prefix'"
+            "Heal source physical-group name '$name' does not begin with layer prefix '$prefix'"
         )
     )
     return string(destination, "__", chop(name; head=length(prefix), tail=0))
@@ -918,7 +920,7 @@ function _compile!(cmp::CompilerState, op::_LoweredHeal)
     end
 
     haskey(cmp.reg, op.destination) &&
-        _require_destination_dimension(cmp.reg, op.destination, state.dim)
+        _require_destination_dimension(cmp.reg, op.destination, state.dim, "Heal")
     new_records = [
         PGRecord(
             _replace_layer_prefix(record.name, op.source, op.destination),
@@ -932,7 +934,7 @@ function _compile!(cmp::CompilerState, op::_LoweredHeal)
     collision = findfirst(record -> record.name in existing_names, new_records)
     isnothing(collision) || throw(
         ArgumentError(
-            "healed physical-group name '$(new_records[collision].name)' already exists"
+            "Heal destination physical-group name '$(new_records[collision].name)' already exists"
         )
     )
 
@@ -979,16 +981,21 @@ function _compile!(cmp::CompilerState, op::_LoweredIntersect)
     object_state = cmp.reg[op.object]
     tool_state = cmp.reg[op.tool]
     isempty(object_state.pgs) &&
-        throw(ArgumentError("intersect object layer must contain a physical group"))
+        throw(ArgumentError("Intersect object layer must contain a physical group"))
     isempty(tool_state.pgs) &&
-        throw(ArgumentError("intersect tool layer must contain a physical group"))
+        throw(ArgumentError("Intersect tool layer must contain a physical group"))
 
     destination_dim = min(object_state.dim, tool_state.dim)
     append_mode =
         haskey(cmp.reg, op.destination) &&
         op.destination != op.object &&
         op.destination != op.tool
-    append_mode && _require_destination_dimension(cmp.reg, op.destination, destination_dim)
+    append_mode && _require_destination_dimension(
+        cmp.reg,
+        op.destination,
+        destination_dim,
+        "Intersect"
+    )
     existing_pgs =
         append_mode ?
         [record.name for record in cmp.reg[op.destination].pgs if !islocator(record.meta)] :
@@ -1011,8 +1018,8 @@ function _compile!(cmp::CompilerState, op::_LoweredIntersect)
             generated_record_exists(cmp.reg, op.destination, dest_name, new_records) &&
                 throw(
                     ArgumentError(
-                        "physical group '$dest_name' at the Intersect destination layer"
-                        * " $(op.destination) already exists"
+                        "Intersect destination physical group '$dest_name' already exists in layer " *
+                        ":$(op.destination)"
                     )
                 )
             push!(
@@ -1066,7 +1073,7 @@ function _compile!(cmp::CompilerState, op::GetInterface)
                 ophash(
                     obj_rec.name,
                     [tool_rec.name];
-                    operation=:interface,
+                    operation=:get_interface,
                     parameters=(obj_dim, tool_dim)
                 )
             generated_record_exists(cmp.reg, op.destination, dest_name, new_recs) &&
@@ -1096,7 +1103,7 @@ function _compile!(cmp::CompilerState, op::GetInterface)
     if haskey(cmp.reg, op.destination) &&
        op.destination != op.object &&
        op.destination != op.tool
-        _require_destination_dimension(cmp.reg, op.destination, new_dim)
+        _require_destination_dimension(cmp.reg, op.destination, new_dim, "GetInterface")
         append!(cmp.reg[op.destination].pgs, new_recs)
     else
         cmp.reg[op.destination] = LayerState(new_recs, new_dim)
@@ -1107,11 +1114,12 @@ end
 
 function _compile!(cmp::CompilerState, op::RestrictTo)
     state = cmp.reg[op.volume]
-    state.dim == 3 || throw(ArgumentError("bounding volume layer :$(op.volume) must be 3D"))
+    state.dim == 3 ||
+        throw(ArgumentError("RestrictTo bounding volume layer :$(op.volume) must be 3D"))
     bv_pgs = state.pgs
     length(bv_pgs) == 1 || throw(
         ArgumentError(
-            "bounding volume layer :$(op.volume) must contain exactly one physical group"
+            "RestrictTo bounding volume layer :$(op.volume) must contain exactly one physical group"
         )
     )
     bv_pg = bv_pgs[1].name
@@ -1128,7 +1136,8 @@ function _compile_unary_layer_op!(
     destination_dim::Int;
     replace::Bool,
     hash_operation::Symbol,
-    hash_parameters
+    hash_parameters,
+    operation_name::AbstractString
 )
     state = cmp.reg[source]
     if replace
@@ -1161,7 +1170,12 @@ function _compile_unary_layer_op!(
     end
 
     if haskey(cmp.reg, destination)
-        _require_destination_dimension(cmp.reg, destination, destination_dim)
+        _require_destination_dimension(
+            cmp.reg,
+            destination,
+            destination_dim,
+            operation_name
+        )
         append!(cmp.reg[destination].pgs, new_records)
     else
         cmp.reg[destination] = LayerState(new_records, destination_dim)
@@ -1184,7 +1198,7 @@ function _compile!(cmp::CompilerState, op::GetBoundary)
         op.source,
         max(dim - 1, 0);
         replace=op.destination == op.source,
-        hash_operation=:boundary,
+        hash_operation=:get_boundary,
         hash_parameters=(
             dim,
             op.combined,
@@ -1192,7 +1206,8 @@ function _compile!(cmp::CompilerState, op::GetBoundary)
             op.recursive,
             op.direction,
             op.position
-        )
+        ),
+        operation_name="GetBoundary"
     ) do destination, record
         return (destination, SolidModels.get_boundary, (record.name, dim), kwargs...)
     end
@@ -1207,7 +1222,8 @@ function _compile!(cmp::CompilerState, op::Translate)
         dim;
         replace=op.destination == op.source && !op.copy,
         hash_operation=:translate,
-        hash_parameters=(op.dx, op.dy, op.dz, op.copy)
+        hash_parameters=(op.dx, op.dy, op.dz, op.copy),
+        operation_name="Translate"
     ) do destination, record
         return (
             destination,
@@ -1238,7 +1254,7 @@ end
 
 function _compile!(cmp::CompilerState, op::Revolve)
     dim = cmp.reg[op.source].dim
-    dim < 3 || throw(ArgumentError("cannot revolve a 3D layer"))
+    dim < 3 || throw(ArgumentError("Revolve cannot process a 3D layer"))
     return _compile_unary_layer_op!(
         cmp,
         op.destination,
@@ -1246,7 +1262,8 @@ function _compile!(cmp::CompilerState, op::Revolve)
         dim + 1;
         replace=op.destination == op.source,
         hash_operation=:revolve,
-        hash_parameters=(dim, op.origin, op.axis, op.angle)
+        hash_parameters=(dim, op.origin, op.axis, op.angle),
+        operation_name="Revolve"
     ) do destination, record
         return (
             destination,
@@ -1260,9 +1277,10 @@ function _compile!(cmp::CompilerState, op::SetPeriodic)
     first_state = cmp.reg[op.first]
     second_state = cmp.reg[op.second]
     first_state.dim == 2 && second_state.dim == 2 ||
-        throw(ArgumentError("periodic layers must both be 2D"))
-    length(first_state.pgs) == 1 && length(second_state.pgs) == 1 ||
-        throw(ArgumentError("periodic layers must each contain exactly one physical group"))
+        throw(ArgumentError("SetPeriodic layers must both be 2D"))
+    length(first_state.pgs) == 1 && length(second_state.pgs) == 1 || throw(
+        ArgumentError("SetPeriodic layers must each contain exactly one physical group")
+    )
 
     first_pg = only(first_state.pgs).name
     second_pg = only(second_state.pgs).name
