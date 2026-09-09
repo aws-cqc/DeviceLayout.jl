@@ -124,6 +124,20 @@ full.
 """
 coordinate_type_string(::Type{T}) where {T} = get(COORDINATE_TYPE_NAMES, T, string(T))
 
+# Preserve the actual concrete type while abbreviating occurrences of its coordinate type.
+# In particular, a subtype can fix its coordinate type without being parametric itself, or
+# can have additional parameters whose values remain important for dispatch and debugging.
+function type_with_coordinate_string(T::Type, S::Type)
+    T === S && return coordinate_type_string(S)
+    T isa DataType || return string(T)
+    isempty(T.parameters) && return string(nameof(T))
+    wrapper = string(nameof(T))
+    params = map(T.parameters) do p
+        return p isa Type ? type_with_coordinate_string(p, S) : repr(p)
+    end
+    return string(wrapper, "{", join(params, ", "), "}")
+end
+
 """
     uparse(str)
 

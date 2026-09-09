@@ -43,7 +43,8 @@ Base.copy(ent::StyledEntity) = styled(ent.ent, ent.sty)
 Base.show(io::IO, e::StyledEntity) = print(io, e.ent, " styled as ", e.sty)
 function Base.show(io::IO, mime::MIME"text/plain", e::StyledEntity)
     show(io, mime, e.ent)
-    return print(io, " styled as ", e.sty)
+    print(io, "\n  style: ")
+    return show(io, e.sty)
 end
 
 """

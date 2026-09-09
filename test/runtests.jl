@@ -66,13 +66,16 @@ using TestItemRunner
         return with_test_logger(f, allowed; required)
     end
 
-    function quiet_test_output(f; allowed_log=(_ -> false))
+    function quiet_test_output(f; allowed_log=(_ -> false), allowed_output=nothing)
         logger = TestLogger()
-        result = mktemp() do _, io
+        result, output = mktemp() do _, io
             try
-                return redirect_stdio(stdout=io, stderr=io) do
+                result = redirect_stdio(stdout=io, stderr=io) do
                     return with_logger(f, logger)
                 end
+                flush(io)
+                seekstart(io)
+                return result, read(io, String)
             catch
                 flush(io)
                 seekstart(io)
@@ -89,6 +92,14 @@ using TestItemRunner
             println(stderr)
         end
         @test isempty(unexpected)
+        if !isnothing(allowed_output)
+            unexpected_output =
+                filter(!allowed_output, split(output, '\n'; keepempty=false))
+            if !isempty(unexpected_output)
+                println(stderr, join(unexpected_output, "\n"))
+            end
+            @test isempty(unexpected_output)
+        end
         return result
     end
 

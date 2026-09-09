@@ -1,9 +1,10 @@
 # CoordSys interface
 Base.broadcastable(x::AbstractCoordinateSystem) = Ref(x)
-Base.show(io::IO, c::T) where {S, T <: AbstractCoordinateSystem{S}} = print(
-    io,
-    "$(nameof(T)){$(coordinate_type_string(S))} \"$(name(c))\" with $(length(elements(c))) els, $(length(refs(c))) refs"
-)
+function Base.show(io::IO, c::T) where {S, T <: AbstractCoordinateSystem{S}}
+    print(io, type_with_coordinate_string(T, S), " ")
+    show(io, name(c))
+    return print(io, " with ", length(elements(c)), " els, ", length(refs(c)), " refs")
+end
 
 """
     addref!(c1::AbstractCoordinateSystem, cr::GeometryReference)
