@@ -851,6 +851,7 @@ end
         @test intersect.destination == :intersection
         @test intersect.object == :metal
         @test intersect.tool == :voids
+        @test_throws ArgumentError SolidModelsExperimental.Intersect(:self, :metal, :metal)
         @test_throws ArgumentError compile_ops(
             [SolidModelsExperimental.Intersect(:intersection, :missing, :voids)],
             stack,
@@ -942,6 +943,8 @@ end
             registry
         )
         @test length(ops) == 1
+        @test (:remove_object => true) in only(ops)
+        @test (:remove_tool => false) in only(ops)
         @test reg[:metal].dim == 2
         @test only(reg[:metal].pgs).name == only(ops)[1]
         @test haskey(reg, :voids)
@@ -952,6 +955,8 @@ end
             registry
         )
         @test length(ops) == 1
+        @test (:remove_object => false) in only(ops)
+        @test (:remove_tool => true) in only(ops)
         @test only(reg[:voids].pgs).name == only(ops)[1]
         @test haskey(reg, :metal)
 
@@ -1004,26 +1009,14 @@ end
         @test !haskey(reg, :metal)
         @test !haskey(reg, :voids)
 
-        # A removal naming an aliased destination would remove the result so it's not absorbed.
+        # A removal naming an aliased destination applies to the result and is not absorbed.
         ops, reg, _ = compile_ops(
             [SolidModelsExperimental.Intersect(:metal, :metal, :voids), Remove(:metal)],
             stack,
             registry
         )
         intersection_op = only(filter(op -> op[2] == SolidModels.intersect_geom!, ops))
-        @test (:remove_object => false) in intersection_op
-        @test any(op -> op[2] == SolidModels.remove_group!, ops)
-        @test !haskey(reg, :metal)
-
-        # A layer serving as both operands has ambiguous native removal roles.
-        ops, reg, _ = compile_ops(
-            [SolidModelsExperimental.Intersect(:self, :metal, :metal), Remove(:metal)],
-            stack,
-            registry
-        )
-        intersection_op = only(filter(op -> op[2] == SolidModels.intersect_geom!, ops))
-        @test (:remove_object => false) in intersection_op
-        @test (:remove_tool => false) in intersection_op
+        @test (:remove_object => true) in intersection_op
         @test any(op -> op[2] == SolidModels.remove_group!, ops)
         @test !haskey(reg, :metal)
 
