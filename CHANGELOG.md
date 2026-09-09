@@ -9,9 +9,13 @@ The format of this changelog is based on
 ### Added
 
   - Property-based geometry law suite (`test/laws/`, tag `:geomlaws`) built on
-    Supposition.jl: generators for degenerate integer polygon pairs, exact lattice
-    predicates, region-based equivalence, and a ledger of shrunk counterexamples.
-    Runs in the regular test suite at a fixed seed; `GEOMLAWS_EXAMPLES` and
+    Supposition.jl: generators for integer, rectilinear, float, and fm-perturbed polygon
+    pairs; exact lattice predicates; exact and tolerance-based region comparison; laws
+    for the boolean algebra (`union2d`, `intersect2d`, `difference2d`, `xor2d`, `clip`
+    fill rules, `clip_tiled`, `to_polygons` keyhole cuts), offsetting (`offset`, `halo`),
+    rigid-transform equivariance, coordinate-unit invariance, and the prescale round
+    trip; and a ledger of shrunk counterexamples for known kernel and keyhole-cut
+    behaviors. Runs in the regular test suite at a fixed seed; `GEOMLAWS_EXAMPLES` and
     `GEOMLAWS_SEED` raise the budget for exploratory runs.
   - `SolidModels.exclude_groups` returns the entities of a physical group that belong to none of
     a list of other groups, a membership difference with the postrender-operation signature.

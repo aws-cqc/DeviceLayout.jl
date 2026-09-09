@@ -1,7 +1,7 @@
 # GeomLaws — shared setup for property-based geometry laws.
 #
-# Provides Supposition.jl generators, exact lattice predicates, and the region comparison
-# `≐` used by the laws in test/laws/. Generators do not call the clipping kernel, and laws
+# Provides Supposition.jl generators, exact lattice predicates, and the region comparisons
+# used by the laws in test/laws/. Generators do not call the clipping kernel, and laws
 # compare regions rather than vertex order.
 
 @testsnippet LawsSetup begin
@@ -32,7 +32,14 @@
     # itself be flaky at PR budget. The deterministic reproducer lives in
     # test_ledger.jl; when the kernel changes, remove the entry here and see whether the
     # law now holds.
-    const KNOWN_BROKEN = Set([:B3_int, :B8_int])  # ledger L1/L3
+    const KNOWN_BROKEN = Set([
+        :B3_int_thin,   # L1: thin integer polygons vanish under identity ops
+        :B8_int,        # L3: integer output may self-cross after rounding
+        :B8_nested,     # L4: a hole vertex may land outside its parent after rounding
+        :B8_float_perturbed,  # L8: fm-scale self-crossing from a ≤ 2 fm feature
+        :O1_int_thin,   # L1 again, through offset's internal union
+        :O3_int_sharp   # L7: round-join offset leaves the input vertex at sharp corners
+    ])
     macro law(id, check)
         return quote
             if $(esc(id)) in KNOWN_BROKEN
@@ -52,16 +59,37 @@
     # see exactly what the kernel saw, and tolerances are expressed in lattice units.
     # ---------------------------------------------------------------------------------
     const GridPt = Tuple{Int128, Int128}
+    const GridRegion = Vector{Vector{GridPt}}
 
     _gridcoord(x::Integer) = Int128(x)
     _gridcoord(x::AbstractFloat) = round(Int128, x * Polygons.SCALE)
     _gridcoord(x::Unitful.Quantity{<:Integer}) = Int128(Unitful.ustrip(x))
     _gridcoord(x::Unitful.Quantity{<:AbstractFloat}) =
-        round(Int128, Unitful.ustrip(Polygons.USCALE, x))
+        round(Int128, Unitful.ustrip(Unitful.unit(Polygons.USCALE), x))
     togrid(p::Point) = (_gridcoord(getx(p)), _gridcoord(gety(p)))
     togrid(p::Polygon) = togrid.(p.p)
     togrid(ps::AbstractVector{<:Polygon}) = togrid.(ps)
-    togrid(cp::ClippedPolygon) = togrid(to_polygons(cp))
+    # A ClippedPolygon is compared through its tree contours, not through
+    # `to_polygons`, so that the keyhole-cut step is tested separately (law B11).
+    togrid(cp::ClippedPolygon) =
+        Vector{GridPt}[togrid.(Clipper.contour(n)) for n in tree_nodes(cp)]
+    togrid(g::GridRegion) = g
+    togrid(cps::AbstractVector{<:ClippedPolygon}) =
+        reduce(vcat, togrid.(cps); init=Vector{GridPt}[])
+
+    contour_polygons(cp::ClippedPolygon{T}) where {T} =
+        [Polygon{T}(Clipper.contour(n)) for n in tree_nodes(cp)]
+
+    function tree_nodes(cp::ClippedPolygon)
+        out = Clipper.PolyNode[]
+        walk(n) =
+            for c in Clipper.children(n)
+                push!(out, c)
+                walk(c)
+            end
+        walk(cp.tree)
+        return out
+    end
 
     # Twice the signed area of triangle (a, b, c); positive for counterclockwise.
     orient_exact(a::GridPt, b::GridPt, c::GridPt) =
@@ -92,12 +120,48 @@
         i in eachindex(v)
     )
     area_exact(v::Vector{GridPt}) = abs(signed_area2_exact(v)) // 2
+    # Signed area of a contour list under the even-odd rule the tree encodes: outer
+    # contours are counterclockwise and holes clockwise, so the signed sum is the region
+    # area. Used for the area laws, where it must not pass through `to_polygons`.
+    region_area_exact(polys::GridRegion) =
+        sum(signed_area2_exact(v) for v in polys; init=Int128(0)) // 2
+
+    # Squared distance from q to segment ab compared against tol², exactly. The cross
+    # product fits Int128 at the generated coordinate ranges (≤ 1e11 lattice units); its
+    # square does not, so the final comparison is done in BigInt.
+    function within_segment_distance_exact(q::GridPt, a::GridPt, b::GridPt, tol::Integer)
+        tol >= 0 || return false
+        dx, dy = b[1] - a[1], b[2] - a[2]
+        len2 = dx * dx + dy * dy
+        qx, qy = q[1] - a[1], q[2] - a[2]
+        if len2 == 0
+            return qx * qx + qy * qy <= Int128(tol)^2
+        end
+        dot = qx * dx + qy * dy
+        if dot <= 0
+            return qx * qx + qy * qy <= Int128(tol)^2
+        elseif dot >= len2
+            rx, ry = q[1] - b[1], q[2] - b[2]
+            return rx * rx + ry * ry <= Int128(tol)^2
+        end
+        cross = qx * dy - qy * dx
+        return BigInt(cross)^2 <= BigInt(tol)^2 * BigInt(len2)
+    end
+    function within_boundary_distance_exact(q::GridPt, polys::GridRegion, tol::Integer)
+        for v in polys, i in eachindex(v)
+            within_segment_distance_exact(q, v[i], v[mod1(i + 1, end)], tol) && return true
+        end
+        return false
+    end
 
     # A polygon is simple when it has ≥3 vertices, no repeated consecutive vertices,
     # nonzero area, and no two non-adjacent edges touch. O(n²); fine for n ≲ 200.
-    # `weak=true` relaxes "touch" to "cross or overlap": vertices may touch other
-    # vertices or edges (pinch points), which Clipper permits in its output unless run
-    # in strictly-simple mode.
+    # `weak=true` relaxes "touch" to "properly cross": vertices may touch other vertices
+    # or edges (pinch points) and edges may overlap collinearly (a zero-width bridge
+    # traversed in both directions, as in a keyhole cut). Clipper permits both in its
+    # output unless run in strictly-simple mode, and both still describe the region
+    # unambiguously under the even-odd and positive fill rules; a proper crossing does
+    # not.
     function is_simple_exact(v::Vector{GridPt}; weak=false)
         n = length(v)
         n >= 3 || return false
@@ -110,7 +174,7 @@
                 (i == 1 && j == n) && continue
                 c, d = v[j], v[mod1(j + 1, n)]
                 if weak
-                    segments_cross_or_overlap_exact(a, b, c, d) && return false
+                    segments_cross_exact(a, b, c, d) && return false
                 else
                     segments_intersect_exact(a, b, c, d) && return false
                 end
@@ -119,22 +183,15 @@
         return true
     end
 
-    # Proper crossing (interiors meet at one point) or collinear overlap of positive
-    # length. Excludes touching at endpoints and an endpoint lying on the other segment.
-    function segments_cross_or_overlap_exact(a::GridPt, b::GridPt, c::GridPt, d::GridPt)
+    # Proper crossing: the segments' interiors meet at a single point. Excludes
+    # touching at endpoints, an endpoint lying on the other segment, and collinear
+    # overlap.
+    function segments_cross_exact(a::GridPt, b::GridPt, c::GridPt, d::GridPt)
         o1 = orient_exact(a, b, c)
         o2 = orient_exact(a, b, d)
         o3 = orient_exact(c, d, a)
         o4 = orient_exact(c, d, b)
-        (o1 * o2 < 0 && o3 * o4 < 0) && return true
-        if o1 == 0 && o2 == 0
-            # Collinear: overlap iff the projections share more than a point.
-            k = a[1] == b[1] ? 2 : 1
-            lo1, hi1 = minmax(a[k], b[k])
-            lo2, hi2 = minmax(c[k], d[k])
-            return min(hi1, hi2) > max(lo1, lo2)
-        end
-        return false
+        return o1 * o2 < 0 && o3 * o4 < 0
     end
 
     # Ray-crossing test; points on the boundary return `missing` so callers can
@@ -157,11 +214,10 @@
         return inside
     end
 
-    # Region membership for a set of polygons under the even-odd rule. Every polygon
-    # returned by `to_polygons(::ClippedPolygon)` is a simple polygon with holes cut
-    # into keyholes, so the polygons are disjoint and even-odd equals union; the same
-    # rule also handles the raw outer/hole contour list of a ClippedPolygon tree.
-    function point_in_region_exact(q::GridPt, polys::Vector{Vector{GridPt}})
+    # Region membership for a set of contours under the even-odd rule. This is the
+    # right rule both for a ClippedPolygon tree (outer/hole contours nest and
+    # alternate) and for the keyhole polygons `to_polygons` produces from it.
+    function point_in_region_exact(q::GridPt, polys::GridRegion)
         inside = false
         for v in polys
             r = point_in_polygon_exact(q, v)
@@ -172,10 +228,32 @@
     end
 
     # ---------------------------------------------------------------------------------
-    # Region comparison `≐`. Canonical boundary equality after collinear stripping is
-    # the only passing verdict; approximate comparison needs a stronger oracle.
+    # Region comparisons.
+    #
+    # `≐` (exact): canonical boundary equality after collinear stripping. The verdict
+    #   for laws that hold exactly — calibration shows this is every boolean law on
+    #   rectilinear integer inputs (all intersections are lattice points) and the
+    #   commutativity, identity, and fill-rule laws on any input.
+    # `region_within(X, Y, tol)`: X and Y agree up to `tol` lattice units, meaning no
+    #   point farther than `tol` from both boundaries has different membership. This is
+    #   the semantics the kernel's rounding implies: an intersection vertex moves by up
+    #   to half a unit, so slivers up to a unit wide along any boundary may appear or
+    #   vanish — including long, needle-thin ones, whose vertices may be far from the
+    #   other region's boundary although every point of them is near their own. Two
+    #   checks, both required: (1) the exact area difference is within `tol` times the
+    #   summed perimeters, the budget of a `tol`-wide sliver along every edge, checked
+    #   exhaustively; (2) sampled points farther than `tol` from both boundaries have
+    #   equal membership. Probes are placed on both sides of every edge midpoint and
+    #   around every vertex of both regions, just outside the band, plus uniformly over
+    #   the joint bounding box; membership is constant on each connected component of
+    #   the off-band set, so the probes only need to reach every component wider than
+    #   the band, and the components are faces of the two boundaries' arrangement,
+    #   whose edges those probes straddle. Sampling is not a proof; the area budget is
+    #   the exhaustive backstop.
+    # `region_subset_within(X, Y, tol)`: X ⊆ Y up to `tol` by the same membership test.
+    # Tolerances are per law and documented at the law, in lattice units: 1 for one
+    # kernel rounding step, 2 where two results each round independently.
     # ---------------------------------------------------------------------------------
-    const DEFAULT_δ = 2
     function strip_collinear(v::Vector{GridPt})
         n = length(v)
         n < 3 && return v
@@ -196,8 +274,16 @@
         return circshift(v, 1 - i)
     end
 
-    canonical_region(polys::Vector{Vector{GridPt}}) =
+    canonical_region(polys::GridRegion) =
         sort!(filter!(!isempty, canonical_contour.(polys)))
+
+    function region_equal(X::GridRegion, Y::GridRegion)
+        canonical_region(X) == canonical_region(Y) && return (true, nothing)
+        return (false, :canonical_mismatch)
+    end
+    region_equal(X, Y) = region_equal(togrid(X), togrid(Y))
+
+    ≐(X, Y) = first(region_equal(X, Y))
 
     # Distance from q to the boundary of a polygon set, in lattice units. Float64 is
     # sufficient for choosing diagnostic probes at the generated coordinate ranges.
@@ -209,7 +295,7 @@
         t = len2 == 0 ? 0.0 : clamp((qx * dx + qy * dy) / len2, 0.0, 1.0)
         return hypot(qx - t * dx, qy - t * dy)
     end
-    function boundary_distance(q::GridPt, polys::Vector{Vector{GridPt}})
+    function boundary_distance(q::GridPt, polys::GridRegion)
         d = Inf
         for v in polys, i in eachindex(v)
             d = min(d, _dist_point_segment(q, v[i], v[mod1(i + 1, end)]))
@@ -217,48 +303,121 @@
         return d
     end
     near_boundary(q, δ, regions...) = any(r -> boundary_distance(q, r) < δ, regions)
+    perimeter_exact(v::Vector{GridPt}) = sum(
+        hypot(
+            Float64(v[i][1] - v[mod1(i + 1, end)][1]),
+            Float64(v[i][2] - v[mod1(i + 1, end)][2])
+        ) for i in eachindex(v);
+        init=0.0
+    )
+    perimeter_exact(polys::GridRegion) = sum(perimeter_exact, polys; init=0.0)
 
-    function sample_points(polys::Vector{Vector{GridPt}}...; n=256, seed=GEOMLAWS_SEED)
+    # Probe points for membership votes: uniform over the joint bounding box, plus
+    # points around every vertex and on both sides of every edge midpoint of every
+    # region at one and three times `step` (which callers set just above the band).
+    function sample_points(polys::GridRegion...; n=256, step=1, seed=GEOMLAWS_SEED)
         allpts = reduce(vcat, reduce(vcat, p; init=GridPt[]) for p in polys; init=GridPt[])
         isempty(allpts) && return GridPt[]
         xs, ys = first.(allpts), last.(allpts)
-        lo = (minimum(xs) - 1, minimum(ys) - 1)
-        hi = (maximum(xs) + 1, maximum(ys) + 1)
+        lo = (minimum(xs) - step, minimum(ys) - step)
+        hi = (maximum(xs) + step, maximum(ys) + step)
         rng = Random.Xoshiro(seed)
         pts = GridPt[]
         for _ = 1:n
             push!(pts, (rand(rng, lo[1]:hi[1]), rand(rng, lo[2]:hi[2])))
         end
-        # Near-vertex probes at a few grid offsets.
-        for p in allpts,
-            d in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (2, 3), (-3, 2))
-
-            push!(pts, (p[1] + d[1], p[2] + d[2]))
+        dirs = ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1))
+        for region in polys, v in region, i in eachindex(v)
+            a, b = v[i], v[mod1(i + 1, end)]
+            m = ((a[1] + b[1]) ÷ 2, (a[2] + b[2]) ÷ 2)
+            for k in (1, 3), d in dirs
+                push!(pts, (a[1] + k * step * d[1], a[2] + k * step * d[2]))
+                push!(pts, (m[1] + k * step * d[1], m[2] + k * step * d[2]))
+            end
         end
         return pts
     end
 
-    function region_equal(X::Vector{Vector{GridPt}}, Y::Vector{Vector{GridPt}})
+    # Laws never run on outputs this large: the membership probes are O(n·m), and an
+    # output this size from a ≤ 24-vertex input is itself a finding (see the round-join
+    # note in test_offset.jl).
+    const MAX_VERTICES = 4000
+    nvertices(polys::GridRegion) = sum(length, polys; init=0)
+
+    function region_within(X::GridRegion, Y::GridRegion, tol::Integer)
+        nvertices(X) + nvertices(Y) <= MAX_VERTICES || return (false, :too_many_vertices)
         canonical_region(X) == canonical_region(Y) && return (true, nothing)
-        return (false, :canonical_mismatch)
+        budget = tol * (perimeter_exact(X) + perimeter_exact(Y))
+        Float64(abs(region_area_exact(X) - region_area_exact(Y))) <= budget ||
+            return (false, :area)
+        for q in sample_points(X, Y; step=tol + 1)
+            near_boundary(q, tol, X, Y) && continue
+            a = point_in_region_exact(q, X)
+            b = point_in_region_exact(q, Y)
+            (ismissing(a) || ismissing(b)) && continue
+            a == b || return (false, (:membership, q))
+        end
+        return (true, nothing)
     end
-    region_equal(X, Y) = region_equal(togrid(X), togrid(Y))
+    region_within(X, Y, tol) = region_within(togrid(X), togrid(Y), tol)
 
-    ≐(X, Y) = first(region_equal(X, Y))
+    function region_subset_within(X::GridRegion, Y::GridRegion, tol::Integer)
+        nvertices(X) + nvertices(Y) <= MAX_VERTICES || return (false, :too_many_vertices)
+        isempty(X) && return (true, nothing)
+        for q in sample_points(X, Y; step=tol + 1)
+            near_boundary(q, tol, X, Y) && continue
+            a = point_in_region_exact(q, X)
+            b = point_in_region_exact(q, Y)
+            (ismissing(a) || ismissing(b)) && continue
+            (a && !b) && return (false, (:membership, q))
+        end
+        return (true, nothing)
+    end
+    region_subset_within(X, Y, tol) = region_subset_within(togrid(X), togrid(Y), tol)
 
-    # Output validity (law B8): every contour simple; tree alternates outer/hole.
+    # Region equality with no tolerance: exact area equality and membership agreement
+    # everywhere off the shared boundary. Used where `≐` is too strict — the kernel
+    # may return two contours touching at a vertex either merged (with a pinch) or
+    # separate, depending on operand order, and both are the same region.
+    region_same(X, Y) = first(region_within(X, Y, 0))
+    # Output validity (law B8): every contour simple; tree alternates outer/hole; every
+    # hole vertex lies inside or on its parent contour (`nested=true`).
     # Strict simplicity is a known-broken law on Clipper1 (see test/laws/test_ledger.jl), so
     # the default checks weak simplicity.
-    function valid_output(cp::ClippedPolygon; weak=true)
+    function valid_output(cp::ClippedPolygon; weak=true, nested=false)
         function walk(node, expect_hole)
+            parent = togrid.(Clipper.contour(node))
             for c in Clipper.children(node)
                 Clipper.ishole(c) == expect_hole || return false
-                is_simple_exact(togrid.(Clipper.contour(c)); weak) || return false
+                g = togrid.(Clipper.contour(c))
+                is_simple_exact(g; weak) || return false
+                if nested && expect_hole
+                    any(q -> point_in_polygon_exact(q, parent) === false, g) && return false
+                end
                 walk(c, !expect_hole) || return false
             end
             return true
         end
         return walk(cp.tree, false)
+    end
+
+    # Exact point-to-region distance oracle for the offset laws: 0 inside, else the
+    # distance to the boundary, compared against δ ± tol without floating point.
+    # Returns :in, :out, or :band.
+    function offset_class(q::GridPt, A::GridRegion, δ::Integer, tol::Integer)
+        inside = point_in_region_exact(q, A)
+        if δ >= 0
+            ismissing(inside) && return :in
+            inside && return :in
+            within_boundary_distance_exact(q, A, δ - tol) && return :in
+            within_boundary_distance_exact(q, A, δ + tol) && return :band
+            return :out
+        else
+            (ismissing(inside) || !inside) && return :out
+            within_boundary_distance_exact(q, A, -δ - tol) && return :out
+            within_boundary_distance_exact(q, A, -δ + tol) && return :band
+            return :in
+        end
     end
 
     # ---------------------------------------------------------------------------------
@@ -306,9 +465,72 @@
     rectangle_polygon(w::Int, h::Int) =
         make_polygon(Point{Int}[(0, 0), (w, 0), (w, h), (0, h)])
 
+    # Rectilinear staircase polygon: a rectangle whose top edge is a skyline of `k`
+    # steps. Simple by construction; collinear duplicates are stripped by `make_polygon`
+    # only when consecutive, so flat steps leave collinear vertices in place — a
+    # degeneracy worth keeping. On the integer lattice every intersection of two
+    # rectilinear polygons is a lattice point, so the boolean laws hold exactly here.
+    function staircase_polygon(w::Int, xs::Vector{Int}, hs::Vector{Int})
+        pts = Point{Int}[(0, 0), (w, 0)]
+        xprev = w
+        for (x, h) in zip(xs, hs)
+            push!(pts, Point(xprev, h))
+            push!(pts, Point(x, h))
+            xprev = x
+        end
+        pts[end] == Point(0, hs[end]) || push!(pts, Point(0, hs[end]))
+        return make_polygon(pts)
+    end
+    int_rectilinear_polygon = @composed function _int_rectilinear(
+        w=Data.Integers(3, 2GRID_HALF),
+        breaks=Data.Vectors(Data.Integers(1, 2GRID_HALF - 1); min_size=0, max_size=5),
+        hs=Data.Vectors(Data.Integers(1, 2GRID_HALF); min_size=1, max_size=6)
+    )
+        xs = sort(unique(filter(x -> x < w, breaks)); rev=true)
+        push!(xs, 0)
+        hs = hs[1:min(length(hs), length(xs))]
+        # Adjacent equal heights collapse into one step, which is fine.
+        xs = xs[1:length(hs)]
+        xs[end] = 0
+        p = staircase_polygon(w, xs, hs)
+        valid_polygon(p) || reject!()
+        return p
+    end
+
     function valid_polygon(p::Polygon)
         g = togrid(p)
         return length(g) >= 3 && is_simple_exact(g) && signed_area2_exact(g) > 0
+    end
+
+    # Smallest distance from a vertex to a non-adjacent edge, in lattice units. On the
+    # integer lattice, features thinner than one unit are at the mercy of the kernel's
+    # intersection rounding (ledger L1), so laws that must hold exactly are stated for
+    # "thick" polygons and the thin ones are ledgered separately.
+    function min_thickness(g::Vector{GridPt})
+        n = length(g)
+        d = Inf
+        for i = 1:n, j = 1:n
+            (j == i || mod1(j + 1, n) == i) && continue
+            d = min(d, _dist_point_segment(g[i], g[j], g[mod1(j + 1, n)]))
+        end
+        return d
+    end
+    const THICK = 1.5
+    is_thick(p::Polygon, t=THICK) = min_thickness(togrid(p)) >= t
+
+    # Smallest interior angle, for laws that depend on the miter limit.
+    function min_corner_angle(p::Polygon)
+        g = togrid(p)
+        n = length(g)
+        θmin = Float64(π)
+        for i = 1:n
+            a, b, c = g[mod1(i - 1, n)], g[i], g[mod1(i + 1, n)]
+            u = (Float64(a[1] - b[1]), Float64(a[2] - b[2]))
+            v = (Float64(c[1] - b[1]), Float64(c[2] - b[2]))
+            cosθ = (u[1] * v[1] + u[2] * v[2]) / (hypot(u...) * hypot(v...))
+            θmin = min(θmin, acos(clamp(cosθ, -1.0, 1.0)))
+        end
+        return θmin
     end
 
     # Integer star polygons.
@@ -337,15 +559,24 @@
         return p
     end
 
+    int_thick_star_polygon = @composed function _int_thick_star(θ=gen_angles, r=gen_radii)
+        n = min(length(θ), length(r))
+        p = star_polygon(Int, θ[1:n], r[1:n], GRID_HALF)
+        (valid_polygon(p) && is_thick(p)) || reject!()
+        return p
+    end
+
+    # Float coordinates spanning nm to 100 μm feature scales. Vertices are rounded to
+    # 1e-3 of the scale so they land on a coarse grid (cheap collinearity) while the
+    # kernel still rounds their fm images; the cap at 1e2 keeps lattice coordinates
+    # below ~1e11 so the exact predicates stay in Int128.
     float_star_polygon = @composed function _float_star(
         θ=gen_angles,
         r=gen_radii,
-        logscale=Data.Integers(-3, 3)
+        logscale=Data.Integers(-3, 2)
     )
         n = min(length(θ), length(r))
         scale = 10.0^logscale
-        # Round to 1e-3 of the scale so vertices land on a coarse grid (cheap
-        # collinearity) but still exercise float→fm rounding.
         pts = [
             Point(
                 round(rr * cos(tt) * scale; digits=3 - logscale),
@@ -365,6 +596,8 @@
     end
 
     int_polygon = int_star_polygon | int_rectangle_polygon
+    int_thick_polygon = int_thick_star_polygon | int_rectangle_polygon
+    float_polygon = float_star_polygon
 
     """
         degenerate_pair
@@ -399,6 +632,151 @@
         return degenerate_pair_polygons(w, h, kind, k)
     end
 
+    # Two star polygons, the second translated by up to half the grid so the pair ranges
+    # from identical through heavily overlapping to disjoint.
+    int_star_pair = @composed function _int_star_pair(
+        A=int_thick_polygon,
+        B=int_thick_polygon,
+        dx=Data.Integers(-GRID_HALF ÷ 2, GRID_HALF ÷ 2),
+        dy=Data.Integers(-GRID_HALF ÷ 2, GRID_HALF ÷ 2)
+    )
+        return (A, B + Point(dx, dy))
+    end
+    int_pair = int_star_pair | degenerate_pair
+
+    int_rectilinear_pair = @composed function _int_rectilinear_pair(
+        A=int_rectilinear_polygon,
+        B=int_rectilinear_polygon,
+        dx=Data.Integers(-GRID_HALF, GRID_HALF),
+        dy=Data.Integers(-GRID_HALF, GRID_HALF)
+    )
+        return (A, B + Point(dx, dy))
+    end
+    int_rectilinear_triple = @composed function _int_rectilinear_triple(
+        pair=int_rectilinear_pair,
+        C=int_rectilinear_polygon,
+        dx=Data.Integers(-GRID_HALF, GRID_HALF),
+        dy=Data.Integers(-GRID_HALF, GRID_HALF)
+    )
+        return (pair..., C + Point(dx, dy))
+    end
+
+    # Float pairs: independent stars at the same scale (`float_star_pair`), or `B`
+    # derived from `A` by moving one vertex `kfm` lattice units or attaching a
+    # `kfm`-wide sliver along an edge (`float_perturbed_pair`, which also returns
+    # `kfm`). Near-coincident edges meeting at an angle of order kfm/length make every
+    # intersection ill-conditioned by geometry — rounding an endpoint by half a unit
+    # moves the intersection along the edge by up to half the edge length — so laws on
+    # perturbed pairs are stated within `kfm + 2` rather than within 1 or 2.
+    function _fm_offset(A::Polygon{Float64}, i, kfm)
+        return A.p[mod1(i, length(A.p))] + Point(kfm / Polygons.SCALE, 0.0)
+    end
+    float_star_pair = @composed function _float_star_pair(
+        A=float_star_polygon,
+        r=gen_radii,
+        θ=gen_angles,
+        shift=Data.Floats{Float64}(; minimum=-0.5, maximum=0.5, nans=false, infs=false)
+    )
+        scale = maximum(p -> max(abs(p.x), abs(p.y)), A.p)
+        m = min(length(θ), length(r))
+        pts = [
+            Point(rr * cos(tt), rr * sin(tt)) * scale for
+            (tt, rr) in zip(sort(θ[1:m]), r[1:m])
+        ]
+        B = make_polygon(pts) + Point(shift * scale, shift * scale)
+        valid_polygon(B) || reject!()
+        return (A, B)
+    end
+    float_perturbed_pair = @composed function _float_perturbed_pair(
+        A=float_star_polygon,
+        kind=Data.Integers(1, 2),
+        i=Data.Integers(1, 12),
+        kfm=Data.Integers(1, 10)
+    )
+        n = length(A.p)
+        idx = mod1(i, n)
+        B = if kind == 1
+            pts = copy(A.p)
+            pts[idx] = _fm_offset(A, idx, kfm)
+            make_polygon(pts)
+        else
+            a, c = A.p[idx], A.p[mod1(idx + 1, n)]
+            d = c - a
+            nrm = Point(-d.y, d.x) / hypot(d.x, d.y) * (kfm / Polygons.SCALE)
+            make_polygon([a, c, c + nrm, a + nrm])
+        end
+        valid_polygon(B) || reject!()
+        return (A, B, kfm)
+    end
+
+    int_triple = @composed function _int_triple(
+        pair=int_star_pair,
+        C=int_thick_polygon,
+        dx=Data.Integers(-GRID_HALF ÷ 2, GRID_HALF ÷ 2),
+        dy=Data.Integers(-GRID_HALF ÷ 2, GRID_HALF ÷ 2)
+    )
+        return (pair..., C + Point(dx, dy))
+    end
+    float_triple =
+        @composed function _float_triple(pair=float_star_pair, other=float_star_pair)
+            A, B = pair
+            C, _ = other
+            scale = maximum(p -> max(abs(p.x), abs(p.y)), A.p)
+            cscale = maximum(p -> max(abs(p.x), abs(p.y)), C.p)
+            return (A, B, Polygon(C.p .* (scale / cscale)))
+        end
+
+    # A set of several polygons spread over a region several times the polygon size,
+    # for the tiled and identity laws.
+    int_polygon_set = @composed function _int_polygon_set(
+        polys=Data.Vectors(int_thick_polygon; min_size=1, max_size=6),
+        offsets=Data.Vectors(
+            Data.Integers(-2GRID_HALF, 2GRID_HALF);
+            min_size=12,
+            max_size=12
+        )
+    )
+        return [p + Point(offsets[2i - 1], offsets[2i]) for (i, p) in enumerate(polys)]
+    end
+    # Float version at unit scale: `clip_tiled` builds its tiles in Float64, so integer
+    # inputs would be promoted and the comparison would cross lattices.
+    float_polygon_set = @composed function _float_polygon_set(set=int_polygon_set)
+        return [Polygon(Point{Float64}.(p.p)) for p in set]
+    end
+
+    # A polygon with holes, built directly as a ClippedPolygon tree: a star and a copy
+    # scaled toward the center (star-shaped about the origin ⇒ the copy is strictly
+    # inside), optionally with a second hole. Exercises `to_polygons`' keyhole cutting
+    # on trees of known validity.
+    function holed_tree(outer::Polygon{Int}, holes::Vector{Polygon{Int}})
+        root = Clipper.PolyNode{Point{Int}}(Point{Int}[], false, false)
+        root.parent = root
+        o = Clipper.PolyNode{Point{Int}}(outer.p, false, false)
+        o.parent = root
+        o.children = map(holes) do h
+            node = Clipper.PolyNode{Point{Int}}(reverse(h.p), true, false)
+            node.parent = o
+            node.children = Clipper.PolyNode{Point{Int}}[]
+            return node
+        end
+        root.children = [o]
+        return ClippedPolygon(root)
+    end
+    int_holed_polygon = @composed function _int_holed(
+        θ=gen_angles,
+        r=gen_radii,
+        shrink=Data.Floats{Float64}(; minimum=0.2, maximum=0.6, nans=false, infs=false)
+    )
+        n = min(length(θ), length(r))
+        big = 5GRID_HALF
+        outer = star_polygon(Int, θ[1:n], r[1:n], big)
+        hole = star_polygon(Int, θ[1:n], r[1:n], big * shrink)
+        (valid_polygon(outer) && valid_polygon(hole)) || reject!()
+        all(q -> point_in_polygon_exact(q, togrid(outer)) === true, togrid(hole)) ||
+            reject!()
+        return holed_tree(outer, [hole])
+    end
+
     # Rigid transformations only: magnification is out of scope for equivariance laws.
     rigid_transform = @composed function _rigid(
         dx=Data.Integers(-GRID_HALF, GRID_HALF),
@@ -409,4 +787,20 @@
         t = Translation(Point(dx, dy)) ∘ Rotation(quarter_turns * π / 2)
         return reflect ? t ∘ XReflection() : t
     end
+    # Integer-exact rigid transforms: quarter turns and reflections keep integer
+    # coordinates integer, so the law can be stated exactly.
+    function apply_exact(t, p::Polygon{Int})
+        return Polygon(Point{Int}[Point(round(Int, q.x), round(Int, q.y)) for q in t(p).p])
+    end
+
+    # Lengths: fixed unit choices for the unit-invariance law. The nm/μm/mm images of
+    # one integer polygon are exactly representable, and `clipperize` maps all three to
+    # the same fm lattice.
+    const UNIT_CHOICES = (Unitful.nm, Unitful.μm, Unitful.mm)
+    with_unit(p::Polygon{Int}, u) = Polygon([
+        Point(
+            Unitful.uconvert(u, float(q.x) * Unitful.μm),
+            Unitful.uconvert(u, float(q.y) * Unitful.μm)
+        ) for q in p.p
+    ])
 end
