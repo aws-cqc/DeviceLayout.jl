@@ -17,7 +17,7 @@ The first two behavior columns below are therefore both kinds of syntactic dupli
 | `Fuse` | `Fuse(:combined, (:a, :b))` twice is rejected because both calls request the same generated destination identity. A different fused source set may append one new PG to the existing destination. | `Fuse(:metal); Fuse(:metal)` executes twice. The second fuses the first generated PG and creates another hashed identity. | `Fuse(:ab, (:a, :b)); Fuse(:abc, (:ab, :c))` works and creates a second collapsed result. |
 | `Heal` | `Heal(:clean, :metal); Heal(:clean, :metal)` fails on the second call because the renamed PG identity already exists in `:clean`. | `Heal(:metal); Heal(:metal)` executes twice under the same identity. The second heals the already-healed result and should be geometrically idempotent. | `Heal(:clean, :metal); Heal(:cleaner, :clean)` preserves the identity suffix while changing the layer prefix twice. |
 | `Intersect` | `Intersect(:overlap, :a, :b)` twice is rejected because the generated destination identity collides. | `Intersect(:a, :a, :mask)` twice executes on evolved state and consumes each replaced OCC object. The second computes `(a ∩ mask) ∩ mask`, geometrically idempotent for the same mask but with new generated PG identities. Using one layer as both object and tool is rejected. | `Intersect(:ab, :a, :b); Intersect(:abc, :ab, :c)` computes `(a ∩ b) ∩ c`. |
-| `GetInterface` | `GetInterface(:ab, :a, :b)` twice silently deduplicates the second deferred output. | `GetInterface(:a, :a, :b)` twice makes the second deferred operation consume the first interface result. It is not the same interface calculation. | `GetInterface(:ab, :a, :b); GetInterface(:abc, :ab, :c)` creates a deferred interface chain. |
+| `GetInterface` | `GetInterface(:ab, :a, :b)` twice is rejected because both calls request the same deferred destination identity. | In-place use is rejected because deferred interface inputs must retain their registered PG identities and dimensions through execution. | `GetInterface(:ab, :a, :b); GetInterface(:abc, :ab, :c)` creates a deferred interface chain while preserving the original inputs. |
 | `RestrictTo` | There is no destination. `RestrictTo(:volume)` twice emits two native calls; the second should usually be geometrically idempotent. | The first call changes the global model rather than a named destination, so the second sees an already-restricted model. | `RestrictTo(:outer); RestrictTo(:inner)` sequentially restricts the global model, effectively approaching restriction to the common retained region. This is global-state composition, not named-layer composition. |
 | `GetBoundary` | `GetBoundary(:faces, :volume)` twice executes twice and creates `faces__hash` and `faces__hash__2`. | `GetBoundary(:shape, :shape)` twice composes dimensions, for example 3D → 2D → 1D. | `GetBoundary(:faces, :volume); GetBoundary(:edges, :faces)` explicitly computes boundaries of boundaries. |
 | `Translate` | `Translate(:shifted, :metal, dx, dy, dz)` twice creates two copied results with suffixes, even though they represent the same transformation. | `Translate(:metal, :metal, dx, 0, 0; copy=false)` twice accumulates to translation by `2dx`. With `copy=true`, repeated in-place calls append copies to the source layer and later calls can copy earlier copies, causing PG growth. | `Translate(:x, :metal, dx, 0, 0); Translate(:xy, :x, 0, dy, 0)` composes to translation by `(dx, dy, 0)`. |
@@ -27,13 +27,11 @@ The first two behavior columns below are therefore both kinds of syntactic dupli
 
 ## Main patterns now visible
 
-### Independent duplicates currently have three outcomes
-
-- **Silently deduplicated**
-  - `GetInterface`
+### Independent duplicates currently have two outcomes
 
 - **Rejected**
   - `Cut`
+  - `GetInterface`
   - `Intersect`
   - Assign-mode `Heal`
   - `Fuse`
@@ -43,7 +41,10 @@ The first two behavior columns below are therefore both kinds of syntactic dupli
   - `Translate`
   - `Revolve`
 
-### In-place reapplication also has three broad meanings
+### In-place reapplication has four broad meanings
+
+- **Rejected**
+  - `GetInterface`
 
 - **Geometrically idempotent or nearly so**
   - `Cut` with the same mask
