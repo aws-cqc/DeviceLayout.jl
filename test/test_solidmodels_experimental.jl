@@ -645,8 +645,18 @@ end
         @test haskey(reg, :voids)
         @test only(reg[:combined].pgs).name == op[1]
 
-        # An existing destination must be an explicit source and is collapsed with them.
-        @test_throws ArgumentError compile_ops([Fuse(:metal, (:voids,))], stack, registry)
+        # An unrelated existing destination receives one appended, disjoint fused PG.
+        ops, reg, _ = compile_ops([Fuse(:metal, (:voids,))], stack, registry)
+        union_op = only(filter(op -> op[2] == SolidModels.union_geom!, ops))
+        difference_op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
+        @test union_op[3] == ([pgname(voids_meta)], 2)
+        @test difference_op[3] == (union_op[1], [pgname(metal_meta)], 2, 2)
+        @test length(reg[:metal].pgs) == 2
+        @test reg[:metal].pgs[1].name == pgname(metal_meta)
+        @test reg[:metal].pgs[2].name == union_op[1]
+        @test haskey(reg, :voids)
+
+        # Including the destination among the sources collapses and replaces its PGs.
         ops, reg, _ = compile_ops([Fuse(:metal, (:metal, :voids))], stack, registry)
         op = only(ops)
         @test op[3] == (sort([pgname(metal_meta), pgname(voids_meta)]), 2)
@@ -654,6 +664,28 @@ end
         @test only(reg[:metal].pgs).name == op[1]
         @test (:remove_object => false) in op
         @test haskey(reg, :voids)
+
+        # Independent repeats request the same generated identity and are rejected.
+        fuse = Fuse(:combined, (:metal, :voids))
+        @test_throws ArgumentError compile_ops([fuse, fuse], stack, registry)
+
+        # Stateful in-place repeats fuse the result produced by the previous call.
+        ops, reg, _ = compile_ops([Fuse(:metal), Fuse(:metal)], stack, registry)
+        @test length(ops) == 2
+        @test ops[2][3] == ([ops[1][1]], 2)
+        @test ops[2][1] != ops[1][1]
+        @test only(reg[:metal].pgs).name == ops[2][1]
+
+        # Explicit chains consume a named fused result from the preceding operation.
+        ops, reg, _ = compile_ops(
+            [Fuse(:combined, (:metal, :voids)), Fuse(:all, (:combined, :shell))],
+            stack,
+            registry
+        )
+        @test length(ops) == 2
+        @test ops[2][3] == (sort([ops[1][1], pgname(shell_meta)]), 2)
+        @test haskey(reg, :combined)
+        @test haskey(reg, :all)
 
         # Explicit removal controls source lifetime and is folded only when all
         # non-destination sources are removed.
@@ -690,6 +722,14 @@ end
         reg = deepcopy(registry)
         empty!(reg[:metal].pgs)
         @test_throws ArgumentError compile_ops([Fuse(:metal)], stack, reg)
+
+        reg = deepcopy(registry)
+        reg[:combined] = LayerState([PGRecord("combined__existing", :combined, nothing)], 3)
+        @test_throws ArgumentError compile_ops(
+            [Fuse(:combined, (:metal, :voids))],
+            stack,
+            reg
+        )
     end
 
     @testset "Heal" begin
