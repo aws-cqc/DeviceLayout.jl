@@ -99,14 +99,20 @@ Heal(source::Symbol) = Heal(source, source)
 
 Compute the intersection of `object` and `tool`. All physical-group pairings are
 intersected independently, so the output can contain up to `|object| × |tool|` physical
-groups. The destination dimension is the lower input dimension. Non-destination inputs
-remain available unless consumed by adjacent [`Remove`](@ref) operations. Generated
-destination identity collisions are rejected.
+groups. The destination dimension is the lower input dimension. In-place operation consumes
+the replaced OCC input; other inputs remain available unless consumed by adjacent
+[`Remove`](@ref) operations. Object and tool layers must be distinct. Generated destination
+identity collisions are rejected.
 """
 struct Intersect <: BooleanOp
     destination::Symbol
     object::Symbol
     tool::Symbol
+    function Intersect(destination::Symbol, object::Symbol, tool::Symbol)
+        object == tool &&
+            throw(ArgumentError("Intersect requires distinct object and tool layers"))
+        return new(destination, object, tool)
+    end
 end
 
 """
@@ -513,18 +519,17 @@ source_layers(op::_LoweredFuse) = op.sources
 source_layers(op::_LoweredHeal) = (op.source,)
 
 function _lower_with_removals(op::Intersect, removals::Vector{Remove})
-    ambiguous = op.object == op.tool
-    remove_object =
-        !ambiguous &&
+    absorb_object =
         op.object != op.destination &&
         any(r -> r.source == op.object && r.remove_entities, removals)
-    remove_tool =
-        !ambiguous &&
+    absorb_tool =
         op.tool != op.destination &&
         any(r -> r.source == op.tool && r.remove_entities, removals)
+    remove_object = op.destination == op.object || absorb_object
+    remove_tool = op.destination == op.tool || absorb_tool
     absorbed = Set{Symbol}()
-    remove_object && push!(absorbed, op.object)
-    remove_tool && push!(absorbed, op.tool)
+    absorb_object && push!(absorbed, op.object)
+    absorb_tool && push!(absorbed, op.tool)
     return _LoweredIntersect(
         op.destination,
         op.object,
