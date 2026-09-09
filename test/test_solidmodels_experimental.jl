@@ -557,6 +557,12 @@ end
     end
 
     @testset "Translate" begin
+        @test Translate(:metal, 1μm, 0μm, 0μm).destination == :metal
+        @test Translate(:metal, 1μm, 0μm, 0μm).source == :metal
+        @test !Translate(:metal, 1μm, 0μm, 0μm).copy
+        @test !Translate(:metal, :metal, 1μm, 0μm, 0μm).copy
+        @test Translate(:shifted, :metal, 1μm, 0μm, 0μm).copy
+
         ops, reg, _ =
             compile_ops([Translate(:shifted, :metal, 1μm, 0μm, 0μm)], stack, registry)
         @test haskey(reg, :metal)
@@ -564,28 +570,59 @@ end
         @test only(ops)[2] == SolidModels.translate!
         @test (:copy => true) in only(ops)
 
-        ops, reg, _ = compile_ops(
-            [Translate(:moved, :metal, 1μm, 0μm, 0μm; copy=false)],
-            stack,
-            registry
-        )
-        @test haskey(reg, :metal)
-        @test reg[:moved].dim == 2
-        @test (:copy => false) in only(ops)
+        @test_throws ArgumentError Translate(:moved, :metal, 1μm, 0μm, 0μm; copy=false)
 
+        # Independent repeats request the same generated identity.
+        translate = Translate(:shifted, :metal, 1μm, 0μm, 0μm)
+        @test_throws ArgumentError compile_ops([translate, translate], stack, registry)
+
+        # Distinct translations may append to one destination; disjointness is the
+        # caller's responsibility.
         ops, reg, _ = compile_ops(
             [
                 Translate(:shifted, :metal, 1μm, 0μm, 0μm),
-                Translate(:shifted, :metal, 2μm, 0μm, 0μm),
                 Translate(:shifted, :metal, 2μm, 0μm, 0μm)
             ],
             stack,
             registry
         )
         names = getfield.(reg[:shifted].pgs, :name)
-        @test length(names) == 3
+        @test length(names) == 2
         @test allunique(names)
-        @test count(op -> op[2] == SolidModels.translate!, ops) == 3
+        @test count(op -> op[2] == SolidModels.translate!, ops) == 2
+
+        # In-place noncopying translations accumulate on the previous result.
+        ops, reg, _ = compile_ops(
+            [Translate(:metal, 1μm, 0μm, 0μm), Translate(:metal, 1μm, 0μm, 0μm)],
+            stack,
+            registry
+        )
+        @test length(ops) == 2
+        @test all(op -> op[1] == pgname(metal_meta), ops)
+        @test all(op -> (:copy => false) in op, ops)
+        @test only(reg[:metal].pgs).name == pgname(metal_meta)
+
+        # Repeating an in-place copy would recreate the first generated identity.
+        in_place_copy = Translate(:metal, :metal, 1μm, 0μm, 0μm; copy=true)
+        @test_throws ArgumentError compile_ops(
+            [in_place_copy, in_place_copy],
+            stack,
+            registry
+        )
+
+        # Explicit chains consume the translated result from the preceding operation.
+        ops, reg, _ = compile_ops(
+            [
+                Translate(:shifted_x, :metal, 1μm, 0μm, 0μm),
+                Translate(:shifted_xy, :shifted_x, 0μm, 2μm, 0μm)
+            ],
+            stack,
+            registry
+        )
+        @test length(ops) == 2
+        @test ops[2][3][1] == ops[1][1]
+        @test haskey(reg, :shifted_x)
+        @test haskey(reg, :shifted_xy)
 
         reg = deepcopy(registry)
         reg[:shifted] = LayerState([PGRecord("wrong_dimension", :shifted, nothing)], 3)
