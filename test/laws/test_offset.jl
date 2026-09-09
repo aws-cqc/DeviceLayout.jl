@@ -165,39 +165,26 @@ end
 
 @testitem "GeomLaws O6: opening and closing" setup = [CommonTestSetup, LawsSetup] tags =
     [:geomlaws] begin
-    # Grow-then-shrink contains A for every join type: growing reproduces A's edges
-    # shifted outward, and shrinking that back intersects them at A's own vertices.
-    # Shrink-then-grow is contained in A only for round joins (it is the morphological
-    # opening). With miter joins a short edge can collapse under the shrink, and
-    # regrowing the sharper corner that results overshoots A — e.g.
-    # `(0.000463,0),(0.000478,0),(0.000828,0.000109),(-8.7e-5,0.00048)` at δ = 0.05 of
-    # its extent regrows 3.4 pm outside — so that direction is not a law for miter.
-    # Both directions are stated away from the L7 regime, within `offset_tol` of the
-    # first result.
-    function closing_holds(A, δ, j)
+    # Grow-then-shrink contains A and shrink-then-grow is contained in A — for round
+    # joins, where they are the morphological closing and opening. Neither is a theorem
+    # for miter or square joins: erosion with those joins cuts deeper than a disk at a
+    # concave vertex of the grown polygon, and when such a vertex sits within δ of A
+    # (a short edge next to a reflex vertex) the closing clips A — e.g. the 9-gon
+    # `(20,0),(37.1,0),(28.1,2.7),(19,6.4),(23.1,25.7),(14.2,55.6),(-3.4,19.7),
+    # (-45.7,-36.4),(20,-0.8)` at δ = 11.12 loses a 0.48 μm-deep sliver of itself.
+    # Round joins are integer-only (see the header), stated away from the L7 regime,
+    # within `offset_tol` of the first result.
+    @check config = LAWS function closing_round(A=int_thick_polygon, δ=Data.Integers(1, 6))
         well_conditioned_offset(A, δ) || reject!()
+        j = Clipper.JoinTypeRound
         o = offset([A], δ; j)
         return first(region_subset_within([A], offset(o, -δ; j), offset_tol(o, δ)))
-    end
-    @check config = LAWS function closing(
-        A=int_thick_polygon,
-        δ=Data.Integers(1, 6),
-        j=Data.SampledFrom([Clipper.JoinTypeRound, Clipper.JoinTypeMiter])
-    )
-        return closing_holds(A, δ, j)
     end
     @check config = LAWS function opening_round(A=int_thick_polygon, δ=Data.Integers(1, 6))
         well_conditioned_offset(A, δ) || reject!()
         j = Clipper.JoinTypeRound
         i = offset([A], -δ; j)
         return first(region_subset_within(offset(i, δ; j), [A], offset_tol(i, δ)))
-    end
-    @check config = LAWS function closing_float(
-        A=float_polygon,
-        f=Data.SampledFrom([0.05, 0.2])
-    )
-        δ = f * maximum(p -> max(abs(p.x), abs(p.y)), A.p)
-        return closing_holds(A, δ, Clipper.JoinTypeMiter)
     end
 end
 
