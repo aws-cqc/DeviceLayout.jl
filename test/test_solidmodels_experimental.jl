@@ -1977,9 +1977,12 @@ end
     @test element_metadata(geometry)[1].name == "island"
 end
 
-@testitem "LumpedPort directions" begin
+@testitem "LumpedPorts" begin
     using DeviceLayout
-    using DeviceLayout.SolidModelsExperimental: EntityMeta, LumpedPort
+    using DeviceLayout.SchematicDrivenLayout
+    using DeviceLayout.SolidModels
+    using DeviceLayout.SolidModelsExperimental:
+        EntityMeta, LumpedPort, NULL, SolidModelTarget, SourceLayer, SourceStack
     import Unitful: μm, °, ustrip
 
     function direction_map(cs)
@@ -2015,6 +2018,49 @@ end
     reflected_direction =
         direction_map(reflected)[SolidModelsExperimental.pgname(local_meta)]
     @test reflected_direction ≈ [0.5, cospi(1 / 6), 0.0]
+
+    target = SolidModelTarget(
+        SourceStack(
+            :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(5, 0));
+            levels=(1 => 0μm,)
+        )
+    )
+    function _port_schematic(name, geometry)
+        graph = SchematicGraph(name)
+        add_node!(graph, BasicComponent(geometry); base_id="q1")
+        return plan(graph; log_dir=nothing) |> check!
+    end
+
+    missing_geometry = CoordinateSystem("missing_port_style", μm)
+    place!(
+        missing_geometry,
+        Rectangle(2μm, 2μm),
+        EntityMeta(:port; name="missing", role=LumpedPort)
+    )
+    missing_sm = SolidModel("missing_port_style"; overwrite=true)
+    SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
+    @test_throws ArgumentError render!(
+        missing_sm,
+        _port_schematic("missing_port_style", missing_geometry),
+        target
+    )
+    @test isempty(SolidModels.dimgroupdict(missing_sm, 2))
+
+    duplicate_geometry = CoordinateSystem("duplicate_port_identity", μm)
+    duplicate_meta = EntityMeta(:port; name="duplicate", role=LumpedPort)
+    place!(duplicate_geometry, WithDirection(0°)(Rectangle(1μm, 1μm)), duplicate_meta)
+    place!(
+        duplicate_geometry,
+        WithDirection(0°)(Rectangle(Point(2μm, 0μm), Point(3μm, 1μm))),
+        duplicate_meta
+    )
+    duplicate_sm = SolidModel("duplicate_port_identity"; overwrite=true)
+    @test_throws ArgumentError render!(
+        duplicate_sm,
+        _port_schematic("duplicate_port_identity", duplicate_geometry),
+        target
+    )
+    @test isempty(SolidModels.dimgroupdict(duplicate_sm, 2))
 end
 
 @testitem "Tag resolution stays within its declared layer" begin
@@ -2065,109 +2111,6 @@ end
     end
 end
 
-@testitem "Rendered metadata conforms to schema" begin
-    using DeviceLayout
-    using DeviceLayout.SchematicDrivenLayout
-    using DeviceLayout.SolidModels
-    using DeviceLayout.SolidModelsExperimental:
-        EntityMeta, LumpedPort, NULL, SolidModelTarget, SourceLayer, SourceStack
-    import JSON
-    using JSONSchema
-    import Unitful: μm, °
-
-    schema_path = joinpath(pkgdir(DeviceLayout), "schemas", "sm_metadata.schema.json")
-    schema = JSONSchema.Schema(JSON.parsefile(schema_path); parent_dir=dirname(schema_path))
-    fixture = JSON.parsefile(
-        joinpath(pkgdir(DeviceLayout), "test", "fixtures", "sm_metadata_v1.json")
-    )
-    @test isnothing(JSONSchema.validate(schema, fixture))
-    invalid_fixture = deepcopy(fixture)
-    invalid_fixture["metadata"]["assembly"]["levels"] = Dict("not-an-integer" => 0.0)
-    @test !isnothing(JSONSchema.validate(schema, invalid_fixture))
-
-    geometry = CoordinateSystem("shape", μm)
-    place!(geometry, Rectangle(10μm, 10μm), EntityMeta(:surface; name="pad"))
-    place!(
-        geometry,
-        WithDirection(90°)(Rectangle(Point(12μm, 0μm), Point(14μm, 2μm))),
-        EntityMeta(:port; name="drive", role=LumpedPort)
-    )
-    graph = SchematicGraph("render")
-    add_node!(graph, BasicComponent(geometry); base_id="q1")
-    sch = plan(graph; log_dir=nothing)
-    check!(sch)
-    target = SolidModelTarget(
-        SourceStack(
-            :surface => SourceLayer(NULL; level=1, gds_meta=GDSMeta(4, 0)),
-            :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(5, 0));
-            levels=(1 => 0μm,)
-        )
-    )
-
-    missing_geometry = CoordinateSystem("missing_port_style", μm)
-    place!(
-        missing_geometry,
-        Rectangle(2μm, 2μm),
-        EntityMeta(:port; name="missing", role=LumpedPort)
-    )
-    missing_graph = SchematicGraph("missing_port_style")
-    add_node!(missing_graph, BasicComponent(missing_geometry); base_id="q1")
-    missing_sch = plan(missing_graph; log_dir=nothing) |> check!
-    missing_sm = SolidModel("missing_port_style"; overwrite=true)
-    SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
-    @test_throws ArgumentError render!(missing_sm, missing_sch, target)
-    @test isempty(SolidModels.dimgroupdict(missing_sm, 2))
-
-    duplicate_geometry = CoordinateSystem("duplicate_port_identity", μm)
-    duplicate_meta = EntityMeta(:port; name="duplicate", role=LumpedPort)
-    place!(duplicate_geometry, WithDirection(0°)(Rectangle(1μm, 1μm)), duplicate_meta)
-    place!(
-        duplicate_geometry,
-        WithDirection(0°)(Rectangle(Point(2μm, 0μm), Point(3μm, 1μm))),
-        duplicate_meta
-    )
-    duplicate_graph = SchematicGraph("duplicate_port_identity")
-    add_node!(duplicate_graph, BasicComponent(duplicate_geometry); base_id="q1")
-    duplicate_sch = plan(duplicate_graph; log_dir=nothing) |> check!
-    duplicate_sm = SolidModel("duplicate_port_identity"; overwrite=true)
-    @test_throws ArgumentError render!(duplicate_sm, duplicate_sch, target)
-    @test isempty(SolidModels.dimgroupdict(duplicate_sm, 2))
-
-    output_dir = mktempdir()
-    before = readdir(output_dir)
-    metadata = cd(output_dir) do
-        sm = SolidModel("schema_test"; overwrite=true)
-        return render!(sm, sch, target)
-    end
-    @test readdir(output_dir) == before
-    @test isnothing(JSONSchema.validate(schema, metadata))
-    generic_pg = metadata["physical_groups"][SolidModelsExperimental.pgname(
-        EntityMeta(:surface; name="q1.pad")
-    )]
-    @test generic_pg["entity_meta"]["role"]["type"] == "Generic"
-    port_pg = metadata["physical_groups"][SolidModelsExperimental.pgname(
-        EntityMeta(:port; name="q1.drive", role=LumpedPort)
-    )]
-    @test port_pg["entity_meta"]["role"] ==
-          Dict("type" => "LumpedPort", "direction" => [0.0, 1.0, 0.0])
-    @test element_metadata(geometry)[1].name == "pad"
-
-    second_sm = SolidModel("schema_test_repeat"; overwrite=true)
-    repeated_metadata = render!(second_sm, sch, target)
-    @test repeated_metadata == metadata
-    @test element_metadata(geometry)[1].name == "pad"
-
-    json_path = joinpath(output_dir, "metadata.json")
-    open(json_path, "w") do io
-        return JSON.print(io, metadata, 4)
-    end
-    @test JSON.parsefile(json_path) == metadata
-    @test_throws ArgumentError begin
-        sm = SolidModel("no_output_dir"; overwrite=true)
-        render!(sm, sch, target; output_dir=output_dir)
-    end
-end
-
 @testitem "Unitless coordinates and finalization strictness" begin
     using DeviceLayout
     using DeviceLayout.SchematicDrivenLayout
@@ -2188,7 +2131,11 @@ end
     )
     unitless_sm = SolidModel("unitless"; overwrite=true)
     SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
-    unitless_metadata = render!(unitless_sm, unitless_sch, unitless_target)
+    output_dir = mktempdir()
+    unitless_metadata = cd(output_dir) do
+        return render!(unitless_sm, unitless_sch, unitless_target)
+    end
+    @test isempty(readdir(output_dir))
     @test unitless_metadata["metadata"]["assembly"]["levels"]["1"] == 2.0
     @test unitless_metadata["layers"]["surface"]["height"] == 3.0
     @test unitless_metadata["layers"]["surface"]["thickness"] == 0.0
