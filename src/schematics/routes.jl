@@ -8,9 +8,9 @@ Route(rule, hook0::PointHook, hook1::PointHook; kwargs...) =
     Route(rule, hook0.p, hook1.p, out_direction(hook0), hook1.in_direction; kwargs...)
 
 """
-    mutable struct RouteComponent{T} <: AbstractComponent{T}
+    mutable struct RouteComponent{T, R <: Paths.RouteRule} <: AbstractComponent{T}
         name::String
-        r::Paths.Route{T}
+        r::Paths.Route{T, R}
         global_waypoints::Bool
         sty::Vector{Paths.Style}
         meta::Meta
@@ -22,22 +22,22 @@ Wraps a `Route` in a `Component` type for use with schematics.
 taken to be relative to the component coordinate system. Otherwise, they will be relative to
 the schematic global coordinate system.
 """
-mutable struct RouteComponent{T} <: AbstractComponent{T}
+mutable struct RouteComponent{T, R <: Paths.RouteRule} <: AbstractComponent{T}
     name::String
-    r::Paths.Route{T}
+    r::Paths.Route{T, R}
     global_waypoints::Bool
     sty::Vector{Paths.Style}
     meta::Meta
     _path::Path{T}
-    RouteComponent{T}(n, r, g, s, m) where {T} = new{T}(n, r, g, s, m, Path{T}(n))
+    RouteComponent{T, R}(n, r, g, s, m) where {T, R} = new{T, R}(n, r, g, s, m, Path{T}(n))
 end
 RouteComponent(
     name::String,
-    r::Paths.Route{T},
+    r::Paths.Route{T, R},
     gw::Bool,
     sty::Paths.Style,
     meta::Meta
-) where {T} = RouteComponent{T}(name, r, gw, [sty], meta)
+) where {T, R} = RouteComponent{T, R}(name, r, gw, [sty], meta)
 
 function hooks(rc::RouteComponent{T}) where {T}
     p0 = StyledHook(
