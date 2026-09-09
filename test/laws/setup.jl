@@ -38,7 +38,7 @@
         :B8_nested,     # L4: a hole vertex may land outside its parent after rounding
         :B8_float_perturbed,  # L8: fm-scale self-crossing from a ≤ 2 fm feature
         :O1_int_thin,   # L1 again, through offset's internal union
-        :O3_int_sharp   # L7: round-join offset leaves the input vertex at sharp corners
+        :O3_int_sharp   # L7: small offsets leave the input vertex in place at sharp corners
     ])
     macro law(id, check)
         return quote
@@ -517,6 +517,50 @@
     end
     const THICK = 1.5
     is_thick(p::Polygon, t=THICK) = min_thickness(togrid(p)) >= t
+
+    # Smallest |sin| of the turn angle over all vertices: near zero both at a spike and
+    # at a nearly straight vertex. Clipper's offset misplaces a vertex when
+    # |δ|·sin(turn) is below a lattice unit (ledger L7), so offset laws that compose
+    # operations are stated away from that regime.
+    function min_turn_sine(p::Polygon)
+        g = togrid(p)
+        n = length(g)
+        smin = 1.0
+        for i = 1:n
+            a, b, c = g[mod1(i - 1, n)], g[i], g[mod1(i + 1, n)]
+            u = (Float64(b[1] - a[1]), Float64(b[2] - a[2]))
+            v = (Float64(c[1] - b[1]), Float64(c[2] - b[2]))
+            smin = min(smin, abs(u[1] * v[2] - u[2] * v[1]) / (hypot(u...) * hypot(v...)))
+        end
+        return smin
+    end
+    well_conditioned_offset(p::Polygon, δ) = abs(δ) * min_turn_sine(p) >= 1
+
+    # Shortest edge, in lattice units. Rounding two nearly coincident offset vertices to
+    # distinct lattice points creates an edge of a few units whose direction is
+    # meaningless; a second offset then moves that edge by δ along its own normal
+    # (ledger L9), so laws that offset twice do not claim anything once the first
+    # result contains such an edge.
+    function min_edge_length(polys::GridRegion)
+        d = Inf
+        for v in polys, i in eachindex(v)
+            a, b = v[i], v[mod1(i + 1, end)]
+            d = min(d, hypot(Float64(b[1] - a[1]), Float64(b[2] - a[2])))
+        end
+        return d
+    end
+    min_edge_length(x) = min_edge_length(togrid(x))
+    # Drop vertices closer than `tol` lattice units to their predecessor.
+    function strip_short_edges(pts::Vector{<:Point}; tol=4)
+        g = togrid.(pts)
+        keep = [
+            i for i in eachindex(pts) if hypot(
+                Float64(g[i][1] - g[mod1(i - 1, end)][1]),
+                Float64(g[i][2] - g[mod1(i - 1, end)][2])
+            ) >= tol
+        ]
+        return pts[keep]
+    end
 
     # Smallest interior angle, for laws that depend on the miter limit.
     function min_corner_angle(p::Polygon)

@@ -176,6 +176,35 @@
         @test all(q -> offset_class(q, togrid([A10]), 20, 1) == :band, only(togrid(o20)))
     end
 
+    # L9 — A micro-edge created by one offset misdirects the next.
+    # Found by: O6 `closing_float` (2026-09-09, Clipper1, fm lattice). Class: kernel
+    # finding, tolerance amplification. `A` has a nearly straight vertex (turn 0.08°).
+    # Growing by δ ≈ 98 nm with miter joins emits two offset points there that round to
+    # lattice points 1 fm apart — a horizontal edge whose direction has nothing to do
+    # with the geometry. Shrinking back offsets that edge by δ along its own normal,
+    # cutting a 110 nm notch and leaving A's vertex 38 fm outside the result. The same
+    # mechanism applies to any offset of an offset (halos of halos, `offset` after
+    # `to_polygons` of a discretized curve whose vertices nearly coincide).
+    @testset "> L9 micro-edge from one offset misdirects the next" begin
+        A = Polygon(
+            Point{Float64}[
+                (0.0002, 0.0),
+                (-0.000275, -0.000117),
+                (-0.000269, -0.00017),
+                (-0.000233, -0.000492)
+            ]
+        )
+        δ = 0.2 * 0.000492
+        j = Clipper.JoinTypeMiter
+        grown = offset([A], δ; j)
+        @test min_edge_length(grown) == 1
+        back = offset(grown, -δ; j)
+        @test_broken first(region_subset_within([A], back, 2))
+        # Removing the micro-edge before shrinking restores the closing law.
+        cleaned = [Polygon(strip_short_edges(p.p)) for p in grown]
+        @test first(region_subset_within([A], offset(cleaned, -δ; j), 2))
+    end
+
     # L8 — Self-crossing output on the fm lattice from a 2 fm feature.
     # Found by: B8 `valid_float_perturbed` (2026-09-09, Clipper1). Class: kernel
     # finding; L3 at the scale float users actually hit. `B` is a 2 fm-wide sliver along
