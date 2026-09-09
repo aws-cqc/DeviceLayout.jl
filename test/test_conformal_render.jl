@@ -567,8 +567,11 @@
         # are offset-BSplines with non-trivial curvature. Endpoint direction
         # varies along the loop, so canonicalize matters.
         straight!(pa, 10μm, Paths.SimpleCPW(4.0μm, 2.0μm))
-        bspline!(pa, [Point(40.0μm, 20.0μm), Point(80.0μm, -20.0μm),
-                      Point(120.0μm, 20.0μm)], 0°)
+        bspline!(
+            pa,
+            [Point(40.0μm, 20.0μm), Point(80.0μm, -20.0μm), Point(120.0μm, 20.0μm)],
+            0°
+        )
         straight!(pa, 10μm)
         place!(cs, pa, :l1)
 

@@ -728,8 +728,9 @@ function _add_conformal_curve!(
         reverse_output = true
     end
     approx = bspline_approximation(approx_seg; atol=atol_local)
-    approx_segments = reverse_output ?
-        reverse([Paths.reverse(s) for s in approx.segments]) : approx.segments
+    approx_segments =
+        reverse_output ? reverse([Paths.reverse(s) for s in approx.segments]) :
+        approx.segments
     newstarts = DeviceLayout.p0.(approx_segments)[2:end]
     newpts = [
         _cached_point_relaxed!(
