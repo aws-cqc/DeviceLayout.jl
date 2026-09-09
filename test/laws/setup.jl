@@ -536,11 +536,11 @@
     end
     well_conditioned_offset(p::Polygon, δ) = abs(δ) * min_turn_sine(p) >= 1
 
-    # Shortest edge, in lattice units. Rounding two nearly coincident offset vertices to
-    # distinct lattice points creates an edge of a few units whose direction is
-    # meaningless; a second offset then moves that edge by δ along its own normal
-    # (ledger L9), so laws that offset twice do not claim anything once the first
-    # result contains such an edge.
+    # Shortest edge, in lattice units. An edge of length L whose endpoints are rounded
+    # by half a unit has its direction wrong by ~1/(2L); offsetting it by δ moves the
+    # intersections at its ends by ~|δ|/(2L). Laws that offset an offset result
+    # therefore carry the tolerance `offset_tol` below instead of a fixed 2; at L = 1
+    # (ledger L9) that tolerance is |δ| and the law says nothing, which is the truth.
     function min_edge_length(polys::GridRegion)
         d = Inf
         for v in polys, i in eachindex(v)
@@ -550,6 +550,8 @@
         return d
     end
     min_edge_length(x) = min_edge_length(togrid(x))
+    offset_tol(first_result, δ) =
+        2 + ceil(Int, Float64(abs(_gridcoord(δ))) / (2 * min_edge_length(first_result)))
     # Drop vertices closer than `tol` lattice units to their predecessor.
     function strip_short_edges(pts::Vector{<:Point}; tol=4)
         g = togrid.(pts)

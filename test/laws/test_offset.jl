@@ -133,13 +133,12 @@ end
     # offset(offset(A, δ), δ) agrees with offset(A, 2δ) for δ > 0: exactly true for
     # round joins (Minkowski sum with a disk), and for miter joins as long as no corner
     # hits the miter limit (2δ, i.e. corners sharper than 60°), where the clamp depends
-    # on δ. Both sides are offset results: within 2. Stated away from the L7 regime and
-    # only when the first offset produced no micro-edge (L9).
+    # on δ. Both sides are offset results, and the left side offsets an offset: within
+    # `offset_tol`. Stated away from the L7 regime.
     function semigroup_holds(A, δ, j)
         well_conditioned_offset(A, δ) || reject!()
         o = offset([A], δ; j)
-        min_edge_length(o) >= 4 || reject!()
-        return first(region_within(offset(o, δ; j), offset([A], 2δ; j), 2))
+        return first(region_within(offset(o, δ; j), offset([A], 2δ; j), offset_tol(o, δ)))
     end
     @check config = LAWS function semigroup_round(
         A=int_thick_polygon,
@@ -173,13 +172,12 @@ end
     # regrowing the sharper corner that results overshoots A — e.g.
     # `(0.000463,0),(0.000478,0),(0.000828,0.000109),(-8.7e-5,0.00048)` at δ = 0.05 of
     # its extent regrows 3.4 pm outside — so that direction is not a law for miter.
-    # Both directions are stated away from the L7 regime and only when the first offset
-    # produced no micro-edge (L9).
+    # Both directions are stated away from the L7 regime, within `offset_tol` of the
+    # first result.
     function closing_holds(A, δ, j)
         well_conditioned_offset(A, δ) || reject!()
         o = offset([A], δ; j)
-        min_edge_length(o) >= 4 || reject!()
-        return first(region_subset_within([A], offset(o, -δ; j), 2))
+        return first(region_subset_within([A], offset(o, -δ; j), offset_tol(o, δ)))
     end
     @check config = LAWS function closing(
         A=int_thick_polygon,
@@ -192,8 +190,7 @@ end
         well_conditioned_offset(A, δ) || reject!()
         j = Clipper.JoinTypeRound
         i = offset([A], -δ; j)
-        min_edge_length(i) >= 4 || reject!()
-        return first(region_subset_within(offset(i, δ; j), [A], 2))
+        return first(region_subset_within(offset(i, δ; j), [A], offset_tol(i, δ)))
     end
     @check config = LAWS function closing_float(
         A=float_polygon,

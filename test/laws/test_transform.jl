@@ -22,9 +22,9 @@
         A, B = pair
         tA, tB = apply_exact(t, A), apply_exact(t, B)
         u, d, o = union2d([A], [B]), difference2d([A], [B]), offset([A], δ)
-        return union2d([tA], [tB]) ≐ transformed_exact(t, u) &&
-               difference2d([tA], [tB]) ≐ transformed_exact(t, d) &&
-               offset([tA], δ) ≐ [apply_exact(t, p) for p in o]
+        return region_same(union2d([tA], [tB]), transformed_exact(t, u)) &&
+               region_same(difference2d([tA], [tB]), transformed_exact(t, d)) &&
+               region_same(offset([tA], δ), [apply_exact(t, p) for p in o])
     end
     @check config = LAWS function equivariant_int_star(pair=int_pair, t=rigid_transform)
         A, B = pair
