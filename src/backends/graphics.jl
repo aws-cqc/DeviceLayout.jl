@@ -194,7 +194,7 @@ function Base.show(
     sf = iszero(w) || iszero(h) ? 1.0 : min(w1 / w, h1 / h)
     Cairo.scale(ctx, sf, sf)
 
-    view_idx = findbox(bnd, elements(c0); intersects=true)
+    view_idx = isempty(elements(c0)) ? Int[] : findbox(bnd, elements(c0); intersects=true)
     view_elements = elements(c0)[view_idx]
     view_metas = default_meta_map.(element_metadata(c0)[view_idx])
     unique_metas = sort(unique(view_metas), by=meta -> (gdslayer(meta), datatype(meta)))
