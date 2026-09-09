@@ -494,7 +494,7 @@ command-line argument:
 ```julia
 function (@main)(ARGS)
     ps = load_parameter_set(ARGS)
-    ...
+    return ...
 end
 ```
 
@@ -508,8 +508,8 @@ function load_parameter_set(args::AbstractVector{<:AbstractString})
     isempty(args) && throw(
         ArgumentError(
             "load_parameter_set requires a YAML parameter-set file path as the first " *
-            "argument, but the argument vector was empty",
-        ),
+            "argument, but the argument vector was empty"
+        )
     )
     return ParameterSet(String(first(args)))
 end
