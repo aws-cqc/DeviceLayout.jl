@@ -130,7 +130,7 @@ dogbone = union2d([r, r2, r3]) # Boolean union of the three rectangles as a sing
 rounded_dogbone = Rounded(4μm)(dogbone) # Apply the Rounded style
 ```
 
-The printed output above is a bit hard to read, and it's not necessary to understand it in detail to get started. The most important information here is that `rounded_dogbone` is a certain kind of `GeometryEntity` that only describes the vertices of the dogbone polygon and the rounding radius—in particular, we have not discretized the rounded corners to represent the result as a polygon. In more detail, `rounded_dogbone` is a `StyledEntity{T,U,S}` with three type parameters: the coordinate type `T = typeof(1.0μm)`, the underlying entity type `U = ClippedPolygon{T}`, and the style `S = Rounded{T}`—that is, it is a `GeometryEntity` that composes the result of a polygon clipping (Boolean) operation with a `GeometryEntityStyle` specifying rules for rounding that entity.
+The printed output summarizes the clipped geometry and identifies the `Rounded` style applied to it. The important point is that `rounded_dogbone` still describes a composition of the clipped geometry and its rounding rule—in particular, we have not discretized the rounded corners to represent the result as a polygon. Its concrete type, available with `typeof(rounded_dogbone)`, is a `StyledEntity{T,U,S}` whose parameters identify the coordinate type, underlying `ClippedPolygon`, and `Rounded` style.
 
 ### Cells and Rendering
 

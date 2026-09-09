@@ -776,19 +776,42 @@ end
 Rounded(r::Coordinate; kwargs...) = Rounded{float(typeof(r))}(; abs_r=r, kwargs...)
 
 # Constructor-like form listing only the settings that differ from the defaults
-function Base.show(io::IO, s::Rounded)
-    print(io, "Rounded(")
+function Base.show(io::IO, s::Rounded{T}) where {T}
+    typed = iszero(s.abs_r)
+    if typed
+        print(io, "Rounded{", DeviceLayout.coordinate_type_string(T), "}(")
+    else
+        print(io, "Rounded(", s.abs_r)
+    end
     args = String[]
-    iszero(s.abs_r) || push!(args, string(s.abs_r))
     iszero(s.rel_r) || push!(args, string("rel_r=", s.rel_r))
     s.min_side_len == s.abs_r || push!(args, string("min_side_len=", s.min_side_len))
     s.min_angle == 1e-3 || push!(args, string("min_angle=", s.min_angle))
-    isempty(s.p0) || push!(args, string(length(s.p0), " selected points"))
+    isempty(s.p0) || push!(
+        args,
+        string(length(s.p0), length(s.p0) == 1 ? " selected point" : " selected points")
+    )
     s.inverse_selection && push!(args, "inverse_selection=true")
-    isfinite(s.selection_tolerance) &&
+    default_tolerance = typeof(s.selection_tolerance)(Inf)
+    isequal(s.selection_tolerance, default_tolerance) ||
         push!(args, string("selection_tolerance=", s.selection_tolerance))
-    join(io, args, ", ")
+    if isempty(args)
+        return print(io, ")")
+    end
+    print(io, "; ", join(args, ", "))
     return print(io, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", s::Rounded)
+    show(io, s)
+    print(io, "\n  absolute radius: ", s.abs_r)
+    print(io, "\n  relative radius: ", s.rel_r)
+    print(io, "\n  minimum side length: ", s.min_side_len)
+    print(io, "\n  minimum angle: ", s.min_angle)
+    print(io, "\n  selected points:")
+    isempty(s.p0) ? print(io, " none") : _show_point_list(io, s.p0)
+    print(io, "\n  inverse selection: ", s.inverse_selection)
+    return print(io, "\n  selection tolerance: ", s.selection_tolerance)
 end
 p0(r::Rounded) = r.p0
 
@@ -1619,6 +1642,31 @@ function Base.show(io::IO, s::StyleDict)
     n = length(s.styles)
     print(io, "StyleDict with default ", s.default, " and ", n)
     return print(io, n == 1 ? " override" : " overrides")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", s::StyleDict)
+    show(io, s)
+    print(io, "\n  overrides:")
+    isempty(s.styles) && return print(io, " none")
+    indices = sort!(collect(keys(s.styles)); by=repr)
+    maxitems = get(io, :limit, false)::Bool ? 20 : length(indices)
+    shown =
+        length(indices) <= maxitems ? eachindex(indices) :
+        Iterators.flatten((
+            1:(maxitems ÷ 2),
+            (length(indices) - maxitems ÷ 2 + 1):length(indices)
+        ))
+    lastidx = 0
+    for i in shown
+        i > lastidx + 1 && print(io, "\n   ⋮")
+        key = indices[i]
+        print(io, "\n   ")
+        show(io, key)
+        print(io, " => ")
+        show(io, s.styles[key])
+        lastidx = i
+    end
+    return nothing
 end
 
 """

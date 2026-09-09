@@ -545,15 +545,9 @@ end
 _node_count_str(n) = string(n, n == 1 ? " node" : " nodes")
 
 function _show_path_header(io::IO, p::Path{T}) where {T}
-    return print(
-        io,
-        "Path{",
-        DeviceLayout.coordinate_type_string(T),
-        "} \"",
-        p.name,
-        "\" with ",
-        _node_count_str(length(p))
-    )
+    print(io, "Path{", DeviceLayout.coordinate_type_string(T), "} ")
+    show(io, p.name)
+    return print(io, " with ", _node_count_str(length(p)))
 end
 
 show(io::IO, p::Path) = _show_path_header(io, p)

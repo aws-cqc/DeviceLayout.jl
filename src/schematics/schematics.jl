@@ -41,8 +41,14 @@ end
 
 Base.getindex(n::ComponentNode, idx) = component(n)[idx]
 
-Base.show(io::IO, n::ComponentNode) =
-    print(io, "ComponentNode \"", n.id, "\" (", nameof(typeof(component(n))), ")")
+_component_type_string(c::AbstractComponent{S}) where {S} =
+    DeviceLayout.type_with_coordinate_string(typeof(c), S)
+
+function Base.show(io::IO, n::ComponentNode)
+    print(io, "ComponentNode ")
+    show(io, n.id)
+    return print(io, " (", _component_type_string(component(n)), ")")
+end
 
 """
     SchematicGraph <: AbstractMetaGraph{Int}
@@ -86,44 +92,60 @@ parameter_set(g::SchematicGraph) = g.parameter_set
 
 _count_str(n, noun) = string(n, " ", noun, n == 1 ? "" : "s")
 
+_shown_indices(n, maxitems) =
+    n <= maxitems ? (1:n) : Iterators.flatten((1:(maxitems ÷ 2), (n - maxitems ÷ 2 + 1):n))
+
 # Print an indented, indexed list of component nodes, truncated if `io` is limited
 function _show_node_list(io::IO, nodevec)
-    n = length(nodevec)
-    maxnodes = get(io, :limit, false)::Bool ? 20 : n
-    shown =
-        n <= maxnodes ? eachindex(nodevec) :
-        Iterators.flatten((1:(maxnodes ÷ 2), (n - maxnodes ÷ 2 + 1):n))
+    isempty(nodevec) && return print(io, " none")
+    maxnodes = get(io, :limit, false)::Bool ? 20 : length(nodevec)
     lastidx = 0
-    for i in shown
+    for i in _shown_indices(length(nodevec), maxnodes)
         i > lastidx + 1 && print(io, "\n   ⋮")
         node = nodevec[i]
-        print(
-            io,
-            "\n   [",
-            i,
-            "] \"",
-            node.id,
-            "\" (",
-            nameof(typeof(component(node))),
-            ")"
-        )
+        print(io, "\n   [", i, "] ")
+        show(io, node.id)
+        print(io, " (", _component_type_string(component(node)), ")")
         lastidx = i
     end
+    return nothing
 end
 
-Base.show(io::IO, g::SchematicGraph) = print(
-    io,
-    "SchematicGraph \"",
-    g.name,
-    "\" with ",
-    _count_str(length(nodes(g)), "node"),
-    " and ",
-    _count_str(Graphs.ne(g.graph), "edge")
-)
+function _show_edge_list(io::IO, g::SchematicGraph)
+    edgevec = collect(edges(g.graph))
+    isempty(edgevec) && return print(io, " none")
+    maxedges = get(io, :limit, false)::Bool ? 20 : length(edgevec)
+    lastidx = 0
+    for i in _shown_indices(length(edgevec), maxedges)
+        i > lastidx + 1 && print(io, "\n   ⋮")
+        edge = edgevec[i]
+        print(io, "\n   [", i, "] ")
+        show(io, nodes(g)[src(edge)].id)
+        print(io, " — ")
+        show(io, nodes(g)[dst(edge)].id)
+        lastidx = i
+    end
+    return nothing
+end
+
+function Base.show(io::IO, g::SchematicGraph)
+    print(io, "SchematicGraph ")
+    show(io, g.name)
+    return print(
+        io,
+        " with ",
+        _count_str(length(nodes(g)), "node"),
+        " and ",
+        _count_str(Graphs.ne(g.graph), "edge")
+    )
+end
 
 function Base.show(io::IO, ::MIME"text/plain", g::SchematicGraph)
     show(io, g)
-    return _show_node_list(io, nodes(g))
+    print(io, "\n  nodes:")
+    _show_node_list(io, nodes(g))
+    print(io, "\n  edges:")
+    return _show_edge_list(io, g)
 end
 
 """
@@ -731,23 +753,26 @@ end
 
 Base.getindex(sch::Schematic, node::ComponentNode) = sch.ref_dict[node]
 
-Base.show(io::IO, sch::Schematic{S}) where {S} = print(
-    io,
-    "Schematic{",
-    DeviceLayout.coordinate_type_string(S),
-    "} \"",
-    sch.name,
-    "\" with ",
-    _count_str(length(nodes(sch.graph)), "node"),
-    " and ",
-    _count_str(Graphs.ne(sch.graph.graph), "edge")
-)
+function Base.show(io::IO, sch::Schematic{S}) where {S}
+    print(io, "Schematic{", DeviceLayout.coordinate_type_string(S), "} ")
+    show(io, sch.name)
+    return print(
+        io,
+        " with ",
+        _count_str(length(nodes(sch.graph)), "node"),
+        " and ",
+        _count_str(Graphs.ne(sch.graph.graph), "edge")
+    )
+end
 
 function Base.show(io::IO, ::MIME"text/plain", sch::Schematic)
     show(io, sch)
     print(io, "\n  coordinate system: ", sch.coordinate_system)
     print(io, "\n  checked: ", sch.checked[])
-    return _show_node_list(io, nodes(sch.graph))
+    print(io, "\n  nodes:")
+    _show_node_list(io, nodes(sch.graph))
+    print(io, "\n  edges:")
+    return _show_edge_list(io, sch.graph)
 end
 
 function max_level_logged(sch::Schematic, stage)

@@ -127,7 +127,7 @@ are also defined as wrappers around `aligned_to` with pre-specified `AlignRule`s
 
 ```jldoctest
 julia> Align.aligned_to(Rectangle(2, 2), Rectangle(4, 4), Align.LeftEdge(), Align.XCenter())
-Rectangle{Float64}((2.0,0.0), (4.0,2.0))
+Rectangle((2.0,0.0), (4.0,2.0))
 ```
 """
 function aligned_to(

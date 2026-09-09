@@ -1,6 +1,8 @@
 @testitem "Pretty printing" setup = [CommonTestSetup] begin
     using .SchematicDrivenLayout
-    import .SchematicDrivenLayout: SchematicGraph, ComponentNode, add_node!, plan, nodes
+    import Graphs
+    import .SchematicDrivenLayout:
+        AbstractComponent, SchematicGraph, ComponentNode, add_node!, plan, nodes
 
     showstr(x) = sprint(show, MIME"text/plain"(), x)
     compactstr(x) = sprint(show, x)
@@ -34,6 +36,9 @@
     @test contains(se, "from (0.0 nm,0.0 nm)")
     @test !contains(se, "\n  to ")
     @test compactstr(pe) == "Path{typeof(1.0nm)} \"emptypath\" with 0 nodes"
+    escaped_name = "path\"name\nnext"
+    @test compactstr(Path(nm2nm; name=escaped_name)) ==
+          "Path{typeof(1.0nm)} $(repr(escaped_name)) with 0 nodes"
 
     # Coordinate type strings: short names for common types, module-qualified when the
     # promotion context differs from the package preference, full type otherwise
@@ -91,6 +96,24 @@
         waypoints=[Point(50.0μm, 50.0μm)]
     )
     @test contains(compactstr(r2), "via 1 waypoint")
+    sr2 = showstr(r2)
+    @test contains(sr2, "rule: StraightAnd90(")
+    @test contains(sr2, "min_bend_radius=50 μm")
+    @test contains(sr2, "waypoints: [(50.0 μm,50.0 μm)]")
+    @test contains(sr2, "waydirs: ")
+
+    # Concrete component types retain every real parameter while abbreviating coordinates
+    struct FixedCoordinateComponent <: AbstractComponent{Float64}
+        name::String
+    end
+    fixed_display = showstr(FixedCoordinateComponent("fixed"))
+    @test contains(fixed_display, "FixedCoordinateComponent \"fixed\"")
+    @test !contains(fixed_display, "FixedCoordinateComponent{")
+    rc = RouteComponent("showroute", r, false, Paths.Trace(2μm), SemanticMeta(:route))
+    route_component_display = showstr(rc)
+    @test contains(route_component_display, "RouteComponent{")
+    @test contains(route_component_display, "StraightAnd90")
+    @test contains(route_component_display, "\"showroute\"")
 
     # SchematicGraph, ComponentNode, Schematic
     g = SchematicGraph("showgraph")
@@ -99,10 +122,11 @@
     @test contains(sg, "SchematicGraph \"showgraph\"")
     @test contains(sg, "1 node")
     @test contains(sg, "0 edges")
-    @test contains(sg, "[1] \"showpath\" (Path)")
+    @test contains(sg, "[1] \"showpath\" (Path{typeof(1.0nm)})")
+    @test contains(sg, "edges: none")
     @test compactstr(g) == "SchematicGraph \"showgraph\" with 1 node and 0 edges"
 
-    @test compactstr(n1) == "ComponentNode \"showpath\" (Path)"
+    @test compactstr(n1) == "ComponentNode \"showpath\" (Path{typeof(1.0nm)})"
 
     sch = plan(g; log_dir=nothing)
     ss = showstr(sch)
@@ -111,14 +135,25 @@
     @test contains(ss, "0 edges")
     @test contains(ss, "coordinate system:")
     @test contains(ss, "checked: false")
-    @test contains(ss, "[1] \"showpath\" (Path)")
+    @test contains(ss, "[1] \"showpath\" (Path{typeof(1.0nm)})")
     @test contains(
         compactstr(sch),
         "Schematic{typeof(1.0nm)} \"showgraph\" with 1 node and 0 edges"
     )
+
+    p2 = Path(nm2nm; name="other")
+    add_node!(g, p2)
+    Graphs.add_edge!(g.graph, 1, 2)
+    sg_connected = showstr(g)
+    @test contains(sg_connected, "edges:\n   [1] \"showpath\" — \"other\"")
+    escaped_graph_name = "graph\"name\nnext"
+    @test startswith(
+        compactstr(SchematicGraph(escaped_graph_name)),
+        "SchematicGraph $(repr(escaped_graph_name))"
+    )
 end
 
-@testitem "Pretty printing (SolidModel)" setup = [CommonTestSetup] begin
+@testitem "Pretty printing (SolidModel)" setup = [CommonTestSetup, QuietGmshSetup] begin
     import DeviceLayout.SolidModels
 
     sm0 = SolidModel("showmodel_empty"; overwrite=true)
@@ -130,13 +165,25 @@ end
     cs = CoordinateSystem("showmodel_cs", nm)
     place!(cs, Rectangle(10μm, 10μm), :test_layer)
     sm = SolidModel("showmodel"; overwrite=true)
-    render!(sm, cs)
+    quiet_test_output(
+        allowed_output=line ->
+            strip(line) == "Boolean fragments skipped - too few arguments"
+    ) do
+        return render!(sm, cs)
+    end
+    SolidModel("showmodel_other"; overwrite=true)
+    current_model = SolidModels.gmsh.model.get_current()
     ssm = sprint(show, MIME"text/plain"(), sm)
+    @test SolidModels.gmsh.model.get_current() == current_model
     @test contains(ssm, "SolidModel \"showmodel\"")
     @test contains(ssm, "physical group")
-    @test contains(ssm, "dim 2: ")
-    @test contains(ssm, "test_layer")
+    @test contains(ssm, "dim 2:")
+    @test contains(ssm, "\"test_layer\": 1 entity")
     @test contains(sprint(show, sm), "SolidModel \"showmodel\"")
+
+    escaped_name = "show\"model\nnext"
+    escaped_model = SolidModel(escaped_name; overwrite=true)
+    @test contains(sprint(show, escaped_model), "SolidModel $(repr(escaped_name))")
 end
 
 @testitem "Pretty printing (entities, styles, hooks, references)" setup = [CommonTestSetup] begin
@@ -147,7 +194,6 @@ end
         ToTolerance,
         Plain,
         StyleDict,
-        ArrayEntity,
         CurvilinearPolygon,
         CurvilinearRegion
     import DeviceLayout.Texts: Text
@@ -180,28 +226,70 @@ end
     @test compactstr(cp) == "ClippedPolygon with 1 outer contour and 0 holes"
     cp2 = difference2d(Rectangle(10μm, 10μm), Rectangle(2μm, 2μm) + Point(4μm, 4μm))
     @test compactstr(cp2) == "ClippedPolygon with 1 outer contour and 1 hole"
-    @test compactstr(CurvilinearPolygon(points(tri))) ==
-          "CurvilinearPolygon with 3 points and 0 curves"
+    ctri = CurvilinearPolygon(points(tri))
+    @test compactstr(ctri) == "CurvilinearPolygon with 3 points and 0 curves"
+    sctri = showstr(ctri)
+    @test contains(sctri, "points:\n   [1] (0 μm,0 μm)")
+    @test contains(sctri, "curve start indices: Int64[]")
+    @test contains(sctri, "curves: none")
     rounded_r = to_polygons(Rounded(1.0μm)(r)) # sanity check that rounding works
-    @test compactstr(CurvilinearRegion(CurvilinearPolygon(Circle(1.0μm)))) ==
+    circle_region = CurvilinearRegion(CurvilinearPolygon(Circle(1.0μm)))
+    @test compactstr(circle_region) ==
           "CurvilinearRegion with 4-point exterior (4 curves) and 0 holes"
+    scircle_region = showstr(circle_region)
+    @test contains(scircle_region, "exterior:")
+    @test contains(scircle_region, "curve start indices: [1, 2, 3, 4]")
+    @test contains(scircle_region, "[1] Turn by 90.0°")
+    @test contains(scircle_region, "holes: none")
+    region_with_hole = CurvilinearRegion(
+        CurvilinearPolygon(points(Rectangle(10.0μm, 10.0μm))),
+        [
+            CurvilinearPolygon(
+                points(centered(Rectangle(2.0μm, 2.0μm); on_pt=Point(5.0μm, 5.0μm)))
+            )
+        ]
+    )
+    hole_display = showstr(region_with_hole)
+    @test contains(hole_display, "holes:\n   [1] CurvilinearPolygon with 4 points")
+    @test contains(hole_display, "[4] (4.0 μm,4.0 μm)")
     @test compactstr(Text("hi", Point(0μm, 0μm))) ==
           "Text \"hi\" at (0 μm,0 μm) with width 0 μm"
     @test compactstr(Text("hi", Point(0μm, 0μm); rot=90°)) ==
           "Text \"hi\" at (0 μm,0 μm) with width 0 μm with Rotation(90.0°)"
-    ae = ArrayEntity([r, r])
-    @test compactstr(ae) == "ArrayEntity with 2 elements"
-    sae = showstr(ae)
-    @test contains(sae, "[1] Rectangle((0 μm,0 μm), (10 μm,5 μm))")
-    @test contains(sae, "[2] Rectangle")
+    detailed_text = showstr(
+        Text(
+            "hi",
+            Point(0μm, 0μm);
+            can_scale=true,
+            xalign=Align.RightEdge(),
+            yalign=Align.BottomEdge()
+        )
+    )
+    @test contains(detailed_text, "can scale: true")
+    @test contains(detailed_text, "x alignment: DeviceLayout.Align.RightEdge()")
+    @test contains(detailed_text, "y alignment: DeviceLayout.Align.BottomEdge()")
 
     # Styles and styled entities
     @test compactstr(Rounded(1μm)) == "Rounded(1.0 μm)"
     @test compactstr(Rounded(1μm; min_side_len=3μm)) ==
-          "Rounded(1.0 μm, min_side_len=3.0 μm)"
-    @test compactstr(Rounded{typeof(1.0μm)}(; rel_r=0.2)) == "Rounded(rel_r=0.2)"
-    @test compactstr(Rounded(1μm; p0=[Point(0μm, 0μm)], selection_tolerance=1nm)) ==
-          "Rounded(1.0 μm, 1 selected points, selection_tolerance=0.001 μm)"
+          "Rounded(1.0 μm; min_side_len=3.0 μm)"
+    @test compactstr(Rounded{typeof(1.0μm)}(; rel_r=0.2)) ==
+          "Rounded{typeof(1.0Unitful.μm)}(; rel_r=0.2)"
+    selected_rounding = Rounded(1μm; p0=[Point(0μm, 0μm)], selection_tolerance=1nm)
+    @test compactstr(selected_rounding) ==
+          "Rounded(1.0 μm; 1 selected point, selection_tolerance=0.001 μm)"
+    selected_rounding_detail = showstr(selected_rounding)
+    @test contains(selected_rounding_detail, "selected points:\n   [1] (0.0 μm,0.0 μm)")
+    @test contains(selected_rounding_detail, "selection tolerance: 0.001 μm")
+    @test compactstr(Rounded{typeof(1.0μm)}()) == "Rounded{typeof(1.0Unitful.μm)}()"
+    @test contains(
+        compactstr(Rounded{typeof(1.0μm)}(; selection_tolerance=-Inf * μm)),
+        "selection_tolerance=-Inf μm"
+    )
+    @test contains(
+        compactstr(Rounded{typeof(1.0μm)}(; selection_tolerance=NaN * μm)),
+        "selection_tolerance=NaN μm"
+    )
     @test compactstr(MeshSized(1μm)) == "MeshSized(1 μm)"
     @test compactstr(MeshSized(1μm, 0.5)) == "MeshSized(1 μm, α=0.5)"
     @test compactstr(OptionalStyle(Rounded(1μm), :rounding)) ==
@@ -212,12 +300,16 @@ end
           "OptionalStyle(Rounded(1.0 μm), :rounding, false_style=ToTolerance(1 nm), default=false)"
     @test compactstr(ToTolerance(1nm)) == "ToTolerance(1 nm)"
     @test compactstr(StyleDict()) == "StyleDict with default Plain() and 0 overrides"
+    style_dict = StyleDict()
+    style_dict[1, 2] = Rounded(1μm)
+    style_dict_display = showstr(style_dict)
+    @test contains(style_dict_display, "overrides:\n   [1, 2] => Rounded(1.0 μm)")
     se = Rounded(1μm)(r)
     @test compactstr(se) == "Rectangle((0 μm,0 μm), (10 μm,5 μm)) styled as Rounded(1.0 μm)"
     sse = showstr(Rounded(1μm)(tri))
     @test contains(sse, "Polygon with 3 points")
     @test contains(sse, "[3] (0 μm,1 μm)")
-    @test endswith(sse, " styled as Rounded(1.0 μm)")
+    @test endswith(sse, "\n  style: Rounded(1.0 μm)")
 
     # Hooks
     ph = PointHook(Point(0μm, 1μm), 90°)

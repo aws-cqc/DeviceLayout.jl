@@ -142,6 +142,31 @@ Base.show(io::IO, c::CurvilinearPolygon) = print(
     " and ",
     _curve_count_str(length(c.curves))
 )
+
+function Base.show(io::IO, ::MIME"text/plain", c::CurvilinearPolygon)
+    show(io, c)
+    print(io, "\n  points:")
+    isempty(c.p) ? print(io, " none") : Polygons._show_point_list(io, c.p)
+    print(io, "\n  curve start indices: ")
+    show(io, c.curve_start_idx)
+    print(io, "\n  curves:")
+    isempty(c.curves) && return print(io, " none")
+    maxitems = get(io, :limit, false)::Bool ? 20 : length(c.curves)
+    shown =
+        length(c.curves) <= maxitems ? eachindex(c.curves) :
+        Iterators.flatten((
+            1:(maxitems ÷ 2),
+            (length(c.curves) - maxitems ÷ 2 + 1):length(c.curves)
+        ))
+    lastidx = 0
+    for i in shown
+        i > lastidx + 1 && print(io, "\n   ⋮")
+        print(io, "\n   [", i, "] ")
+        show(io, c.curves[i])
+        lastidx = i
+    end
+    return nothing
+end
 # A circle as four 90° CCW arcs meeting at the axis-aligned extreme points. Four arcs
 # rather than one or two: a single 360° curve collapses in the duplicate-endpoint dedup
 # above (its lone vertex pairs with itself under `circshift`), and 180° arcs hit the OCC
@@ -291,6 +316,34 @@ function Base.show(io::IO, r::CurvilinearRegion)
         nh,
         nh == 1 ? " hole" : " holes"
     )
+end
+
+function _show_indented(io::IO, mime::MIME"text/plain", x, indent)
+    rendered = sprint(show, mime, x; context=io)
+    return print(io, replace(rendered, "\n" => "\n" * indent))
+end
+
+function Base.show(io::IO, mime::MIME"text/plain", r::CurvilinearRegion)
+    show(io, r)
+    print(io, "\n  exterior:\n   ")
+    _show_indented(io, mime, r.exterior, "   ")
+    print(io, "\n  holes:")
+    isempty(r.holes) && return print(io, " none")
+    maxitems = get(io, :limit, false)::Bool ? 20 : length(r.holes)
+    shown =
+        length(r.holes) <= maxitems ? eachindex(r.holes) :
+        Iterators.flatten((
+            1:(maxitems ÷ 2),
+            (length(r.holes) - maxitems ÷ 2 + 1):length(r.holes)
+        ))
+    lastidx = 0
+    for i in shown
+        i > lastidx + 1 && print(io, "\n   ⋮")
+        print(io, "\n   [", i, "] ")
+        _show_indented(io, mime, r.holes[i], "       ")
+        lastidx = i
+    end
+    return nothing
 end
 CurvilinearRegion(ext::CurvilinearPolygon{T}) where {T} = CurvilinearRegion{T}(ext)
 CurvilinearRegion(

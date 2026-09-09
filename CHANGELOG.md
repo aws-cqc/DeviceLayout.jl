@@ -39,10 +39,10 @@ The format of this changelog is based on
   (after coordinate type). This should not have functional consequences for ordinary usage, but it
   does mean that `Route{T}` and `RouteComponent{T}` are no longer concrete, and their `RouteRule` cannot
   be changed in-place to a different type.
-  - Improved pretty printing at the REPL: `Path`, `Route`, `Schematic`, `SchematicGraph`,
-    `ComponentNode`, and `SolidModel` now have informative `Base.show` methods (name,
-    node/edge/group counts, metadata, and endpoints where applicable) instead of
-    falling back to verbose default or generic displays
+  - Improved pretty printing at the REPL for paths, routes, schematics, coordinate systems,
+    components, solid models, geometry entities, styles, hooks, references, and text. Compact
+    displays now summarize the most useful state, while detailed displays expose items such as
+    nodes, edges, coordinates, style settings, array shape, and physical-group entity counts.
 
 ### Removed
 

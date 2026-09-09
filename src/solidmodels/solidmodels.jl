@@ -204,9 +204,9 @@ end
 Base.broadcastable(x::SolidModel) = Ref(x)
 
 summary(sm::SolidModel) = string(
-    "SolidModel \"",
-    sm.name,
-    "\" (",
+    "SolidModel ",
+    repr(sm.name),
+    " (",
     nameof(typeof(sm.kernel)),
     " kernel) with ",
     sum(length, sm.groups),
@@ -214,17 +214,54 @@ summary(sm::SolidModel) = string(
     sum(length, sm.groups) == 1 ? "" : "s"
 )
 Base.show(io::IO, sm::SolidModel) = print(io, summary(sm))
+
+function _physical_group_entity_counts(sm::SolidModel)
+    gmsh.is_initialized() == 0 && return nothing
+    models = gmsh.model.list()
+    name(sm) in models || return nothing
+    current = gmsh.model.get_current()
+    gmsh.model.set_current(name(sm))
+    try
+        counts = Dict{Tuple{Int, String}, Int}()
+        for (index, groups) in enumerate(sm.groups)
+            for (groupname, group) in groups
+                counts[(index - 1, groupname)] = length(entitytags(group))
+            end
+        end
+        return counts
+    finally
+        current in gmsh.model.list() && gmsh.model.set_current(current)
+    end
+end
+
 function Base.show(io::IO, ::MIME"text/plain", sm::SolidModel)
     print(io, summary(sm))
+    counts = _physical_group_entity_counts(sm)
     for dim = 3:-1:0
         groups = sm.groups[dim + 1]
         isempty(groups) && continue
         names = sort!(collect(keys(groups)))
-        print(io, "\n  dim ", dim, ": ")
-        if get(io, :limit, false)::Bool && length(names) > 10
-            print(io, join(names[1:10], ", "), " … (+", length(names) - 10, " more)")
-        else
-            print(io, join(names, ", "))
+        print(io, "\n  dim ", dim, ":")
+        maxitems = get(io, :limit, false)::Bool ? 10 : length(names)
+        shown =
+            length(names) <= maxitems ? eachindex(names) :
+            Iterators.flatten((
+                1:(maxitems ÷ 2),
+                (length(names) - maxitems ÷ 2 + 1):length(names)
+            ))
+        lastidx = 0
+        for i in shown
+            i > lastidx + 1 && print(io, "\n   ⋮")
+            groupname = names[i]
+            print(io, "\n   ")
+            show(io, groupname)
+            if isnothing(counts)
+                print(io, ": entity count unavailable")
+            else
+                count = counts[(dim, groupname)]
+                print(io, ": ", count, count == 1 ? " entity" : " entities")
+            end
+            lastidx = i
         end
     end
     return nothing
