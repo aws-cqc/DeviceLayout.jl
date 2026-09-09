@@ -94,7 +94,7 @@ end
             # A self-crossing output (B8, ledger L3) is re-interpreted by the fill rule
             # on re-union; that is B8's finding, not this law's.
             valid_output(u; weak=true) || reject!()
-            return union2d(u) ≐ u
+            return region_same(union2d(u), u)
         end
     end
     @check config = LAWS function union_of_set(polys=int_polygon_set)

@@ -80,15 +80,15 @@ end
         end
         return true
     end
-    # At |δ| ≥ 4 the oracle holds on stars as well as on rectilinear input; at smaller
-    # |δ| Clipper can leave the original vertex of a sharp corner in the output (ledger
-    # L7), which is a genuine deviation of up to δ from the offset curve rather than a
-    # discretization artifact.
+    # Holds wherever |δ|·sin(turn) ≥ 1 at every vertex; below that Clipper can leave
+    # the original vertex of a sharp corner in the output (ledger L7), a genuine
+    # deviation of up to δ from the offset curve rather than a discretization artifact.
     @check config = LAWS function round_oracle(
         A=int_thick_polygon,
-        δ=Data.Integers(4, 8),
+        δ=Data.Integers(1, 8),
         sgn=Data.SampledFrom([1, -1])
     )
+        well_conditioned_offset(A, δ) || reject!()
         return offset_oracle(A, offset([A], sgn * δ; j=Clipper.JoinTypeRound), sgn * δ, 2)
     end
     @check config = LAWS function round_oracle_rectilinear(
@@ -98,10 +98,11 @@ end
     )
         return offset_oracle(A, offset([A], sgn * δ; j=Clipper.JoinTypeRound), sgn * δ, 2)
     end
-    @law :O3_int_sharp @check config = LAWS function round_oracle_small(
+    @law :O3_int_sharp @check config = LAWS function round_oracle_sharp(
         A=int_thick_polygon,
-        δ=Data.Integers(1, 3)
+        δ=Data.Integers(1, 8)
     )
+        well_conditioned_offset(A, δ) && reject!()
         return offset_oracle(A, offset([A], δ; j=Clipper.JoinTypeRound), δ, 2)
     end
 end
@@ -132,21 +133,26 @@ end
     # offset(offset(A, δ), δ) agrees with offset(A, 2δ) for δ > 0: exactly true for
     # round joins (Minkowski sum with a disk), and for miter joins as long as no corner
     # hits the miter limit (2δ, i.e. corners sharper than 60°), where the clamp depends
-    # on δ. Both sides are offset results: within 2.
+    # on δ. Both sides are offset results: within 2. Stated away from the L7 regime and
+    # only when the first offset produced no micro-edge (L9).
+    function semigroup_holds(A, δ, j)
+        well_conditioned_offset(A, δ) || reject!()
+        o = offset([A], δ; j)
+        min_edge_length(o) >= 4 || reject!()
+        return first(region_within(offset(o, δ; j), offset([A], 2δ; j), 2))
+    end
     @check config = LAWS function semigroup_round(
         A=int_thick_polygon,
         δ=Data.Integers(1, 6)
     )
-        j = Clipper.JoinTypeRound
-        return first(region_within(offset(offset([A], δ; j), δ; j), offset([A], 2δ; j), 2))
+        return semigroup_holds(A, δ, Clipper.JoinTypeRound)
     end
     @check config = LAWS function semigroup_miter_int(
         A=int_thick_polygon,
         δ=Data.Integers(1, 6)
     )
         min_corner_angle(A) >= π / 3 || reject!()
-        j = Clipper.JoinTypeMiter
-        return first(region_within(offset(offset([A], δ; j), δ; j), offset([A], 2δ; j), 2))
+        return semigroup_holds(A, δ, Clipper.JoinTypeMiter)
     end
     @check config = LAWS function semigroup_miter_float(
         A=float_polygon,
@@ -154,8 +160,7 @@ end
     )
         min_corner_angle(A) >= π / 3 || reject!()
         δ = f * maximum(p -> max(abs(p.x), abs(p.y)), A.p)
-        j = Clipper.JoinTypeMiter
-        return first(region_within(offset(offset([A], δ; j), δ; j), offset([A], 2δ; j), 2))
+        return semigroup_holds(A, δ, Clipper.JoinTypeMiter)
     end
 end
 
@@ -168,24 +173,34 @@ end
     # regrowing the sharper corner that results overshoots A — e.g.
     # `(0.000463,0),(0.000478,0),(0.000828,0.000109),(-8.7e-5,0.00048)` at δ = 0.05 of
     # its extent regrows 3.4 pm outside — so that direction is not a law for miter.
+    # Both directions are stated away from the L7 regime and only when the first offset
+    # produced no micro-edge (L9).
+    function closing_holds(A, δ, j)
+        well_conditioned_offset(A, δ) || reject!()
+        o = offset([A], δ; j)
+        min_edge_length(o) >= 4 || reject!()
+        return first(region_subset_within([A], offset(o, -δ; j), 2))
+    end
     @check config = LAWS function closing(
         A=int_thick_polygon,
         δ=Data.Integers(1, 6),
         j=Data.SampledFrom([Clipper.JoinTypeRound, Clipper.JoinTypeMiter])
     )
-        return first(region_subset_within([A], offset(offset([A], δ; j), -δ; j), 2))
+        return closing_holds(A, δ, j)
     end
     @check config = LAWS function opening_round(A=int_thick_polygon, δ=Data.Integers(1, 6))
+        well_conditioned_offset(A, δ) || reject!()
         j = Clipper.JoinTypeRound
-        return first(region_subset_within(offset(offset([A], -δ; j), δ; j), [A], 2))
+        i = offset([A], -δ; j)
+        min_edge_length(i) >= 4 || reject!()
+        return first(region_subset_within(offset(i, δ; j), [A], 2))
     end
     @check config = LAWS function closing_float(
         A=float_polygon,
         f=Data.SampledFrom([0.05, 0.2])
     )
         δ = f * maximum(p -> max(abs(p.x), abs(p.y)), A.p)
-        j = Clipper.JoinTypeMiter
-        return first(region_subset_within([A], offset(offset([A], δ; j), -δ; j), 2))
+        return closing_holds(A, δ, Clipper.JoinTypeMiter)
     end
 end
 
