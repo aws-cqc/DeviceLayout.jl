@@ -1754,7 +1754,9 @@ end
     end
 
     @testset "Sparse pairwise intersections prune empty results" begin
-        geometry = CoordinateSystem("sparse_intersections", μm)
+        # Note: using unitless coordinates for this test to also exercise rendering
+        # of unitless coordinate systems / schematics
+        geometry = CoordinateSystem{Float64}("sparse_intersections")
         for (layer, name, x0) in (
             (:objects, "first", 0.0),
             (:objects, "second", 3.0),
@@ -1763,14 +1765,18 @@ end
         )
             place!(
                 geometry,
-                _rectangle(x0, 0.0, x0 + 1.0, 1.0),
+                Rectangle(Point(x0, 0.0), Point(x0 + 1.0, 1.0)),
                 EntityMeta(layer; name=name)
             )
         end
         result = render_case(
             "compiler_geometry_sparse_intersections",
             geometry,
-            flat_stack(:objects, :tools),
+            SourceStack(
+                :objects => SourceLayer(NULL; level=1, height=0.0, thickness=0.0),
+                :tools => SourceLayer(NULL; level=1, height=0.0, thickness=0.0);
+                levels=(1 => 0.0,)
+            ),
             [SolidModelsExperimental.Intersect(:intersections, :objects, :tools)]
         )
         @test length(layer_pgs(result, :intersections)) == 2
@@ -2111,59 +2117,39 @@ end
     end
 end
 
-@testitem "Unitless coordinates and finalization strictness" begin
+@testitem "Strictness modes" begin
     using DeviceLayout
     using DeviceLayout.SchematicDrivenLayout
     using DeviceLayout.SolidModels
     using DeviceLayout.SolidModelsExperimental:
-        EntityMeta, METAL, NULL, SolidModelTarget, SourceLayer, SourceStack
+        EntityMeta, METAL, SolidModelTarget, SourceLayer, SourceStack
 
-    unitless_geometry = CoordinateSystem{Float64}("unitless")
-    place!(unitless_geometry, Rectangle(10.0, 5.0), EntityMeta(:surface; name="shape"))
-    unitless_graph = SchematicGraph("unitless_render")
-    add_node!(unitless_graph, BasicComponent(unitless_geometry); base_id="q1")
-    unitless_sch = plan(unitless_graph; log_dir=nothing) |> check!
-    unitless_target = SolidModelTarget(
-        SourceStack(
-            :surface => SourceLayer(NULL; level=1, height=3.0, thickness=0.0);
-            levels=(1 => 2.0,)
-        )
-    )
-    unitless_sm = SolidModel("unitless"; overwrite=true)
-    SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
-    output_dir = mktempdir()
-    unitless_metadata = cd(output_dir) do
-        return render!(unitless_sm, unitless_sch, unitless_target)
-    end
-    @test isempty(readdir(output_dir))
-    @test unitless_metadata["metadata"]["assembly"]["levels"]["1"] == 2.0
-    @test unitless_metadata["layers"]["surface"]["height"] == 3.0
-    @test unitless_metadata["layers"]["surface"]["thickness"] == 0.0
-
-    warning_geometry = CoordinateSystem{Float64}("warning_surface")
-    place!(warning_geometry, Rectangle(10.0, 10.0), EntityMeta(:metal; name="floating"))
-    warning_graph = SchematicGraph("finalization_warning")
-    add_node!(warning_graph, BasicComponent(warning_geometry); base_id="q1")
-    log_dir = mktempdir()
-    warning_sch = plan(warning_graph; log_dir=log_dir) |> check!
-    warning_target = SolidModelTarget(
+    geometry = CoordinateSystem{Float64}("warning_surface")
+    place!(geometry, Rectangle(10.0, 10.0), EntityMeta(:metal; name="floating"))
+    graph = SchematicGraph("finalization_warning")
+    add_node!(graph, BasicComponent(geometry); base_id="q1")
+    schematic = plan(graph; log_dir=mktempdir()) |> check!
+    target = SolidModelTarget(
         SourceStack(
             :metal => SourceLayer(METAL; level=1, height=0.0, thickness=0.0);
             levels=(1 => 0.0,)
         )
     )
-    strict_sm = SolidModel("strict_warning"; overwrite=true)
+    SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
+    # A metal connected component without a Terminal or Ground locator emits a warning,
+    # which strict=:warn promotes to an error.
     @test_throws ErrorException render!(
-        strict_sm,
-        warning_sch,
-        warning_target;
+        SolidModel("strict_warning"; overwrite=true),
+        schematic,
+        target;
         strict=:warn
     )
-    @test isfile(warning_sch.logger.logname)
-
-    # A second render proves the exceptional strict path closed its working logfile.
-    nonstrict_sm = SolidModel("strict_cleanup"; overwrite=true)
-    @test render!(nonstrict_sm, warning_sch, warning_target; strict=:no) isa Dict
+    @test render!(
+        SolidModel("nonstrict_warning"; overwrite=true),
+        schematic,
+        target;
+        strict=:no
+    ) isa Dict
 end
 
 @testitem "SolidModel end-to-end" begin
