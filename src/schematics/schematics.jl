@@ -731,9 +731,11 @@ end
 
 Base.getindex(sch::Schematic, node::ComponentNode) = sch.ref_dict[node]
 
-Base.show(io::IO, sch::Schematic) = print(
+Base.show(io::IO, sch::Schematic{S}) where {S} = print(
     io,
-    "Schematic \"",
+    "Schematic{",
+    DeviceLayout.coordinate_type_string(S),
+    "} \"",
     sch.name,
     "\" with ",
     _count_str(length(nodes(sch.graph)), "node"),

@@ -132,6 +132,16 @@ function CurvilinearPolygon(points::Vector{Point{T}}) where {T}
     return CurvilinearPolygon{T}(points, Paths.Segment[], Int[])
 end
 CurvilinearPolygon(p::Polygon{T}) where {T} = CurvilinearPolygon(points(p))
+
+_curve_count_str(n) = string(n, n == 1 ? " curve" : " curves")
+
+Base.show(io::IO, c::CurvilinearPolygon) = print(
+    io,
+    "CurvilinearPolygon with ",
+    Polygons._point_count_str(length(c.p)),
+    " and ",
+    _curve_count_str(length(c.curves))
+)
 # A circle as four 90° CCW arcs meeting at the axis-aligned extreme points. Four arcs
 # rather than one or two: a single 360° curve collapses in the duplicate-endpoint dedup
 # above (its lone vertex pairs with itself under `circshift`), and 180° arcs hit the OCC
@@ -268,6 +278,20 @@ function _to_hole_winding(h::CurvilinearPolygon)
     return Polygons.orientation(pg) > 0 ? _reverse(h) : h
 end
 CurvilinearRegion(x) = CurvilinearRegion(CurvilinearPolygon(x))
+
+function Base.show(io::IO, r::CurvilinearRegion)
+    nh = length(r.holes)
+    return print(
+        io,
+        "CurvilinearRegion with ",
+        length(r.exterior.p),
+        "-point exterior (",
+        _curve_count_str(length(r.exterior.curves)),
+        ") and ",
+        nh,
+        nh == 1 ? " hole" : " holes"
+    )
+end
 CurvilinearRegion(ext::CurvilinearPolygon{T}) where {T} = CurvilinearRegion{T}(ext)
 CurvilinearRegion(
     exterior::CurvilinearPolygon{T},

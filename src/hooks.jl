@@ -104,6 +104,13 @@ HandedPointHook(p0::Point, in_direction, rh::Bool) =
 HandedPointHook(x0::Coordinate, y0::Coordinate, in_direction, right_handed=true) =
     HandedPointHook(PointHook(x0, y0, in_direction), right_handed)
 
+Base.show(io::IO, h::PointHook) = print(io, "PointHook(", h.p, ", ", h.in_direction, ")")
+function Base.show(io::IO, h::HandedPointHook)
+    print(io, "HandedPointHook(", h.h.p, ", ", h.h.in_direction)
+    h.right_handed || print(io, ", false")
+    return print(io, ")")
+end
+
 function transformation(h1::HandedPointHook, h2::HandedPointHook)
     f = transformation(h1.h, h2.h)
     h1.right_handed == h2.right_handed && return f
