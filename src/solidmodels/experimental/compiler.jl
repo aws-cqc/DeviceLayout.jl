@@ -150,7 +150,9 @@ end
              direction="all", position="all")
 
 Extract the boundary of `source` into `destination`. Use `direction` and `position` to
-select axis-aligned boundary entities.
+select axis-aligned boundary entities. The destination must be new or equal to `source`;
+appending to an existing unrelated layer is rejected. Boundaries produced from multiple
+source PGs are expected to be disjoint.
 """
 struct GetBoundary <: LayerOp
     destination::Symbol
@@ -1190,7 +1192,8 @@ function _compile_unary_layer_op!(
     replace::Bool,
     hash_operation::Symbol,
     hash_parameters,
-    operation_name::AbstractString
+    operation_name::AbstractString,
+    reject_collisions::Bool=false
 )
     state = cmp.reg[source]
     if replace
@@ -1215,6 +1218,11 @@ function _compile_unary_layer_op!(
         dest_name = base_name
         suffix = 2
         while generated_record_exists(cmp.reg, destination, dest_name, new_records)
+            reject_collisions && throw(
+                ArgumentError(
+                    "$operation_name destination physical group '$dest_name' already exists"
+                )
+            )
             dest_name = base_name * "__" * string(suffix)
             suffix += 1
         end
@@ -1237,6 +1245,13 @@ function _compile_unary_layer_op!(
 end
 
 function _compile!(cmp::CompilerState, op::GetBoundary)
+    op.destination != op.source &&
+        haskey(cmp.reg, op.destination) &&
+        throw(
+            ArgumentError(
+                "GetBoundary destination layer :$(op.destination) already exists"
+            )
+        )
     dim = cmp.reg[op.source].dim
     kwargs = (
         :combined => op.combined,
@@ -1260,7 +1275,8 @@ function _compile!(cmp::CompilerState, op::GetBoundary)
             op.direction,
             op.position
         ),
-        operation_name="GetBoundary"
+        operation_name="GetBoundary",
+        reject_collisions=true
     ) do destination, record
         return (destination, SolidModels.get_boundary, (record.name, dim), kwargs...)
     end
