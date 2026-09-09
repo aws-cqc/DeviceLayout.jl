@@ -328,12 +328,17 @@ Revolve(source::Symbol, origin::NTuple{3, <:Real}, axis::NTuple{3, <:Real}, angl
 """
     SetPeriodic(first, second)
 
-Pair two parallel, axis-aligned 2D periodic layers containing exactly one physical group
-each.
+Pair two distinct, parallel, axis-aligned 2D periodic layers containing exactly one physical
+group each.
 """
 struct SetPeriodic <: LayerOp
     first::Symbol
     second::Symbol
+    function SetPeriodic(first::Symbol, second::Symbol)
+        first == second &&
+            throw(ArgumentError("SetPeriodic requires distinct first and second layers"))
+        return new(first, second)
+    end
 end
 
 # ─── Lowered operations ──────────────────────────────────────────────────────

@@ -1455,6 +1455,7 @@ end
         periodic = SetPeriodic(:metal, :voids)
         @test periodic.first == :metal
         @test periodic.second == :voids
+        @test_throws ArgumentError SetPeriodic(:metal, :metal)
         @test_throws ArgumentError compile_ops(
             [SetPeriodic(:missing, :voids)],
             stack,
