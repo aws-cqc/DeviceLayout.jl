@@ -746,6 +746,14 @@ end
         @test (:remove_object => true) in op
         @test only(reg[:metal].pgs).meta == metal_meta
 
+        # Stateful repeats heal the result again under the same identity.
+        ops, reg, _ = compile_ops([Heal(:metal), Heal(:metal)], stack, registry)
+        @test length(ops) == 2
+        @test all(op -> op[1] == pgname(metal_meta), ops)
+        @test all(op -> op[3] == (pgname(metal_meta), 2), ops)
+        @test all(op -> (:remove_object => true) in op, ops)
+        @test only(reg[:metal].pgs).meta == metal_meta
+
         reg = deepcopy(registry)
         second_meta = EntityMeta(:metal; name="second")
         push!(reg[:metal].pgs, PGRecord(pgname(second_meta), :metal, second_meta))
@@ -765,6 +773,29 @@ end
         @test only(reg[:combined].pgs).meta == metal_meta
         @test (:remove_object => false) in op
         @test haskey(reg, :metal)
+
+        # Independent repeats request the same identity and are rejected, even when the
+        # second call would otherwise absorb a source removal.
+        heal = Heal(:combined, :metal)
+        @test_throws ArgumentError compile_ops([heal, heal], stack, registry)
+        @test_throws ArgumentError compile_ops(
+            [heal, heal, Remove(:metal)],
+            stack,
+            registry
+        )
+
+        # Explicit chains preserve the identity suffix through successive layer prefixes.
+        ops, reg, _ =
+            compile_ops([Heal(:clean, :metal), Heal(:cleaner, :clean)], stack, registry)
+        clean_name = replace(pgname(metal_meta), "metal__" => "clean__"; count=1)
+        cleaner_name = replace(clean_name, "clean__" => "cleaner__"; count=1)
+        @test length(ops) == 2
+        @test ops[1][1] == clean_name
+        @test ops[2][1] == cleaner_name
+        @test ops[2][3] == (clean_name, 2)
+        @test haskey(reg, :metal)
+        @test haskey(reg, :clean)
+        @test only(reg[:cleaner].pgs).meta == metal_meta
 
         reg = deepcopy(registry)
         push!(reg[:metal].pgs, PGRecord(pgname(second_meta), :metal, second_meta))
