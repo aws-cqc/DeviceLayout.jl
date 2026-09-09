@@ -1161,25 +1161,18 @@ end
         @test ps2.components.cap.count == 6
     end
 
-    @testset "load_parameter_set from args vector" begin
+    @testset "load_parameter_set from file path" begin
         ps = ParameterSet()
         ps.global.version = 7
         ps.components.cap.width = 150μm
         path = joinpath(tdir, "loader_ps.yaml")
         save_parameter_set(path, ps)
 
-        # First arg is the parameter-file path, the loaded set records it.
-        loaded = load_parameter_set([path])
+        # The named counterpart to save_parameter_set: loads the YAML file at `path`.
+        loaded = load_parameter_set(path)
         @test loaded.path == path
         @test loaded.global.version == 7
         @test loaded.components.cap.width == 150μm
-
-        # Extra args (e.g. an output dir) are ignored by the loader.
-        loaded2 = load_parameter_set([path, joinpath(tdir, "out")])
-        @test loaded2.global.version == 7
-
-        # An empty argument vector has no parameter-file path to load.
-        @test_throws ArgumentError load_parameter_set(String[])
     end
 
     @testset "Nested namespaces round-trip" begin
