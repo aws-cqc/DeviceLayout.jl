@@ -297,11 +297,14 @@ end
 Remove(source::Symbol; remove_entities::Bool=true) = Remove(source, remove_entities)
 
 """
+    Revolve(source, origin, axis, angle)
     Revolve(destination, source, origin, axis, angle)
 
 Sweep `source` through `angle` radians around the axis passing through `origin` in the
-specified axis direction. The destination dimension is one greater than the source
-dimension; 3D sources are unsupported.
+specified axis direction. The one-layer form operates in place. The destination dimension
+is one greater than the source dimension; 3D sources and generated destination identity
+collisions are rejected. The compiler does not check appended revolutions for geometric
+overlap.
 """
 struct Revolve <: LayerOp
     destination::Symbol
@@ -319,6 +322,8 @@ function Revolve(
 )
     return Revolve(destination, source, Float64.(origin), Float64.(axis), Float64(angle))
 end
+Revolve(source::Symbol, origin::NTuple{3, <:Real}, axis::NTuple{3, <:Real}, angle::Real) =
+    Revolve(source, source, origin, axis, angle)
 
 """
     SetPeriodic(first, second)
@@ -1225,8 +1230,7 @@ function _compile_unary_layer_op!(
     replace::Bool,
     hash_operation::Symbol,
     hash_parameters,
-    operation_name::AbstractString,
-    reject_collisions::Bool=false
+    operation_name::AbstractString
 )
     state = cmp.reg[source]
     if replace
@@ -1239,7 +1243,7 @@ function _compile_unary_layer_op!(
 
     new_records = PGRecord[]
     for record in state.pgs
-        base_name =
+        dest_name =
             string(destination) *
             "__" *
             ophash(
@@ -1248,17 +1252,11 @@ function _compile_unary_layer_op!(
                 operation=hash_operation,
                 parameters=hash_parameters
             )
-        dest_name = base_name
-        suffix = 2
-        while generated_record_exists(cmp.reg, destination, dest_name, new_records)
-            reject_collisions && throw(
-                ArgumentError(
-                    "$operation_name destination physical group '$dest_name' already exists"
-                )
+        generated_record_exists(cmp.reg, destination, dest_name, new_records) && throw(
+            ArgumentError(
+                "$operation_name destination physical group '$dest_name' already exists"
             )
-            dest_name = base_name * "__" * string(suffix)
-            suffix += 1
-        end
+        )
         push!(cmp.ops, lower(dest_name, record))
         push!(new_records, PGRecord(dest_name, destination, nothing))
     end
@@ -1308,8 +1306,7 @@ function _compile!(cmp::CompilerState, op::GetBoundary)
             op.direction,
             op.position
         ),
-        operation_name="GetBoundary",
-        reject_collisions=true
+        operation_name="GetBoundary"
     ) do destination, record
         return (destination, SolidModels.get_boundary, (record.name, dim), kwargs...)
     end
@@ -1325,8 +1322,7 @@ function _compile!(cmp::CompilerState, op::Translate)
         replace=op.destination == op.source && !op.copy,
         hash_operation=:translate,
         hash_parameters=(op.dx, op.dy, op.dz),
-        operation_name="Translate",
-        reject_collisions=true
+        operation_name="Translate"
     ) do destination, record
         return (
             destination,

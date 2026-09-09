@@ -22,24 +22,21 @@ The first two behavior columns below are therefore both kinds of syntactic dupli
 | `GetBoundary` | `GetBoundary(:faces, :volume)` twice is rejected because both calls request the same generated destination identity. | `GetBoundary(:shape, :shape)` twice composes dimensions, for example 3D → 2D → 1D. | `GetBoundary(:faces, :volume); GetBoundary(:edges, :faces)` explicitly computes boundaries of boundaries. |
 | `Translate` | `Translate(:shifted, :metal, dx, dy, dz)` twice is rejected because both calls request the same generated destination identity. Out-of-place `copy=false` is invalid. | `Translate(:metal, dx, 0, 0)` twice accumulates to translation by `2dx` because in-place calls move by default. Repeating the same in-place `copy=true` operation is rejected because it would recreate the first copied identity. | `Translate(:x, :metal, dx, 0, 0); Translate(:xy, :x, 0, dy, 0)` composes copied translations to `(dx, dy, 0)`. |
 | `Remove` | Not independent: the first call changes source availability. | `Remove(:metal); Remove(:metal)` emits removal only once; the second is a no-op because the layer is absent. | Common lifecycle composition is `Heal(:clean, :metal); Remove(:metal)`, where removal may be absorbed into the preceding operation. |
-| `Revolve` | `Revolve(:swept, :surface, origin, axis, angle)` twice executes twice and creates suffixed copies from the unchanged source. | `Revolve(:shape, :shape, ...)` repeatedly increments dimension. A 1D source can become 2D and then 3D; the next call is rejected. A typical 2D source permits only one in-place revolution. | `Revolve(:surface, :curve, ...); Revolve(:volume, :surface, ...)` explicitly composes two sweeps. |
+| `Revolve` | `Revolve(:swept, :surface, origin, axis, angle)` twice is rejected because both calls request the same generated destination identity. | `Revolve(:shape, origin, axis, angle)` repeatedly increments dimension. A 1D source can become 2D and then 3D; the next call is rejected. A typical 2D source permits only one in-place revolution. | `Revolve(:surface, :curve, ...); Revolve(:volume, :surface, ...)` explicitly composes two sweeps. |
 | `SetPeriodic` | There is no destination. `SetPeriodic(:first, :second)` twice emits two native calls and leaves registry state unchanged. | The second call sees the periodic relationship already installed, so it should be idempotent at the model level. | There is no named result to feed forward. Different calls can establish additional periodic relationships, but that is not dataflow composition. |
 
 ## Main patterns now visible
 
-### Independent duplicates currently have two outcomes
+### Generated independent duplicates are rejected
 
-- **Rejected**
-  - `Cut`
-  - `GetInterface`
-  - `GetBoundary`
-  - `Intersect`
-  - `Translate`
-  - Assign-mode `Heal`
-  - `Fuse`
-
-- **Executed with generated suffixes**
-  - `Revolve`
+- `Cut`
+- `GetInterface`
+- `GetBoundary`
+- `Intersect`
+- `Translate`
+- `Revolve`
+- Assign-mode `Heal`
+- `Fuse`
 
 ### In-place reapplication has four broad meanings
 

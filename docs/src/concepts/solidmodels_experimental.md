@@ -113,7 +113,7 @@ The public operation types are:
 | `GetBoundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries into a new destination or replace the source in place. Appending to an existing unrelated destination is rejected. Boundaries from multiple source PGs are expected to be disjoint. |
 | `Translate(source, dx, dy, dz; copy)` or `Translate(destination, source, dx, dy, dz; copy)` | Translate a layer. In-place calls move by default; distinct destinations copy and preserve the source by default. Out-of-place `copy=false` is invalid. Generated identity collisions are rejected; the compiler does not check appended copies for geometric overlap. |
 | `Remove(source; remove_entities)` | Remove a layer, or do nothing if it is absent. |
-| `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. Three-dimensional sources are unsupported. |
+| `Revolve(source, origin, axis, angle)` or `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. The one-layer form operates in place. Three-dimensional sources and generated identity collisions are rejected; appended revolutions are not checked for geometric overlap. |
 | `SetPeriodic(first, second)` | Pair two 2D periodic layers containing exactly one physical group each. |
 
 `Fuse` always collapses all source PGs into one new identity. For example,

@@ -1339,6 +1339,9 @@ end
         @test rev.origin === (0.0, 0.0, 0.0)
         @test rev.axis === (0.0, 0.0, 1.0)
         @test rev.angle === Float64(π)
+        in_place = Revolve(:metal, (0, 0, 0), (0, 0, 1), π)
+        @test in_place.destination == :metal
+        @test in_place.source == :metal
         @test_throws ArgumentError compile_ops(
             [Revolve(:revolved, :missing, (0, 0, 0), (0, 0, 1), π)],
             stack,
@@ -1375,14 +1378,9 @@ end
         @test length(reg[:revolved].pgs) == 2
         @test Set(op[3][1] for op in ops) == Set((pgname(metal_meta), pgname(second_meta)))
 
-        # Repeated identical revolutions execute and receive deterministic local suffixes.
+        # Independent repeats request the same generated identity and are rejected.
         rev = Revolve(:revolved, :metal, (0, 0, 0), (0, 0, 1), π)
-        ops, reg, _ = compile_ops([rev, rev], stack, registry)
-        @test length(ops) == 2
-        @test length(reg[:revolved].pgs) == 2
-        @test ops[2][1] == ops[1][1] * "__2"
-        @test reg[:revolved].pgs[1].name == ops[1][1]
-        @test reg[:revolved].pgs[2].name == ops[2][1]
+        @test_throws ArgumentError compile_ops([rev, rev], stack, registry)
 
         # Lower-dimensional sources advance by exactly one dimension.
         reg = deepcopy(registry)
@@ -1392,6 +1390,47 @@ end
             compile_ops([Revolve(:surface, :line, (0, 0, 0), (0, 0, 1), π)], stack, reg)
         @test only(ops)[3][2] == 1
         @test reg[:surface].dim == 2
+
+        # In-place repeats advance through successive dimensions.
+        reg = deepcopy(registry)
+        reg[:line] = LayerState([PGRecord(pgname(line_meta), :line, line_meta)], 1)
+        revolve_line = Revolve(:line, (0, 0, 0), (0, 0, 1), π)
+        ops, reg, _ = compile_ops([revolve_line, revolve_line], stack, reg)
+        @test length(ops) == 2
+        @test ops[1][3][2] == 1
+        @test ops[2][3][2] == 2
+        @test reg[:line].dim == 3
+        @test all(op -> op[1] == pgname(line_meta), ops)
+
+        # Explicit chains consume the named result from the preceding revolution.
+        reg = deepcopy(registry)
+        reg[:line] = LayerState([PGRecord(pgname(line_meta), :line, line_meta)], 1)
+        ops, reg, _ = compile_ops(
+            [
+                Revolve(:surface, :line, (0, 0, 0), (0, 0, 1), π),
+                Revolve(:volume, :surface, (0, 0, 0), (1, 0, 0), π / 2)
+            ],
+            stack,
+            reg
+        )
+        @test length(ops) == 2
+        @test ops[2][3][1] == ops[1][1]
+        @test ops[2][3][2] == 2
+        @test reg[:surface].dim == 2
+        @test reg[:volume].dim == 3
+
+        # Distinct revolutions may append when their generated identities differ.
+        ops, reg, _ = compile_ops(
+            [
+                Revolve(:revolved, :metal, (0, 0, 0), (0, 0, 1), π),
+                Revolve(:revolved, :voids, (0, 0, 0), (1, 0, 0), π)
+            ],
+            stack,
+            registry
+        )
+        @test length(ops) == 2
+        @test length(reg[:revolved].pgs) == 2
+        @test allunique(record.name for record in reg[:revolved].pgs)
 
         # OCC cannot sweep a volume into a fourth dimension.
         reg = deepcopy(registry)
