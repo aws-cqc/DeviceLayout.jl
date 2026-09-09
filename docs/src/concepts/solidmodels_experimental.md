@@ -110,7 +110,7 @@ The public operation types are:
 | `SolidModelsExperimental.Intersect(destination, object, tool)` | Compute pairwise OCC intersections across the object and tool PGs. Follow it with `Remove` to consume either input layer. |
 | `GetInterface(destination, object, tool)` | Resolve a deferred interface after fragmentation. The destination must differ from both inputs, whose PG identities must remain available through deferred execution. |
 | `RestrictTo(volume)` | Restrict the model to a 3D bounding-volume layer containing exactly one physical group. |
-| `GetBoundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries. |
+| `GetBoundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries into a new destination or replace the source in place. Appending to an existing unrelated destination is rejected. Boundaries from multiple source PGs are expected to be disjoint. |
 | `Translate(destination, source, dx, dy, dz; copy)` | Translate or copy-translate a layer. |
 | `Remove(source; remove_entities)` | Remove a layer, or do nothing if it is absent. |
 | `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. Three-dimensional sources are unsupported. |
