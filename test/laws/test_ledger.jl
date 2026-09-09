@@ -200,7 +200,9 @@
         @test min_edge_length(grown) == 1
         back = offset(grown, -δ; j)
         @test_broken first(region_subset_within([A], back, 2))
-        # Removing the micro-edge before shrinking restores the closing law.
+        # The derived tolerance |δ|/(2L) says so: with L = 1 fm it is ~5e4 fm.
+        @test offset_tol(grown, δ) > 10_000
+        # Removing the micro-edge before shrinking restores the closing law at 2.
         cleaned = [Polygon(strip_short_edges(p.p)) for p in grown]
         @test first(region_subset_within([A], offset(cleaned, -δ; j), 2))
     end
