@@ -1611,7 +1611,10 @@ end
         GetBoundary,
         GetInterface,
         Heal,
+        LayerRegistry,
+        LayerState,
         NULL,
+        PGRecord,
         Remove,
         RestrictTo,
         Revolve,
@@ -1784,7 +1787,11 @@ end
             "compiler_geometry_interface",
             geometry,
             flat_stack(:left, :right; thickness=1μm),
-            [GetInterface(:interface, :left, :right)]
+            [
+                GetInterface(:interface, :left, :right),
+                GetInterface(:interface_copy, :left, :right),
+                GetInterface(:self_interface, :left, :left)
+            ]
         )
         @test result.metadata["layers"]["left"]["dim"] == 3
         @test result.metadata["layers"]["right"]["dim"] == 3
@@ -1792,12 +1799,42 @@ end
         @test layer_measure(result, :left) ≈ 1.0 atol = 1e-8
         @test layer_measure(result, :right) ≈ 1.0 atol = 1e-8
         @test layer_measure(result, :interface) ≈ 1.0 atol = 1e-8
+        @test layer_measure(result, :interface_copy) ≈ 1.0 atol = 1e-8
+        @test layer_measure(result, :self_interface) ≈ 6.0 atol = 1e-8
         @test collect(layer_bbox(result, :left)) ≈ [0.0, 0.0, 0.0, 1.0, 1.0, 1.0] atol =
             1e-6
         @test collect(layer_bbox(result, :right)) ≈ [1.0, 0.0, 0.0, 2.0, 1.0, 1.0] atol =
             1e-6
         @test collect(layer_bbox(result, :interface)) ≈ [1.0, 0.0, 0.0, 1.0, 1.0, 1.0] atol =
             1e-6
+        @test collect(layer_bbox(result, :interface_copy)) ≈ [1.0, 0.0, 0.0, 1.0, 1.0, 1.0] atol =
+            1e-6
+        @test collect(layer_bbox(result, :self_interface)) ≈ [0.0, 0.0, 0.0, 1.0, 1.0, 1.0] atol =
+            1e-6
+
+        mixed_geometry = CoordinateSystem("mixed_interface", μm)
+        place!(mixed_geometry, _rectangle(0.0, 0.0, 1.0, 1.0), EntityMeta(:volume))
+        place!(mixed_geometry, _rectangle(0.0, 0.0, 1.0, 1.0), EntityMeta(:surface))
+        mixed_stack = SourceStack(
+            :volume => SourceLayer(NULL; level=1, thickness=1μm),
+            :surface => SourceLayer(NULL; level=1, thickness=0μm);
+            levels=(1 => 0μm,)
+        )
+        mixed = render_case(
+            "compiler_geometry_mixed_interface",
+            mixed_geometry,
+            mixed_stack,
+            [
+                GetInterface(:lower_first, :surface, :volume),
+                GetInterface(:higher_first, :volume, :surface)
+            ]
+        )
+        for layer in (:lower_first, :higher_first)
+            @test mixed.metadata["layers"][String(layer)]["dim"] == 2
+            @test layer_measure(mixed, layer) ≈ 1.0 atol = 1e-8
+            @test collect(layer_bbox(mixed, layer)) ≈ [0.0, 0.0, 0.0, 1.0, 1.0, 0.0] atol =
+                1e-6
+        end
     end
 
     @testset "Translation, boundary extraction, and revolution" begin
@@ -1868,26 +1905,24 @@ end
         SolidModels.gmsh.model.mesh.generate(2)
         @test SolidModels.gmsh.model.mesh.getPeriodic(2, child_tags) == parent_tags
     end
-end
 
-@testitem "Model physical groups are registered" begin
-    using DeviceLayout
-    using DeviceLayout.SolidModels
-    using DeviceLayout.SolidModelsExperimental:
-        EntityMeta, PGRecord, LayerState, LayerRegistry
+    @testset "Registry/model consistency" begin
+        sm = SolidModel("registry_validation"; overwrite=true)
+        SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
+        tag = SolidModels.gmsh.model.occ.addRectangle(0.0, 0.0, 0.0, 1.0, 1.0)
+        SolidModels.gmsh.model.occ.synchronize()
+        sm["surface"] = [(Int32(2), Int32(tag))]
 
-    sm = SolidModel("registry_validation"; overwrite=true)
-    SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
-    tag = SolidModels.gmsh.model.occ.addRectangle(0.0, 0.0, 0.0, 1.0, 1.0)
-    SolidModels.gmsh.model.occ.synchronize()
-    sm["surface"] = [(Int32(2), Int32(tag))]
+        registry = LayerRegistry()
+        @test_throws ErrorException SolidModelsExperimental._check_pgs_registered(
+            sm,
+            registry
+        )
 
-    registry = LayerRegistry()
-    @test_throws ErrorException SolidModelsExperimental._check_pgs_registered(sm, registry)
-
-    registry[:surface] =
-        LayerState([PGRecord("surface", :surface, EntityMeta(:surface))], 2)
-    @test isnothing(SolidModelsExperimental._check_pgs_registered(sm, registry))
+        registry[:surface] =
+            LayerState([PGRecord("surface", :surface, EntityMeta(:surface))], 2)
+        @test isnothing(SolidModelsExperimental._check_pgs_registered(sm, registry))
+    end
 end
 
 @testitem "Placement prefix copies" begin
@@ -2028,89 +2063,6 @@ end
         tool_name = SolidModelsExperimental.MetaGraphs.get_prop(deferred, tool, :name)
         return (object_name, tool_name) == (tag_name, "layer_b")
     end
-end
-
-@testitem "Deferred interface graph execution" begin
-    using DeviceLayout
-    using DeviceLayout.SolidModels
-
-    sm = SolidModel("deferred_graph"; overwrite=true)
-    SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
-    obj_tag = SolidModels.gmsh.model.occ.addBox(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
-    tool_tag = SolidModels.gmsh.model.occ.addBox(1.0, 0.0, 0.0, 1.0, 1.0, 1.0)
-    SolidModels.gmsh.model.occ.synchronize()
-    sm["object"] = [(Int32(3), Int32(obj_tag))]
-    sm["tool"] = [(Int32(3), Int32(tool_tag))]
-    SolidModels._fragment_three_pass!(sm)
-
-    same_dim = SolidModelsExperimental._deferred_interface_graph()
-    SolidModelsExperimental.defer_interface!(
-        same_dim,
-        "interface_1",
-        "object",
-        "tool",
-        3,
-        3,
-        :interface,
-        :object,
-        :tool
-    )
-    SolidModelsExperimental.defer_interface!(
-        same_dim,
-        "interface_2",
-        "object",
-        "tool",
-        3,
-        3,
-        :interface,
-        :object,
-        :tool
-    )
-    SolidModelsExperimental.defer_interface!(
-        same_dim,
-        "self_interface",
-        "object",
-        "object",
-        3,
-        3,
-        :interface,
-        :object,
-        :object
-    )
-    SolidModelsExperimental.execute_deferred_interfaces!(sm, same_dim)
-
-    interface_tags = SolidModels.entitytags(sm["interface_1", 2])
-    @test !isempty(interface_tags)
-    @test SolidModels.entitytags(sm["interface_2", 2]) == interface_tags
-    @test !isempty(SolidModels.entitytags(sm["self_interface", 2]))
-
-    sm["lower"] = [(Int32(2), tag) for tag in interface_tags]
-    mixed_dim = SolidModelsExperimental._deferred_interface_graph()
-    SolidModelsExperimental.defer_interface!(
-        mixed_dim,
-        "lower_first",
-        "lower",
-        "tool",
-        2,
-        3,
-        :interface,
-        :lower,
-        :tool
-    )
-    SolidModelsExperimental.defer_interface!(
-        mixed_dim,
-        "higher_first",
-        "tool",
-        "lower",
-        3,
-        2,
-        :interface,
-        :tool,
-        :lower
-    )
-    SolidModelsExperimental.execute_deferred_interfaces!(sm, mixed_dim)
-    @test SolidModels.entitytags(sm["lower_first", 2]) == interface_tags
-    @test SolidModels.entitytags(sm["higher_first", 2]) == interface_tags
 end
 
 @testitem "Rendered metadata conforms to schema" begin
