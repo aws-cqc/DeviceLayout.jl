@@ -105,7 +105,7 @@ The public operation types are:
 |:--|:--|
 | `Extrude(layer)` | Extrude a source-stack layer using its configured thickness. |
 | `Cut(destination, object, tools)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector. Follow it with `Remove` to remove inputs. |
-| `Fuse(source)` or `Fuse(destination, sources)` | Collapse every PG in one or more source layers into one generated destination PG. Existing destinations must be included among the grouped sources; other sources remain unless removed explicitly later. |
+| `Fuse(source)` or `Fuse(destination, sources)` | Collapse every PG in one or more source layers into one generated PG. Append when an existing destination is not a source; include it among the sources to collapse and replace its current PGs. Other sources remain unless removed explicitly later. |
 | `Heal(source)` or `Heal(destination, source)` | Union each PG in one source independently, preserving its identity and metadata. Assign mode replaces only the layer-name prefix, preserves the source, and may append to an existing destination. |
 | `SolidModelsExperimental.Intersect(destination, object, tool)` | Compute pairwise OCC intersections across the object and tool PGs. Follow it with `Remove` to consume either input layer. |
 | `GetInterface(destination, object, tool)` | Resolve a deferred interface after fragmentation. |
@@ -117,10 +117,11 @@ The public operation types are:
 | `SetPeriodic(first, second)` | Pair two 2D periodic layers containing exactly one physical group each. |
 
 `Fuse` always collapses all source PGs into one new identity. For example,
-`Fuse(:metal)` replaces one layer in place, while
-`Fuse(:metal, (:metal, :added_metal))` explicitly includes an existing destination among
-the layers being collapsed and leaves `:added_metal` available unless a following `Remove`
-consumes it. `Heal(:metal)` instead heals each PG in place without changing
+`Fuse(:metal)` replaces one layer in place, while `Fuse(:combined, (:metal, :ground))`
+appends one fused PG when `:combined` already exists. Including the destination explicitly,
+as in `Fuse(:metal, (:metal, :added_metal))`, collapses and replaces its current PGs.
+Other sources remain available unless a following `Remove` consumes them. `Heal(:metal)`
+instead heals each PG in place without changing
 its identity. `Heal(:clean_metal, :metal)` assigns healed PGs to another layer by replacing
 only their `metal__` name prefix; assigning to an existing destination appends the healed PGs
 while preserving both the source layer and existing destination records. Follow either
