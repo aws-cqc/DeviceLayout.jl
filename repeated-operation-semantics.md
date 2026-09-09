@@ -20,7 +20,7 @@ The first two behavior columns below are therefore both kinds of syntactic dupli
 | `GetInterface` | `GetInterface(:ab, :a, :b)` twice is rejected because both calls request the same deferred destination identity. | In-place use is rejected because deferred interface inputs must retain their registered PG identities and dimensions through execution. | `GetInterface(:ab, :a, :b); GetInterface(:abc, :ab, :c)` creates a deferred interface chain while preserving the original inputs. |
 | `RestrictTo` | There is no destination. `RestrictTo(:volume)` twice emits two native calls; the second should usually be geometrically idempotent. | The first call changes the global model rather than a named destination, so the second sees an already-restricted model. | `RestrictTo(:outer); RestrictTo(:inner)` sequentially restricts the global model, effectively approaching restriction to the common retained region. This is global-state composition, not named-layer composition. |
 | `GetBoundary` | `GetBoundary(:faces, :volume)` twice is rejected because both calls request the same generated destination identity. | `GetBoundary(:shape, :shape)` twice composes dimensions, for example 3D → 2D → 1D. | `GetBoundary(:faces, :volume); GetBoundary(:edges, :faces)` explicitly computes boundaries of boundaries. |
-| `Translate` | `Translate(:shifted, :metal, dx, dy, dz)` twice creates two copied results with suffixes, even though they represent the same transformation. | `Translate(:metal, :metal, dx, 0, 0; copy=false)` twice accumulates to translation by `2dx`. With `copy=true`, repeated in-place calls append copies to the source layer and later calls can copy earlier copies, causing PG growth. | `Translate(:x, :metal, dx, 0, 0); Translate(:xy, :x, 0, dy, 0)` composes to translation by `(dx, dy, 0)`. |
+| `Translate` | `Translate(:shifted, :metal, dx, dy, dz)` twice is rejected because both calls request the same generated destination identity. Out-of-place `copy=false` is invalid. | `Translate(:metal, dx, 0, 0)` twice accumulates to translation by `2dx` because in-place calls move by default. Repeating the same in-place `copy=true` operation is rejected because it would recreate the first copied identity. | `Translate(:x, :metal, dx, 0, 0); Translate(:xy, :x, 0, dy, 0)` composes copied translations to `(dx, dy, 0)`. |
 | `Remove` | Not independent: the first call changes source availability. | `Remove(:metal); Remove(:metal)` emits removal only once; the second is a no-op because the layer is absent. | Common lifecycle composition is `Heal(:clean, :metal); Remove(:metal)`, where removal may be absorbed into the preceding operation. |
 | `Revolve` | `Revolve(:swept, :surface, origin, axis, angle)` twice executes twice and creates suffixed copies from the unchanged source. | `Revolve(:shape, :shape, ...)` repeatedly increments dimension. A 1D source can become 2D and then 3D; the next call is rejected. A typical 2D source permits only one in-place revolution. | `Revolve(:surface, :curve, ...); Revolve(:volume, :surface, ...)` explicitly composes two sweeps. |
 | `SetPeriodic` | There is no destination. `SetPeriodic(:first, :second)` twice emits two native calls and leaves registry state unchanged. | The second call sees the periodic relationship already installed, so it should be idempotent at the model level. | There is no named result to feed forward. Different calls can establish additional periodic relationships, but that is not dataflow composition. |
@@ -34,17 +34,18 @@ The first two behavior columns below are therefore both kinds of syntactic dupli
   - `GetInterface`
   - `GetBoundary`
   - `Intersect`
+  - `Translate`
   - Assign-mode `Heal`
   - `Fuse`
 
 - **Executed with generated suffixes**
-  - `Translate`
   - `Revolve`
 
 ### In-place reapplication has four broad meanings
 
 - **Rejected**
   - `GetInterface`
+  - `Translate(copy=true)` when destination equals source
 
 - **Geometrically idempotent or nearly so**
   - `Cut` with the same mask
@@ -59,6 +60,5 @@ The first two behavior columns below are therefore both kinds of syntactic dupli
 
 - **Unsupported or unclear**
   - `Extrude`
-  - `Translate(copy=true)` when destination equals source
 
 This suggests that independent generated-identity collisions and in-place reapplication should probably be governed by separate policies rather than one universal duplicate rule.

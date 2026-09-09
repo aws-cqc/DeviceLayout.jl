@@ -229,10 +229,14 @@ function exterior_boundaries(bounding_volume_layer::Symbol)
 end
 
 """
-    Translate(destination, source, dx, dy, dz; copy=true)
+    Translate(source, dx, dy, dz; copy=false)
+    Translate(destination, source, dx, dy, dz; copy=destination != source)
 
-Translate `source` by `(dx, dy, dz)` into `destination`. Copy the entities before
-translation when `copy=true`.
+Translate `source` by `(dx, dy, dz)`. With `copy=true`, assign an independently addressable
+copy to `destination` and preserve the source. With `copy=false`, `destination` must equal
+`source` and the geometry is translated in place. By default, distinct destinations copy and
+in-place translations move. Generated destination identity collisions are rejected. The
+compiler does not check appended copies for geometric overlap.
 """
 struct Translate{X <: Coordinate, Y <: Coordinate, Z <: Coordinate} <: LayerOp
     destination::Symbol
@@ -241,15 +245,44 @@ struct Translate{X <: Coordinate, Y <: Coordinate, Z <: Coordinate} <: LayerOp
     dy::Y
     dz::Z
     copy::Bool
+    function Translate{X, Y, Z}(
+        destination::Symbol,
+        source::Symbol,
+        dx::X,
+        dy::Y,
+        dz::Z,
+        copy::Bool
+    ) where {X <: Coordinate, Y <: Coordinate, Z <: Coordinate}
+        !copy &&
+            destination != source &&
+            throw(ArgumentError("Translate with copy=false requires destination == source"))
+        return new{X, Y, Z}(destination, source, dx, dy, dz, copy)
+    end
 end
+Translate(
+    destination::Symbol,
+    source::Symbol,
+    dx::X,
+    dy::Y,
+    dz::Z,
+    copy::Bool
+) where {X <: Coordinate, Y <: Coordinate, Z <: Coordinate} =
+    Translate{X, Y, Z}(destination, source, dx, dy, dz, copy)
 Translate(
     destination::Symbol,
     source::Symbol,
     dx::Coordinate,
     dy::Coordinate,
     dz::Coordinate;
-    copy::Bool=true
+    copy::Bool=destination != source
 ) = Translate(destination, source, dx, dy, dz, copy)
+Translate(
+    source::Symbol,
+    dx::Coordinate,
+    dy::Coordinate,
+    dz::Coordinate;
+    copy::Bool=false
+) = Translate(source, source, dx, dy, dz, copy)
 
 """
     Remove(source; remove_entities=true)
@@ -1284,15 +1317,16 @@ end
 
 function _compile!(cmp::CompilerState, op::Translate)
     dim = cmp.reg[op.source].dim
-    return _compile_unary_layer_op!(
+    _compile_unary_layer_op!(
         cmp,
         op.destination,
         op.source,
         dim;
         replace=op.destination == op.source && !op.copy,
         hash_operation=:translate,
-        hash_parameters=(op.dx, op.dy, op.dz, op.copy),
-        operation_name="Translate"
+        hash_parameters=(op.dx, op.dy, op.dz),
+        operation_name="Translate",
+        reject_collisions=true
     ) do destination, record
         return (
             destination,
@@ -1301,6 +1335,7 @@ function _compile!(cmp::CompilerState, op::Translate)
             :copy => op.copy
         )
     end
+    return nothing
 end
 
 function _compile!(cmp::CompilerState, op::Remove)
