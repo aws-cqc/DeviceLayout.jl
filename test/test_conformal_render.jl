@@ -543,4 +543,51 @@
         @test hasgroup(sm, "l1", 2)
         gmsh.finalize()
     end
+
+    @testset "OffsetSegment inner/outer traces share offset curve endpoints" begin
+        # A `Paths.SimpleCPW` bspline segment emits two parallel offset-BSpline
+        # curves (the inner trace and the outer trace edges), each traversed
+        # in opposite directions when the CPW polygon is closed. Before the
+        # direction-canonicalize fix in `_add_conformal_curve!(::OffsetSegment)`,
+        # `bspline_approximation` could produce different sub-BSpline counts
+        # for the two traversal directions of the SAME geometric offset curve
+        # (see SCT-002-D2 storage-cutout / gnd shared-boundary regression).
+        # With canonicalization, both directions get the same sub-BSpline chain
+        # → identical join points → cache unifies → conformal.
+        #
+        # This test doesn't reproduce the two-face shared-boundary directly
+        # (that requires two independent CurvilinearRegions), but it verifies
+        # the code path runs to completion without producing a non-manifold
+        # SolidModel (which the pre-fix code would silently do). The stronger
+        # end-to-end validation is a full-chip render + mesh in downstream
+        # projects (see PR description).
+        cs = CoordinateSystem("offset_dir", nm)
+        pa = Path(Point(0.0μm, 0.0μm), α0=0°)
+        # A CPW with an S-curve bspline: the inner+outer trace boundaries
+        # are offset-BSplines with non-trivial curvature. Endpoint direction
+        # varies along the loop, so canonicalize matters.
+        straight!(pa, 10μm, Paths.SimpleCPW(4.0μm, 2.0μm))
+        bspline!(pa, [Point(40.0μm, 20.0μm), Point(80.0μm, -20.0μm),
+                      Point(120.0μm, 20.0μm)], 0°)
+        straight!(pa, 10μm)
+        place!(cs, pa, :l1)
+
+        sm = SolidModel("offset_dir"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
+        render_conformal!(sm, cs)
+        @test hasgroup(sm, "l1", 2)
+        # No BSpline curve should be an "orphan" (adjacent to zero surfaces).
+        # A miscounted sub-segment split would leave stranded 1D entities.
+        surfs = Set(Int32(t) for (_, t) in gmsh.model.occ.getEntities(2))
+        curves = gmsh.model.occ.getEntities(1)
+        orphan_curves = 0
+        for (_, tag) in curves
+            ups, _ = gmsh.model.getAdjacencies(1, tag)
+            if isempty(intersect(Set(Int32.(ups)), surfs))
+                orphan_curves += 1
+            end
+        end
+        @test orphan_curves == 0
+        gmsh.finalize()
+    end
 end

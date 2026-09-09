@@ -16,6 +16,17 @@ The format of this changelog is based on
     make adjacent physical groups conformal before `render_conformal!`. Curved edges are split
     natively via `Paths.split`; no discretization.
 
+### Fixed
+
+  - `render_conformal!` on `Paths.OffsetSegment` (general offset / variable-offset curves) now
+    canonicalizes traversal direction before BSpline-approximating. `bspline_approximation` is
+    not direction-symmetric — forward and reverse traversals of the same geometric curve can
+    yield different sub-segment counts and different join coordinates. Without canonicalization,
+    two faces sharing an offset curve produce mismatched sub-BSpline chains, materializing as
+    an unshared curve on the sparser side and leaving the shared boundary non-manifold at the
+    extra internal vertex. Approximating always in the direction from the lexicographically
+    smaller endpoint fixes it.
+
 ### Changed
 
   - Added a precompile workload for the schematic workflow. Precompilation will take longer, but
