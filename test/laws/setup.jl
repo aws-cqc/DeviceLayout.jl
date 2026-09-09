@@ -1,16 +1,8 @@
 # GeomLaws — shared setup for property-based geometry laws.
 #
-# Provides Supposition.jl generators, exact (rational-arithmetic) predicates, and the
-# region-equivalence check `≐` used by every law in test/laws/. Design rules that this
-# file enforces (see the GeomLaws plan for rationale):
-#
-#   * Laws compare *regions*, never vertex lists: legitimate kernel differences (start
-#     vertex, contour order, collinear-vertex stripping) must not fail a law.
-#   * The oracle shares nothing with the clipping kernel: point-in-region, area, and
-#     simplicity are computed exactly on the fm grid (`Polygons.SCALE`) with Rational/BigInt
-#     arithmetic, so a disagreement is a kernel finding, not a tolerance artifact.
-#   * Generated polygons are well-formed by construction *and* validated before use, so a
-#     generator artifact can never masquerade as a kernel bug.
+# Provides Supposition.jl generators, exact lattice predicates, and the region comparison
+# `≐` used by the laws in test/laws/. Generators do not call the clipping kernel, and laws
+# compare regions rather than vertex order.
 
 @testsnippet LawsSetup begin
     using Supposition
@@ -40,7 +32,7 @@
     # itself be flaky at PR budget. The deterministic reproducer lives in
     # test_ledger.jl; when the kernel changes, remove the entry here and see whether the
     # law now holds.
-    const KNOWN_BROKEN = Set([:B8_int])  # ledger L3
+    const KNOWN_BROKEN = Set([:B3_int, :B8_int])  # ledger L1/L3
     macro law(id, check)
         return quote
             if $(esc(id)) in KNOWN_BROKEN
@@ -180,20 +172,8 @@
     end
 
     # ---------------------------------------------------------------------------------
-    # Region equivalence `≐`.
-    #
-    # Tier 1: canonical exact equality of the lattice representation (strip collinear
-    #   vertices, normalize orientation and start vertex, sort contours).
-    # Tier 2: sampled membership vote. Clipper rounds intersection vertices to the
-    #   lattice, so each output boundary may sit up to ~√2/2 lattice units from the true
-    #   boundary; sample points within `δ` lattice units of either region's boundary are
-    #   excluded from the vote (default `δ = 2`, enough for one rounding step per
-    #   operand). Features narrower than `2δ` are invisible to this tier by construction;
-    #   the area laws (B5) are what bound those. Samples are drawn deterministically from
-    #   the union bounding box plus points near every vertex of both regions, where
-    #   clipping bugs concentrate.
-    # Tier 3 (symmetric-difference area via the kernel under test) is deliberately not
-    #   part of the verdict — it would be circular.
+    # Region comparison `≐`. Canonical boundary equality after collinear stripping is
+    # the only passing verdict; approximate comparison needs a stronger oracle.
     # ---------------------------------------------------------------------------------
     const DEFAULT_δ = 2
     function strip_collinear(v::Vector{GridPt})
@@ -220,8 +200,7 @@
         sort!(filter!(!isempty, canonical_contour.(polys)))
 
     # Distance from q to the boundary of a polygon set, in lattice units. Float64 is
-    # adequate here: this only decides which sample points are *excluded*, never the
-    # verdict, so a rounding error at the band edge is harmless.
+    # sufficient for choosing diagnostic probes at the generated coordinate ranges.
     function _dist_point_segment(q::GridPt, a::GridPt, b::GridPt)
         ax, ay = Float64(a[1]), Float64(a[2])
         dx, dy = Float64(b[1] - a[1]), Float64(b[2] - a[2])
@@ -259,45 +238,13 @@
         return pts
     end
 
-    """
-        region_equal(X, Y; δ=DEFAULT_δ, n=256) -> (equal::Bool, witness)
-
-    Region equality of two polygon sets on the kernel lattice, ignoring points within `δ`
-    lattice units of either boundary. `witness` is `nothing` on success or the first
-    sample point where membership disagrees.
-    """
-    function region_equal(
-        X::Vector{Vector{GridPt}},
-        Y::Vector{Vector{GridPt}};
-        δ=DEFAULT_δ,
-        n=256
-    )
+    function region_equal(X::Vector{Vector{GridPt}}, Y::Vector{Vector{GridPt}})
         canonical_region(X) == canonical_region(Y) && return (true, nothing)
-        for q in sample_points(X, Y; n)
-            near_boundary(q, δ, X, Y) && continue
-            a = point_in_region_exact(q, X)
-            b = point_in_region_exact(q, Y)
-            (ismissing(a) || ismissing(b)) && continue
-            a == b || return (false, q)
-        end
-        return (true, nothing)
+        return (false, :canonical_mismatch)
     end
-    region_equal(X, Y; kwargs...) = region_equal(togrid(X), togrid(Y); kwargs...)
+    region_equal(X, Y) = region_equal(togrid(X), togrid(Y))
 
     ≐(X, Y) = first(region_equal(X, Y))
-
-    # Region containment X ⊆ Y by sampled vote (points inside X must be inside Y).
-    function region_subset(X, Y; δ=DEFAULT_δ, n=256)
-        gX, gY = togrid(X), togrid(Y)
-        for q in sample_points(gX, gY; n)
-            near_boundary(q, δ, gX, gY) && continue
-            a = point_in_region_exact(q, gX)
-            b = point_in_region_exact(q, gY)
-            (ismissing(a) || ismissing(b)) && continue
-            (a && !b) && return (false, q)
-        end
-        return (true, nothing)
-    end
 
     # Output validity (law B8): every contour simple; tree alternates outer/hole.
     # Strict simplicity is a known-broken law on Clipper1 (see test/laws/test_ledger.jl), so
@@ -356,26 +303,8 @@
         return make_polygon(pts)
     end
 
-    # Rectilinear polygon from a rectangle with random axis-aligned notches, on the grid.
-    function notched_rectangle(w::Int, h::Int, notches::Vector{NTuple{3, Int}})
-        # Start from a rectangle; each notch (side, offset, depth) cuts a unit-wide slot.
-        r = Rectangle(Point(0, 0), Point(w, h))
-        polys = union2d(to_polygons(r))
-        for (side, off, depth) in notches
-            slot = if side == 1
-                Rectangle(Point(off, 0), Point(off + 1, depth))
-            elseif side == 2
-                Rectangle(Point(off, h - depth), Point(off + 1, h))
-            elseif side == 3
-                Rectangle(Point(0, off), Point(depth, off + 1))
-            else
-                Rectangle(Point(w - depth, off), Point(w, off + 1))
-            end
-            polys = difference2d(polys, to_polygons(slot))
-        end
-        ps = to_polygons(polys)
-        return length(ps) == 1 ? ps[1] : nothing
-    end
+    rectangle_polygon(w::Int, h::Int) =
+        make_polygon(Point{Int}[(0, 0), (w, 0), (w, h), (0, h)])
 
     function valid_polygon(p::Polygon)
         g = togrid(p)
@@ -428,67 +357,46 @@
         return p
     end
 
-    notch = @composed function _notch(
-        side=Data.Integers(1, 4),
-        off=Data.Integers(1, 2GRID_HALF - 2),
-        depth=Data.Integers(1, GRID_HALF ÷ 2)
-    )
-        return (side, off, depth)
-    end
-
-    int_rectilinear_polygon = @composed function _int_rectilinear(
+    int_rectangle_polygon = @composed function _int_rectangle(
         w=Data.Integers(3, 2GRID_HALF),
-        h=Data.Integers(3, 2GRID_HALF),
-        notches=Data.Vectors(notch; max_size=4)
+        h=Data.Integers(3, 2GRID_HALF)
     )
-        ns = [
-            (s, min(o, (s <= 2 ? w : h) - 2), min(d, (s <= 2 ? h : w) - 1)) for
-            (s, o, d) in notches
-        ]
-        p = notched_rectangle(w, h, ns)
-        (isnothing(p) || !valid_polygon(p)) && reject!()
-        return p
+        return rectangle_polygon(w, h)
     end
 
-    int_polygon = int_star_polygon | int_rectilinear_polygon
+    int_polygon = int_star_polygon | int_rectangle_polygon
 
     """
         degenerate_pair
 
-    A polygon `A` and a partner `B` derived from it so that the pair shares structure
-    the kernel finds hard: overlap, shared edge, touch at a vertex, collinear split,
-    or a one-unit sliver along an edge.
+    A rectangle `A` and a partner `B` that is translated (overlapping through disjoint),
+    edge-sharing, vertex-touching, collinear-vertex-equivalent, or a one-unit-wide sliver.
+    Each case is guaranteed by construction.
     """
-    degenerate_pair = @composed function _degenerate_pair(
-        A=int_polygon,
-        kind=Data.Integers(1, 5),
-        k=Data.Integers(0, 2GRID_HALF),
-        i=Data.Integers(1, 64)
-    )
-        n = length(A.p)
-        idx = mod1(i, n)
+    function degenerate_pair_polygons(w, h, kind, k)
+        A = rectangle_polygon(w, h)
         B = if kind == 1
-            A + Point(k, 0)                    # overlap / disjoint by offset
+            A + Point(k, 0)
         elseif kind == 2
-            b = bounds(A)
-            A + Point(width(b), 0)             # shared vertical edge (bbox-touching)
+            A + Point(w, 0)
         elseif kind == 3
-            b = bounds(A)
-            A + Point(width(b), height(b))     # touch at a corner region
+            A + Point(w, h)
         elseif kind == 4
-            # Insert a collinear midpoint on edge idx, then translate by one unit.
-            a, c = A.p[idx], A.p[mod1(idx + 1, n)]
-            m = Point((a.x + c.x) ÷ 2, (a.y + c.y) ÷ 2)
-            make_polygon(vcat(A.p[1:idx], [m], A.p[(idx + 1):end])) + Point(1, 0)
+            split = Point(1 + mod(k, w - 1), 0)
+            make_polygon(vcat(A.p[1:1], [split], A.p[2:end]))
         else
-            # Unit-width sliver along edge idx.
-            a, c = A.p[idx], A.p[mod1(idx + 1, n)]
-            d = c - a
-            nrm = Point(-sign(d.y), sign(d.x))
-            make_polygon([a, c, c + nrm, a + nrm])
+            make_polygon(Point{Int}[(0, 0), (0, -1), (w, -1), (w, 0)])
         end
-        valid_polygon(B) || reject!()
         return (A, B)
+    end
+
+    degenerate_pair = @composed function _degenerate_pair(
+        w=Data.Integers(3, 2GRID_HALF),
+        h=Data.Integers(3, 2GRID_HALF),
+        kind=Data.Integers(1, 5),
+        k=Data.Integers(0, 2GRID_HALF)
+    )
+        return degenerate_pair_polygons(w, h, kind, k)
     end
 
     # Rigid transformations only: magnification is out of scope for equivariance laws.

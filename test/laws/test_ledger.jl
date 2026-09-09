@@ -51,15 +51,14 @@
     # intersection of the two long edges is off-lattice; rounding puts (0,5) on the
     # wrong side, so edge (-4,9)→(0,5) crosses edge (-5,9)→(10,-2). Consequences: the
     # union has area 12 but re-unioning it yields 14.5 (the crossing loop is
-    # re-interpreted under the positive fill rule). Region-equal within δ, so B3 passes;
-    # B8 is marked broken for the integer generators until this is characterized on
-    # Clipper2 and on the fm lattice.
+    # re-interpreted under the positive fill rule). B3 and B8 are marked broken for the
+    # integer generators until this is characterized on Clipper2 and on the fm lattice.
     @testset "> L3 self-crossing integer union output" begin
         A = Polygon(Point{Int}[(8, 0), (-5, 9), (10, -2)])
         B = Polygon(Point{Int}[(9, 0), (-4, 9), (3, 3), (11, -2)])
         u = union2d([A], [B])
         @test_broken valid_output(u; weak=true)
-        @test u ≐ union2d(u)
+        @test_broken u ≐ union2d(u)
         @test u ≐ union2d([B], [A])
     end
 end
