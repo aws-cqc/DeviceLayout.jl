@@ -61,10 +61,11 @@ Cut(dest::Symbol, object::Symbol, tools::AbstractVector{Symbol}) =
     Fuse(destination, sources)
 
 Collapse every physical group in one or more source layers into one generated physical
-group in `destination`. Group multiple sources in a tuple or vector. An existing destination
-must be included among the sources. Out-of-place sources remain available unless consumed by
-adjacent [`Remove`](@ref) operations. The collapsed result has a new identity and no
-per-source entity metadata.
+group in `destination`. Group multiple sources in a tuple or vector. Append to an existing
+destination when it is not a source; include it among the sources to collapse and replace its
+current PGs. Out-of-place sources remain available unless consumed by adjacent [`Remove`](@ref)
+operations. The collapsed result has a new identity and no per-source entity metadata.
+Generated destination identity collisions are rejected.
 """
 struct Fuse{N} <: BooleanOp
     destination::Symbol
@@ -853,14 +854,6 @@ function _compile!(cmp::CompilerState, op::_LoweredCut)
 end
 
 function _compile!(cmp::CompilerState, op::_LoweredFuse)
-    haskey(cmp.reg, op.destination) &&
-        op.destination ∉ op.sources &&
-        throw(
-            ArgumentError(
-                "Fuse destination that already exists must be included among its sources"
-            )
-        )
-
     dims = unique([cmp.reg[source].dim for source in op.sources])
     length(dims) == 1 ||
         throw(ArgumentError("Fuse source layers must have equal dimensions"))
@@ -873,6 +866,11 @@ function _compile!(cmp::CompilerState, op::_LoweredFuse)
         string(op.destination) *
         "__" *
         ophash(first(source_pgs), source_pgs[2:end]; operation=:fuse, parameters=(dim,))
+    generated_record_exists(cmp.reg, op.destination, dest_name) &&
+        throw(ArgumentError("Fuse destination physical group '$dest_name' already exists"))
+
+    append_mode = haskey(cmp.reg, op.destination) && op.destination ∉ op.sources
+    append_mode && _require_destination_dimension(cmp.reg, op.destination, dim, "Fuse")
     push!(
         cmp.ops,
         (
@@ -882,13 +880,32 @@ function _compile!(cmp::CompilerState, op::_LoweredFuse)
             :remove_object => op.remove_sources
         )
     )
+    new_record = PGRecord(dest_name, op.destination, nothing)
+    if append_mode
+        existing_pgs = [
+            record.name for record in cmp.reg[op.destination].pgs if !islocator(record.meta)
+        ]
+        if !isempty(existing_pgs)
+            push!(
+                cmp.ops,
+                (
+                    dest_name,
+                    SolidModels.difference_geom!,
+                    (dest_name, existing_pgs, dim, dim),
+                    :remove_object => true,
+                    :remove_tool => false
+                )
+            )
+        end
+        push!(cmp.reg[op.destination].pgs, new_record)
+    else
+        cmp.reg[op.destination] = LayerState([new_record], dim)
+    end
     if op.remove_sources
         for source in op.sources
             source != op.destination && delete!(cmp.reg, source)
         end
     end
-    cmp.reg[op.destination] =
-        LayerState([PGRecord(dest_name, op.destination, nothing)], dim)
     return nothing
 end
 

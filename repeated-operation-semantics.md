@@ -14,7 +14,7 @@ The first two behavior columns below are therefore both kinds of syntactic dupli
 |---|---|---|---|
 | `Extrude` | Not applicable: it always writes back to its source layer. | `Extrude(:metal); Extrude(:metal)` is accepted, but the lowering assumes source-stack extrusion semantics and is not designed for repeated extrusion. Behavior can be surprising. | There is no separate destination argument. Its result can feed another operation, e.g. `Extrude(:metal); GetBoundary(:faces, :metal)`. |
 | `Cut` | `Cut(:trimmed, :metal, :mask); Cut(:trimmed, :metal, :mask)` is rejected because both calls request the same generated destination identity. Removal flags do not affect that identity. | `Cut(:metal, :metal, :mask)` twice executes twice. The second computes `(metal − mask) − mask`, which is geometrically idempotent for the same mask. If the destination aliases a tool instead, the second call uses the first result as that tool. | `Cut(:first, :metal, :mask_a); Cut(:second, :first, :mask_b)` computes `(metal − mask_a) − mask_b`. |
-| `Fuse` | `Fuse(:combined, (:a, :b))` twice fails on the second call because `:combined` now exists but was not listed as a source. | `Fuse(:metal); Fuse(:metal)` executes twice. The second fuses the first generated PG and creates another hashed identity. | `Fuse(:ab, (:a, :b)); Fuse(:abc, (:ab, :c))` works and creates a second collapsed result. |
+| `Fuse` | `Fuse(:combined, (:a, :b))` twice is rejected because both calls request the same generated destination identity. A different fused source set may append one new PG to the existing destination. | `Fuse(:metal); Fuse(:metal)` executes twice. The second fuses the first generated PG and creates another hashed identity. | `Fuse(:ab, (:a, :b)); Fuse(:abc, (:ab, :c))` works and creates a second collapsed result. |
 | `Heal` | `Heal(:clean, :metal); Heal(:clean, :metal)` fails on the second call because the renamed PG identity already exists in `:clean`. | `Heal(:metal); Heal(:metal)` executes twice under the same identity. The second heals the already-healed result and should be geometrically idempotent. | `Heal(:clean, :metal); Heal(:cleaner, :clean)` preserves the identity suffix while changing the layer prefix twice. |
 | `Intersect` | `Intersect(:overlap, :a, :b)` twice is rejected because the generated destination identity collides. | `Intersect(:a, :a, :mask)` twice executes on evolved state. The second computes `(a ∩ mask) ∩ mask`, geometrically idempotent for the same mask but with new generated PG identities. | `Intersect(:ab, :a, :b); Intersect(:abc, :ab, :c)` computes `(a ∩ b) ∩ c`. |
 | `GetInterface` | `GetInterface(:ab, :a, :b)` twice silently deduplicates the second deferred output. | `GetInterface(:a, :a, :b)` twice makes the second deferred operation consume the first interface result. It is not the same interface calculation. | `GetInterface(:ab, :a, :b); GetInterface(:abc, :ab, :c)` creates a deferred interface chain. |
@@ -36,7 +36,7 @@ The first two behavior columns below are therefore both kinds of syntactic dupli
   - `Cut`
   - `Intersect`
   - Assign-mode `Heal`
-  - `Fuse`, indirectly through its destination rule
+  - `Fuse`
 
 - **Executed with generated suffixes**
   - `GetBoundary`
