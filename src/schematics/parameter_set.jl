@@ -482,3 +482,34 @@ Save a `ParameterSet` to a YAML file at `path` or write YAML to an `IO` stream.
 Requires `YAML.jl` to be loaded (`using YAML`).
 """
 function save_parameter_set end
+
+"""
+    load_parameter_set(args::AbstractVector{<:AbstractString}) -> ParameterSet
+
+Load a `ParameterSet` from a command-line argument vector.
+
+Intended for a script's `@main` entry point, where the parameter file is passed as a
+command-line argument:
+
+```julia
+function (@main)(ARGS)
+    ps = load_parameter_set(ARGS)
+    ...
+end
+```
+
+The first element of `args` is the path to a YAML parameter file; any further elements
+are ignored here and left for the caller to consume. Throws an `ArgumentError` if `args`
+is empty.
+
+Requires `YAML.jl` to be loaded (`using YAML`); see [`ParameterSet`](@ref).
+"""
+function load_parameter_set(args::AbstractVector{<:AbstractString})
+    isempty(args) && throw(
+        ArgumentError(
+            "load_parameter_set requires a YAML parameter-set file path as the first " *
+            "argument, but the argument vector was empty",
+        ),
+    )
+    return ParameterSet(String(first(args)))
+end
