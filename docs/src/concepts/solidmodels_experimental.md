@@ -108,7 +108,7 @@ The public operation types are:
 | `Fuse(source)` or `Fuse(destination, sources)` | Collapse every PG in one or more source layers into one generated PG. Append when an existing destination is not a source; include it among the sources to collapse and replace its current PGs. Other sources remain unless removed explicitly later. |
 | `Heal(source)` or `Heal(destination, source)` | Union each PG in one source independently, preserving its identity and metadata. Assign mode replaces only the layer-name prefix, preserves the source, and may append to an existing destination. |
 | `SolidModelsExperimental.Intersect(destination, object, tool)` | Compute pairwise OCC intersections across the object and tool PGs. Follow it with `Remove` to consume either input layer. |
-| `GetInterface(destination, object, tool)` | Resolve a deferred interface after fragmentation. |
+| `GetInterface(destination, object, tool)` | Resolve a deferred interface after fragmentation. The destination must differ from both inputs, whose PG identities must remain available through deferred execution. |
 | `RestrictTo(volume)` | Restrict the model to a 3D bounding-volume layer containing exactly one physical group. |
 | `GetBoundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries. |
 | `Translate(destination, source, dx, dy, dz; copy)` | Translate or copy-translate a layer. |

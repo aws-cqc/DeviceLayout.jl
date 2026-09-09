@@ -120,12 +120,20 @@ end
 
 Compute the interface between `object` and `tool`. Same-dimensional inputs produce an
 interface one dimension lower; mixed-dimensional inputs produce an interface at the lower
-input dimension.
+input dimension. The destination must differ from both inputs, and every input PG must remain
+available through deferred interface execution. Generated destination identity collisions
+are rejected.
 """
 struct GetInterface <: BooleanOp
     destination::Symbol
     object::Symbol
     tool::Symbol
+    function GetInterface(destination::Symbol, object::Symbol, tool::Symbol)
+        destination in (object, tool) && throw(
+            ArgumentError("GetInterface destination must differ from its input layers")
+        )
+        return new(destination, object, tool)
+    end
 end
 
 """
@@ -614,6 +622,25 @@ function _validate_source_layers(op::LayerOp, registry::LayerRegistry)
     return nothing
 end
 
+function _check_deferred_inputs_registered(cmp)
+    for operation in interface_vertices(cmp.dints)
+        for vertex in operation_pgs(cmp.dints, operation)
+            name = MetaGraphs.get_prop(cmp.dints, vertex, :name)
+            dim = MetaGraphs.get_prop(cmp.dints, vertex, :dim)
+            registered = any(values(cmp.reg)) do state
+                return state.dim == dim && any(record -> record.name == name, state.pgs)
+            end
+            registered || throw(
+                ArgumentError(
+                    "GetInterface input physical group '$name' at dimension $dim must " *
+                    "remain available through deferred execution"
+                )
+            )
+        end
+    end
+    return nothing
+end
+
 struct CompilerState{S <: SourceStack}
     ops::Vector{Tuple}                       # Compiled physical-group operations
     reg::LayerRegistry                       # Evolving layer-to-PG registry
@@ -641,6 +668,7 @@ function compile_ops(
         _validate_source_layers(op, cmp.reg)
         op isa RestrictTo && _flush_interior_solids!(cmp, op.volume)
         _compile!(cmp, op)
+        _check_deferred_inputs_registered(cmp)
     end
     _flush_interior_solids!(cmp, nothing)
     return cmp.ops, cmp.reg, cmp.dints
@@ -1098,8 +1126,11 @@ function _compile!(cmp::CompilerState, op::GetInterface)
                     operation=:get_interface,
                     parameters=(obj_dim, tool_dim)
                 )
-            generated_record_exists(cmp.reg, op.destination, dest_name, new_recs) &&
-                continue
+            generated_record_exists(cmp.reg, op.destination, dest_name, new_recs) && throw(
+                ArgumentError(
+                    "GetInterface destination physical group '$dest_name' already exists"
+                )
+            )
             # All interface calculations are deferred to post-fragmentation. Interfaces of
             # same-dim entities are shared boundary entities (dim-1); interfaces of
             # mixed-dim entities are lo-dim entities on the hi-dim boundary.
