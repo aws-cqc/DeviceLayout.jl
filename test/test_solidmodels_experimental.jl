@@ -1077,6 +1077,8 @@ end
     end
 
     @testset "GetInterface" begin
+        @test_throws ArgumentError GetInterface(:metal, :metal, :voids)
+        @test_throws ArgumentError GetInterface(:voids, :metal, :voids)
         @test_throws ArgumentError compile_ops(
             [GetInterface(:interface, :missing, :metal)],
             stack,
@@ -1170,18 +1172,9 @@ end
                    (:metal, :volume)
         end
 
-        # Repeated identical interfaces are deduplicated.
-        ops, reg, dints = compile_ops(
-            [
-                GetInterface(:interface, :metal, :voids),
-                GetInterface(:interface, :metal, :voids)
-            ],
-            stack,
-            registry
-        )
-        @test isempty(ops)
-        @test length(SolidModelsExperimental.interface_vertices(dints)) == 1
-        @test length(reg[:interface].pgs) == 1
+        # Repeated independent interfaces request the same identity and are rejected.
+        interface = GetInterface(:interface, :metal, :voids)
+        @test_throws ArgumentError compile_ops([interface, interface], stack, registry)
 
         # Distinct interfaces append to an existing compatible destination.
         ops, reg, dints = compile_ops(
@@ -1207,22 +1200,42 @@ end
         @test length(reg[:interface].pgs) == 2
         @test length(SolidModelsExperimental.interface_vertices(dints)) == 1
 
-        # An aliased destination replaces the corresponding source layer.
-        ops, reg, dints =
-            compile_ops([GetInterface(:metal, :metal, :voids)], stack, registry)
+        # Explicit chains consume an earlier deferred destination without aliasing inputs.
+        ops, reg, dints = compile_ops(
+            [
+                GetInterface(:metal_voids, :metal, :voids),
+                GetInterface(:chained, :metal_voids, :shell)
+            ],
+            stack,
+            registry
+        )
         @test isempty(ops)
-        @test reg[:metal].dim == 1
-        @test only(reg[:metal].pgs).layer == :metal
-        @test haskey(reg, :voids)
-        op = only(SolidModelsExperimental.interface_vertices(dints))
-        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :parent_layers) ==
-              (:metal, :voids)
+        @test reg[:metal_voids].dim == 1
+        @test reg[:chained].dim == 1
+        dops = SolidModelsExperimental.interface_vertices(dints)
+        @test length(dops) == 2
+        chained = only(
+            op for op in dops if
+            SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :dest_layer) == :chained
+        )
+        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, chained, :parent_layers) ==
+              (:metal_voids, :shell)
 
-        ops, reg, _ = compile_ops([GetInterface(:voids, :metal, :voids)], stack, registry)
-        @test isempty(ops)
-        @test reg[:voids].dim == 1
-        @test only(reg[:voids].pgs).layer == :voids
+        # Deferred inputs must retain the same registered PG identity and dimension.
+        @test_throws ArgumentError compile_ops([interface, Remove(:metal)], stack, registry)
+        @test_throws ArgumentError compile_ops(
+            [interface, GetBoundary(:metal, :metal)],
+            stack,
+            registry
+        )
+
+        # Out-of-place operations may use a deferred input while preserving it.
+        ops, reg, dints =
+            compile_ops([interface, GetBoundary(:edge, :metal)], stack, registry)
+        @test length(ops) == 1
         @test haskey(reg, :metal)
+        @test haskey(reg, :edge)
+        @test length(SolidModelsExperimental.interface_vertices(dints)) == 1
 
         # Existing unrelated destinations must have the interface dimension.
         reg = deepcopy(registry)
