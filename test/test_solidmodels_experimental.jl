@@ -122,7 +122,7 @@ end
     @test haskey(registry, :second)
 end
 
-@testitem "Compiler" begin
+@testitem "Compiler (unit)" begin
     using DeviceLayout
     using DeviceLayout.SolidModels
     using DeviceLayout.SolidModelsExperimental:
@@ -1597,6 +1597,276 @@ end
             stack,
             registry
         )
+    end
+end
+
+@testitem "Compiler (integration)" begin
+    using DeviceLayout
+    using DeviceLayout.SchematicDrivenLayout
+    using DeviceLayout.SolidModels
+    using DeviceLayout.SolidModelsExperimental:
+        Cut,
+        EntityMeta,
+        Fuse,
+        GetBoundary,
+        GetInterface,
+        Heal,
+        NULL,
+        Remove,
+        RestrictTo,
+        Revolve,
+        SetPeriodic,
+        SolidModelTarget,
+        SourceLayer,
+        SourceStack,
+        Translate
+    import DeviceLayout: μm
+
+    function render_case(name, geometry, stack, ops)
+        graph = SchematicGraph(name)
+        add_node!(graph, BasicComponent(geometry); base_id="fixture")
+        schematic = plan(graph; log_dir=nothing) |> check!
+        sm = SolidModel(name; overwrite=true)
+        SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
+        metadata = render!(sm, schematic, SolidModelTarget(stack, ops))
+        return (; sm, metadata)
+    end
+
+    function layer_pgs(result, layer)
+        state = result.metadata["layers"][String(layer)]
+        dim = state["dim"]
+        return [result.sm[pg_name, dim] for pg_name in state["pgs"]]
+    end
+
+    function layer_dimtags(result, layer)
+        return unique(vcat(SolidModels.dimtags.(layer_pgs(result, layer))...))
+    end
+
+    function layer_measure(result, layer)
+        return sum(layer_dimtags(result, layer)) do (dim, tag)
+            return SolidModels.gmsh.model.occ.getMass(dim, tag)
+        end
+    end
+
+    function layer_bbox(result, layer)
+        boxes = [
+            SolidModels.gmsh.model.getBoundingBox(dim, tag) for
+            (dim, tag) in layer_dimtags(result, layer)
+        ]
+        return (
+            minimum(box[1] for box in boxes),
+            minimum(box[2] for box in boxes),
+            minimum(box[3] for box in boxes),
+            maximum(box[4] for box in boxes),
+            maximum(box[5] for box in boxes),
+            maximum(box[6] for box in boxes)
+        )
+    end
+
+    function flat_stack(layers...; thickness=0μm)
+        return SourceStack(
+            (
+                layer => SourceLayer(NULL; level=1, height=0μm, thickness=thickness) for
+                layer in layers
+            )...;
+            levels=(1 => 0μm,)
+        )
+    end
+
+    _rectangle(xmin, ymin, xmax, ymax) =
+        Rectangle(Point(xmin * μm, ymin * μm), Point(xmax * μm, ymax * μm))
+
+    @testset "Planar Boolean geometry and source lifetime" begin
+        cases = [
+            (
+                "cut",
+                [Cut(:result, :a, :b)],
+                2.0,
+                [0.0, 0.0, 0.0, 1.0, 2.0, 0.0],
+                Set(["a", "b", "result"])
+            ),
+            (
+                "fuse",
+                [Fuse(:result, [:a, :b])],
+                6.0,
+                [0.0, 0.0, 0.0, 3.0, 2.0, 0.0],
+                Set(["a", "b", "result"])
+            ),
+            (
+                "cut_remove",
+                [Cut(:result, :a, :b), Remove(:a)],
+                2.0,
+                [0.0, 0.0, 0.0, 1.0, 2.0, 0.0],
+                Set(["b", "result"])
+            )
+        ]
+        for (name, ops, expected_area, expected_bbox, expected_layers) in cases
+            geometry = CoordinateSystem(name, μm)
+            place!(geometry, _rectangle(0.0, 0.0, 2.0, 2.0), EntityMeta(:a))
+            place!(geometry, _rectangle(1.0, 0.0, 3.0, 2.0), EntityMeta(:b))
+            result =
+                render_case("compiler_geometry_$name", geometry, flat_stack(:a, :b), ops)
+            @test layer_measure(result, :result) ≈ expected_area atol = 1e-8
+            @test collect(layer_bbox(result, :result)) ≈ expected_bbox atol = 1e-6
+            @test Set(keys(result.metadata["layers"])) == expected_layers
+            if haskey(result.metadata["layers"], "a")
+                @test layer_measure(result, :a) ≈ 4.0 atol = 1e-8
+            end
+            @test layer_measure(result, :b) ≈ 4.0 atol = 1e-8
+        end
+    end
+
+    @testset "Heal preserves identities while Fuse collapses them" begin
+        function parts_fixture(name)
+            geometry = CoordinateSystem(name, μm)
+            for (part, x0) in (("left", 0.0), ("right", 2.0))
+                meta = EntityMeta(:parts; name=part)
+                place!(geometry, _rectangle(x0, 0.0, x0 + 0.5, 1.0), meta)
+                place!(geometry, _rectangle(x0 + 0.5, 0.0, x0 + 1.0, 1.0), meta)
+            end
+            return geometry
+        end
+
+        healed = render_case(
+            "compiler_geometry_heal",
+            parts_fixture("heal"),
+            flat_stack(:parts),
+            [Heal(:healed, :parts)]
+        )
+        @test length(layer_pgs(healed, :healed)) == 2
+        @test layer_measure(healed, :healed) ≈ 2.0 atol = 1e-8
+        @test collect(layer_bbox(healed, :healed)) ≈ [0.0, 0.0, 0.0, 3.0, 1.0, 0.0] atol =
+            1e-6
+
+        fused = render_case(
+            "compiler_geometry_fuse_parts",
+            parts_fixture("fuse_parts"),
+            flat_stack(:parts),
+            [Fuse(:fused, [:parts])]
+        )
+        @test length(layer_pgs(fused, :fused)) == 1
+        @test layer_measure(fused, :fused) ≈ 2.0 atol = 1e-8
+        @test collect(layer_bbox(fused, :fused)) ≈ [0.0, 0.0, 0.0, 3.0, 1.0, 0.0] atol =
+            1e-6
+    end
+
+    @testset "Sparse pairwise intersections prune empty results" begin
+        geometry = CoordinateSystem("sparse_intersections", μm)
+        for (layer, name, x0) in (
+            (:objects, "first", 0.0),
+            (:objects, "second", 3.0),
+            (:tools, "first", 0.5),
+            (:tools, "second", 3.5)
+        )
+            place!(
+                geometry,
+                _rectangle(x0, 0.0, x0 + 1.0, 1.0),
+                EntityMeta(layer; name=name)
+            )
+        end
+        result = render_case(
+            "compiler_geometry_sparse_intersections",
+            geometry,
+            flat_stack(:objects, :tools),
+            [SolidModelsExperimental.Intersect(:intersections, :objects, :tools)]
+        )
+        @test length(layer_pgs(result, :intersections)) == 2
+        @test layer_measure(result, :intersections) ≈ 1.0 atol = 1e-8
+        @test collect(layer_bbox(result, :intersections)) ≈ [0.5, 0.0, 0.0, 4.0, 1.0, 0.0] atol =
+            1e-6
+    end
+
+    @testset "Extrusion and deferred interfaces" begin
+        geometry = CoordinateSystem("adjacent_volumes", μm)
+        place!(geometry, _rectangle(0.0, 0.0, 1.0, 1.0), EntityMeta(:left))
+        place!(geometry, _rectangle(1.0, 0.0, 2.0, 1.0), EntityMeta(:right))
+        result = render_case(
+            "compiler_geometry_interface",
+            geometry,
+            flat_stack(:left, :right; thickness=1μm),
+            [GetInterface(:interface, :left, :right)]
+        )
+        @test result.metadata["layers"]["left"]["dim"] == 3
+        @test result.metadata["layers"]["right"]["dim"] == 3
+        @test result.metadata["layers"]["interface"]["dim"] == 2
+        @test layer_measure(result, :left) ≈ 1.0 atol = 1e-8
+        @test layer_measure(result, :right) ≈ 1.0 atol = 1e-8
+        @test layer_measure(result, :interface) ≈ 1.0 atol = 1e-8
+        @test collect(layer_bbox(result, :left)) ≈ [0.0, 0.0, 0.0, 1.0, 1.0, 1.0] atol =
+            1e-6
+        @test collect(layer_bbox(result, :right)) ≈ [1.0, 0.0, 0.0, 2.0, 1.0, 1.0] atol =
+            1e-6
+        @test collect(layer_bbox(result, :interface)) ≈ [1.0, 0.0, 0.0, 1.0, 1.0, 1.0] atol =
+            1e-6
+    end
+
+    @testset "Translation, boundary extraction, and revolution" begin
+        geometry = CoordinateSystem("translated_boundary", μm)
+        place!(geometry, _rectangle(0.0, 0.0, 2.0, 1.0), EntityMeta(:shape))
+        translated = render_case(
+            "compiler_geometry_translated_boundary",
+            geometry,
+            flat_stack(:shape),
+            [Translate(:shifted, :shape, 3μm, 0μm, 0μm), GetBoundary(:edge, :shifted)]
+        )
+        @test layer_measure(translated, :shape) ≈ 2.0 atol = 1e-8
+        @test layer_measure(translated, :shifted) ≈ 2.0 atol = 1e-8
+        @test layer_measure(translated, :edge) ≈ 6.0 atol = 1e-8
+        @test collect(layer_bbox(translated, :shifted)) ≈ [3.0, 0.0, 0.0, 5.0, 1.0, 0.0] atol =
+            1e-6
+
+        revolved_geometry = CoordinateSystem("revolved", μm)
+        place!(revolved_geometry, _rectangle(1.0, 0.0, 2.0, 1.0), EntityMeta(:shape))
+        revolved = render_case(
+            "compiler_geometry_revolved",
+            revolved_geometry,
+            flat_stack(:shape),
+            [Revolve(:solid, :shape, (0, 0, 0), (0, 1, 0), π)]
+        )
+        @test revolved.metadata["layers"]["solid"]["dim"] == 3
+        @test layer_measure(revolved, :solid) ≈ 3π / 2 atol = 1e-8
+        @test collect(layer_bbox(revolved, :solid)) ≈ [-2.0, 0.0, -2.0, 2.0, 1.0, 0.0] atol =
+            1e-6
+    end
+
+    @testset "Global restriction" begin
+        geometry = CoordinateSystem("restricted", μm)
+        place!(geometry, _rectangle(0.0, 0.0, 3.0, 1.0), EntityMeta(:target))
+        place!(geometry, _rectangle(1.0, 0.0, 2.0, 1.0), EntityMeta(:bounds))
+        result = render_case(
+            "compiler_geometry_restricted",
+            geometry,
+            flat_stack(:target, :bounds; thickness=1μm),
+            [RestrictTo(:bounds)]
+        )
+        @test layer_measure(result, :target) ≈ 1.0 atol = 1e-8
+        @test collect(layer_bbox(result, :target)) ≈ [1.0, 0.0, 0.0, 2.0, 1.0, 1.0] atol =
+            1e-6
+    end
+
+    @testset "Periodic surfaces survive finalization" begin
+        geometry = CoordinateSystem("periodic", μm)
+        place!(geometry, _rectangle(0.0, 0.0, 1.0, 1.0), EntityMeta(:child))
+        place!(geometry, _rectangle(0.0, 0.0, 1.0, 1.0), EntityMeta(:parent))
+        stack = SourceStack(
+            :child => SourceLayer(NULL; level=1, thickness=0μm),
+            :parent => SourceLayer(NULL; level=2, thickness=0μm);
+            levels=(1 => 0μm, 2 => 2μm)
+        )
+        result = render_case(
+            "compiler_geometry_periodic",
+            geometry,
+            stack,
+            [SetPeriodic(:child, :parent)]
+        )
+        @test collect(layer_bbox(result, :child)) ≈ [0.0, 0.0, 0.0, 1.0, 1.0, 0.0] atol =
+            1e-6
+        @test collect(layer_bbox(result, :parent)) ≈ [0.0, 0.0, 2.0, 1.0, 1.0, 2.0] atol =
+            1e-6
+        child_tags = Int32[tag for (_, tag) in layer_dimtags(result, :child)]
+        parent_tags = Int32[tag for (_, tag) in layer_dimtags(result, :parent)]
+        SolidModels.gmsh.model.mesh.generate(2)
+        @test SolidModels.gmsh.model.mesh.getPeriodic(2, child_tags) == parent_tags
     end
 end
 
