@@ -385,6 +385,8 @@ struct StyledHook{T, H <: Hook{T}, S <: Paths.Style} <: Hook{T}
 end
 StyledHook(h::Hook, ::Nothing) = StyledHook(h, Paths.NoRenderContinuous())
 
+show(io::IO, h::StyledHook) = print(io, getfield(h, :h), " styled as ", getfield(h, :style))
+
 function DeviceLayout.transformation(h1::StyledHook, h2::StyledHook)
     return transformation(getfield(h1, :h), getfield(h2, :h))
 end
@@ -542,10 +544,22 @@ end
 
 _node_count_str(n) = string(n, n == 1 ? " node" : " nodes")
 
-show(io::IO, p::Path) = print(io, "Path \"", p.name, "\" with ", _node_count_str(length(p)))
+function _show_path_header(io::IO, p::Path{T}) where {T}
+    return print(
+        io,
+        "Path{",
+        DeviceLayout.coordinate_type_string(T),
+        "} \"",
+        p.name,
+        "\" with ",
+        _node_count_str(length(p))
+    )
+end
+
+show(io::IO, p::Path) = _show_path_header(io, p)
 
 function show(io::IO, ::MIME"text/plain", p::Path)
-    print(io, "Path \"", p.name, "\" with ", _node_count_str(length(p)))
+    _show_path_header(io, p)
     print(io, " and metadata ", p.metadata)
     print(io, "\n  from ", p.p0, " with ∠", p.α0)
     isempty(p) && return nothing

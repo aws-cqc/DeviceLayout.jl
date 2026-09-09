@@ -26,7 +26,7 @@ object with its coordinates transformed. Here's an example with a `Rectangle`:
 
 ```jldoctest
 julia> r = Rectangle(2, 1)
-Rectangle{Int64}((0,0), (2,1))
+Rectangle((0,0), (2,1))
 
 julia> trans = Translation(10, 10)
 Translation(10, 10)
@@ -35,7 +35,7 @@ julia> trans = Rotation(90°) ∘ trans
 AffineMap([0.0 -1.0; 1.0 0.0], [-10.0, 10.0])
 
 julia> trans(r)
-Rectangle{Float64}((-11.0,10.0), (-10.0,12.0))
+Rectangle((-11.0,10.0), (-10.0,12.0))
 ```
 
 ## Implementation details

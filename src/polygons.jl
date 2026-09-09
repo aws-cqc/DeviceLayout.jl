@@ -138,6 +138,40 @@ Polygon(parr::AbstractVector{Point}) =
 isapprox(p1::Polygon, p2::Polygon; kwargs...) = isapprox(p1.p, p2.p; kwargs...)
 copy(p::Polygon) = Polygon(copy(p.p))
 
+_point_count_str(n) = string(n, n == 1 ? " point" : " points")
+
+# Compact form: the constructor expression for small polygons, a summary for large ones
+# when the output is limited (as in the REPL or inside a collection)
+function Base.show(io::IO, p::Polygon)
+    n = length(p.p)
+    if get(io, :limit, false)::Bool && n > 8
+        return print(io, "Polygon with ", _point_count_str(n))
+    end
+    print(io, "Polygon(")
+    join(io, p.p, ", ")
+    return print(io, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", p::Polygon)
+    print(io, "Polygon with ", _point_count_str(length(p.p)))
+    return _show_point_list(io, p.p)
+end
+
+# Indented, indexed list of points, truncated with ⋮ if `io` is limited
+function _show_point_list(io::IO, pts)
+    n = length(pts)
+    maxpts = get(io, :limit, false)::Bool ? 20 : n
+    shown =
+        n <= maxpts ? eachindex(pts) :
+        Iterators.flatten((1:(maxpts ÷ 2), (n - maxpts ÷ 2 + 1):n))
+    lastidx = 0
+    for i in shown
+        i > lastidx + 1 && print(io, "\n   ⋮")
+        print(io, "\n   [", i, "] ", pts[i])
+        lastidx = i
+    end
+end
+
 """
     struct Ellipse{T} <: GeometryEntity{T}
         center::Point{T}
@@ -166,6 +200,9 @@ end
 Ellipse(center::Point; r::Coordinate) = Ellipse(center, (r, r), 0.0°)
 
 copy(e::Ellipse) = Ellipse(e.center, e.radii, e.angle)
+
+Base.show(io::IO, e::Ellipse) =
+    print(io, "Ellipse(", e.center, ", ", e.radii, ", ", e.angle, ")")
 
 """
     Circle(center::Point, r::Coordinate)
@@ -338,6 +375,30 @@ Collection of polygons defined by a call to Clipper.
 """
 struct ClippedPolygon{T} <: AbstractPolygon{T}
     tree::Clipper.PolyNode{Point{T}}
+end
+
+# Count outer (positive-fill) contours and holes at any depth of the polygon tree
+function _count_contours(node::Clipper.PolyNode, hole::Bool=false)
+    outer = 0
+    holes = 0
+    for c in children(node)
+        hole ? (holes += 1) : (outer += 1)
+        o, h = _count_contours(c, !hole)
+        outer += o
+        holes += h
+    end
+    return outer, holes
+end
+
+function Base.show(io::IO, p::ClippedPolygon)
+    outer, holes = _count_contours(p.tree)
+    print(
+        io,
+        "ClippedPolygon with ",
+        outer,
+        outer == 1 ? " outer contour" : " outer contours"
+    )
+    return print(io, " and ", holes, holes == 1 ? " hole" : " holes")
 end
 
 """
@@ -713,6 +774,22 @@ Base.@kwdef struct Rounded{T <: Coordinate} <: GeometryEntityStyle
     end
 end
 Rounded(r::Coordinate; kwargs...) = Rounded{float(typeof(r))}(; abs_r=r, kwargs...)
+
+# Constructor-like form listing only the settings that differ from the defaults
+function Base.show(io::IO, s::Rounded)
+    print(io, "Rounded(")
+    args = String[]
+    iszero(s.abs_r) || push!(args, string(s.abs_r))
+    iszero(s.rel_r) || push!(args, string("rel_r=", s.rel_r))
+    s.min_side_len == s.abs_r || push!(args, string("min_side_len=", s.min_side_len))
+    s.min_angle == 1e-3 || push!(args, string("min_angle=", s.min_angle))
+    isempty(s.p0) || push!(args, string(length(s.p0), " selected points"))
+    s.inverse_selection && push!(args, "inverse_selection=true")
+    isfinite(s.selection_tolerance) &&
+        push!(args, string("selection_tolerance=", s.selection_tolerance))
+    join(io, args, ", ")
+    return print(io, ")")
+end
 p0(r::Rounded) = r.p0
 
 function RelativeRounded(r::Float64; kwargs...)
@@ -1537,6 +1614,12 @@ StyleDict(d::S) where {S <: GeometryEntityStyle} =
     StyleDict{S}(Dict{Vector{Int}, GeometryEntityStyle}(), d)
 DeviceLayout.Polygons.StyleDict(e::DeviceLayout.GeometryEntity, a::Any) =
     MethodError(DeviceLayout.Polygons.StyleDict, e, a)
+
+function Base.show(io::IO, s::StyleDict)
+    n = length(s.styles)
+    print(io, "StyleDict with default ", s.default, " and ", n)
+    return print(io, n == 1 ? " override" : " overrides")
+end
 
 """
     addstyle!(d::StyleDict, s::GeometryEntityStyle, indices::Vector{Int})
