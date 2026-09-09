@@ -19,7 +19,7 @@ The first two behavior columns below are therefore both kinds of syntactic dupli
 | `Intersect` | `Intersect(:overlap, :a, :b)` twice is rejected because the generated destination identity collides. | `Intersect(:a, :a, :mask)` twice executes on evolved state and consumes each replaced OCC object. The second computes `(a ∩ mask) ∩ mask`, geometrically idempotent for the same mask but with new generated PG identities. Using one layer as both object and tool is rejected. | `Intersect(:ab, :a, :b); Intersect(:abc, :ab, :c)` computes `(a ∩ b) ∩ c`. |
 | `GetInterface` | `GetInterface(:ab, :a, :b)` twice is rejected because both calls request the same deferred destination identity. | In-place use is rejected because deferred interface inputs must retain their registered PG identities and dimensions through execution. | `GetInterface(:ab, :a, :b); GetInterface(:abc, :ab, :c)` creates a deferred interface chain while preserving the original inputs. |
 | `RestrictTo` | There is no destination. `RestrictTo(:volume)` twice emits two native calls; the second should usually be geometrically idempotent. | The first call changes the global model rather than a named destination, so the second sees an already-restricted model. | `RestrictTo(:outer); RestrictTo(:inner)` sequentially restricts the global model, effectively approaching restriction to the common retained region. This is global-state composition, not named-layer composition. |
-| `GetBoundary` | `GetBoundary(:faces, :volume)` twice executes twice and creates `faces__hash` and `faces__hash__2`. | `GetBoundary(:shape, :shape)` twice composes dimensions, for example 3D → 2D → 1D. | `GetBoundary(:faces, :volume); GetBoundary(:edges, :faces)` explicitly computes boundaries of boundaries. |
+| `GetBoundary` | `GetBoundary(:faces, :volume)` twice is rejected because both calls request the same generated destination identity. | `GetBoundary(:shape, :shape)` twice composes dimensions, for example 3D → 2D → 1D. | `GetBoundary(:faces, :volume); GetBoundary(:edges, :faces)` explicitly computes boundaries of boundaries. |
 | `Translate` | `Translate(:shifted, :metal, dx, dy, dz)` twice creates two copied results with suffixes, even though they represent the same transformation. | `Translate(:metal, :metal, dx, 0, 0; copy=false)` twice accumulates to translation by `2dx`. With `copy=true`, repeated in-place calls append copies to the source layer and later calls can copy earlier copies, causing PG growth. | `Translate(:x, :metal, dx, 0, 0); Translate(:xy, :x, 0, dy, 0)` composes to translation by `(dx, dy, 0)`. |
 | `Remove` | Not independent: the first call changes source availability. | `Remove(:metal); Remove(:metal)` emits removal only once; the second is a no-op because the layer is absent. | Common lifecycle composition is `Heal(:clean, :metal); Remove(:metal)`, where removal may be absorbed into the preceding operation. |
 | `Revolve` | `Revolve(:swept, :surface, origin, axis, angle)` twice executes twice and creates suffixed copies from the unchanged source. | `Revolve(:shape, :shape, ...)` repeatedly increments dimension. A 1D source can become 2D and then 3D; the next call is rejected. A typical 2D source permits only one in-place revolution. | `Revolve(:surface, :curve, ...); Revolve(:volume, :surface, ...)` explicitly composes two sweeps. |
@@ -32,12 +32,12 @@ The first two behavior columns below are therefore both kinds of syntactic dupli
 - **Rejected**
   - `Cut`
   - `GetInterface`
+  - `GetBoundary`
   - `Intersect`
   - Assign-mode `Heal`
   - `Fuse`
 
 - **Executed with generated suffixes**
-  - `GetBoundary`
   - `Translate`
   - `Revolve`
 

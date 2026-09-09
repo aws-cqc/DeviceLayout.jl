@@ -495,17 +495,13 @@ end
         @test length(reg[:edge].pgs) == 2
         @test Set(record.name for record in reg[:edge].pgs) == Set(op[1] for op in ops)
 
-        # Repeated identical boundaries execute with deterministic local suffixes.
+        # Independent repeats request the same generated identity and are rejected.
         bnd = GetBoundary(:edge, :metal)
-        ops, reg, _ = compile_ops([bnd, bnd], stack, registry)
-        @test length(ops) == 2
-        @test ops[2][1] == ops[1][1] * "__2"
-        @test length(reg[:edge].pgs) == 2
-        @test reg[:edge].pgs[1].name == ops[1][1]
-        @test reg[:edge].pgs[2].name == ops[2][1]
+        @test_throws ArgumentError compile_ops([bnd, bnd], stack, registry)
 
-        # Distinct boundaries append to an existing compatible destination.
-        ops, reg, _ = compile_ops(
+        # Appending to an existing unrelated destination is rejected, even for a distinct
+        # boundary selection.
+        @test_throws ArgumentError compile_ops(
             [
                 GetBoundary(:edge, :metal; direction="x"),
                 GetBoundary(:edge, :voids; direction="y")
@@ -513,18 +509,10 @@ end
             stack,
             registry
         )
-        @test length(ops) == 2
-        @test reg[:edge].dim == 1
-        @test length(reg[:edge].pgs) == 2
-        @test Set(op[3][1] for op in ops) == Set((pgname(metal_meta), pgname(voids_meta)))
 
         reg = deepcopy(registry)
-        existing = PGRecord("existing", :edge, nothing)
-        reg[:edge] = LayerState([existing], 1)
-        ops, reg, _ = compile_ops([GetBoundary(:edge, :metal)], stack, reg)
-        @test only(ops)[2] == SolidModels.get_boundary
-        @test reg[:edge].pgs[1] == existing
-        @test length(reg[:edge].pgs) == 2
+        reg[:edge] = LayerState([PGRecord("existing", :edge, nothing)], 1)
+        @test_throws ArgumentError compile_ops([GetBoundary(:edge, :metal)], stack, reg)
 
         # In-place extraction retains PG identity and metadata while lowering dimension.
         ops, reg, _ = compile_ops([GetBoundary(:metal, :metal)], stack, registry)
@@ -542,6 +530,17 @@ end
               [(pgname(metal_meta), 2), (pgname(metal_meta), 1), (pgname(metal_meta), 0)]
         @test reg[:metal].dim == 0
         @test all(op -> op[1] == pgname(metal_meta), ops)
+
+        # Explicit chains consume a named boundary result from the preceding operation.
+        ops, reg, _ = compile_ops(
+            [GetBoundary(:edges, :metal), GetBoundary(:points, :edges)],
+            stack,
+            registry
+        )
+        @test length(ops) == 2
+        @test ops[2][3] == (ops[1][1], 1)
+        @test reg[:edges].dim == 1
+        @test reg[:points].dim == 0
 
         # An out-of-place 0D boundary remains a valid, potentially unrealized 0D layer.
         reg = deepcopy(registry)
