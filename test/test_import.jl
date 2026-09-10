@@ -241,3 +241,216 @@ end
         @test sum(length, etags) > 0
     end
 end
+
+@testitem "SolidModelComponent renders + meshes in a schematic" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+    import DeviceLayout.SchematicDrivenLayout: SolidModelComponent
+    import DeviceLayout.SolidModels: gmsh, hasgroup, dimtags
+    using DeviceLayout: SemanticMeta, GDSMeta
+
+    # Author a 10 μm cube as external CAD.
+    _tmp = SolidModel("smc_author"; overwrite=true)
+    brep = joinpath(tdir, "smc_cube.brep")
+    gmsh.model.add("smc_auth")
+    gmsh.model.occ.addBox(-5, -5, -5, 10, 10, 10)
+    gmsh.model.occ.synchronize()
+    gmsh.write(brep)
+    gmsh.model.remove()
+
+    reset_uniquename!()
+    g = SchematicGraph("smc")
+    smc = SolidModelComponent(brep, SemanticMeta(:chip_outline); name="cad")
+    add_node!(g, smc)
+    sch = plan(g; log_dir=nothing)
+    check!(sch)
+
+    tech = ProcessTechnology((; chip_outline=GDSMeta()), (;))
+    target = SolidModelTarget(tech)
+    sm = SolidModel("smc"; overwrite=true)
+    @test_nowarn render!(sm, sch, target)
+
+    @testset "component imported as its own physical group" begin
+        @test hasgroup(sm, "cad_1", 3)
+        vol = sum(gmsh.model.occ.getMass(d, t) for (d, t) in dimtags(sm["cad_1", 3]))
+        @test vol ≈ 1000.0 atol = 1e-6
+    end
+
+    @testset "meshes" begin
+        gmsh.model.set_current("smc")
+        gmsh.model.mesh.generate(3)
+        _, et, _ = gmsh.model.mesh.getElements(3)
+        @test sum(length, et) > 0
+    end
+end
+
+@testitem "SolidModelComponent lands at its hook-mated pose" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+    import DeviceLayout.SchematicDrivenLayout: SolidModelComponent, Spacer
+    import DeviceLayout.SolidModels: gmsh, dimtags
+    using DeviceLayout: SemanticMeta, GDSMeta, Point
+
+    # Author a 10 μm cube centred at the origin (centroid (0,0,0) in its own frame).
+    _tmp = SolidModel("smc2_author"; overwrite=true)
+    brep = joinpath(tdir, "smc2_cube.brep")
+    gmsh.model.add("smc2_auth")
+    gmsh.model.occ.addBox(-5, -5, -5, 10, 10, 10)
+    gmsh.model.occ.synchronize()
+    gmsh.write(brep)
+    gmsh.model.remove()
+
+    # Place the component NOT at the origin: mate it to a Spacer whose far hook is at (100,50)μm.
+    # A centred cube's centroid follows the component origin, so after mating it must sit at (100,50).
+    reset_uniquename!()
+    g = SchematicGraph("smc2")
+    sp_node = add_node!(g, Spacer(; p1=Point(100μm, 50μm)))
+    fuse!(
+        g,
+        sp_node => :p1_east,
+        SolidModelComponent(brep, SemanticMeta(:chip_outline); name="cad") => :west
+    )
+    sch = plan(g; log_dir=nothing)
+    check!(sch)
+
+    tech = ProcessTechnology((; chip_outline=GDSMeta()), (;))
+    sm = SolidModel("smc2"; overwrite=true)
+    @test_nowarn render!(sm, sch, SolidModelTarget(tech))
+
+    # The imported cube must have moved to the mated pose (rotation-invariant: centroid = mate point).
+    grp = only(
+        filter(
+            n -> startswith(n, "cad"),
+            collect(keys(SchematicDrivenLayout.SolidModels.dimgroupdict(sm, 3)))
+        )
+    )
+    c = gmsh.model.occ.getCenterOfMass(dimtags(sm[grp, 3])[1]...)
+    @test c[1] ≈ 100.0 atol = 1e-6
+    @test c[2] ≈ 50.0 atol = 1e-6
+
+    gmsh.model.set_current("smc2")
+    gmsh.model.mesh.generate(3)
+    _, et, _ = gmsh.model.mesh.getElements(3)
+    @test sum(length, et) > 0
+end
+
+@testitem "SolidModelComponent fuses with schematic geometry" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+    import DeviceLayout.SchematicDrivenLayout: SolidModelComponent
+    import DeviceLayout.SolidModels: gmsh, dimtags, hasgroup
+    using DeviceLayout: SemanticMeta, GDSMeta, Rectangle, centered
+
+    # External CAD: a 40 μm cube whose base is at z=0 (so it rests on the substrate top plane).
+    _tmp = SolidModel("smcf_author"; overwrite=true)
+    brep = joinpath(tdir, "smcf_cube.brep")
+    gmsh.model.add("smcf_auth")
+    gmsh.model.occ.addBox(-20, -20, 0, 40, 40, 40)
+    gmsh.model.occ.synchronize()
+    gmsh.write(brep)
+    gmsh.model.remove()
+
+    # Schematic: one SolidModelComponent at the origin, plus a 2D chip-outline rectangle that
+    # extrudes into a substrate directly beneath it. The render fragment pass should fuse them.
+    reset_uniquename!()
+    g = SchematicGraph("smcf")
+    add_node!(g, SolidModelComponent(brep, SemanticMeta(:chip_outline); name="cad"))
+    floorplan = plan(g; log_dir=nothing)
+    render!(
+        floorplan.coordinate_system,
+        centered(Rectangle(200μm, 200μm)),
+        SemanticMeta(:chip_outline)
+    )
+    check!(floorplan)
+
+    substrate_z = 50μm
+    tech = ProcessTechnology(
+        (; chip_outline=GDSMeta()),
+        (; thickness=(; chip_outline=[substrate_z]), chip_thicknesses=[substrate_z])
+    )
+    # `substrate_layers` makes chip_outline extrude DOWNWARD (z=-50…0), so the substrate sits
+    # beneath the z=0 plane and the cube (z=0…40) rests on top — a touching interface. Without
+    # it the layer extrudes upward (z=0…50) and the cube would be buried inside the substrate.
+    target = SolidModelTarget(
+        tech;
+        levelwise_layers=[:chip_outline],
+        substrate_layers=[:chip_outline]
+    )
+    sm = SolidModel("smcf"; overwrite=true)
+    @test_nowarn render!(sm, floorplan, target)
+
+    faceset(grp) = Set(
+        abs(t) for
+        (d, t) in gmsh.model.getBoundary(dimtags(sm[grp, 3]), false, false, false)
+    )
+
+    @testset "component + substrate present and conformal" begin
+        @test hasgroup(sm, "cad_1", 3)                       # imported CAD group
+        @test hasgroup(sm, "chip_outline_L1_extrusion", 3)   # extruded substrate
+        # The cube rests on the substrate top → the fragment pass makes a shared interface face.
+        @test !isempty(intersect(faceset("cad_1"), faceset("chip_outline_L1_extrusion")))
+    end
+
+    @testset "meshes" begin
+        gmsh.model.set_current("smcf")
+        gmsh.model.mesh.generate(3)
+        _, et, _ = gmsh.model.mesh.getElements(3)
+        @test sum(length, et) > 0
+    end
+end
+
+@testitem "SolidModelComponent placement: rotation and layer z" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+    import DeviceLayout.SchematicDrivenLayout: SolidModelComponent, Spacer, transformation
+    import DeviceLayout.SolidModels: gmsh, dimtags
+    import DeviceLayout: SemanticMeta, GDSMeta, Point, rotation, getx, gety
+
+    # ASYMMETRIC CAD: a 40×10×10 μm bar from the origin. Its centroid (20,5,5) is NOT at the
+    # component origin, so a rotation actually moves it — orientation is observable (unlike a
+    # centred cube). z-centroid is 5.
+    _tmp = SolidModel("smcr_author"; overwrite=true)
+    brep = joinpath(tdir, "smcr_bar.brep")
+    gmsh.model.add("smcr_auth")
+    gmsh.model.occ.addBox(0, 0, 0, 40, 10, 10)
+    gmsh.model.occ.synchronize()
+    gmsh.write(brep)
+    gmsh.model.remove()
+
+    # Mate so the transform includes a real rotation: component :east hook (dir 0°) onto the
+    # spacer's :p1_north hook (at (100,50), dir 90°) → component rotated (hooks point opposite).
+    reset_uniquename!()
+    g = SchematicGraph("smcr")
+    sp = add_node!(g, Spacer(; p1=Point(100μm, 50μm)))
+    smc_node = fuse!(
+        g,
+        sp => :p1_north,
+        SolidModelComponent(brep, SemanticMeta(:comp_layer); name="cad") => :east
+    )
+    sch = plan(g; log_dir=nothing)
+    check!(sch)
+
+    # comp_layer sits at a NONZERO height (100 μm) in the process stack → tests meta→layer_z→z.
+    tech = ProcessTechnology((; comp_layer=GDSMeta()), (; height=(; comp_layer=100μm)))
+    sm = SolidModel("smcr"; overwrite=true)
+    @test_nowarn render!(sm, sch, SolidModelTarget(tech))
+
+    trans = transformation(sch, smc_node)
+    @test rotation(trans) ≈ -90°
+
+    # The imported solid's centroid must equal the solved transform applied to the CAD centroid
+    # (xy) and the CAD z-centroid lifted by the layer height (z). Asymmetric solid ⇒ this fails
+    # if the rotation is wrong; nonzero layer height ⇒ this fails if the z-lift is wrong.
+    exp_xy = trans(Point(20μm, 5μm))
+    grp = only(
+        filter(
+            n -> startswith(n, "cad"),
+            collect(keys(SchematicDrivenLayout.SolidModels.dimgroupdict(sm, 3)))
+        )
+    )
+    c = gmsh.model.occ.getCenterOfMass(dimtags(sm[grp, 3])[1]...)
+    @test c[1] ≈ ustrip(μm, getx(exp_xy)) atol = 1e-6
+    @test c[2] ≈ ustrip(μm, gety(exp_xy)) atol = 1e-6
+    @test c[3] ≈ 105.0 atol = 1e-6                 # CAD z-centroid (5) + layer_z (100 μm)
+
+    gmsh.model.set_current("smcr")
+    gmsh.model.mesh.generate(3)
+    _, et, _ = gmsh.model.mesh.getElements(3)
+    @test sum(length, et) > 0
+end
