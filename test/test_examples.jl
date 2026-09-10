@@ -111,6 +111,50 @@ end
     )
     @test length(metal_conn_comps) == 3  # Ground, island, transmission line
     @test length(active_conn_comps) == 1 # Ports and lumped elements connect metal components
+
+    @testset "Palace mesh boundary attributes" begin
+        gmsh = SolidModels.gmsh
+        mesh_path = joinpath(tdir, "single_transmon.msh2")
+        option_names = ("Mesh.Binary", "Mesh.ElementOrder")
+        original_options = gmsh.option.get_number.(option_names)
+        try
+            gmsh.option.set_number("Mesh.Binary", 0)
+            gmsh.option.set_number("Mesh.ElementOrder", 2)
+            gmsh.model.mesh.generate(3)
+            save(mesh_path, sm)
+        finally
+            for (option, value) in zip(option_names, original_options)
+                gmsh.option.set_number(option, value)
+            end
+        end
+
+        # MSH2 writes a boundary element for each physical group containing a surface.
+        # Palace requires a single boundary record per non-periodic face.
+        mesh_lines = readlines(mesh_path)
+        elements_start = findfirst(==("\$Elements"), mesh_lines)
+        element_count = parse(Int, mesh_lines[elements_start + 1])
+        boundary_faces = NTuple{3, Int}[]
+        boundary_attributes = Set{Int}()
+        volume_elements = 0
+        for line in mesh_lines[(elements_start + 2):(elements_start + 1 + element_count)]
+            fields = parse.(Int, split(line))
+            if fields[2] in (2, 9) # Linear and quadratic triangles
+                num_tags = fields[3]
+                push!(boundary_faces, Tuple(sort(fields[(num_tags + 4):(num_tags + 6)])))
+                push!(boundary_attributes, fields[4])
+            elseif fields[2] in (4, 11) # Linear and quadratic tetrahedra
+                volume_elements += 1
+            end
+        end
+        attributes = SolidModels.attributes(sm)
+        expected_boundaries =
+            ("exterior_boundary", "metal", "lumped_element", "port_1", "port_2")
+        @test volume_elements > 0
+        @test !isempty(boundary_faces)
+        @test allunique(boundary_faces)
+        @test boundary_attributes == Set(attributes[name] for name in expected_boundaries)
+    end
+
     # Assign to new groups
     metal_comp_tags = []
     for i in eachindex(metal_conn_comps)
