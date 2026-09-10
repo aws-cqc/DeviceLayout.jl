@@ -18,14 +18,15 @@ The format of this changelog is based on
 
 ### Fixed
 
-  - `render_conformal!` on `Paths.OffsetSegment` (general offset / variable-offset curves) now
-    canonicalizes traversal direction before BSpline-approximating. `bspline_approximation` is
-    not direction-symmetric — forward and reverse traversals of the same geometric curve can
-    yield different sub-segment counts and different join coordinates. Without canonicalization,
-    two faces sharing an offset curve produce mismatched sub-BSpline chains, materializing as
-    an unshared curve on the sparser side and leaving the shared boundary non-manifold at the
-    extra internal vertex. Approximating always in the direction from the lexicographically
-    smaller endpoint fixes it.
+  - `bspline_approximation` now canonicalizes traversal direction, so approximating a segment
+    and its `reverse` yields chains that are exact reverses of one another (same sub-segment
+    count, same join coordinates). Previously the error-driven refinement could place joins at
+    ulp-different coordinates — or split into a different number of sub-segments — depending on
+    traversal direction. This surfaced in `render_conformal!`: two faces sharing a curved edge
+    traverse it in opposite directions, so a direction-dependent approximation left the shared
+    boundary non-manifold. Approximating always from the lexicographically smaller endpoint (and
+    reversing the result to preserve the caller's orientation) fixes it for every render path
+    (GDS discretization, stock `render!`, and `render_conformal!`).
 
 ### Changed
 

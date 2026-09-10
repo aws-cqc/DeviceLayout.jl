@@ -547,13 +547,13 @@
     @testset "OffsetSegment inner/outer traces share offset curve endpoints" begin
         # A `Paths.SimpleCPW` bspline segment emits two parallel offset-BSpline
         # curves (the inner trace and the outer trace edges), each traversed
-        # in opposite directions when the CPW polygon is closed. Before the
-        # direction-canonicalize fix in `_add_conformal_curve!(::OffsetSegment)`,
-        # `bspline_approximation` could produce different sub-BSpline counts
-        # for the two traversal directions of the SAME geometric offset curve
-        # (see SCT-002-D2 storage-cutout / gnd shared-boundary regression).
-        # With canonicalization, both directions get the same sub-BSpline chain
-        # → identical join points → cache unifies → conformal.
+        # in opposite directions when the CPW polygon is closed. Before
+        # `bspline_approximation` canonicalized traversal direction, it could
+        # produce different sub-BSpline counts for the two traversal directions
+        # of the SAME geometric offset curve, leaving a shared boundary
+        # non-manifold. With canonicalization, both directions get sub-BSpline
+        # chains that are exact reverses → identical join points → cache
+        # unifies → conformal.
         #
         # This test doesn't reproduce the two-face shared-boundary directly
         # (that requires two independent CurvilinearRegions), but it verifies

@@ -699,39 +699,15 @@ function _add_conformal_curve!(
             kwargs...
         )
     end
-    # General case (offset BSpline / variable offset). `bspline_approximation`
-    # is NOT direction-symmetric: calling it on `seg` and on `Paths.reverse(seg)`
-    # produces ulp-level different join coordinates on the SAME geometric curve.
-    # The RELAXED merge unifies join POINTS produced from opposite directions,
-    # but it cannot unify a two-sub-segment approximation on side A with a
-    # one-sub-segment approximation on side B: those materialize as distinct
-    # OCC entities (one long BSpline vs a chain of two shorter BSplines), and
-    # the shared boundary becomes non-manifold at the extra internal vertex.
-    #
-    # Fix: canonicalize traversal direction before approximating. Compare the
-    # two endpoints lexicographically on (x, y); if `seg` runs from the larger
-    # endpoint to the smaller one, approximate the reversed segment instead
-    # and un-reverse the resulting sub-segments before emitting. Both sides
-    # sharing this curve then hit `bspline_approximation` in the same direction
-    # → same sub-segment count → same join points → unified OCC entities.
+    # General case (offset BSpline / variable offset). Approximate with a
+    # BSpline chain. `bspline_approximation` canonicalizes traversal direction
+    # internally (see `paths/segments/bspline_approximation.jl`), so the two
+    # faces sharing this curve — which traverse it in opposite directions —
+    # receive edge chains that are exact reverses of one another. Join points
+    # then coincide and the shared boundary is conformal.
     atol_local = onenanometer(coordinatetype(Paths.p0(seg)))
-    approx_seg = seg
-    reverse_output = false
-    seg_p0 = Paths.p0(seg)
-    seg_p1 = Paths.p1(seg)
-    p0x = Float64(ustrip(STP_UNIT, getx(seg_p0)))
-    p0y = Float64(ustrip(STP_UNIT, gety(seg_p0)))
-    p1x = Float64(ustrip(STP_UNIT, getx(seg_p1)))
-    p1y = Float64(ustrip(STP_UNIT, gety(seg_p1)))
-    if (p0x, p0y) > (p1x, p1y)
-        approx_seg = Paths.reverse(seg)
-        reverse_output = true
-    end
-    approx = bspline_approximation(approx_seg; atol=atol_local)
-    approx_segments =
-        reverse_output ? reverse([Paths.reverse(s) for s in approx.segments]) :
-        approx.segments
-    newstarts = DeviceLayout.p0.(approx_segments)[2:end]
+    approx = bspline_approximation(seg; atol=atol_local)
+    newstarts = DeviceLayout.p0.(approx.segments)[2:end]
     newpts = [
         _cached_point_relaxed!(
             k,
@@ -745,7 +721,7 @@ function _add_conformal_curve!(
     starts = [endpoints[1], newpts...]
     stops = [newpts..., endpoints[2]]
     tags = Int32[]
-    for (ep, sub) in zip([[s, e] for (s, e) in zip(starts, stops)], approx_segments)
+    for (ep, sub) in zip([[s, e] for (s, e) in zip(starts, stops)], approx.segments)
         t = _add_conformal_curve!(ctx, ep, sub, k, z, points_cache; kwargs...)
         if t isa AbstractVector
             append!(tags, t)
