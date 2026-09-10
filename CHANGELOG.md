@@ -8,6 +8,8 @@ The format of this changelog is based on
 
 ### Added
 
+  - `load_parameter_set` (exported from `SchematicDrivenLayout`) loads a `ParameterSet` from a
+    YAML file path. Requires `YAML.jl` to be loaded.
   - `split_t_junctions!` (exported from `DeviceLayout`) injects foreign vertices onto edges
     (straight or `Paths.Turn`/`Paths.BSpline`) using an `RTree`-based noding core, with three
     methods: asymmetric `(targets, sources...)` for general 2D / GDS-gap use, single-argument
