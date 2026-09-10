@@ -544,10 +544,12 @@
         gmsh.finalize()
     end
 
-    @testset "render_conformal! with Ellipse (kept as native OCC primitive)" begin
-        # `to_primitives(sm, ::Ellipse)` keeps ellipses (incl. circles) as
-        # native OCC ellipses rather than discretizing to polygons, so
-        # `_add_conformal!` must handle the `Ellipse` type directly.
+    @testset "render_conformal! with a non-circular Ellipse (native OCC primitive)" begin
+        # `to_primitives(sm, ::Ellipse)` keeps ellipses as native OCC ellipses
+        # rather than discretizing to polygons. A non-circular ellipse is not
+        # exactly representable as arcs (`CurvilinearPolygon(::Ellipse)` throws),
+        # so `_add_conformal!(::Ellipse)` falls through to the native
+        # `add_ellipse` path and emits a single smooth boundary curve.
         cs = CoordinateSystem("ellipse", nm)
         place!(cs, DeviceLayout.Ellipse(Point(0.0μm, 0.0μm), (5.0μm, 3.0μm), 0.0°), :l1)
 
@@ -558,16 +560,18 @@
         @test length(gmsh.model.occ.getEntities(2)) == 1
         # OCC keeps the boundary as a single smooth ellipse curve (not a chord
         # chain), so the surface has exactly one bounding curve.
-        # OCC boundary curves of surface: an ellipse ⇒ 1 curve.
         surf_curves = gmsh.model.occ.getEntities(1)
         @test length(surf_curves) == 1
         gmsh.finalize()
     end
 
-    @testset "render_conformal! with a Circle in a mixed layer" begin
-        # Two rectangles + a circle on the same layer. The rectangles share an
-        # edge (dedup); the circle is disjoint. All three surfaces render;
-        # the shared edge still dedups.
+    @testset "render_conformal! routes a Circle through arc contour" begin
+        # A circle IS exactly arc-representable, so `_add_conformal!(::Ellipse)`
+        # routes it through `CurvilinearPolygon(e)` — four 90° `Paths.Turn` arcs,
+        # the same contour a circular hole comes out of `difference2d_curved`.
+        # This puts the arcs into the shared edge cache instead of emitting a
+        # native `add_ellipse`, so a directly-placed circle can share entities
+        # with a boolean-cut circular hole at the same location.
         cs = CoordinateSystem("mixed", nm)
         place!(cs, Rectangle(Point(0.0μm, 0.0μm), Point(10.0μm, 10.0μm)), :l1)
         place!(cs, Rectangle(Point(10.0μm, 0.0μm), Point(20.0μm, 10.0μm)), :l1)
@@ -580,10 +584,35 @@
         @test hasgroup(sm, "l1", 2)
         # 3 surfaces: two rects + circle.
         @test length(gmsh.model.occ.getEntities(2)) == 3
-        # Edge count: 4 (left rect) + 3 (right rect, shared edge reused) + 1
-        # (ellipse) = 8. A duplicated shared edge would give 9.
-        @test length(gmsh.model.occ.getEntities(1)) == 8
-        @test ctx.stats[:hits] >= 1
+        # Edge count: 4 (left rect) + 3 (right rect, shared edge reused) + 4
+        # (circle as four arcs) = 11. The rectangles' shared edge still dedups.
+        @test length(gmsh.model.occ.getEntities(1)) == 11
+        @test ctx.stats[:arcs] == 4   # the circle emitted four arc entities
+        @test ctx.stats[:hits] >= 1   # rectangles' shared edge reused
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal! shares arcs between co-located circles" begin
+        # The point of routing circles through `CurvilinearPolygon`: two circles
+        # at the SAME center and radius (e.g. a placed `Circle` and a circular
+        # hole cut into an adjacent layer) resolve to the SAME four cached arc
+        # entities. Without arc caching each circle would emit its own four
+        # curves (8 total); with it, the second circle's four arcs are all cache
+        # hits and only four unique arc entities exist.
+        cs = CoordinateSystem("cocirc", nm)
+        place!(cs, DeviceLayout.Polygons.Circle(Point(10.0μm, 10.0μm), 3.0μm), :l1)
+        place!(cs, DeviceLayout.Polygons.Circle(Point(10.0μm, 10.0μm), 3.0μm), :l2)
+
+        ctx = ConformalRenderContext()
+        sm = SolidModel("cocirc"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
+        render_conformal!(sm, cs; context=ctx)
+        @test hasgroup(sm, "l1", 2)
+        @test hasgroup(sm, "l2", 2)
+        @test length(gmsh.model.occ.getEntities(2)) == 2  # two circle surfaces
+        # Four unique arcs shared by both circles (8 without sharing).
+        @test length(gmsh.model.occ.getEntities(1)) == 4
+        @test ctx.stats[:hits] == 4  # second circle's four arcs all reused
         gmsh.finalize()
     end
 end

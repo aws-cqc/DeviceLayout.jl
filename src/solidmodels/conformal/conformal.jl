@@ -74,7 +74,7 @@ import DeviceLayout:
     coordinatetype,
     onenanometer
 import DeviceLayout.Paths: bspline_approximation, pathlength
-import DeviceLayout.Polygons: center, r1, r2, angle
+import DeviceLayout.Polygons: center, r1, r2, angle, iscircle
 import Unitful: ustrip, Length, @u_str, °
 import SpatialIndexing
 import SpatialIndexing: RTree
@@ -483,10 +483,17 @@ function _add_conformal!(
     return (Int32(1), linetag)
 end
 
-# Ellipse (incl. circles): OCC keeps these as a native ellipse primitive rather
-# than a cached polyline, so `to_primitives` hands us an `Ellipse` unchanged.
-# A smooth closed curve has nothing to share with neighbours, so this mirrors
-# stock `render!`'s ellipse path directly (no point/edge cache involvement).
+# Ellipse: `to_primitives` hands us an `Ellipse` unchanged (OCC keeps these as a
+# native primitive rather than a cached polyline).
+#
+# Circles route through `CurvilinearPolygon(e)`, which represents the circle as
+# four 90° `Paths.Turn` arcs. This matches how a circular hole comes out of
+# `difference2d_curved` (also a four-arc contour), so a circle placed directly
+# and a circle produced by a boolean cut land on the SAME cached arc entities and
+# can be shared with neighbours. Non-circular ellipses are not exactly arc-
+# representable (`CurvilinearPolygon(::Ellipse)` throws), so they fall through to
+# the native `add_ellipse` path below; a smooth closed ellipse has nothing to
+# share with neighbours anyway, so no cache involvement is needed there.
 function _add_conformal!(
     ctx::ConformalRenderContext,
     e::Ellipse{T},
@@ -496,6 +503,15 @@ function _add_conformal!(
     points_cache=nothing,
     kwargs...
 ) where {T}
+    iscircle(e) && return _add_conformal!(
+        ctx,
+        CurvilinearPolygon(e),
+        m,
+        k;
+        zmap=zmap,
+        points_cache=points_cache,
+        kwargs...
+    )
     z = zmap(m)
     c = ustrip(STP_UNIT, center(e))
     line = k.add_ellipse(

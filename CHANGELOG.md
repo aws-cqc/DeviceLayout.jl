@@ -25,9 +25,11 @@ The format of this changelog is based on
     kept ellipses as native OCC primitives, but the conformal-emit dispatch had
     no `Ellipse` method, so `render_conformal!` on any `CoordinateSystem`
     containing an ellipse fell through to the generic vector path and errored.
-    The new method mirrors stock `render!`'s ellipse path (native
-    `add_ellipse`); a smooth closed curve has nothing to share with neighbours,
-    so no cache involvement is needed.
+    Circles route through `CurvilinearPolygon` (four 90° arcs), the same contour
+    a circular hole comes out of `difference2d_curved`, so a placed circle and a
+    boolean-cut circular hole at the same location share cached arc entities.
+    Non-circular ellipses (not exactly arc-representable) emit a native
+    `add_ellipse`; a smooth closed curve has nothing to share with neighbours.
 
 ### Changed
 
