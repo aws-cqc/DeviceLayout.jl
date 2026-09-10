@@ -80,13 +80,14 @@ end
     @test !first(region_equal([square, hole], [square]))
 
     # Within-tolerance comparison: a sub-tolerance shift passes, a larger one fails;
-    # a missing 4-wide hole fails at tol 2 (its center is exactly 2 from its boundary)
-    # and passes at tol 3, where it lies within the band by construction; a
+    # a missing 4-wide hole fails at tol 1 and passes at tol 2 (the closed band
+    # includes its center, exactly 2 from its boundary); a
     # sub-tolerance needle passes at tol 1; a thin triangle of area 2 is still
     # distinguishable from nothing.
     @test first(region_within([square], [shifted], 1))
     @test !first(region_within([square], [shift(shifted, 2, 0)], 1))
-    @test !first(region_within([square, hole], [square], 2))
+    @test !first(region_within([square, hole], [square], 1))
+    @test first(region_within([square, hole], [square], 2))
     @test first(region_within([square, hole], [square], 3))
     needle = [g(0, 10), g(0, 11), g(40, 10)]
     @test first(region_within([square, needle], [square], 1))

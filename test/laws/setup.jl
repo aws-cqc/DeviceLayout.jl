@@ -26,6 +26,24 @@
         db=false
     )
 
+    # Supposition caps attempts as well as valid examples. A search that exhausts
+    # its attempts without covering the requested budget is not a passing law.
+    budget_satisfied(report) =
+        Supposition.num_testcases(report) >= report.config.max_examples
+    function check_budget(report)
+        if Supposition.results(report).ispass
+            valid = Supposition.num_testcases(report)
+            calls = something(report.final_state).calls
+            @testset "$(report.description): $valid valid / $calls attempts" begin
+                @test budget_satisfied(report)
+            end
+        end
+        return report
+    end
+    macro lawcheck(def)
+        return esc(:(check_budget(@check config = LAWS $def)))
+    end
+
     # Laws known to fail on the current kernel, keyed by law id and generator family.
     # A generative check for a known-broken law is skipped (recorded as Broken) rather
     # than run with `broken=true`: the failure is probabilistic, so `broken=true` would
@@ -230,40 +248,28 @@
     # ---------------------------------------------------------------------------------
     # Region comparisons.
     #
-    # `≐` (exact): canonical boundary equality after collinear stripping. The verdict
-    #   for laws that hold exactly — calibration shows this is every boolean law on
-    #   rectilinear integer inputs (all intersections are lattice points) and the
-    #   commutativity, identity, and fill-rule laws on any input.
-    # `region_within(X, Y, tol)`: X and Y agree up to `tol` lattice units, meaning no
-    #   point farther than `tol` from both boundaries has different membership. This is
-    #   the semantics the kernel's rounding implies: an intersection vertex moves by up
-    #   to half a unit, so slivers up to a unit wide along any boundary may appear or
-    #   vanish — including long, needle-thin ones, whose vertices may be far from the
-    #   other region's boundary although every point of them is near their own. Two
-    #   checks, both required: (1) the exact area difference is within `tol` times the
-    #   summed perimeters, the budget of a `tol`-wide sliver along every edge, checked
-    #   exhaustively; (2) sampled points farther than `tol` from both boundaries have
-    #   equal membership. Probes are placed on both sides of every edge midpoint and
-    #   around every vertex of both regions, just outside the band, plus uniformly over
-    #   the joint bounding box; membership is constant on each connected component of
-    #   the off-band set, so the probes only need to reach every component wider than
-    #   the band, and the components are faces of the two boundaries' arrangement,
-    #   whose edges those probes straddle. Sampling is not a proof; the area budget is
-    #   the exhaustive backstop.
-    # `region_subset_within(X, Y, tol)`: X ⊆ Y up to `tol` by the same membership test.
-    # Tolerances are per law and documented at the law, in lattice units: 1 for one
-    # kernel rounding step, 2 where two results each round independently.
+    # `≐` compares canonical contours. `region_same` also accepts equivalent regions
+    # represented by different contour decompositions, using an exact rational sweep.
+    # `region_within(X, Y, tol)` certifies that every region disagreement lies within
+    # `tol` of either boundary. Thin slivers may disappear, but equal total areas or
+    # matching samples alone never establish equality. The bounded certificate can be
+    # inconclusive; that is a non-pass, not a rejected generator example.
+    # `region_subset_within` applies the same certificate to X ∖ Y only.
+    # Tolerances are stated per law in lattice units.
     # ---------------------------------------------------------------------------------
+    function dedupe_contour(v::Vector{GridPt})
+        v = [p for (i, p) in enumerate(v) if i == 1 || p != v[i - 1]]
+        length(v) > 1 && first(v) == last(v) && pop!(v)
+        return v
+    end
     function strip_collinear(v::Vector{GridPt})
+        v = dedupe_contour(v)
         n = length(v)
         n < 3 && return v
-        out = GridPt[]
-        for i = 1:n
-            a, b, c = v[mod1(i - 1, n)], v[i], v[mod1(i + 1, n)]
-            (b == a || orient_exact(a, b, c) == 0) && continue
-            push!(out, b)
-        end
-        return out
+        return [
+            v[i] for
+            i = 1:n if !on_segment_exact(v[i], v[mod1(i - 1, n)], v[mod1(i + 1, n)])
+        ]
     end
 
     function canonical_contour(v::Vector{GridPt})
@@ -338,47 +344,25 @@
         return pts
     end
 
-    # Laws never run on outputs this large: the membership probes are O(n·m), and an
+    # Laws never run on outputs this large: boundary arrangements are O(n²), and an
     # output this size from a ≤ 24-vertex input is itself a finding (see the round-join
     # note in test_offset.jl).
     const MAX_VERTICES = 4000
     nvertices(polys::GridRegion) = sum(length, polys; init=0)
 
-    function region_within(X::GridRegion, Y::GridRegion, tol::Integer)
-        nvertices(X) + nvertices(Y) <= MAX_VERTICES || return (false, :too_many_vertices)
-        canonical_region(X) == canonical_region(Y) && return (true, nothing)
-        budget = tol * (perimeter_exact(X) + perimeter_exact(Y))
-        Float64(abs(region_area_exact(X) - region_area_exact(Y))) <= budget ||
-            return (false, :area)
-        for q in sample_points(X, Y; step=tol + 1)
-            near_boundary(q, tol, X, Y) && continue
-            a = point_in_region_exact(q, X)
-            b = point_in_region_exact(q, Y)
-            (ismissing(a) || ismissing(b)) && continue
-            a == b || return (false, (:membership, q))
-        end
-        return (true, nothing)
-    end
-    region_within(X, Y, tol) = region_within(togrid(X), togrid(Y), tol)
+    include("region_oracle.jl")
 
-    function region_subset_within(X::GridRegion, Y::GridRegion, tol::Integer)
-        nvertices(X) + nvertices(Y) <= MAX_VERTICES || return (false, :too_many_vertices)
-        isempty(X) && return (true, nothing)
-        for q in sample_points(X, Y; step=tol + 1)
-            near_boundary(q, tol, X, Y) && continue
-            a = point_in_region_exact(q, X)
-            b = point_in_region_exact(q, Y)
-            (ismissing(a) || ismissing(b)) && continue
-            (a && !b) && return (false, (:membership, q))
+    function comparison_result(result)
+        if !first(result) && Test.get_testset() isa Supposition.SuppositionReport
+            event!("region certificate", last(result))
         end
-        return (true, nothing)
+        return result
     end
-    region_subset_within(X, Y, tol) = region_subset_within(togrid(X), togrid(Y), tol)
-
-    # Region equality with no tolerance: exact area equality and membership agreement
-    # everywhere off the shared boundary. Used where `≐` is too strict — the kernel
-    # may return two contours touching at a vertex either merged (with a pinch) or
-    # separate, depending on operand order, and both are the same region.
+    region_within(X, Y, tol; kwargs...) =
+        comparison_result(region_certificate(togrid(X), togrid(Y), tol; kwargs...))
+    region_subset_within(X, Y, tol; kwargs...) = comparison_result(
+        region_certificate(togrid(X), togrid(Y), tol; subset=true, kwargs...)
+    )
     region_same(X, Y) = first(region_within(X, Y, 0))
     # Output validity (law B8): every contour simple; tree alternates outer/hole; every
     # hole vertex lies inside or on its parent contour (`nested=true`).
@@ -391,14 +375,45 @@
                 Clipper.ishole(c) == expect_hole || return false
                 g = togrid.(Clipper.contour(c))
                 is_simple_exact(g; weak) || return false
-                if nested && expect_hole
-                    any(q -> point_in_polygon_exact(q, parent) === false, g) && return false
+                (signed_area2_exact(g) < 0) == expect_hole || return false
+                if nested && !isempty(parent)
+                    contour_contained(g, parent) || return false
                 end
                 walk(c, !expect_hole) || return false
             end
             return true
         end
         return walk(cp.tree, false)
+    end
+
+    # L6 permits only duplicate cut endpoints: a parent vertex hit by the downward
+    # ray, or the lowest hole vertex when a sub-lattice cut rounds to zero length.
+    # Every other zero edge, wrong winding, and proper crossing remains a failure.
+    # The ledger separately demands no zero edges at either kind of attachment.
+    # Exemptions are limited to a single outer/single hole tree. Earlier sibling cuts
+    # alter the attachment search, and shared coordinates cannot identify which output
+    # component owns an exemption; fail closed outside this unambiguous domain.
+    function valid_keyholes(cp::ClippedPolygon, out::GridRegion)
+        short_cuts = GridPt[]
+        nodes = tree_nodes(cp)
+        for n in nodes
+            length(nodes) == 2 || break
+            Clipper.ishole(n) || continue
+            hole, parent = togrid.(Clipper.contour(n)), togrid.(Clipper.contour(n.parent))
+            q = first(sort(hole; by=p -> (p[2], p[1])))
+            cut = downward_attachment(q, parent)
+            isnothing(cut) && return false
+            (cut == q || cut in parent) && push!(short_cuts, cut)
+        end
+        for v in out
+            for i in eachindex(v)
+                v[i] == v[mod1(i + 1, end)] && !(v[i] in short_cuts) && return false
+            end
+            clean = dedupe_contour(v)
+            is_simple_exact(clean; weak=true) && signed_area2_exact(clean) > 0 ||
+                return false
+        end
+        return true
     end
 
     # Exact point-to-region distance oracle for the offset laws: 0 inside, else the
@@ -425,8 +440,8 @@
     #
     # Simple polygons are produced by construction (star-shaped around a center) and
     # then validated exactly. Anything that fails validation is rejected via `reject!`,
-    # and Supposition reports the rejection rate, so a leaky generator is visible rather
-    # than silently distorting the input distribution.
+    # and `@lawcheck` enforces the valid-example budget, so generator starvation is a
+    # test failure rather than a silent reduction of coverage.
     # ---------------------------------------------------------------------------------
     const GRID_HALF = 20  # integer polygons live on [-20, 20]²: degeneracy-rich, and
     # since the kernel's lattice for integers is 1 unit, its intersection rounding is
@@ -534,7 +549,12 @@
         end
         return smin
     end
-    well_conditioned_offset(p::Polygon, δ) = abs(δ) * min_turn_sine(p) >= 1
+    function lattice_delta(::Polygon{T}, δ) where {T}
+        S = promote_type(T, typeof(δ))
+        return Unitful.ustrip(Polygons.prescaledelta(convert(S, δ)))
+    end
+    well_conditioned_offset(p::Polygon, δ) =
+        abs(lattice_delta(p, δ)) * min_turn_sine(p) >= 1
 
     # Shortest edge, in lattice units. An edge of length L whose endpoints are rounded
     # by half a unit has its direction wrong by ~1/(2L); offsetting it by δ moves the
@@ -634,11 +654,35 @@
         return p
     end
 
+    int_convex_polygon = @composed function _int_convex(
+        n=Data.Integers(3, 12),
+        radius=Data.Integers(5, GRID_HALF),
+        θ=Data.Floats{Float64}(; minimum=0.0, maximum=2π, nans=false, infs=false)
+    )
+        p = make_polygon([
+            Point(
+                round(Int, radius * cos(θ + 2π * i / n)),
+                round(Int, radius * sin(θ + 2π * i / n))
+            ) for i = 1:n
+        ])
+        is_convex_exact(togrid(p)) || reject!()
+        return p
+    end
+
     int_rectangle_polygon = @composed function _int_rectangle(
         w=Data.Integers(3, 2GRID_HALF),
         h=Data.Integers(3, 2GRID_HALF)
     )
         return rectangle_polygon(w, h)
+    end
+
+    # Rectangles keep the miter-law angle precondition well represented at every
+    # float scale; unconstrained float stars alone starve that conditional law.
+    float_rectangle_polygon = @composed function _float_rectangle(
+        A=int_rectangle_polygon,
+        logscale=Data.Integers(-3, 2)
+    )
+        return Polygon(Point{Float64}.(A.p) .* (10.0^logscale / (2GRID_HALF)))
     end
 
     int_polygon = int_star_polygon | int_rectangle_polygon
@@ -818,8 +862,7 @@
         outer = star_polygon(Int, θ[1:n], r[1:n], big)
         hole = star_polygon(Int, θ[1:n], r[1:n], big * shrink)
         (valid_polygon(outer) && valid_polygon(hole)) || reject!()
-        all(q -> point_in_polygon_exact(q, togrid(outer)) === true, togrid(hole)) ||
-            reject!()
+        contour_contained(togrid(hole), togrid(outer); strict=true) || reject!()
         return holed_tree(outer, [hole])
     end
 

@@ -15,8 +15,11 @@ The format of this changelog is based on
     fill rules, `clip_tiled`, `to_polygons` keyhole cuts), offsetting (`offset`, `halo`),
     rigid-transform equivariance, coordinate-unit invariance, and the prescale round
     trip; and a ledger of shrunk counterexamples for known kernel and keyhole-cut
-    behaviors. Runs in the regular test suite at a fixed seed; `GEOMLAWS_EXAMPLES` and
-    `GEOMLAWS_SEED` raise the budget for exploratory runs.
+    behaviors. Region comparisons use exact rational boundary arrangements and bounded
+    tolerance certificates, with inconclusive results treated as non-passes. The suite
+    enforces valid-example budgets, validates complete hole boundaries, and checks full
+    convex round-offset chords. Runs in the regular test suite at a fixed seed;
+    `GEOMLAWS_EXAMPLES` and `GEOMLAWS_SEED` raise the budget for exploratory runs.
   - `SolidModels.exclude_groups` returns the entities of a physical group that belong to none of
     a list of other groups, a membership difference with the postrender-operation signature.
     A group left with no entities is removed (its entities stay in the model).
