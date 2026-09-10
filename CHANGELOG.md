@@ -25,6 +25,11 @@ The format of this changelog is based on
   does mean that `Route{T}` and `RouteComponent{T}` are no longer concrete, and their `RouteRule` cannot
   be changed in-place to a different type.
 
+### Removed
+
+  - `ArrayEntity`, an unexported and undocumented wrapper that presented an array of
+    `GeometryEntity` as a single entity. Use a plain `Vector` of entities instead.
+
 ## 1.18.1 (2026-09-07)
 
 ### Fixed

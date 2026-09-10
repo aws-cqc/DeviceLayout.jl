@@ -48,20 +48,6 @@
     @test halo(plus, 1) == OriginPlus(7, 4)
     @test length(halo(aplus, 1)) == 2 # separate halos
 
-    @testset "ArrayEntity" begin
-        r = Rectangle(Point(5, 5), Point(10, 10))
-        a = DeviceLayout.ArrayEntity(GeometryEntity{Int}[plus, r])
-        c = Cell{Float64}("ex")
-        render!(c, a)
-        @test length(elements(c)) == length(a)
-        ah = halo(a, 2)
-        @test ah[1] isa OriginPlus{Int}
-        @test ah[end] isa Polygon{Int}
-        @test footprint(a) == bounds(plus, r)
-        @test (Point(1, 1) + a) isa DeviceLayout.ArrayEntity
-        @test offset(plus, 2)[1] == to_polygons(ah[1])
-    end
-
     @testset "EntityStyle" begin
         pr = Polygons.Rounded(plus, 0.1)
         @test DeviceLayout.unstyled(pr) == plus
@@ -70,9 +56,6 @@
         ### Issue #85
         @test to_polygons(translate(pr, Point(1, 1))) ≈ translate(poly, Point(1, 1))
         ###
-        a = DeviceLayout.ArrayEntity([plus, plus])
-        pa = Polygons.Rounded(0.1)(a)
-        @test all(to_polygons(pa) .== poly)
 
         opt_plus = optional_entity(plus, :opt_ent; default=false)
         opt_round_plus = OptionalStyle(plus, Polygons.Rounded(0.1), :opt_round)
