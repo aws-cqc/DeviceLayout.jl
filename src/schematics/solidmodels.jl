@@ -136,6 +136,122 @@ function intersection_ops(t::SolidModelTarget, sch::Schematic)
     ]
 end
 
+"""
+    SolidModelRenderContext
+
+Context for generating SolidModel operations for one placed component.
+"""
+struct SolidModelRenderContext{TT, TF, TP}
+    target::TT
+    transformation::TF
+    path::TP
+end
+
+"""
+    solidmodel_ops(component, ctx::SolidModelRenderContext)
+
+Return postrender operations contributed by a placed component.
+"""
+solidmodel_ops(::AbstractComponent, ::SolidModelRenderContext) = []
+
+"""
+    SolidModelComponent{T} <: AbstractComponent{T}
+    SolidModelComponent(filename, meta; name=uniquename("solid"), scale=1.0, hooks=compass(), parameters=(;))
+
+An external CAD solid imported into a `SolidModel` at its solved schematic transform and
+the z of layer `meta`.
+
+It emits no 2D geometry and instead contributes an [`import_solid!`](@ref) operation during
+solid-model rendering. `scale` applies a uniform scale, such as for unit conversion.
+
+`hooks` supplies named mate points and defaults to a [`compass`](@ref) at the CAD origin.
+
+Requires a `SolidModelTarget` using the OpenCascade kernel.
+
+# Example
+
+```julia
+using DeviceLayout, DeviceLayout.SchematicDrivenLayout
+using Unitful: μm, °
+
+chip = SolidModelComponent(
+    "chip.step",
+    SemanticMeta(:chip);
+    hooks=(; mount=PointHook(10μm, 0μm, 180°))
+)
+
+g = SchematicGraph("demo")
+anchor = add_node!(g, Spacer(; p1=Point(100μm, 0μm)))
+fuse!(g, anchor => :p1_east, chip => :mount)
+
+sch = plan(g)
+check!(sch)
+```
+
+Rendering `sch` with a `SolidModelTarget` imports `chip.step` at the solved pose and layer
+height.
+"""
+@compdef struct SolidModelComponent{T} <: AbstractComponent{T}
+    name::String = "solid"
+    filename::String = ""
+    meta::SemanticMeta = SemanticMeta(:solid)
+    scale::Float64 = 1.0
+    hooks::NamedTuple = compass(p0=zero(Point{T}))
+    parameters::NamedTuple = (;)
+end
+
+function SolidModelComponent(
+    filename::String,
+    meta::SemanticMeta;
+    name::String=uniquename("solid"),
+    scale=1.0,
+    hooks::Union{Nothing, NamedTuple}=nothing,
+    parameters::NamedTuple=(;)
+)
+    T = typeof(1.0UPREFERRED)
+    hks = isnothing(hooks) ? compass(p0=zero(Point{T})) : hooks
+    return SolidModelComponent{T}(;
+        name,
+        filename,
+        meta,
+        scale=Float64(scale),
+        hooks=hks,
+        parameters
+    )
+end
+
+hooks(c::SolidModelComponent) = c.hooks
+
+function solidmodel_ops(c::SolidModelComponent, ctx::SolidModelRenderContext)
+    dest = string(name(c), "_", join(ctx.path, "_"))
+    z = layer_z(ctx.target.technology, c.meta)
+    return [(
+        dest,
+        SolidModels.import_solid!,
+        (c.filename,),
+        :transform => ctx.transformation,
+        :z => z,
+        :scale => c.scale,
+        :groupname => nothing
+    )]
+end
+
+"""
+    component_solidmodel_ops(sch::Schematic, target::Target)
+
+Collect SolidModel operations from placed components using their solved global transforms.
+"""
+function component_solidmodel_ops(sch::Schematic, target::Target)
+    ops = []
+    for idx in find_components(AbstractComponent, sch)
+        path = idx isa Tuple ? idx : (idx,)
+        node = getpath(sch.graph, path...)[end]
+        ctx = SolidModelRenderContext(target, transformation(sch, path), path)
+        append!(ops, solidmodel_ops(component(node), ctx))
+    end
+    return ops
+end
+
 bounding_layers(t::SolidModelTarget) = t.bounding_layers
 
 wave_port_layers(t::SolidModelTarget) = t.wave_port_layers
@@ -251,8 +367,13 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
     # Extrusions
     # Target specific actions
     # Intersections with rendered volume
-    postrender_ops =
-        vcat(extrusion_ops(target, sch), target.postrenderer, intersection_ops(target, sch))
+    # Import component solids before target operations that may reference or intersect them.
+    postrender_ops = vcat(
+        extrusion_ops(target, sch),
+        component_solidmodel_ops(sch, target),
+        target.postrenderer,
+        intersection_ops(target, sch)
+    )
     reopen_logfile(sch, :render_solidmodel)
     with_logger(sch.logger) do
         return render!(
