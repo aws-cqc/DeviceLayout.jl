@@ -145,6 +145,25 @@
         p = only(to_polygons(x))
         @test first(region_within(togrid([p]), togrid(x), 0))
         @test_broken all(i -> p.p[i] != p.p[mod1(i + 1, end)], eachindex(p.p))
+        # A strictly interior hole can also have a sub-lattice cut: rounding the
+        # parent intersection lands on the hole vertex. Construct the tree directly
+        # so changes to the clipping kernel cannot bypass this DL regression.
+        outer = Polygon(Point{Int}[(31, 0), (20, 1), (-100, -3)])
+        hole = Polygon(Point{Int}[(-22, -1), (7, 0), (4, 0)])
+        cp = holed_tree(outer, [hole])
+        @test contour_contained(togrid(hole), togrid(outer); strict=true)
+        out = togrid(to_polygons(cp))
+        @test valid_keyholes(cp, out)
+        @test_broken all(v -> is_simple_exact(v; weak=true), out)
+        # The attachment can also coincide with an existing parent vertex even when
+        # the hole has ample clearance: the parent endpoint is emitted twice.
+        outer = Polygon(Point{Int}[(20, 0), (-4, 20), (0, -20)])
+        hole = Polygon(Point{Int}[(4, 0), (-1, 4), (0, -4)])
+        cp = holed_tree(outer, [hole])
+        @test valid_output(cp; nested=true)
+        out = togrid(to_polygons(cp))
+        @test valid_keyholes(cp, out)
+        @test_broken all(v -> is_simple_exact(v; weak=true), out)
     end
 
     # L7 — Small offsets leave the input vertex on the output boundary at a sharp

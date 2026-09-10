@@ -14,7 +14,7 @@
     transformed(t, ps::Vector{<:Polygon}) = [t(p) for p in ps]
     transformed_exact(t, cp::ClippedPolygon) =
         [apply_exact(t, p) for p in contour_polygons(cp)]
-    @check config = LAWS function equivariant_int(
+    @lawcheck function equivariant_int(
         pair=int_rectilinear_pair,
         t=rigid_transform,
         δ=Data.Integers(1, 4)
@@ -26,14 +26,14 @@
                region_same(difference2d([tA], [tB]), transformed_exact(t, d)) &&
                region_same(offset([tA], δ), [apply_exact(t, p) for p in o])
     end
-    @check config = LAWS function equivariant_int_star(pair=int_pair, t=rigid_transform)
+    @lawcheck function equivariant_int_star(pair=int_pair, t=rigid_transform)
         A, B = pair
         tA, tB = apply_exact(t, A), apply_exact(t, B)
         return first(
             region_within(union2d([tA], [tB]), transformed_exact(t, union2d([A], [B])), 1)
         )
     end
-    @check config = LAWS function equivariant_float(
+    @lawcheck function equivariant_float(
         pair=float_star_pair,
         t=rigid_transform,
         θ=Data.Floats{Float64}(; minimum=0.0, maximum=2π, nans=false, infs=false)
@@ -51,7 +51,7 @@ end
     # One integer polygon expressed in nm, μm, and mm (all exactly representable) must
     # give lattice-identical results, and identical to the unitless Float64 (μm) path:
     # `clipperize` maps every one of them to the same fm lattice.
-    @check config = LAWS function unit_invariant(pair=int_pair, δ=Data.Integers(1, 4))
+    @lawcheck function unit_invariant(pair=int_pair, δ=Data.Integers(1, 4))
         A, B = pair
         Af, Bf = Polygon(Point{Float64}.(A.p)), Polygon(Point{Float64}.(B.p))
         ref_u = canonical_region(togrid(union2d([Af], [Bf])))
@@ -71,10 +71,7 @@ end
     # declipperize(clipperize(A)) lands on the same lattice points as A for every
     # coordinate type: exact for integers, within the fm lattice for floats and
     # quantities.
-    @check config = LAWS function round_trip(
-        A=int_polygon,
-        u=Data.SampledFrom(collect(UNIT_CHOICES))
-    )
+    @lawcheck function round_trip(A=int_polygon, u=Data.SampledFrom(collect(UNIT_CHOICES)))
         Af = Polygon(Point{Float64}.(A.p))
         Au = with_unit(A, u)
         Aq = Polygon([Point(q.x * Unitful.nm, q.y * Unitful.nm) for q in A.p])  # Quantity{Int}

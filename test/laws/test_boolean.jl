@@ -14,7 +14,7 @@
 @testitem "GeomLaws B1: commutativity" setup = [CommonTestSetup, LawsSetup] tags =
     [:geomlaws] begin
     for gen in (int_pair, int_rectilinear_pair, float_star_pair)
-        @check config = LAWS function commutes(pair=gen)
+        @lawcheck function commutes(pair=gen)
             A, B = pair
             return region_same(union2d([A], [B]), union2d([B], [A])) &&
                    region_same(intersect2d([A], [B]), intersect2d([B], [A])) &&
@@ -23,7 +23,7 @@
     end
     # Near-coincident edges (B is A with one vertex moved kfm lattice units) make every
     # intersection ill-conditioned by geometry; see `float_perturbed_pair`.
-    @check config = LAWS function commutes_perturbed(triple=float_perturbed_pair)
+    @lawcheck function commutes_perturbed(triple=float_perturbed_pair)
         A, B, kfm = triple
         tol = kfm + 2
         return first(region_within(union2d([A], [B]), union2d([B], [A]), tol)) &&
@@ -38,7 +38,7 @@ end
     # two contours sharing the edge, depending on the order the kernel saw them; both
     # describe the same region, so the exact variant compares regions at tolerance 0
     # rather than canonical contours.
-    @check config = LAWS function associates_exact(triple=int_rectilinear_triple)
+    @lawcheck function associates_exact(triple=int_rectilinear_triple)
         A, B, C = triple
         return region_same(
                    union2d(union2d([A], [B]), [C]),
@@ -51,7 +51,7 @@ end
                region_same(union2d([A, B, C]), union2d(union2d([A], [B]), [C]))
     end
     for gen in (int_triple, float_triple)
-        @check config = LAWS function associates(triple=gen)
+        @lawcheck function associates(triple=gen)
             A, B, C = triple
             return first(
                        region_within(
@@ -83,11 +83,11 @@ end
     # Self-union is the identity and union output is a fixed point of union: this is
     # the normal form `clip_tiled` and autofill rely on.
     for gen in (int_thick_polygon, int_rectilinear_polygon, float_polygon)
-        @check config = LAWS function self_union(A=gen)
+        @lawcheck function self_union(A=gen)
             return union2d([A], [A]) ≐ [A] && intersect2d([A], [A]) ≐ [A]
         end
     end
-    @check config = LAWS function normal_form_exact(pair=int_rectilinear_pair)
+    @lawcheck function normal_form_exact(pair=int_rectilinear_pair)
         A, B = pair
         u = union2d([A], [B])
         return region_same(union2d(u), u)
@@ -95,7 +95,7 @@ end
     # A rounded intersection vertex can leave a sub-unit spike in the union; re-union
     # may drop it. Within 1.
     for gen in (int_pair, float_star_pair)
-        @check config = LAWS function normal_form(pair=gen)
+        @lawcheck function normal_form(pair=gen)
             A, B = pair
             u = union2d([A], [B])
             # A self-crossing output (B8, ledger L3) is re-interpreted by the fill rule
@@ -104,14 +104,14 @@ end
             return first(region_within(union2d(u), u, 1))
         end
     end
-    @check config = LAWS function union_of_set(polys=int_polygon_set)
+    @lawcheck function union_of_set(polys=int_polygon_set)
         folded =
             foldl((acc, p) -> union2d(acc, [p]), polys[2:end]; init=union2d([polys[1]]))
         return first(region_within(union2d(polys), folded, 1))
     end
     # Thin integer polygons (a vertex within a lattice unit of a non-adjacent edge) may
     # vanish under the identity union: ledger L1.
-    @law :B3_int_thin @check config = LAWS function self_union_thin(A=int_polygon)
+    @law :B3_int_thin @lawcheck function self_union_thin(A=int_polygon)
         return union2d([A], [A]) ≐ [A]
     end
 end
@@ -119,7 +119,7 @@ end
 @testitem "GeomLaws B4: identity and annihilator" setup = [CommonTestSetup, LawsSetup] tags =
     [:geomlaws] begin
     for gen in (int_thick_polygon, int_rectilinear_polygon, float_polygon)
-        @check config = LAWS function identities(A=gen)
+        @lawcheck function identities(A=gen)
             T = eltype(A.p).parameters[1]
             ∅ = Polygon{T}[]
             return union2d([A], ∅) ≐ [A] &&
@@ -138,7 +138,7 @@ end
     # inputs; otherwise each output rounds its intersection vertices independently, so
     # the residual is bounded by half a lattice unit along the input perimeters
     # (calibrated maximum 0.11 of the perimeter sum).
-    @check config = LAWS function partition_exact(pair=int_rectilinear_pair)
+    @lawcheck function partition_exact(pair=int_rectilinear_pair)
         A, B = pair
         a(x) = region_area_exact(togrid(x))
         u, i, d, x = union2d([A], [B]),
@@ -148,7 +148,7 @@ end
         return a(i) + a(x) == a(u) && a(d) + a(i) == a([A])
     end
     for gen in (int_pair, float_star_pair)
-        @check config = LAWS function partition(pair=gen)
+        @lawcheck function partition(pair=gen)
             A, B = pair
             a(x) = region_area_exact(togrid(x))
             u, i, d, x = union2d([A], [B]),
@@ -164,7 +164,7 @@ end
 
 @testitem "GeomLaws B6: difference–union duality and absorption" setup =
     [CommonTestSetup, LawsSetup] tags = [:geomlaws] begin
-    @check config = LAWS function duality_exact(triple=int_rectilinear_triple)
+    @lawcheck function duality_exact(triple=int_rectilinear_triple)
         A, B, C = triple
         return region_same(
             difference2d([A], union2d([B], [C])),
@@ -172,7 +172,7 @@ end
         ) && region_same(union2d(difference2d([A], [B]), [B]), union2d([A], [B]))
     end
     for gen in (int_triple, float_triple)
-        @check config = LAWS function duality(triple=gen)
+        @lawcheck function duality(triple=gen)
             A, B, C = triple
             return first(
                 region_within(
@@ -219,11 +219,11 @@ end
         return true
     end
     for gen in (int_pair, int_rectilinear_pair, float_star_pair)
-        @check config = LAWS function membership(pair=gen)
+        @lawcheck function membership(pair=gen)
             return oracle_holds(pair...)
         end
     end
-    @check config = LAWS function membership_perturbed(triple=float_perturbed_pair)
+    @lawcheck function membership_perturbed(triple=float_perturbed_pair)
         A, B, kfm = triple
         return oracle_holds(A, B; tol=kfm + 2)
     end
@@ -237,26 +237,26 @@ end
     # to the geometry: integer inputs (ledger L3, L4) and, rarely, fm-lattice floats.
     results(A, B) =
         (union2d([A], [B]), intersect2d([A], [B]), difference2d([A], [B]), xor2d([A], [B]))
-    @check config = LAWS function valid_rectilinear(pair=int_rectilinear_pair)
+    @lawcheck function valid_rectilinear(pair=int_rectilinear_pair)
         return all(c -> valid_output(c; weak=true, nested=true), results(pair...))
     end
-    @check config = LAWS function valid_float(pair=float_star_pair)
+    @lawcheck function valid_float(pair=float_star_pair)
         return all(c -> valid_output(c; weak=true), results(pair...))
     end
     # Features one or two fm wide reproduce L3 on the fm lattice (ledger L8).
-    @law :B8_float_perturbed @check config = LAWS function valid_float_perturbed(
+    @law :B8_float_perturbed @lawcheck function valid_float_perturbed(
         triple=float_perturbed_pair
     )
         A, B, _ = triple
         return all(c -> valid_output(c; weak=true), results(A, B))
     end
-    @law :B8_int @check config = LAWS function valid_int(pair=int_pair)
+    @law :B8_int @lawcheck function valid_int(pair=int_pair)
         return all(c -> valid_output(c; weak=true), results(pair...))
     end
-    @law :B8_nested @check config = LAWS function nested_int(pair=int_pair)
+    @law :B8_nested @lawcheck function nested_int(pair=int_pair)
         return all(c -> valid_output(c; weak=true, nested=true), results(pair...))
     end
-    @law :B8_nested @check config = LAWS function nested_float(pair=float_star_pair)
+    @law :B8_nested @lawcheck function nested_float(pair=float_star_pair)
         return all(c -> valid_output(c; weak=true, nested=true), results(pair...))
     end
 end
@@ -269,7 +269,7 @@ end
     # which is how the Clipper2 shim implements them (`_normalize_clip_fill`).
     rev(p) = Polygon(reverse(p.p))
     for gen in (int_pair, int_rectilinear_pair, float_star_pair)
-        @check config = LAWS function single_rule(pair=gen)
+        @lawcheck function single_rule(pair=gen)
             A, B = pair
             T = eltype(A.p).parameters[1]
             ∅ = Polygon{T}[]
@@ -301,7 +301,7 @@ end
                    ) ≐ union2d([A])
         end
     end
-    @check config = LAWS function mixed_rules_exact(triple=int_rectilinear_triple)
+    @lawcheck function mixed_rules_exact(triple=int_rectilinear_triple)
         A, B, C = triple
         mixed = clip(
             Clipper.ClipTypeUnion,
@@ -313,7 +313,7 @@ end
         return region_same(mixed, union2d(xor2d([A], [B]), [C]))
     end
     for gen in (int_triple, float_triple)
-        @check config = LAWS function mixed_rules(triple=gen)
+        @lawcheck function mixed_rules(triple=gen)
             A, B, C = triple
             mixed = clip(
                 Clipper.ClipTypeUnion,
@@ -331,7 +331,7 @@ end
     [:geomlaws] begin
     # `clip_tiled` splits entities at tile edges with `intersect2d` before clipping, so
     # each tile edge adds a rounding step at the seam: within one lattice unit.
-    @check config = LAWS function tiled(
+    @lawcheck function tiled(
         polys=float_polygon_set,
         tile=Data.SampledFrom([7.0, 15.0, 40.0])
     )
@@ -352,21 +352,30 @@ end
     # lattice, so the keyhole polygons agree with the tree within one unit. Trees whose
     # holes are not nested in their parents (ledger L4) are rejected here: that is B8's
     # finding, and on such trees the cut silently fails (ledger L5).
-    @check config = LAWS function keyhole_built(cp=int_holed_polygon)
-        return first(region_within(togrid(to_polygons(cp)), togrid(cp), 1))
+    @lawcheck function keyhole_built(cp=int_holed_polygon)
+        out = togrid(to_polygons(cp))
+        event!("tree", togrid(cp))
+        event!("keyhole", out)
+        return valid_keyholes(cp, out) && first(region_within(out, togrid(cp), 1))
     end
-    for gen in (int_pair, int_rectilinear_pair, float_star_pair)
-        @check config = LAWS function keyhole_kernel(pair=gen)
-            A, B = pair
-            saw_hole = false
-            for c in (xor2d([A], [B]), difference2d([A], [B]), difference2d([B], [A]))
-                any(Clipper.ishole, tree_nodes(c)) || continue
-                valid_output(c; weak=true, nested=true) || reject!()
-                saw_hole = true
-                first(region_within(togrid(to_polygons(c)), togrid(c), 1)) || return false
+    # The direct tree guarantees a hole without conditioning on a rare overlap of
+    # unrelated stars. Clipping its outer/hole contours still exercises kernel trees.
+    for floating in (false, true)
+        @lawcheck function keyhole_kernel(cp=int_holed_polygon)
+            outer, hole = contour_polygons(cp)
+            if floating
+                outer = Polygon(Point{Float64}.(outer.p))
+                hole = Polygon(Point{Float64}.(hole.p))
             end
-            saw_hole || reject!()
-            return true
+            c = difference2d([outer], [Polygon(reverse(hole.p))])
+            valid_output(c; weak=true, nested=true) || reject!()
+            # Integer clipping may erase a thin hole (L1). B11 needs a hole to cut;
+            # budget enforcement prevents this precondition from starving the check.
+            any(Clipper.ishole, tree_nodes(c)) || reject!()
+            out = togrid(to_polygons(c))
+            event!("tree", togrid(c))
+            event!("keyhole", out)
+            return valid_keyholes(c, out) && first(region_within(out, togrid(c), 1))
         end
     end
 end

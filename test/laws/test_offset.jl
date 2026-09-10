@@ -14,14 +14,14 @@
 
 @testitem "GeomLaws O1: zero offset" setup = [CommonTestSetup, LawsSetup] tags = [:geomlaws] begin
     for gen in (int_thick_polygon, int_rectilinear_polygon, float_polygon)
-        @check config = LAWS function zero_offset(A=gen)
+        @lawcheck function zero_offset(A=gen)
             return offset([A], zero(eltype(A.p).parameters[1])) ≐ [A] &&
                    offset([A], zero(eltype(A.p).parameters[1]); j=Clipper.JoinTypeRound) ≐
                    [A]
         end
     end
     # `offset` unions its result, so thin integer polygons vanish exactly as in B3.
-    @law :O1_int_thin @check config = LAWS function zero_offset_thin(A=int_polygon)
+    @law :O1_int_thin @lawcheck function zero_offset_thin(A=int_polygon)
         return offset([A], 0) ≐ [A]
     end
 end
@@ -31,7 +31,7 @@ end
     # offset(A, δ₁) ⊆ offset(A, δ₂) for δ₁ < δ₂, including δ = 0 (A itself), for every
     # join type. Containment is checked at one lattice unit: each side rounds once.
     joins = (Clipper.JoinTypeMiter, Clipper.JoinTypeSquare, Clipper.JoinTypeRound)
-    @check config = LAWS function monotone_int(
+    @lawcheck function monotone_int(
         A=int_thick_polygon,
         δ=Data.Integers(1, 6),
         j=Data.SampledFrom(joins)
@@ -43,7 +43,7 @@ end
                first(region_subset_within(i1, [A], 2)) &&
                first(region_subset_within(i2, i1, 2))
     end
-    @check config = LAWS function monotone_float(
+    @lawcheck function monotone_float(
         A=float_polygon,
         f=Data.SampledFrom([0.05, 0.2]),
         j=Data.SampledFrom(joins[1:2])
@@ -57,13 +57,12 @@ end
     end
 end
 
-@testitem "GeomLaws O3/O8: round-join distance oracle" setup = [CommonTestSetup, LawsSetup] tags =
+@testitem "GeomLaws O3: round-join distance oracle" setup = [CommonTestSetup, LawsSetup] tags =
     [:geomlaws] begin
     # q ∈ offset(A, δ) ⟺ dist(q, A) ≤ δ for δ > 0, and q ∈ offset(A, −δ) ⟺ q ∈ A with
-    # dist(q, ∂A) ≥ δ, both checked exactly. Two parts: every output vertex lies within
-    # `tol` of the true offset curve (O8, the discretization bound: arc tolerance 0.25
-    # plus rounding), and sampled points clearly inside or outside the true offset
-    # region are classified the same way by the output (O3).
+    # dist(q, ∂A) ≥ δ. This is a sampled membership oracle, with an additional vertex
+    # check. O8 separately certifies entire output chords; matching these samples does
+    # not establish an exhaustive discretization bound.
     function offset_oracle(A, out, δ, tol)
         gA, gO = togrid([A]), togrid(out)
         nvertices(gO) <= MAX_VERTICES || return false
@@ -83,7 +82,7 @@ end
     # Holds wherever |δ|·sin(turn) ≥ 1 at every vertex; below that Clipper can leave
     # the original vertex of a sharp corner in the output (ledger L7), a genuine
     # deviation of up to δ from the offset curve rather than a discretization artifact.
-    @check config = LAWS function round_oracle(
+    @lawcheck function round_oracle(
         A=int_thick_polygon,
         δ=Data.Integers(1, 8),
         sgn=Data.SampledFrom([1, -1])
@@ -91,14 +90,14 @@ end
         well_conditioned_offset(A, δ) || reject!()
         return offset_oracle(A, offset([A], sgn * δ; j=Clipper.JoinTypeRound), sgn * δ, 2)
     end
-    @check config = LAWS function round_oracle_rectilinear(
+    @lawcheck function round_oracle_rectilinear(
         A=int_rectilinear_polygon,
         δ=Data.Integers(1, 8),
         sgn=Data.SampledFrom([1, -1])
     )
         return offset_oracle(A, offset([A], sgn * δ; j=Clipper.JoinTypeRound), sgn * δ, 2)
     end
-    @law :O3_int_sharp @check config = LAWS function round_oracle_sharp(
+    @law :O3_int_sharp @lawcheck function round_oracle_sharp(
         A=int_thick_polygon,
         δ=Data.Integers(1, 8)
     )
@@ -107,21 +106,33 @@ end
     end
 end
 
+@testitem "GeomLaws O8: full-chord round-offset bound" setup = [CommonTestSetup, LawsSetup] tags =
+    [:geomlaws] begin
+    # Two lattice units is the conformance budget, including rounding; this is not a
+    # measurement of Clipper's unrounded 0.25 arc tolerance. Positive convex offsets
+    # have no merging fronts: source-distance residual equals offset-boundary distance
+    # outside A. Nonconvex inputs and erosion remain in the sampled O3 law.
+    for gen in (int_convex_polygon, int_rectangle_polygon)
+        @lawcheck function round_chords(A=gen, δ=Data.Integers(3, 8))
+            well_conditioned_offset(A, δ) || reject!()
+            out = offset([A], δ; j=Clipper.JoinTypeRound)
+            return round_chords_within(A, out, δ, 2)
+        end
+    end
+end
+
 @testitem "GeomLaws O4: join ordering" setup = [CommonTestSetup, LawsSetup] tags =
     [:geomlaws] begin
     # At convex corners round ⊆ square ⊆ miter for δ > 0. (Miter is limited to 2δ, so
     # very sharp corners get a square-like cut farther out than the square join's;
     # containment still holds.)
-    @check config = LAWS function join_order_int(A=int_thick_polygon, δ=Data.Integers(1, 6))
+    @lawcheck function join_order_int(A=int_thick_polygon, δ=Data.Integers(1, 6))
         r = offset([A], δ; j=Clipper.JoinTypeRound)
         s = offset([A], δ; j=Clipper.JoinTypeSquare)
         m = offset([A], δ; j=Clipper.JoinTypeMiter)
         return first(region_subset_within(r, s, 2)) && first(region_subset_within(s, m, 2))
     end
-    @check config = LAWS function join_order_float(
-        A=float_polygon,
-        f=Data.SampledFrom([0.05, 0.2])
-    )
+    @lawcheck function join_order_float(A=float_polygon, f=Data.SampledFrom([0.05, 0.2]))
         δ = f * maximum(p -> max(abs(p.x), abs(p.y)), A.p)
         s = offset([A], δ; j=Clipper.JoinTypeSquare)
         m = offset([A], δ; j=Clipper.JoinTypeMiter)
@@ -140,21 +151,15 @@ end
         o = offset([A], δ; j)
         return first(region_within(offset(o, δ; j), offset([A], 2δ; j), offset_tol(o, δ)))
     end
-    @check config = LAWS function semigroup_round(
-        A=int_thick_polygon,
-        δ=Data.Integers(1, 6)
-    )
+    @lawcheck function semigroup_round(A=int_thick_polygon, δ=Data.Integers(1, 6))
         return semigroup_holds(A, δ, Clipper.JoinTypeRound)
     end
-    @check config = LAWS function semigroup_miter_int(
-        A=int_thick_polygon,
-        δ=Data.Integers(1, 6)
-    )
+    @lawcheck function semigroup_miter_int(A=int_thick_polygon, δ=Data.Integers(1, 6))
         min_corner_angle(A) >= π / 3 || reject!()
         return semigroup_holds(A, δ, Clipper.JoinTypeMiter)
     end
-    @check config = LAWS function semigroup_miter_float(
-        A=float_polygon,
+    @lawcheck function semigroup_miter_float(
+        A=float_polygon | float_rectangle_polygon,
         f=Data.SampledFrom([0.05, 0.2])
     )
         min_corner_angle(A) >= π / 3 || reject!()
@@ -174,13 +179,13 @@ end
     # (-45.7,-36.4),(20,-0.8)` at δ = 11.12 loses a 0.48 μm-deep sliver of itself.
     # Round joins are integer-only (see the header), stated away from the L7 regime,
     # within `offset_tol` of the first result.
-    @check config = LAWS function closing_round(A=int_thick_polygon, δ=Data.Integers(1, 6))
+    @lawcheck function closing_round(A=int_thick_polygon, δ=Data.Integers(1, 6))
         well_conditioned_offset(A, δ) || reject!()
         j = Clipper.JoinTypeRound
         o = offset([A], δ; j)
         return first(region_subset_within([A], offset(o, -δ; j), offset_tol(o, δ)))
     end
-    @check config = LAWS function opening_round(A=int_thick_polygon, δ=Data.Integers(1, 6))
+    @lawcheck function opening_round(A=int_thick_polygon, δ=Data.Integers(1, 6))
         well_conditioned_offset(A, δ) || reject!()
         j = Clipper.JoinTypeRound
         i = offset([A], -δ; j)
@@ -191,14 +196,11 @@ end
 @testitem "GeomLaws O7: halo" setup = [CommonTestSetup, LawsSetup] tags = [:geomlaws] begin
     # halo(A, δ) is offset(A, δ) and halo(A, δo, δi) is offset(A, δo) ∖ offset(A, δi),
     # exactly (same calls, same rounding).
-    @check config = LAWS function halo_int(A=int_thick_polygon, δ=Data.Integers(1, 6))
+    @lawcheck function halo_int(A=int_thick_polygon, δ=Data.Integers(1, 6))
         return halo([A], δ) ≐ offset([A], δ) &&
                halo([A], δ, -δ) ≐ difference2d(offset([A], δ), offset([A], -δ))
     end
-    @check config = LAWS function halo_float(
-        A=float_polygon,
-        f=Data.SampledFrom([0.05, 0.2])
-    )
+    @lawcheck function halo_float(A=float_polygon, f=Data.SampledFrom([0.05, 0.2]))
         δ = f * maximum(p -> max(abs(p.x), abs(p.y)), A.p)
         return halo([A], δ) ≐ offset([A], δ) &&
                halo([A], δ, δ / 2) ≐ difference2d(offset([A], δ), offset([A], δ / 2))
