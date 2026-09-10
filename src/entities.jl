@@ -44,18 +44,6 @@ Not all styles need be valid for any given entity type.
 """
 abstract type GeometryEntity{T} <: AbstractGeometry{T} end
 
-###### Array of GeometryEntity as a GeometryEntity
-"""
-    struct ArrayEntity{T, S} <: GeometryEntity{T}
-        a::S
-    end
-
-A wrapper `GeometryEntity` for an `AbstractArray` `a` of `GeometryEntity{T}`.
-"""
-struct ArrayEntity{T, S <: AbstractArray{<:GeometryEntity{T}}} <: GeometryEntity{T}
-    a::S
-end
-
 ######## GeometryEntity API
 # Include methods for ::Any to take arrays and iterators
 """
@@ -385,31 +373,6 @@ end
 (f::ScaledIsometry{T})(ent::AbstractGeometry) where {T} = transform(ent, f)
 # IdentityTransformation is always valid, never copies
 (f::IdentityTransformation)(ent::AbstractGeometry) = ent
-
-#### Interface methods for ArrayEntity
-# Iteration
-Base.iterate(aent::ArrayEntity) = iterate(aent.a)
-Base.iterate(aent::ArrayEntity, state) = iterate(aent.a, state)
-Base.IteratorSize(::Type{ArrayEntity{T, S}}) where {T, S} = Base.IteratorSize(S)
-Base.IteratorEltype(::Type{ArrayEntity{T, S}}) where {T, S} = Base.IteratorEltype(S)
-Base.eltype(::Type{ArrayEntity{T, S}}) where {T, S} = Base.eltype{S}
-Base.length(aent::ArrayEntity) = length(aent.a)
-Base.size(aent::ArrayEntity) = size(aent.a)
-Base.size(aent::ArrayEntity, dim) = size(aent.a, dim)
-Base.isdone(aent::ArrayEntity) = Base.isdone(aent.a)
-Base.isdone(aent::ArrayEntity, state) = Base.isdone(aent.a, state)
-# Indexing
-Base.getindex(aent::ArrayEntity, i) = getindex(aent.a, i)
-Base.setindex!(aent::ArrayEntity, v, i) = setindex!(aent.a, v, i)
-Base.firstindex(aent::ArrayEntity) = firstindex(aent.a)
-Base.lastindex(aent::ArrayEntity) = lastindex(aent.a)
-# GeometryEntity
-to_polygons(aent::ArrayEntity) = reduce(vcat, to_polygons.(aent.a))
-transform(aent::ArrayEntity, f::Transformation) = ArrayEntity(f.(aent.a))
-lowerleft(aent::ArrayEntity) = lowerleft(aent.a)
-upperright(aent::ArrayEntity) = upperright(aent.a)
-halo(aent::ArrayEntity, outer_delta, inner_delta=nothing) =
-    ArrayEntity(halo(aent.a, outer_delta, inner_delta))
 
 ######## Entity selection
 function SpatialIndexing.mbr(ent::AbstractGeometry{T}) where {T}

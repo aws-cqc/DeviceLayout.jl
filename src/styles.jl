@@ -102,14 +102,6 @@ function to_polygons(styled_ent::StyledEntity; kwargs...)
     return to_polygons(styled_ent.ent, styled_ent.sty; kwargs...)
 end
 
-# Dispatch directly on array entity to avoid ambiguity
-function to_polygons(
-    styled_ent::StyledEntity{T, U};
-    kwargs...
-) where {T, U <: ArrayEntity{T}}
-    return to_polygons.(styled_ent.ent.a, styled_ent.sty; kwargs...)
-end
-
 # If a style has no specialization for `ent`, convert `ent` to polygons first
 function to_polygons(ent::GeometryEntity, sty::GeometryEntityStyle; kwargs...)
     return to_polygons.(to_polygons(ent; kwargs...), sty; kwargs...)
