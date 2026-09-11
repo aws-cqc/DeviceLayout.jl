@@ -156,21 +156,48 @@ solidmodel_ops(::AbstractComponent, ::SolidModelRenderContext) = []
 
 """
     SolidModelComponent{T} <: AbstractComponent{T}
-    SolidModelComponent(filename, meta; name="solid", scale=1.0)
+    SolidModelComponent(filename, meta; name=uniquename("solid"), scale=1.0, hooks=compass(), parameters=(;))
 
-An external CAD solid imported at its solved schematic transform and layer height. It emits no
-2D geometry and provides compass hooks at the origin.
+An external CAD solid imported into a `SolidModel` at its solved schematic transform and
+the z of layer `meta`.
+
+It emits no 2D geometry and instead contributes an [`import_solid!`](@ref) operation during
+solid-model rendering. `scale` applies a uniform scale, such as for unit conversion.
+
+`hooks` supplies named mate points and defaults to a [`compass`](@ref) at the CAD origin.
+
+Requires a `SolidModelTarget` using the OpenCascade kernel.
 """
 @compdef struct SolidModelComponent{T} <: AbstractComponent{T}
     name::String = "solid"
     filename::String = ""
     meta::SemanticMeta = SemanticMeta(:solid)
     scale::Float64 = 1.0
+    hooks::NamedTuple = compass(p0=zero(Point{T}))
+    parameters::NamedTuple = (;)
 end
-SolidModelComponent(filename::String, meta::SemanticMeta; kwargs...) =
-    SolidModelComponent{typeof(1.0UPREFERRED)}(; filename=filename, meta=meta, kwargs...)
 
-hooks(::SolidModelComponent{T}) where {T} = compass(p0=zero(Point{T}))
+function SolidModelComponent(
+    filename::String,
+    meta::SemanticMeta;
+    name::String=uniquename("solid"),
+    scale=1.0,
+    hooks::Union{Nothing, NamedTuple}=nothing,
+    parameters::NamedTuple=(;)
+)
+    T = typeof(1.0UPREFERRED)
+    hks = isnothing(hooks) ? compass(p0=zero(Point{T})) : hooks
+    return SolidModelComponent{T}(;
+        name,
+        filename,
+        meta,
+        scale=Float64(scale),
+        hooks=hks,
+        parameters
+    )
+end
+
+hooks(c::SolidModelComponent) = c.hooks
 
 function solidmodel_ops(c::SolidModelComponent, ctx::SolidModelRenderContext)
     dest = string(name(c), "_", join(ctx.path, "_"))
