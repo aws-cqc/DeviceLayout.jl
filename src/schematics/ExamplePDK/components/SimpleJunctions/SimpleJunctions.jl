@@ -32,15 +32,15 @@ connected by a `LUMPED_ELEMENT` rectangle.
 
      :island hook
         ↓
-        ⋆           —
-        █           ↑
-        █           │
-        █           │
+        ⋆                     —
+        █                     ↑
+        █                     │
+        █                     │
         ▒↕ junction_lead_gap  ground_island_length
-        █           │
+        █                     │
        →█← junction_width     │
-        █           ↓
-        ⋆           —
+        █                     ↓
+        ⋆                     —
         ↑
      :ground hook
 
@@ -114,15 +114,15 @@ connected by a `LUMPED_ELEMENT` rectangle.
 
       :island hook
          ↓
-         ⋆                —
-    █         █           ↑
-    █         █           │
-    █         █           │
+         ⋆                          —
+    █         █                     ↑
+    █         █                     │
+    █         █                     │
     ▒         ▒↕ junction_lead_gap  ground_island_length
-    █         █           │
+    █         █                     │
     █        →█← junction_width     │
-    █         █           ↓
-         ⋆                —
+    █         █                     ↓
+         ⋆                          —
          ↑
          :ground hook
 

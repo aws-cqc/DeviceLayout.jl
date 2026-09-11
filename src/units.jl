@@ -90,6 +90,54 @@ Mixed unit operations with these imports will be converted based on the unit
 preference set by [`DeviceLayout.set_unit_preference!`](@ref) (default `nm`).
 """ PreferredUnits
 
+# Short names for the coordinate types users are expected to encounter, keyed on the exact
+# type so nothing can be misidentified. Entries are written as the constructor expression
+# (`typeof(1.0nm)`) that the docs and code already use to spell these types, qualified by
+# module so that units with a promotion context other than the package preference (or none,
+# for plain `Unitful` units) remain visibly distinct. `PreferredUnits` entries are inserted
+# last so they take precedence over the equivalent `PreferNanometers`/`PreferMicrons` entry
+# (or the `Unitful` entry, under the `NoUnits` preference).
+const COORDINATE_TYPE_NAMES = Dict{DataType, String}()
+for (modname, mod) in (
+        ("Unitful", Unitful),
+        ("PreferNanometers", PreferNanometers),
+        ("PreferMicrons", PreferMicrons),
+        ("", PreferredUnits)
+    ),
+    s in (:fm, :pm, :nm, :μm, :mm, :cm, :dm, :m),
+    (num, numstr) in ((1.0, "1.0"), (1, "1"))
+
+    prefix = isempty(modname) ? "" : modname * "."
+    COORDINATE_TYPE_NAMES[typeof(num * getfield(mod, s))] = "typeof($numstr$prefix$s)"
+end
+
+"""
+    coordinate_type_string(::Type{T})
+
+A short string naming the coordinate type `T`, for use in `show` methods.
+
+Common length types are written as the expression constructing them, assuming
+`using DeviceLayout.PreferredUnits`: `typeof(1.0nm)`, `typeof(1μm)`. Lengths whose
+promotion context differs from the package preference are qualified by module, e.g.
+`typeof(1.0PreferMicrons.μm)` or `typeof(1.0Unitful.μm)`. Any other type is printed in
+full.
+"""
+coordinate_type_string(::Type{T}) where {T} = get(COORDINATE_TYPE_NAMES, T, string(T))
+
+# Preserve the actual concrete type while abbreviating occurrences of its coordinate type.
+# In particular, a subtype can fix its coordinate type without being parametric itself, or
+# can have additional parameters whose values remain important for dispatch and debugging.
+function type_with_coordinate_string(T::Type, S::Type)
+    T === S && return coordinate_type_string(S)
+    T isa DataType || return string(T)
+    isempty(T.parameters) && return string(nameof(T))
+    wrapper = string(nameof(T))
+    params = map(T.parameters) do p
+        return p isa Type ? type_with_coordinate_string(p, S) : repr(p)
+    end
+    return string(wrapper, "{", join(params, ", "), "}")
+end
+
 """
     uparse(str)
 

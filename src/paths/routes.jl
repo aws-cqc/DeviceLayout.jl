@@ -176,6 +176,53 @@ Route(rule, path0::Path, endpoint::Point, end_direction; kwargs...) =
 @inline Base.eltype(::Route{T}) where {T} = T
 @inline Base.eltype(::Type{<:Route{T}}) where {T} = T
 
+function show(io::IO, r::Route)
+    print(io, "Route from ", r.p0, " @ ", r.α0, " to ", r.p1, " @ ", r.α1)
+    print(io, " with rule ", nameof(typeof(r.rule)))
+    nwp = length(r.waypoints)
+    nwp > 0 && print(io, " via ", nwp, nwp == 1 ? " waypoint" : " waypoints")
+    return nothing
+end
+
+function _show_route_rule(io::IO, rule::RouteRule)
+    print(io, nameof(typeof(rule)), "(")
+    for (i, field) in enumerate(fieldnames(typeof(rule)))
+        i > 1 && print(io, ", ")
+        print(io, field, "=")
+        show(io, getfield(rule, field))
+    end
+    return print(io, ")")
+end
+
+function _show_route_values(io::IO, values)
+    print(io, "[")
+    maxitems = get(io, :limit, false)::Bool ? 20 : length(values)
+    shown =
+        length(values) <= maxitems ? eachindex(values) :
+        Iterators.flatten((
+            1:(maxitems ÷ 2),
+            (length(values) - maxitems ÷ 2 + 1):length(values)
+        ))
+    lastidx = 0
+    for i in shown
+        i > firstindex(values) && print(io, ", ")
+        i > lastidx + 1 && print(io, "…, ")
+        show(io, values[i])
+        lastidx = i
+    end
+    return print(io, "]")
+end
+
+function show(io::IO, ::MIME"text/plain", r::Route)
+    show(io, r)
+    print(io, "\n  rule: ")
+    _show_route_rule(io, r.rule)
+    print(io, "\n  waypoints: ")
+    _show_route_values(io, r.waypoints)
+    print(io, "\n  waydirs: ")
+    return _show_route_values(io, r.waydirs)
+end
+
 """
     p0(r::Route)
 

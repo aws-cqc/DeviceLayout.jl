@@ -385,6 +385,8 @@ struct StyledHook{T, H <: Hook{T}, S <: Paths.Style} <: Hook{T}
 end
 StyledHook(h::Hook, ::Nothing) = StyledHook(h, Paths.NoRenderContinuous())
 
+show(io::IO, h::StyledHook) = print(io, getfield(h, :h), " styled as ", getfield(h, :style))
+
 function DeviceLayout.transformation(h1::StyledHook, h2::StyledHook)
     return transformation(getfield(h1, :h), getfield(h2, :h))
 end
@@ -538,6 +540,42 @@ pathf(p) = segment(p[1]).f
 
 function show(io::IO, x::Node)
     return print(io, "$(segment(x)) styled as $(style(x))")
+end
+
+_node_count_str(n) = string(n, n == 1 ? " node" : " nodes")
+
+function _show_path_header(io::IO, p::Path{T}) where {T}
+    print(io, "Path{", DeviceLayout.coordinate_type_string(T), "} ")
+    show(io, p.name)
+    return print(io, " with ", _node_count_str(length(p)))
+end
+
+show(io::IO, p::Path) = _show_path_header(io, p)
+
+function show(io::IO, ::MIME"text/plain", p::Path)
+    _show_path_header(io, p)
+    print(io, " and metadata ", p.metadata)
+    print(io, "\n  from ", p.p0, " with ∠", p.α0)
+    isempty(p) && return nothing
+    print(io, "\n  to ", p1(p), " with ∠", α1(p))
+    # List nodes, truncated if the output is limited (as in the REPL)
+    n = length(p)
+    maxnodes = get(io, :limit, false)::Bool ? 20 : n
+    if n <= maxnodes
+        for (i, node) in enumerate(nodes(p))
+            print(io, "\n   [", i, "] ", node)
+        end
+    else
+        half = maxnodes ÷ 2
+        for i = 1:half
+            print(io, "\n   [", i, "] ", nodes(p)[i])
+        end
+        print(io, "\n   ⋮")
+        for i = (n - half + 1):n
+            print(io, "\n   [", i, "] ", nodes(p)[i])
+        end
+    end
+    return nothing
 end
 
 Path{T}(p0::Point=zero(Point{T}), α0=0.0°, meta::Meta=UNDEF_META) where {T} =
