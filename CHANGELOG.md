@@ -17,6 +17,10 @@ The format of this changelog is based on
     that injects each group's vertices onto every other group's edges — the form needed to
     make adjacent physical groups conformal before `render_conformal!`. Curved edges are split
     natively via `Paths.split`; no discretization.
+  - `SemanticMeta` is now totally ordered (`Base.isless` on `(layer, index, level)`), so it can
+    key a sorted collection. In particular the all-pairs `split_t_junctions!(groups::AbstractDict)`
+    can be keyed directly by `SemanticMeta`, giving deterministic all-pairs ownership without a
+    caller-supplied `Symbol` key.
 
 ### Fixed
 
