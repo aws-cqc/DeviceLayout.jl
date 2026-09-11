@@ -501,3 +501,103 @@ end
     @test c[1] ≈ 90.0 atol = 1e-6
     @test c[2] ≈ 50.0 atol = 1e-6
 end
+
+@testitem "partition_material_groups! enforces material precedence" setup =
+    [CommonTestSetup] begin
+    using DeviceLayout.SolidModels
+    import DeviceLayout.SolidModels: gmsh, dimtags, partition_material_groups!
+
+    # Model the overlapping memberships left by fragmentation.
+    sm = SolidModel("matpart"; overwrite=true)
+    v = [gmsh.model.occ.addBox(20i, 0, 0, 10, 10, 10) for i = 0:3]
+    gmsh.model.occ.synchronize()
+    sm["chip"] = [(3, v[1]), (3, v[2])]
+    sm["vacuum"] = [(3, v[2]), (3, v[3]), (3, v[4])]
+    sm["annotation"] = [(3, v[4])]
+
+    tagset(g) = Set(Int(t) for (d, t) in dimtags(sm[g, 3]))
+    chip_before = tagset("chip")
+    vacuum_before = tagset("vacuum")
+    @test_throws ArgumentError partition_material_groups!(
+        sm,
+        [("chip", 3), ("missing", 3), ("vacuum", 3)]
+    )
+    @test_throws ArgumentError partition_material_groups!(
+        sm,
+        [("chip", 3), ("chip", 3), ("vacuum", 3)]
+    )
+    @test tagset("chip") == chip_before
+    @test tagset("vacuum") == vacuum_before
+
+    partition_material_groups!(sm, [("chip", 3), ("vacuum", 3)])
+    @test tagset("chip") == Set(Int.(v[1:2]))
+    @test tagset("vacuum") == Set(Int.(v[3:4]))
+    @test isempty(intersect(tagset("chip"), tagset("vacuum"))) # mutually exclusive
+    @test tagset("annotation") == Set([Int(v[4])])
+end
+
+@testitem "SolidModelComponent hook-mated, fused in vacuum, exclusive material" setup =
+    [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+    import DeviceLayout.SchematicDrivenLayout: SolidModelComponent, Spacer, find_components
+    import DeviceLayout.SolidModels: gmsh, dimtags
+    import DeviceLayout: SemanticMeta, GDSMeta, Point
+
+    _tmp = SolidModel("smcv_author"; overwrite=true)
+    brep = joinpath(tdir, "smcv_cube.brep")
+    gmsh.model.add("smcv_auth")
+    gmsh.model.occ.addBox(-20, -20, -20, 40, 40, 40)
+    gmsh.model.occ.synchronize()
+    gmsh.write(brep)
+    gmsh.model.remove()
+
+    reset_uniquename!()
+    g = SchematicGraph("smcv")
+    sp = add_node!(g, Spacer(; p1=Point(10μm, 0μm)))
+    fuse!(
+        g,
+        sp => :p1_east,
+        SolidModelComponent(brep, SemanticMeta(:cad); name="cad") => :west
+    )
+    sch = plan(g; log_dir=nothing)
+    check!(sch)
+    render!(sch.coordinate_system, centered(Rectangle(100μm, 100μm)), SemanticMeta(:vacuum))
+    check!(sch)
+
+    cad_group = "cad_$(only(find_components(SolidModelComponent, sch)))"
+    tech = ProcessTechnology(
+        (; vacuum=GDSMeta(), cad=GDSMeta(2)),
+        (; height=(; vacuum=-50μm, cad=0μm), thickness=(; vacuum=100μm))
+    )
+    target = SolidModelTarget(
+        tech;
+        material_precedence=[(cad_group, 3), ("vacuum_extrusion", 3)]
+    )
+    sm = SolidModel("smcv"; overwrite=true)
+    @test_nowarn render!(sm, sch, target)
+
+    vol(g) = sum(gmsh.model.occ.getMass(d, t) for (d, t) in dimtags(sm[g, 3]))
+    faceset(g) = Set(
+        abs(t) for (d, t) in gmsh.model.getBoundary(dimtags(sm[g, 3]), false, false, false)
+    )
+    vtags(g) = Set((d, t) for (d, t) in dimtags(sm[g, 3]))
+
+    @testset "pose" begin
+        c = gmsh.model.occ.getCenterOfMass(dimtags(sm[cad_group, 3])[1]...)
+        @test c[1] ≈ 10.0 atol = 1e-6
+        @test c[2] ≈ 0.0 atol = 1e-6
+        @test c[3] ≈ 0.0 atol = 1e-6
+    end
+    @testset "conformal + exclusive material" begin
+        @test !isempty(intersect(faceset(cad_group), faceset("vacuum_extrusion")))
+        @test isempty(intersect(vtags(cad_group), vtags("vacuum_extrusion")))
+        @test vol(cad_group) ≈ 64000.0 atol = 1e-3
+        @test vol("vacuum_extrusion") ≈ 1e6 - 64000.0 atol = 1e-3
+    end
+    @testset "meshes" begin
+        gmsh.model.set_current("smcv")
+        gmsh.model.mesh.generate(3)
+        _, et, _ = gmsh.model.mesh.getElements(3)
+        @test sum(length, et) > 0
+    end
+end
