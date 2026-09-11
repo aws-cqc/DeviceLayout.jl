@@ -63,6 +63,7 @@ import DeviceLayout:
     AbstractPolygon,
     CurvilinearPolygon,
     CurvilinearRegion,
+    Ellipse,
     LineSegment,
     Meta,
     Point,
@@ -73,6 +74,7 @@ import DeviceLayout:
     coordinatetype,
     onenanometer
 import DeviceLayout.Paths: bspline_approximation, pathlength
+import DeviceLayout.Polygons: center, r1, r2, angle, iscircle
 import Unitful: ustrip, Length, @u_str, °
 import SpatialIndexing
 import SpatialIndexing: RTree
@@ -479,6 +481,54 @@ function _add_conformal!(
     )
     linetag = _cached_add_line!(k, ctx, p0, p1)
     return (Int32(1), linetag)
+end
+
+# Ellipse: `to_primitives` hands us an `Ellipse` unchanged (OCC keeps these as a
+# native primitive rather than a cached polyline).
+#
+# Circles route through `CurvilinearPolygon(e)`, which represents the circle as
+# four 90° `Paths.Turn` arcs. This matches how a circular hole comes out of
+# `difference2d_curved` (also a four-arc contour), so a circle placed directly
+# and a circle produced by a boolean cut land on the SAME cached arc entities and
+# can be shared with neighbours. Non-circular ellipses are not exactly arc-
+# representable (`CurvilinearPolygon(::Ellipse)` throws), so they fall through to
+# the native `add_ellipse` path below; a smooth closed ellipse has nothing to
+# share with neighbours anyway, so no cache involvement is needed there.
+function _add_conformal!(
+    ctx::ConformalRenderContext,
+    e::Ellipse{T},
+    m::Meta,
+    k::OpenCascade;
+    zmap=(_) -> zero(T),
+    points_cache=nothing,
+    kwargs...
+) where {T}
+    iscircle(e) && return _add_conformal!(
+        ctx,
+        CurvilinearPolygon(e),
+        m,
+        k;
+        zmap=zmap,
+        points_cache=points_cache,
+        kwargs...
+    )
+    z = zmap(m)
+    c = ustrip(STP_UNIT, center(e))
+    line = k.add_ellipse(
+        c[1],
+        c[2],
+        ustrip(STP_UNIT, z),
+        ustrip(STP_UNIT, r1(e)),
+        ustrip(STP_UNIT, r2(e)),
+        -1,
+        0.0,
+        2 * π,
+        [0.0, 0.0, 1.0],
+        [cos(angle(e)), sin(angle(e)), 0.0]
+    )
+    loop = k.add_curve_loop([line])
+    surf = k.add_plane_surface([loop])
+    return (Int32(2), surf)
 end
 
 # Broadcast dispatcher — top-level entry from render_conformal!'s metadata loop.
