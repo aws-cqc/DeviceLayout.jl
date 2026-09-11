@@ -167,6 +167,29 @@ solid-model rendering. `scale` applies a uniform scale, such as for unit convers
 `hooks` supplies named mate points and defaults to a [`compass`](@ref) at the CAD origin.
 
 Requires a `SolidModelTarget` using the OpenCascade kernel.
+
+# Example
+
+```julia
+using DeviceLayout, DeviceLayout.SchematicDrivenLayout
+using Unitful: μm, °
+
+chip = SolidModelComponent(
+    "chip.step",
+    SemanticMeta(:chip);
+    hooks=(; mount=PointHook(10μm, 0μm, 180°))
+)
+
+g = SchematicGraph("demo")
+anchor = add_node!(g, Spacer(; p1=Point(100μm, 0μm)))
+fuse!(g, anchor => :p1_east, chip => :mount)
+
+sch = plan(g)
+check!(sch)
+```
+
+Rendering `sch` with a `SolidModelTarget` imports `chip.step` at the solved pose and layer
+height.
 """
 @compdef struct SolidModelComponent{T} <: AbstractComponent{T}
     name::String = "solid"
