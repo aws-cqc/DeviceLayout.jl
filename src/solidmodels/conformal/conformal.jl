@@ -808,7 +808,7 @@ _add_conformal_curve!(
 """
     render_conformal!(sm::SolidModel, cs::AbstractCoordinateSystem;
         context=ConformalRenderContext(),
-        fragment_backstop=false, kwargs...)
+        fragment_backstop=false, material_precedence=[], kwargs...)
 
 Render `cs` into `sm` using the ConformalRender strategy. Delegates to the
 same shared orchestrator as [`render!`](@ref); the only differences are:
@@ -819,7 +819,7 @@ same shared orchestrator as [`render!`](@ref); the only differences are:
     the cache already guarantees conformality on rendered geometry if preconditions are met (see below).
 
 Accepts all of `render!`'s keyword arguments (`map_meta`, `postrender_ops`,
-`retained_physical_groups`, `zmap`, `gmsh_options`, `skip_postrender`,
+`retained_physical_groups`, `material_precedence`, `zmap`, `gmsh_options`, `skip_postrender`,
 `auto_union`, `skip_unused_layers`, `curvature_sizing`, `meshing_parameters`) in addition to:
 
   - `context::ConformalRenderContext`: the edge/curve cache and merge tolerances.
@@ -829,7 +829,7 @@ Accepts all of `render!`'s keyword arguments (`map_meta`, `postrender_ops`,
     after postrender operations. Enable when your input violates preconditions 1-3
     (overlapping areas at the same z, overlapping edges, or intersecting edges),
     which the cache does not resolve on its own, or when postrender operations create
-    non-conformal geometry.
+    non-conformal geometry. Required when `material_precedence` is nonempty.
 
 Not supported on `GmshNative` kernel.
 
@@ -863,8 +863,12 @@ function render_conformal!(
     cs::AbstractCoordinateSystem{T};
     context::ConformalRenderContext=ConformalRenderContext(),
     fragment_backstop::Bool=false,
+    material_precedence=[],
     kwargs...
 ) where {T}
+    !isempty(material_precedence) &&
+        !fragment_backstop &&
+        throw(ArgumentError("material_precedence requires fragment_backstop=true"))
     kernel(sm) isa OpenCascade || error(
         "render_conformal! is only implemented for OpenCascade kernel; " *
         "got $(typeof(kernel(sm))). Use render! instead."
@@ -882,6 +886,7 @@ function render_conformal!(
             kwargs...
         ),
         (fragment!)=fragment_backstop ? _fragment_three_pass! : (_) -> nothing,
+        material_precedence=material_precedence,
         kwargs...
     )
 end

@@ -1026,6 +1026,43 @@ function remove_group!(group::PhysicalGroup; recursive=true, remove_entities=tru
 end
 
 """
+    partition_material_groups!(sm::SolidModel, precedence)
+
+Make the physical groups named in `precedence` mutually exclusive by priority.
+
+`precedence` contains `(name, dimension)` tuples, highest priority first. Each entity is kept
+only in its highest-priority listed group. Unlisted groups are unchanged.
+
+This changes physical-group membership, not geometry, and should run after fragmentation.
+All listed groups must exist and each `(name, dimension)` pair must be unique.
+
+Returns `sm`.
+"""
+function partition_material_groups!(sm::SolidModel, precedence)
+    entries = [(string(name), Int(d)) for (name, d) in precedence]
+    all(0 <= d <= 3 for (_, d) in entries) ||
+        throw(ArgumentError("material group dimensions must be between 0 and 3"))
+    allunique(entries) || throw(ArgumentError("material precedence entries must be unique"))
+
+    missing = filter(entry -> !hasgroup(sm, entry...), entries)
+    isempty(missing) ||
+        throw(ArgumentError("material groups not found: $(join(missing, ", "))"))
+
+    claimed = Set{Tuple{Int32, Int32}}()
+    for (name, d) in entries
+        dts = dimtags(sm[name, d])
+        keep = filter(dt -> !(dt in claimed), dts)
+        union!(claimed, keep)
+        if isempty(keep)
+            remove_group!(sm[name, d], remove_entities=false)
+        else
+            sm[name] = keep
+        end
+    end
+    return sm
+end
+
+"""
     connected_components(dim::Int, tags::Vector{Int32};
         detect_non_boundary_contacts=false, 
         non_boundary_contact_tol=0.0)
