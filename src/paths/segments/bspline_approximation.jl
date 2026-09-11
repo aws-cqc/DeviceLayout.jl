@@ -145,6 +145,28 @@ function bspline_approximation(
     # rtol is accepted for API consistency with render-time callers (e.g. OffsetSegment).
     # The internal _testvals sampling grid is construction-time, not render-time, and
     # intentionally stays at the package default atol.
+    #
+    # Canonicalize traversal direction before approximating. The refinement loop
+    # below splits by half-pathlength and places join points by error-driven
+    # bisection; run on `f` versus `reverse(f)` it can otherwise land those joins
+    # at ulp-different coordinates (or even yield a different sub-segment count).
+    # When a curved edge is shared between two faces, each face traverses it in
+    # the opposite direction — a direction-dependent approximation then produces
+    # mismatched edges and a non-conformal shared boundary. Comparing the two
+    # endpoints lexicographically on (x, y) and always approximating from the
+    # lexicographically-smaller endpoint makes `bspline_approximation(f)` and
+    # `bspline_approximation(reverse(f))` exact reverses of one another, keeping
+    # every render path (GDS discretization, stock SolidModel render, conformal
+    # render) in agreement on shared curves. The result still traverses in `f`'s
+    # direction, so callers that rely on the p0(f) → p1(f) orientation are
+    # unaffected.
+    p_start = p0(f)
+    p_stop = p1(f)
+    if (getx(p_start), gety(p_start)) > (getx(p_stop), gety(p_stop))
+        return reverse(
+            bspline_approximation(reverse(f); atol=atol, maxits=maxits, rtol=rtol)
+        )
+    end
     # Sample points from f and use them to create the BSpline interpolation
     approx = _initial_guess(f)
     # Sample a dense set of points to test approximation against

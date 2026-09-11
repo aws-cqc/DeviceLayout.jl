@@ -18,6 +18,18 @@ The format of this changelog is based on
     make adjacent physical groups conformal before `render_conformal!`. Curved edges are split
     natively via `Paths.split`; no discretization.
 
+### Fixed
+
+  - `bspline_approximation` now canonicalizes traversal direction, so approximating a segment
+    and its `reverse` yields chains that are exact reverses of one another (same sub-segment
+    count, same join coordinates). Previously the error-driven refinement could place joins at
+    ulp-different coordinates — or split into a different number of sub-segments — depending on
+    traversal direction. This surfaced in `render_conformal!`: two faces sharing a curved edge
+    traverse it in opposite directions, so a direction-dependent approximation left the shared
+    boundary non-manifold. Approximating always from the lexicographically smaller endpoint (and
+    reversing the result to preserve the caller's orientation) fixes it for every render path
+    (GDS discretization, stock `render!`, and `render_conformal!`).
+
 ### Changed
 
   - Added a precompile workload for the schematic workflow. Precompilation will take longer, but

@@ -699,10 +699,12 @@ function _add_conformal_curve!(
             kwargs...
         )
     end
-    # General case (offset BSpline / variable offset). `bspline_approximation`
-    # is NOT direction-symmetric: calling it on `seg` and on `Paths.reverse(seg)`
-    # produces ulp-level different join coordinates on the SAME geometric curve.
-    # The RELAXED merge unifies them; the strict merge does not.
+    # General case (offset BSpline / variable offset). Approximate with a
+    # BSpline chain. `bspline_approximation` canonicalizes traversal direction
+    # internally (see `paths/segments/bspline_approximation.jl`), so the two
+    # faces sharing this curve — which traverse it in opposite directions —
+    # receive edge chains that are exact reverses of one another. Join points
+    # then coincide and the shared boundary is conformal.
     atol_local = onenanometer(coordinatetype(Paths.p0(seg)))
     approx = bspline_approximation(seg; atol=atol_local)
     newstarts = DeviceLayout.p0.(approx.segments)[2:end]
