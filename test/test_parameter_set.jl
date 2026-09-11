@@ -935,7 +935,7 @@ end
 
 @testitem "ParameterSet YAML IO" setup = [CommonTestSetup] begin
     using DeviceLayout.SchematicDrivenLayout:
-        ParameterSet, resolve, leaf_params, save_parameter_set
+        ParameterSet, resolve, leaf_params, save_parameter_set, load_parameter_set
     using YAML
     using Unitful: μm, ustrip, unit
 
@@ -1159,6 +1159,20 @@ end
         @test ps2.components.cap.width == 150μm
         @test ps2.components.cap.gap == 3μm
         @test ps2.components.cap.count == 6
+    end
+
+    @testset "load_parameter_set from file path" begin
+        ps = ParameterSet()
+        ps.global.version = 7
+        ps.components.cap.width = 150μm
+        path = joinpath(tdir, "loader_ps.yaml")
+        save_parameter_set(path, ps)
+
+        # The named counterpart to save_parameter_set: loads the YAML file at `path`.
+        loaded = load_parameter_set(path)
+        @test loaded.path == path
+        @test loaded.global.version == 7
+        @test loaded.components.cap.width == 150μm
     end
 
     @testset "Nested namespaces round-trip" begin

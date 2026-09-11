@@ -482,3 +482,12 @@ Save a `ParameterSet` to a YAML file at `path` or write YAML to an `IO` stream.
 Requires `YAML.jl` to be loaded (`using YAML`).
 """
 function save_parameter_set end
+
+"""
+    load_parameter_set(file::AbstractString) -> ParameterSet
+
+Load a `ParameterSet` from the YAML file at `file`.
+
+Requires `YAML.jl` to be loaded (`using YAML`); see [`ParameterSet`](@ref).
+"""
+function load_parameter_set end

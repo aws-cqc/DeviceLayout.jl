@@ -9,6 +9,7 @@ DeviceLayout.SchematicDrivenLayout.ParameterKeyError
 DeviceLayout.SchematicDrivenLayout.resolve
 DeviceLayout.SchematicDrivenLayout.leaf_params
 DeviceLayout.SchematicDrivenLayout.save_parameter_set
+DeviceLayout.SchematicDrivenLayout.load_parameter_set
 DeviceLayout.SchematicDrivenLayout.extract_parameter_set
 ```
 

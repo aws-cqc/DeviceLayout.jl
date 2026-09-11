@@ -129,4 +129,8 @@ function DeviceLayout.SchematicDrivenLayout.save_parameter_set(path::String, ps:
     return path
 end
 
+function DeviceLayout.SchematicDrivenLayout.load_parameter_set(file::AbstractString)
+    return ParameterSet(String(file))
+end
+
 end # module ParameterSetYAMLExt
