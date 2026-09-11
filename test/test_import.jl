@@ -454,3 +454,50 @@ end
     _, et, _ = gmsh.model.mesh.getElements(3)
     @test sum(length, et) > 0
 end
+
+@testitem "SolidModelComponent honours user-supplied hooks" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+    import DeviceLayout.SchematicDrivenLayout: SolidModelComponent, Spacer, transformation
+    import DeviceLayout.SolidModels: gmsh, dimtags
+    import DeviceLayout: SemanticMeta, GDSMeta, Point, PointHook, rotation
+
+    # Use a centred cube so its centroid tracks the component origin.
+    _tmp = SolidModel("smch_author"; overwrite=true)
+    brep = joinpath(tdir, "smch_cube.brep")
+    gmsh.model.add("smch_auth")
+    gmsh.model.occ.addBox(-5, -5, -5, 10, 10, 10)
+    gmsh.model.occ.synchronize()
+    gmsh.write(brep)
+    gmsh.model.remove()
+
+    # Place the mate hook 10 μm away from the CAD origin, pointing west.
+    reset_uniquename!()
+    g = SchematicGraph("smch")
+    sp = add_node!(g, Spacer(; p1=Point(100μm, 50μm)))
+    smc = SolidModelComponent(
+        brep,
+        SemanticMeta(:chip_outline);
+        name="cad",
+        hooks=(; mount=PointHook(10μm, 0μm, 180°))
+    )
+    smc_node = fuse!(g, sp => :p1_east, smc => :mount)
+    sch = plan(g; log_dir=nothing)
+    check!(sch)
+
+    tech = ProcessTechnology((; chip_outline=GDSMeta()), (;))
+    sm = SolidModel("smch"; overwrite=true)
+    @test_nowarn render!(sm, sch, SolidModelTarget(tech))
+
+    trans = transformation(sch, smc_node)
+    @test rotation(trans) ≈ 0° # West-to-east mating requires no rotation.
+    # Mating (10,0) to (100,50) places the CAD origin, and therefore its centroid, at (90,50).
+    grp = only(
+        filter(
+            n -> startswith(n, "cad"),
+            collect(keys(SchematicDrivenLayout.SolidModels.dimgroupdict(sm, 3)))
+        )
+    )
+    c = gmsh.model.occ.getCenterOfMass(dimtags(sm[grp, 3])[1]...)
+    @test c[1] ≈ 90.0 atol = 1e-6
+    @test c[2] ≈ 50.0 atol = 1e-6
+end
