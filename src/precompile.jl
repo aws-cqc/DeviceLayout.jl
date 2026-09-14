@@ -12,7 +12,8 @@ else
     @setup_workload begin
         # Workload uses ExamplePDK, but ExamplePDK changes are still not breaking
         # Just change the workload along with ExamplePDK as necessary
-        using .SchematicDrivenLayout
+        using .SchematicDrivenLayout:
+            SchematicGraph, add_node!, attach!, check!, fuse!, plan, route!
         using .SchematicDrivenLayout.ExamplePDK
         using .SchematicDrivenLayout.ExamplePDK.LayerVocabulary
         using .ExamplePDK.ChipTemplates,
