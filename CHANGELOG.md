@@ -6,6 +6,8 @@ The format of this changelog is based on
 
 ## Unreleased
 
+## 1.19.0 (2026-09-14)
+
 ### Added
 
   - `load_parameter_set` (exported from `SchematicDrivenLayout`) loads a `ParameterSet` from a
