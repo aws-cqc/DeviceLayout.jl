@@ -24,6 +24,16 @@ The format of this changelog is based on
     collide under the GDS writer's case-insensitive duplicate check, and glyphs for characters
     outside the GDSII name charset (`/`, `"`, `α`, …) no longer trigger invalid-name warnings
     on save. (#321)
+  - `bspline_approximation` now canonicalizes traversal direction, so approximating a segment
+    and its `reverse` yields chains that are exact reverses of one another (same sub-segment
+    count, same split points). Previously the error-driven refinement was not reversal-symmetric,
+    so it could place split points at ulp-different coordinates — or split into a different number
+    of sub-segments — depending on traversal direction. This surfaced in `render_conformal!`: two
+    faces sharing a curved edge traverse it in opposite directions, so a direction-dependent
+    approximation left the shared boundary non-manifold. Endpoints are compared with a tolerance
+    band (so nearly-coincident endpoints don't flip on floating-point noise), and the result is
+    reversed back to the caller's traversal direction, so GDS discretization, stock `render!`, and
+    `render_conformal!` all agree on a shared curve.
 
 ## 1.19.0 (2026-09-14)
 

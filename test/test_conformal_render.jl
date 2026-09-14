@@ -615,4 +615,49 @@
         @test ctx.stats[:hits] == 4  # second circle's four arcs all reused
         gmsh.finalize()
     end
+
+    @testset "shared offset-BSpline boundary is conformal in both directions" begin
+        # Two faces share a curved boundary that is a `Paths.OffsetSegment`
+        # (offset of a `Paths.BSpline`). Each face traverses that boundary in the
+        # opposite direction. `bspline_approximation` is not reversal-symmetric,
+        # so without direction canonicalization the two faces get different
+        # sub-BSpline chains on the shared edge and the boundary is left
+        # non-manifold (an edge adjacent to only one face). Canonicalizing makes
+        # both faces approximate the boundary identically, so every interior edge
+        # is shared by exactly two faces.
+        b = Paths.BSpline(
+            Point.([(0, 0), (40, 20), (80, -20), (120, 20)]) .* μm,
+            Point(100.0, 0.0)μm,
+            Point(100.0, 0.0)μm
+        )
+        seg = Paths.offset(b, 2μm)
+        P0, P1 = Paths.p0(seg), Paths.p1(seg)
+        # A rectangle whose top side is `seg`, and its neighbor across `seg` (the
+        # neighbor stores the reversed segment, as the closed loops require).
+        region_B = CurvilinearPolygon(
+            [P0, P1, Point(getx(P1), -30μm), Point(getx(P0), -30μm)],
+            [seg],
+            [1]
+        )
+        region_A = CurvilinearPolygon(
+            [P1, P0, Point(getx(P0), 70μm), Point(getx(P1), 70μm)],
+            [Paths.reverse(seg)],
+            [1]
+        )
+        sm = SolidModel("offset_dir"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
+        cs = CoordinateSystem("test")
+        place!(cs, region_A, :l1)
+        place!(cs, region_B, :l1)
+        render_conformal!(sm, cs)
+        tags_1d = last.(gmsh.model.occ.getEntities(1))
+        adj_2d = first.(gmsh.model.getAdjacencies.(1, tags_1d))
+        # Exactly the exterior edges have a single 2D neighbor; every edge on the
+        # shared boundary is adjacent to both faces (a duplicated shared edge from
+        # a direction-dependent approximation would push the single-adjacency
+        # count above 6).
+        @test count(adj -> length(adj) == 1, adj_2d) == 6
+        @test count(adj -> length(adj) == 2, adj_2d) == length(tags_1d) - 6
+        gmsh.finalize()
+    end
 end
