@@ -1,7 +1,9 @@
 module Graphics
 using Unitful
-import Unitful: Length, inch, ustrip
+import Unitful: Length, inch, unit, ustrip
 import Cairo
+using JSON
+using SHA
 
 import DeviceLayout:
     bounds,
@@ -11,11 +13,16 @@ import DeviceLayout:
     element_metadata,
     findbox,
     gdslayer,
+    layerindex,
+    layername,
+    level,
     load,
+    name,
     refs,
     save,
+    save_render,
     to_polygons
-import DeviceLayout: CoordinateSystem, GeometryEntity
+import DeviceLayout: CoordinateSystem, GDSMeta, GeometryEntity, Meta
 using ..Points
 using ..Transformations
 import ..Rectangles: Rectangle, width, height
@@ -95,16 +102,19 @@ function fillcolor(options, meta)
     return get(layercolors, color_index, (0.0, 0.0, 0.0, 0.5)) # Fallback in case `layercolors` was given non-consecutive keys
 end
 
+const DEFAULT_RENDER_DPI = 72
+const DEFAULT_RENDER_MAX_DIMENSION = 4inch
+
 lscale(x::Length, dpi)  = round(Int, NoUnits((x |> inch) * dpi / inch))
 lscale(x::Integer, dpi) = x
 lscale(x::Real, dpi)    = Int(round(x))
 
 function canvas_size(options, w, h)
-    dpi = get(options, :dpi, 72)
+    dpi = get(options, :dpi, DEFAULT_RENDER_DPI)
     dpi isa Real && dpi > 0 || throw(ArgumentError("dpi must be a positive number"))
     has_width = haskey(options, :width)
     has_height = haskey(options, :height)
-    default_size = lscale(4inch, dpi)
+    default_size = lscale(DEFAULT_RENDER_MAX_DIMENSION, dpi)
     if has_width && has_height
         return lscale(options[:width], dpi), lscale(options[:height], dpi)
     elseif has_width
@@ -151,9 +161,42 @@ MIMETypes = Union{
     MIME"application/pdf",
     MIME"application/postscript"
 }
-function Base.show(
-    io,
-    mime::MIMETypes,
+
+const RENDER_MANIFEST_SCHEMA_VERSION = "0.1"
+
+"""
+    RenderArtifact
+
+Absolute image and manifest paths together with the JSON-shaped manifest snapshot.
+Changing `manifest` does not rewrite the saved manifest.
+"""
+struct RenderArtifact
+    image_path::String
+    manifest_path::String
+    manifest::Dict{String, Any}
+end
+
+struct GraphicsRenderPlan{T, F, E, M, R}
+    flattened::F
+    viewport::Rectangle{T}
+    canvas_width::Int
+    canvas_height::Int
+    scale::Float64
+    content_width::Float64
+    content_height::Float64
+    view_elements::E
+    view_metadata::M
+    selected_metadata::Vector{GDSMeta}
+    colors::Dict{GDSMeta, NTuple{4, Float64}}
+    background::NTuple{4, Float64}
+    reference_boxes::R
+    options::Dict{Symbol, Any}
+end
+
+_rgba(color) = Tuple(Float64.(color))
+_meta_sort_key(meta::GDSMeta) = (gdslayer(meta), datatype(meta))
+
+function prepare_graphics_render(
     geom::Union{Cell{T}, CoordinateSystem{T}};
     options...
 ) where {T}
@@ -170,69 +213,97 @@ function Base.show(
         throw(ArgumentError("bbox must have positive width and height"))
     w1, h1 = canvas_size(opt, w, h)
     w1 > 0 && h1 > 0 || throw(ArgumentError("render dimensions must be positive"))
-    bboxes = get(opt, :bboxes, false)
-
-    surf = if mime isa MIME"image/png"
-        Cairo.CairoARGBSurface(w1, h1)
-    elseif mime isa MIME"image/svg+xml"
-        Cairo.CairoSVGSurface(io, w1, h1)
-    elseif mime isa MIME"application/pdf"
-        Cairo.CairoPDFSurface(io, w1, h1)
-    elseif mime isa MIME"application/postscript"
-        Cairo.CairoEPSSurface(io, w1, h1)
-    else
-        error("unknown mime type.")
-    end
-
-    ctx = Cairo.CairoContext(surf)
-    Cairo.set_source_rgba(ctx, background_color(get(opt, :background, :transparent))...)
-    Cairo.rectangle(ctx, 0, 0, w1, h1)
-    Cairo.fill(ctx)
-
-    trans = Translation(-bnd.ll.x, bnd.ur.y) ∘ XReflection()
-
     sf = iszero(w) || iszero(h) ? 1.0 : min(w1 / w, h1 / h)
-    Cairo.scale(ctx, sf, sf)
 
-    view_idx = findbox(bnd, elements(c0); intersects=true)
+    view_idx = isempty(elements(c0)) ? Int[] : findbox(bnd, elements(c0); intersects=true)
     view_elements = elements(c0)[view_idx]
     view_metas = default_meta_map.(element_metadata(c0)[view_idx])
-    unique_metas = sort(unique(view_metas), by=meta -> (gdslayer(meta), datatype(meta)))
-    for meta in unique_metas
+    all_metas = default_meta_map.(element_metadata(c0))
+    if c0 isa Cell
+        append!(all_metas, default_meta_map.(c0.text_metadata))
+    end
+    unique_metas = sort(unique(all_metas); by=_meta_sort_key)
+    colors = Dict{GDSMeta, NTuple{4, Float64}}(
+        meta => _rgba(fillcolor(opt, meta)) for meta in unique_metas
+    )
+    boxes =
+        get(opt, :bboxes, false) ? convert.(Rectangle{T}, bounds.(refs(geom))) :
+        Rectangle{T}[]
+
+    return GraphicsRenderPlan(
+        c0,
+        bnd,
+        w1,
+        h1,
+        Float64(sf),
+        Float64(sf * w),
+        Float64(sf * h),
+        view_elements,
+        view_metas,
+        unique_metas,
+        colors,
+        _rgba(background_color(get(opt, :background, :transparent))),
+        boxes,
+        opt
+    )
+end
+
+function _surface(io, mime::MIMETypes, width, height)
+    mime isa MIME"image/png" && return Cairo.CairoARGBSurface(width, height)
+    mime isa MIME"image/svg+xml" && return Cairo.CairoSVGSurface(io, width, height)
+    mime isa MIME"application/pdf" && return Cairo.CairoPDFSurface(io, width, height)
+    mime isa MIME"application/postscript" && return Cairo.CairoEPSSurface(io, width, height)
+    return error("unknown mime type")
+end
+
+function write_graphics(io, mime::MIMETypes, plan::GraphicsRenderPlan)
+    surf = _surface(io, mime, plan.canvas_width, plan.canvas_height)
+    ctx = Cairo.CairoContext(surf)
+    Cairo.set_source_rgba(ctx, plan.background...)
+    Cairo.rectangle(ctx, 0, 0, plan.canvas_width, plan.canvas_height)
+    Cairo.fill(ctx)
+
+    # The viewport is top-left anchored. Clip before scaling so geometry crossing the
+    # viewport cannot paint into unused canvas space when the aspect ratios differ.
+    Cairo.rectangle(ctx, 0, 0, plan.content_width, plan.content_height)
+    Cairo.clip(ctx)
+    Cairo.scale(ctx, plan.scale, plan.scale)
+    trans = Translation(-plan.viewport.ll.x, plan.viewport.ur.y) ∘ XReflection()
+
+    drawn_metas = sort(unique(plan.view_metadata); by=_meta_sort_key)
+    for meta in drawn_metas
         Cairo.save(ctx)
-        Cairo.set_source_rgba(ctx, fillcolor(opt, meta)...)
-        for el in view_elements[view_metas .== meta]
+        Cairo.set_source_rgba(ctx, plan.colors[meta]...)
+        for el in plan.view_elements[plan.view_metadata .== meta]
             tel = trans(el)
             poly!(ctx, tel)
-            render_text!(ctx, tel, sf)
+            render_text!(ctx, tel, plan.scale)
         end
         Cairo.fill(ctx)
         Cairo.restore(ctx)
     end
 
-    if c0 isa Cell
+    if plan.flattened isa Cell
         Cairo.save(ctx)
-        for (t, meta) in zip(c0.texts, c0.text_metadata)
-            Cairo.set_source_rgba(ctx, fillcolor(opt, default_meta_map(meta))...)
-            render_text!(ctx, trans(t), sf)
+        for (text, meta) in zip(plan.flattened.texts, plan.flattened.text_metadata)
+            mapped_meta = default_meta_map(meta)
+            Cairo.set_source_rgba(ctx, plan.colors[mapped_meta]...)
+            render_text!(ctx, trans(text), plan.scale)
         end
         Cairo.fill(ctx)
         Cairo.restore(ctx)
     end
 
-    if bboxes
-        for ref in refs(geom)
-            Cairo.save(ctx)
-            r = convert(Rectangle{T}, bounds(ref))
-            Cairo.set_line_width(ctx, 0.5)
-            Cairo.set_source_rgb(ctx, 1, 1, 0)
-            Cairo.set_dash(ctx, [1.0, 1.0])
-            ll = ustrip(trans(r.ll))
-            ur = ustrip(trans(r.ur))
-            Cairo.rectangle(ctx, ll.x, ur.y, ustrip(width(r)), ustrip(height(r)))
-            Cairo.stroke(ctx)
-            Cairo.restore(ctx)
-        end
+    for box in plan.reference_boxes
+        Cairo.save(ctx)
+        Cairo.set_line_width(ctx, 0.5)
+        Cairo.set_source_rgb(ctx, 1, 1, 0)
+        Cairo.set_dash(ctx, [1.0, 1.0])
+        ll = ustrip(trans(box.ll))
+        ur = ustrip(trans(box.ur))
+        Cairo.rectangle(ctx, ll.x, ur.y, ustrip(width(box)), ustrip(height(box)))
+        Cairo.stroke(ctx)
+        Cairo.restore(ctx)
     end
 
     if mime isa MIME"image/png"
@@ -241,6 +312,16 @@ function Base.show(
         Cairo.finish(surf)
     end
     return io
+end
+
+function Base.show(
+    io,
+    mime::MIMETypes,
+    geom::Union{Cell{T}, CoordinateSystem{T}};
+    options...
+) where {T}
+    plan = prepare_graphics_render(geom; options...)
+    return write_graphics(io, mime, plan)
 end
 
 function poly!(cr::Cairo.CairoContext, pts)
@@ -279,29 +360,298 @@ function render_text!(ctx, t::Text, sf)
     )
 end
 
-function save(f::File{format"SVG"}, c0::Cell; options...)
-    open(f, "w") do s
-        io = stream(s)
-        return show(io, MIME"image/svg+xml"(), c0; options...)
+function _save_graphics(f::File, mime::MIMETypes, geom; options...)
+    plan = prepare_graphics_render(geom; options...)
+    return open(f, "w") do s
+        return write_graphics(stream(s), mime, plan)
     end
 end
-function save(f::File{format"PDF"}, c0::Cell; options...)
-    open(f, "w") do s
-        io = stream(s)
-        return show(io, MIME"application/pdf"(), c0; options...)
+
+save(f::File{format"SVG"}, c0::Cell; options...) =
+    _save_graphics(f, MIME"image/svg+xml"(), c0; options...)
+save(f::File{format"PDF"}, c0::Cell; options...) =
+    _save_graphics(f, MIME"application/pdf"(), c0; options...)
+save(f::File{format"EPS"}, c0::Cell; options...) =
+    _save_graphics(f, MIME"application/postscript"(), c0; options...)
+save(f::File{format"PNG"}, c0::Cell; options...) =
+    _save_graphics(f, MIME"image/png"(), c0; options...)
+
+function _graphics_format(path::AbstractString)
+    ext = lowercase(splitext(path)[2])
+    ext == ".png" && return "png", MIME"image/png"()
+    ext == ".svg" && return "svg", MIME"image/svg+xml"()
+    ext == ".pdf" && return "pdf", MIME"application/pdf"()
+    ext == ".eps" && return "eps", MIME"application/postscript"()
+    throw(ArgumentError("render image path must end in .png, .svg, .pdf, or .eps"))
+end
+
+_default_manifest_path(image_path::AbstractString) =
+    splitext(image_path)[1] * ".render.json"
+
+function _metadata_record(meta::GDSMeta)
+    return Dict{String, Any}(
+        "type" => "GDSMeta",
+        "layer" => gdslayer(meta),
+        "datatype" => datatype(meta)
+    )
+end
+
+function _metadata_record(meta::Meta)
+    return Dict{String, Any}(
+        "type" => String(nameof(typeof(meta))),
+        "layer" => layername(meta),
+        "level" => level(meta),
+        "index" => layerindex(meta)
+    )
+end
+
+function _mapping_sort_key(mapping::Pair)
+    source, target = mapping
+    return (
+        String(nameof(typeof(source))),
+        layername(source),
+        level(source),
+        layerindex(source),
+        gdslayer(target),
+        datatype(target)
+    )
+end
+
+function _mapping_records(mappings, selected_metadata)
+    selected = Set(selected_metadata)
+    filtered = unique(mapping for mapping in mappings if mapping.second in selected)
+    sort!(filtered; by=_mapping_sort_key)
+    return [
+        Dict{String, Any}(
+            "source" => _metadata_record(mapping.first),
+            "target" => _metadata_record(mapping.second)
+        ) for mapping in filtered
+    ]
+end
+
+_coordinate_unit(x::Length) = string(unit(x))
+_coordinate_unit(x::Real) = "unitless"
+
+function _dimension_request(options, key, canvas_unit)
+    haskey(options, key) || return nothing
+    value = options[key]
+    value isa Length && return _manifest_value(value)
+    return Dict{String, Any}("value" => Float64(value), "unit" => canvas_unit)
+end
+
+function _background_request(options)
+    value = get(options, :background, :transparent)
+    isnothing(value) && return "transparent"
+    value isa Symbol && return String(value)
+    return collect(Float64.(value))
+end
+
+_manifest_value(value::Length) =
+    Dict{String, Any}("value" => Float64(ustrip(value)), "unit" => string(unit(value)))
+_manifest_value(value::Symbol) = String(value)
+_manifest_value(value::Union{Nothing, Bool, AbstractString}) = value
+_manifest_value(value::Real) =
+    isfinite(value) ? (value isa Integer ? value : Float64(value)) : string(value)
+_manifest_value(value::NamedTuple) = Dict{String, Any}(
+    String(key) => _manifest_value(entry) for (key, entry) in pairs(value)
+)
+_manifest_value(value::Union{Tuple, AbstractVector}) = _manifest_value.(collect(value))
+_manifest_value(value) =
+    Dict{String, Any}("type" => String(nameof(typeof(value))), "repr" => repr(value))
+
+function _geometry_manifest(plan, manifest_source, rendered_fingerprint)
+    geometry = Dict{String, Any}(
+        "type" => String(nameof(typeof(manifest_source))),
+        "name" => name(manifest_source),
+        "unit" => _coordinate_unit(plan.viewport.ll.x)
+    )
+    if !isnothing(rendered_fingerprint)
+        geometry["rendered_cell_fingerprint"] = Dict{String, Any}(
+            "algorithm" => "DeviceLayout.Cells.geometry_fingerprint",
+            "sha256" => rendered_fingerprint
+        )
+    end
+    return geometry
+end
+
+function _layout_to_canvas_manifest(plan, canvas_unit)
+    bnd = ustrip(plan.viewport)
+    xmin = Float64(bnd.ll.x)
+    ymax = Float64(bnd.ur.y)
+    sf = plan.scale
+    matrix = [[sf, 0.0, -sf * xmin], [0.0, -sf, sf * ymax], [0.0, 0.0, 1.0]]
+    inverse = [[1 / sf, 0.0, xmin], [0.0, -1 / sf, ymax], [0.0, 0.0, 1.0]]
+    return Dict{String, Any}(
+        "matrix" => matrix,
+        "output_unit" => canvas_unit,
+        "inverse" => inverse,
+        "anchoring" => "top-left",
+        "content_rect" => Dict{String, Any}(
+            "xmin" => 0.0,
+            "ymin" => 0.0,
+            "xmax" => plan.content_width,
+            "ymax" => plan.content_height,
+            "unit" => canvas_unit
+        )
+    )
+end
+
+function _selected_metadata_records(plan)
+    return [
+        merge(
+            _metadata_record(meta),
+            Dict{String, Any}("rgba" => collect(plan.colors[meta]))
+        ) for meta in plan.selected_metadata
+    ]
+end
+
+function _render_options_manifest(plan, geometry_render_options, canvas_unit)
+    render_options = Dict{String, Any}(
+        "width" => _dimension_request(plan.options, :width, canvas_unit),
+        "height" => _dimension_request(plan.options, :height, canvas_unit),
+        "dpi" => Float64(get(plan.options, :dpi, DEFAULT_RENDER_DPI)),
+        "bboxes" => get(plan.options, :bboxes, false),
+        "bbox_requested" => !isnothing(get(plan.options, :bbox, nothing))
+    )
+    if !haskey(plan.options, :width) && !haskey(plan.options, :height)
+        render_options["default_max_dimension"] =
+            _manifest_value(DEFAULT_RENDER_MAX_DIMENSION)
+    end
+    if !isnothing(geometry_render_options)
+        render_options["geometry_render_options"] = _manifest_value(geometry_render_options)
+    end
+    return render_options
+end
+
+function _render_manifest(
+    plan,
+    manifest_source,
+    mappings,
+    rendered_fingerprint,
+    geometry_render_options,
+    format,
+    image_path,
+    manifest_path,
+    image_sha256
+)
+    bnd = ustrip(plan.viewport)
+    canvas_unit = format in ("pdf", "eps") ? "pt" : "px"
+    return Dict{String, Any}(
+        "schema_version" => RENDER_MANIFEST_SCHEMA_VERSION,
+        "image" => relpath(image_path, dirname(manifest_path)),
+        "image_sha256" => image_sha256,
+        "format" => format,
+        "geometry" => _geometry_manifest(plan, manifest_source, rendered_fingerprint),
+        "viewport" => Dict{String, Any}(
+            "xmin" => Float64(bnd.ll.x),
+            "ymin" => Float64(bnd.ll.y),
+            "xmax" => Float64(bnd.ur.x),
+            "ymax" => Float64(bnd.ur.y),
+            "unit" => _coordinate_unit(plan.viewport.ll.x)
+        ),
+        "canvas" => Dict{String, Any}(
+            "width" => plan.canvas_width,
+            "height" => plan.canvas_height,
+            "unit" => canvas_unit
+        ),
+        "layout_to_canvas" => _layout_to_canvas_manifest(plan, canvas_unit),
+        "metadata_selection" =>
+            isnothing(get(plan.options, :metadata_filter, nothing)) ? "all" : "filtered",
+        "selected_metadata" => _selected_metadata_records(plan),
+        "metadata_mapping" => _mapping_records(mappings, plan.selected_metadata),
+        "background" => Dict{String, Any}(
+            "requested" => _background_request(plan.options),
+            "rgba" => collect(plan.background)
+        ),
+        "render_options" =>
+            _render_options_manifest(plan, geometry_render_options, canvas_unit)
+    )
+end
+
+function _write_manifest_temp(directory, manifest)
+    tmp_path, io = mktemp(directory)
+    succeeded = false
+    try
+        JSON.json(io, manifest; pretty=true)
+        write(io, '\n')
+        close(io)
+        succeeded = true
+        return tmp_path
+    finally
+        isopen(io) && close(io)
+        !succeeded && isfile(tmp_path) && rm(tmp_path; force=true)
     end
 end
-function save(f::File{format"EPS"}, c0::Cell; options...)
-    open(f, "w") do s
-        io = stream(s)
-        return show(io, MIME"application/postscript"(), c0; options...)
+
+function _save_render(
+    image_path::AbstractString,
+    rendered_geom::Union{Cell, CoordinateSystem},
+    manifest_source=rendered_geom,
+    mappings=Pair{Meta, GDSMeta}[],
+    geometry_render_options=nothing;
+    manifest_path=nothing,
+    options...
+)
+    image_abs = abspath(image_path)
+    manifest_abs = abspath(
+        isnothing(manifest_path) ? _default_manifest_path(image_path) : manifest_path
+    )
+    image_abs == manifest_abs &&
+        throw(ArgumentError("manifest_path must differ from image_path"))
+    isdir(dirname(image_abs)) ||
+        throw(ArgumentError("image output directory does not exist: $(dirname(image_abs))"))
+    isdir(dirname(manifest_abs)) || throw(
+        ArgumentError("manifest output directory does not exist: $(dirname(manifest_abs))")
+    )
+    isdir(image_abs) && throw(ArgumentError("image_path cannot be a directory"))
+    isdir(manifest_abs) && throw(ArgumentError("manifest_path cannot be a directory"))
+    format, mime = _graphics_format(image_abs)
+    plan = prepare_graphics_render(rendered_geom; options...)
+    rendered_fingerprint =
+        rendered_geom isa Cell ? Cells.geometry_fingerprint(rendered_geom) : nothing
+
+    image_tmp, image_io = mktemp(dirname(image_abs))
+    manifest_tmp = nothing
+    try
+        write_graphics(image_io, mime, plan)
+        close(image_io)
+        image_sha256 = open(SHA.sha256, image_tmp) |> bytes2hex
+        manifest = _render_manifest(
+            plan,
+            manifest_source,
+            mappings,
+            rendered_fingerprint,
+            geometry_render_options,
+            format,
+            image_abs,
+            manifest_abs,
+            image_sha256
+        )
+        artifact = RenderArtifact(image_abs, manifest_abs, manifest)
+        manifest_tmp = _write_manifest_temp(dirname(manifest_abs), manifest)
+
+        # Remove the old sidecar before replacing the image. A publication failure can
+        # leave an image without a manifest, but never a stale manifest paired with it.
+        isfile(manifest_abs) && rm(manifest_abs; force=true)
+        mv(image_tmp, image_abs; force=true)
+        image_tmp = nothing
+        mv(manifest_tmp, manifest_abs; force=true)
+        manifest_tmp = nothing
+        return artifact
+    finally
+        isopen(image_io) && close(image_io)
+        !isnothing(image_tmp) && isfile(image_tmp) && rm(image_tmp; force=true)
+        !isnothing(manifest_tmp) && isfile(manifest_tmp) && rm(manifest_tmp; force=true)
     end
 end
-function save(f::File{format"PNG"}, c0::Cell; options...)
-    open(f, "w") do s
-        io = stream(s)
-        return show(io, MIME"image/png"(), c0; options...)
-    end
+
+function save_render(
+    image_path::AbstractString,
+    geom::Union{Cell, CoordinateSystem};
+    manifest_path=nothing,
+    options...
+)
+    return _save_render(image_path, geom; manifest_path=manifest_path, options...)
 end
 
 end

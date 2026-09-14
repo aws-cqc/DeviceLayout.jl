@@ -85,14 +85,16 @@ cells into SVG, PDF, and EPS vector graphics formats, or into the PNG raster gra
 format. This enables patterns to be displayed in web browsers, publications, presentations,
 and so on. You can save a cell to a graphics file by, e.g. `save("/path/to/file.svg", mycell)`. Possible keyword arguments include:
 
-  - `width`: Output width. A unitless number gives pixels. A `Unitful.Quantity`, such as
-    `u"4inch"`, is converted to pixels using `dpi`. If `height` is omitted, it is chosen to
-    preserve the rendered region's aspect ratio.
-  - `height`: Output height, with the same unitless-pixel or physical-length behavior as
+  - `width`: Output width. A unitless number gives Cairo canvas units: pixels for PNG/SVG and
+    points for PDF/EPS. A `Unitful.Quantity`, such as `u"4inch"`, is converted to canvas units
+    using `dpi`. If `height` is omitted, it is chosen to preserve the rendered region's aspect
+    ratio.
+  - `height`: Output height, with the same unitless-canvas or physical-length behavior as
     `width`. If `width` is omitted, it is chosen to preserve the aspect ratio. Supplying both
     dimensions uses them exactly.
-  - `dpi`: Resolution used to convert physical `width` and `height` values to pixels, including
-    the default four-inch maximum dimension. It does not rescale unitless pixel dimensions. The default is 72. For vector outputs, physical dimensions are scaled.
+  - `dpi`: Resolution used to convert physical `width` and `height` values to canvas units,
+    including the default four-inch maximum dimension. It does not rescale unitless dimensions.
+    The default is 72.
   - `bbox`: A [`Rectangle`](@ref) in layout coordinates to use as the viewport. Geometry outside
     the rectangle is clipped by the graphics surface.
   - `metadata_filter`: A predicate passed to [`flatten`](@ref) to select metadata before
@@ -118,3 +120,59 @@ save(
     background=:white
 )
 ```
+
+### Render artifacts and manifests
+
+Use [`save_render`](@ref) when another tool needs machine-readable provenance for an image:
+
+```julia
+artifact = save_render(
+    "junction_crop.png",
+    cell;
+    width=1200,
+    bbox=Rectangle(Point(400μm, 200μm), Point(500μm, 300μm)),
+    background=:white
+)
+```
+
+This writes `junction_crop.png` and `junction_crop.render.json`, then returns a
+[`RenderArtifact`](@ref) containing their absolute paths and the JSON-shaped manifest. Set
+`manifest_path` to choose another sidecar path. Ordinary `save` remains file-only. Both outputs
+are prepared in temporary files, and the image is finalized before its SHA-256 is calculated.
+The old sidecar is removed before a replacement image is published, preventing it from
+silently describing new image bytes.
+
+Schema version `0.1` records the effective viewport and coordinate unit, exact canvas size,
+selected concrete `GDSMeta` values with their resolved RGBA colors, background and dimension
+options, and the image hash. `selected_metadata` describes all metadata retained by
+`metadata_filter`, independently of whether an element is visible inside the `bbox` crop. The
+manifest's `metadata_selection` is `"all"` or `"filtered"`. The
+`rendered_cell_fingerprint` identifies the complete pre-filter cell; the filter state is
+recorded separately. The manifest stores the image path relative to itself. The
+`layout_to_canvas.matrix` maps homogeneous layout coordinates to the recorded canvas unit
+(`px` for PNG/SVG and `pt` for PDF/EPS). For viewport `(xmin, ymin, xmax, ymax)` and uniform
+scale `s`, the top-left-anchored matrix is
+
+```text
+[ s   0  -s*xmin ]
+[ 0  -s   s*ymax ]
+[ 0   0      1   ]
+```
+
+The manifest also contains its inverse and an exact content rectangle in the recorded canvas
+unit. This matters when explicitly supplied canvas dimensions have a different aspect ratio
+than the viewport.
+
+A `CoordinateSystem` can be rendered through a
+[`SchematicDrivenLayout.LayoutTarget`](@ref) without first constructing a `Cell`:
+
+```julia
+artifact = save_render("overview.png", coordinate_system, layout_target; width=1600)
+```
+
+That overload records semantic-to-GDS mappings encountered while constructing the intermediate
+cell; it never dumps the target's mutable mapping cache. Mappings are conservatively retained
+when their output `GDSMeta` survives `metadata_filter`, including every encountered source when
+several semantic metadata values map to one selected output. Pass a `NamedTuple` as
+`render_options` for options used while constructing the intermediate cell. The other keyword
+arguments are graphics options listed above.
