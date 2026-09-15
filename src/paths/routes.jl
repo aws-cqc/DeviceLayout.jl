@@ -37,11 +37,23 @@ abstract type RouteRule end
 
 Specifies rules for routing from one point to another using straight segments and 90° bends.
 
-Can be used with no `waydirs` if each waypoint is reachable from the previous with a single
-turn and the endpoint is reachable with a single turn or two turns in opposite directions.
+If used in a route with waypoints, the route's straight segments pass through the waypoints
+(or a turn begins or ends at a waypoint). In particular, waypoints do not specify
+"corners" where straight segments would intersect given zero turn radius. They only constrain
+where a straight segment would pass through, which then determines the placement and
+direction of bends.
 
-If `waydirs` are used, then any waypoint may be reachable with two turns in opposite
-directions if that satisfies the corresponding waydirection.
+Can be used with no `waydirs` if each waypoint is reachable from the previous with at most a single
+turn (with straight segments on either side as needed), since the current direction and next
+waypoint uniquely determine the bend position and direction of a single-bend route. If `waydirs`
+are provided, then each must either
+
+  - match the feasible single-bend leg's direction at the corresponding waypoint, or
+  - match the direction at the previous waypoint, in which case two opposite turns will be used
+    such that the route passes through the midpoint between waypoints.
+
+The endpoint is treated as another waypoint that always has a direction, so it can be reached in
+one turn or two opposite turns from the last waypoint.
 """
 Base.@kwdef struct StraightAnd90 <: RouteRule
     min_bend_radius = 200μm
@@ -58,11 +70,25 @@ StraightAnd90(r) = StraightAnd90(min_bend_radius=r, max_bend_radius=r)
 
 Specifies rules for routing from one point to another using using straight segments and 45° bends.
 
-Can be used with no `waydirs` if each waypoint is reachable from the previous with a single
-turn and the endpoint is reachable with one or two turns.
+If used in a route with waypoints, the route's straight segments pass through the waypoints
+(or a turn begins or ends at a waypoint). In particular, waypoints do not specify
+"corners" where straight segments would intersect given zero turn radius. They only constrain
+where a straight segment would pass through, which then determines the placement and
+direction of bends.
 
-If `waydirs` are used, then any waypoint may be reachable with two turns if that satisfies
-the corresponding waydirection.
+Can be used with no `waydirs` if each waypoint is reachable from the previous with at most a single
+turn (with straight segments on either side as needed), since the current direction and next
+waypoint uniquely determine the bend position and direction of a single-bend route. If `waydirs`
+are provided, then each must either
+
+  - match the feasible single-bend leg's direction at the corresponding waypoint,
+  - match the feasible single-90°-bend leg's direction, in which case the route takes the shortest
+    path consistent with radius constraints,
+  - match the direction at the previous waypoint, in which case two opposite turns will be used
+    such that the route passes through the midpoint between waypoints.
+
+The endpoint is treated as another waypoint that always has a direction, so it can be reached in
+one or two turns from the last waypoint.
 """
 Base.@kwdef struct StraightAnd45 <: RouteRule
     min_bend_radius = 200μm
@@ -472,8 +498,17 @@ end
     function route!(path::Path{S}, p_end::Point, α_end, rule::RouteRule, sty=Paths.nextstyle(path);
                     waypoints=Point{S}[], waydirs=nothing, atol=1e-9 * DeviceLayout.onemicron(S)) where {S}
 
-Extend `path` to `p_end` with arrival angle `α_end` according to `RouteRule`. The default
-implementation is
+Extend `path` to `p_end` with arrival angle `α_end` according to `RouteRule`.
+
+`waypoints` and `waydirs` can additionally constrain the route. The `RouteRule`
+determines how these are handled, by default routing waypoint-to-waypoint such that the path
+starts at `p0`, passes through each point in `waypoints` in order, and then ends at `p1`.
+
+If `waydirs` is not `nothing`, it should have the same length as `waypoints`. If `waydirs`
+is provided and is not ignored by the `RouteRule` (check the specific rule documentation),
+then `waypoints[i]` will be reached with the path pointing along `waydirs[i]`.
+
+The default implementation is
 
 ```
 reconcile!(path, p_end, α_end, rule, waypoints, waydirs)

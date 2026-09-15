@@ -118,3 +118,5 @@ save(
     background=:white
 )
 ```
+
+Layers are painted in order of ascending GDS layer.

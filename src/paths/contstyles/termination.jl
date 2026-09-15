@@ -209,6 +209,7 @@ End a `Paths.Path` with a termination.
     rounded section of equivalent maximum length.
   - `gap`: If the preceding style is a CPW, this is a "short termination" if `iszero(gap)` and is an
     "open termination" with a gap of `gap` otherwise, defaulting to the gap of the preceding CPW.
+    Advances the start or end of the CPW path by `gap` in the direction of the termination.
     Has no effect for `Trace` terminations.
   - `initial`: If `true`, the termination is added at the beginning of the `Path`.
   - `margin`: If positive, the termination will begin an additional length `margin` away from
@@ -217,9 +218,11 @@ End a `Paths.Path` with a termination.
   - `overlay_index`: If nonzero, the termination is applied to the overlay style at that index.
 
 Trace terminations and CPW short terminations do not change the underlying curve, while
-CPW open terminations add a straight length of `gap`. However, rounding is always drawn
-with exact circular arcs, as though the rounded section were actually straight, even for
-terminations on curves.
+CPW open terminations add a straight length of `gap` after the end of the path, changing
+`p1(pa)` (or, for initial terminations, add that length before the start, changing `p0(pa)`).
+
+Rounding is always drawn with circular-arc-filleted caps as though on a straight segment,
+even if it consumed length from a curved segment, but does not affect `p1(pa)` (or `p0(pa)`).
 """
 function terminate!(
     pa::Path{T};

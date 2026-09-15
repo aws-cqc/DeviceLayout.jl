@@ -179,8 +179,9 @@ If one or both hook symbols are not specified, then `matching_hook` or `matching
 will be used to attempt to automatically find the correct hook or hooks.
 
 The route will have start and endpoints at the origin until a method like `plan!` is called.
-`waypoints` and `waydirs` are in component-local coordinates (unless `global_waypoints` is
-`true`), and `rule` determines how they will be used.
+`waypoints` and `waydirs` are in route-local coordinates where the origin is the route start
+and the x-axis is the route's initial direction (unless `global_waypoints` is `true`, in which
+case they are in global coordinates of the parent `Schematic`), and `rule` determines how they will be used.
 
 Additional keyword arguments will become vertex properties for the `RouteComponent`'s node.
 

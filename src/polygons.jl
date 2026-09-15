@@ -697,7 +697,9 @@ end
 
 Rounded polygon style defined by either radius absolute radius `abs_r` or relative radius
 `rel_r`. Only one of `abs_r` or `rel_r` can be non-zero at once. Can't handle shapes
-with interior cuts, or shapes with too sharp of angles relative to segment length. If
+with too sharp of angles relative to segment length. Shapes with interior cuts (keyhole polygons)
+will be rounded incorrectly; instead, round the equivalent `ClippedPolygon` or `CurvilinearRegion`
+directly without first converting it to a keyhole polygon with `to_polygons`. If
 `rel_r` is non-zero the radius of curvature at each vertex is calculated with
 `rel_r * min(l₁, l₂)` where `l₁` and `l₂` denote the length of the two attached line segments.
 
