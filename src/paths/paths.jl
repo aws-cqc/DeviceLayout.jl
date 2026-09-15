@@ -522,8 +522,13 @@ p1_hook(pa::Path, right_handed=true) =
 """
     hooks(pa::Path)
 
+Hooks at the start and endpoints of `pa`, along with left-handed variants.
+
+Hooks look into the path: `:p0` hooks have inward direction `α0(pa)`, and `:p1` hooks have inward direction
+opposite `α1(pa)`.
+
   - `:p0`: A right-handed `StyledHook` looking into the start of path `pa` with `nextstyle` of the reversed path.
-  - `:p1`: A right-handed `StyledHook` looking into the end of path `pa` (opposite the path direction) with `nextstyle(pa)`.
+  - `:p1`: A right-handed `StyledHook` looking into the end of path `pa` with `nextstyle(pa)`.
   - `:p0_lh`: A left-handed `StyledHook` looking into the start of path `pa` with `nextstyle` of the reversed path.
   - `:p1_lh`: A left-handed `StyledHook` looking into the end of path `pa` with `nextstyle(pa)`.
 """
@@ -1325,10 +1330,11 @@ const launchdefaults = Dict([
 
 Add a coplanar-waveguide "launcher" structure to `p`, with a taper, pad, and open termination.
 
-If `p` is empty, start the path with a launcher; this moves `p0(p)` backward by the pad gap
+If `p` is empty, start the path with a launcher. This moves `p0(p)` backward by the pad gap
 `gap0` to make room for the open termination, so that the pad metal starts at the original `p0(p)`.
 
-If `p` is not empty, terminate with a launcher.
+If `p` is not empty, terminate with a launcher. This extends the path by `taperlen + flatlen + gap0`,
+with the last `gap0` being the open termination past the pad metal.
 
 This method exists mainly for use in demonstrations. The launcher design is not optimized
 for microwave properties.

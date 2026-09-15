@@ -100,7 +100,8 @@ and so on. You can save a cell to a graphics file by, e.g. `save("/path/to/file.
     and datatype.
   - `layercolors`: A dictionary mapping either exact `GDSMeta` values or integer GDS layer
     numbers to RGBA tuples. Exact metadata keys allow datatypes on one layer to have different
-    colors. For example, `(1.0, 0.0, 0.0, 0.5)` is red with 50% opacity.
+    colors. For example, `(1.0, 0.0, 0.0, 0.5)` is red with 50% opacity. Layers are painted in
+    order of ascending `(gdslayer, datatype)`.
   - `background`: `:transparent` (the default), `:white`, `:black`, `nothing`, or an RGB(A)
     tuple with components between zero and one.
   - `bboxes`: Whether to draw yellow bounding boxes around top-level cell arrays or cell
@@ -118,5 +119,3 @@ save(
     background=:white
 )
 ```
-
-Layers are painted in order of ascending GDS layer.

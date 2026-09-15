@@ -697,10 +697,20 @@ end
 
 Rounded polygon style defined by either radius absolute radius `abs_r` or relative radius
 `rel_r`. Only one of `abs_r` or `rel_r` can be non-zero at once. Can't handle shapes
-with too sharp of angles relative to segment length. Shapes with interior cuts (keyhole polygons)
-will be rounded incorrectly; instead, round the equivalent `ClippedPolygon` or `CurvilinearRegion`
-directly without first converting it to a keyhole polygon with `to_polygons`. If
-`rel_r` is non-zero the radius of curvature at each vertex is calculated with
+with angles too sharp relative to segment length.
+
+Prefer to round last: apply `Rounded` after clipping operations (`union2d`, `difference2d`, etc.)
+or `offset`, since these materialize the exact circular fillets specified by `Rounded` as large
+numbers of vertices. Even the curve-preserving variants (`union2d_curved`, ...) do the same as an
+intermediate step, so rounding last is still more efficient when possible. If you must round after
+offsetting a curved entity, you may need to increase `min_angle` to avoid tiny fillets at the new
+vertices (try `min_angle=π/8`).
+
+Shapes with interior cuts (keyhole polygons) will be rounded incorrectly; instead, apply `Rounded`
+to the equivalent `ClippedPolygon` or `CurvilinearRegion` directly without first converting it to a
+keyhole polygon with `to_polygons`.
+
+If `rel_r` is non-zero the radius of curvature at each vertex is calculated with
 `rel_r * min(l₁, l₂)` where `l₁` and `l₂` denote the length of the two attached line segments.
 
 Example usage:

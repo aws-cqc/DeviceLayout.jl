@@ -37,6 +37,8 @@ abstract type RouteRule end
 
 Specifies rules for routing from one point to another using straight segments and 90° bends.
 
+Each bend uses the largest feasible radius consistent with `min_bend_radius` and `max_bend_radius`.
+
 If used in a route with waypoints, the route's straight segments pass through the waypoints
 (or a turn begins or ends at a waypoint). In particular, waypoints do not specify
 "corners" where straight segments would intersect given zero turn radius. They only constrain
@@ -51,6 +53,9 @@ are provided, then each must either
   - match the feasible single-bend leg's direction at the corresponding waypoint, or
   - match the direction at the previous waypoint, in which case two opposite turns will be used
     such that the route passes through the midpoint between waypoints.
+
+If `waydirs` or the final direction do not support a feasible route, an error will be thrown with
+a message containing `Could not automatically route to destination with the correct arrival angle`.
 
 The endpoint is treated as another waypoint that always has a direction, so it can be reached in
 one turn or two opposite turns from the last waypoint.
@@ -70,6 +75,8 @@ StraightAnd90(r) = StraightAnd90(min_bend_radius=r, max_bend_radius=r)
 
 Specifies rules for routing from one point to another using using straight segments and 45° bends.
 
+Each bend uses the largest feasible radius consistent with `min_bend_radius` and `max_bend_radius`.
+
 If used in a route with waypoints, the route's straight segments pass through the waypoints
 (or a turn begins or ends at a waypoint). In particular, waypoints do not specify
 "corners" where straight segments would intersect given zero turn radius. They only constrain
@@ -82,10 +89,13 @@ waypoint uniquely determine the bend position and direction of a single-bend rou
 are provided, then each must either
 
   - match the feasible single-bend leg's direction at the corresponding waypoint,
-  - match the feasible single-90°-bend leg's direction, in which case the route takes the shortest
-    path consistent with radius constraints,
+  - differ from the current direction by ±90°, in which case two turns are used, such that the
+    route takes the shortest path consistent with radius constraints,
   - match the direction at the previous waypoint, in which case two opposite turns will be used
     such that the route passes through the midpoint between waypoints.
+
+If `waydirs` or the final direction do not support a feasible route, an error will be thrown with
+a message containing `Could not automatically route to destination with the correct arrival angle`.
 
 The endpoint is treated as another waypoint that always has a direction, so it can be reached in
 one or two turns from the last waypoint.

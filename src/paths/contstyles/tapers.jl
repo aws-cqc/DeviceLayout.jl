@@ -57,7 +57,7 @@ nextstyle(sty::TaperTrace) = Trace(sty.width_end)
         length::T
     end
 
-A CPW with a linearly tapered trace and gap as a function of path length, drawn as its two gap regions.
+A CPW with a linearly tapered trace and gap as a function of path length.
 """
 struct TaperCPW{T <: Coordinate} <: CPW{true}
     trace_start::T
