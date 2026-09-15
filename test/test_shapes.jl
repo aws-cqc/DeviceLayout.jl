@@ -1019,6 +1019,19 @@ end
         # test that no errors thrown with integer arg
         polytext("AaBbCcDdEe", PolyTextSansMono(20μm, GDSMeta(0)))
 
+        # issue #321: glyph cell names must be unique case-insensitively (GDS readers compare
+        # cell names case-insensitively) and must use only GDSII name characters
+        let c = Cell("polytext321", nm)
+            polytext!(c, "AaBbCcDdEe/\\\"'{}αΩ", PolyTextSansMono(20μm, GDSMeta(0)))
+            glyphs = name.(structure.(c.refs))
+            @test allunique(lowercase.(glyphs))
+            @test all(occursin(r"^[A-Za-z0-9_?$]+$", g) && length(g) <= 32 for g in glyphs)
+            @test_logs min_level = Logging.Warn save(
+                joinpath(mktempdir(), "polytext321.gds"),
+                c
+            )
+        end
+
         # issue #42, make sure it works with both Cell and CoordinateSystem
         let fmark = Cell("fmark_1", nm)
             polytext!(

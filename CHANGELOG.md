@@ -6,6 +6,14 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Fixed
+
+  - `polytext!` names glyph cells by Unicode codepoint (e.g. `PolyTextSansMono_U0041`) instead
+    of by the character itself, so upper- and lowercase glyphs no longer produce cell names that
+    collide under the GDS writer's case-insensitive duplicate check, and glyphs for characters
+    outside the GDSII name charset (`/`, `"`, `α`, …) no longer trigger invalid-name warnings
+    on save. (#321)
+
 ## 1.19.0 (2026-09-14)
 
 ### Added
