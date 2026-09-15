@@ -66,7 +66,7 @@
     rd2 = with_test_logger(
         log ->
             log.level == Logging.Warn &&
-                occursin("Non-finite selection tolerance", log.message)
+                occursin("Non-finite `selection_tolerance`", log.message)
     ) do
         return Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]])(difference2d(r1, r2))
     end
@@ -285,14 +285,14 @@
     sty[1] = with_test_logger(
         log ->
             log.level == Logging.Warn &&
-                occursin("Non-finite selection tolerance", log.message)
+                occursin("Non-finite `selection_tolerance`", log.message)
     ) do
         return RelativeRounded(0.5, p0=[Point(2.0μm, 2.0μm), Point(-2.0μm, -2.0μm)])
     end
     sty[1, 1] = with_test_logger(
         log ->
             log.level == Logging.Warn &&
-                occursin("Non-finite selection tolerance", log.message)
+                occursin("Non-finite `selection_tolerance`", log.message)
     ) do
         return RelativeRounded(0.5, p0=[Point(2.0μm, -2.0μm), Point(-2.0μm, 2.0μm)])
     end
@@ -328,7 +328,7 @@
     er = with_test_logger(
         log ->
             log.level == Logging.Warn &&
-                occursin("Non-finite selection tolerance", log.message)
+                occursin("Non-finite `selection_tolerance`", log.message)
     ) do
         return Rotation(90°)(e)
     end
@@ -369,7 +369,7 @@
     sty = with_test_logger(
         log ->
             log.level == Logging.Warn &&
-                occursin("Non-finite selection tolerance", log.message)
+                occursin("Non-finite `selection_tolerance`", log.message)
     ) do
         return Rounded(1.0μm; p0)
     end

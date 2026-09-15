@@ -6,6 +6,17 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Changed
+
+  - Deprecation warnings follow a consistent policy (#300): `Base.depwarn` (visible under
+    `--depwarn=yes`, once per call site) where a spelling is simply going away, and a
+    default-visible `@warn` with `maxlog=1` where there is a new behavior to opt into. The
+    `meshing_parameters` keyword no longer forces its warning past `--depwarn=no` on every
+    `render!`, non-finite `Rounded` `selection_tolerance` no longer warns once per style
+    construction, and every message names the replacement spelling. `layers(::Cell)` no
+    longer shadows the `layers` deprecation, so `layers` now warns and points at
+    `gdslayers` for cells as it already did for other structures.
+
 ### Fixed
 
   - `polytext!` names glyph cells by Unicode codepoint (e.g. `PolyTextSansMono_U0041`) instead

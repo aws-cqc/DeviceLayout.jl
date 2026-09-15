@@ -491,7 +491,7 @@
     selected_rounding = with_test_logger(
         log ->
             log.level == Logging.Warn &&
-                occursin("Non-finite selection tolerance", log.message)
+                occursin("Non-finite `selection_tolerance`", log.message)
     ) do
         return Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]])
     end
@@ -1460,14 +1460,6 @@
             "fragment_geom!(sm, [\"tile00\", \"foo\"], [\"tile01\", \"bar\"], 2, 2): invalid arguments ([\"bar\"], 2)"
         ) SolidModels.fragment_geom!(sm, ["tile00", "foo"], ["tile01", "bar"])) ==
               [(2, 1), (2, 2)]
-
-        # Use of MeshingParameters is deprecated.
-        sm = SolidModel("test", overwrite=true)
-        @test_logs (:warn, "Using `MeshingParameters` is deprecated!") render!(
-            sm,
-            CoordinateSystem("test", nm),
-            meshing_parameters=SolidModels.MeshingParameters()
-        )
     end
 
     @testset "Mesh size modifications" begin
