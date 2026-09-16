@@ -678,10 +678,10 @@ circle_polygon(r, Δθ=10°) =
 function circle(r, α=10°)
     @warn """"
         `circle(r, α)` is deprecated. Use `Circle(r)` or `Circle(center, r)` to create an \
-        exact circle that will be discretized at render time according to rendering keyword \
-        `atol` (default 1nm) or `Δθ` (if provided). To construct the polygon directly, use \
-        `circle_polygon(r, α)`.
-    """
+        exact circle that will be discretized at render time according to rendering keywords \
+        `atol` and `rtol` (default absolute-only 1nm) or `Δθ` (if provided). To construct the \
+        polygon directly, use `circle_polygon(r, α)`.
+    """ maxlog = 1
     return circle_polygon(r, α)
 end
 
@@ -769,10 +769,7 @@ Base.@kwdef struct Rounded{T <: Coordinate} <: GeometryEntityStyle
             throw(ArgumentError("`abs_r` and `rel_r` cannot both be non-zero"))
         end
         if !isempty(p0) && !isfinite(selection_tolerance)
-            # Default-visible rather than `depwarn` because there is a new behavior to opt
-            # into, not just a renamed spelling; `maxlog` keeps a loop that builds many
-            # styles from warning once per construction.
-            @warn "Non-finite `selection_tolerance` is deprecated and will be replaced with `1.0nm`, after which `p0` will only select points within that distance. Pass `selection_tolerance=1.0nm` to opt in now, or pass a tolerance covering the intended selections." maxlog =
+            @warn "Non-finite `selection_tolerance` is deprecated and will be replaced with `1.0nm`, after which `p0` will only select points within that distance. Pass `selection_tolerance=1.0nm` to `Rounded` to opt in to the future default now, or pass a tolerance covering the intended selections." maxlog =
                 1
         end
         return new{T}(

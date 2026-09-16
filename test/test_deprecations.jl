@@ -66,4 +66,8 @@
         @test (@test_deprecated ExamplePDK.filter_params(ExampleRectangleIsland, tr)) ==
               filter_parameters(ExampleRectangleIsland, tr)
     end
+
+    @testset "circle" begin
+        @test_logs (:warn, r"deprecated") match_mode = :any circle(1μm)
+    end
 end
