@@ -1265,114 +1265,63 @@ end
 
         # Test current intended functionality, but note graphical output changes are not breaking
         @testset "> datatype color variants (#306)" begin
-            hue(c) = DeviceLayout.Graphics._rgb_to_hsl(c[1:3]...)[1]
+            G = DeviceLayout.Graphics
+            lch(c) = convert(G.LCHab, G.RGB(c[1], c[2], c[3]))
             hue_dist(a, b) = abs(mod(a - b + 180, 360) - 180)
+            # Fill as seen over the theme background at the fill's own opacity
+            composite(c, bg) = G.RGB((c[4] .* c[1:3] .+ (1 - c[4]) * bg)...)
             opts = Dict{Symbol, Any}()
 
-            # Force a known theme/`layercolors` state
-            @test_logs (:info, r"Color scheme set") DeviceLayout.Graphics.set_theme!(
-                "light"
-            )
-            try
-                # Datatype 0 uses base color
-                base = DeviceLayout.Graphics.fillcolor(opts, GDSMeta(7, 0))
-                @test base == DeviceLayout.Graphics.lcolor(7)
-
-                # Datatypes 0-3 (base plus one pass of each axis) are always distinct and
-                # same-hue, for every layer. Beyond datatype 3, successive passes over the same
-                # axis can legitimately coincide once that axis saturates (e.g. a low-saturation
-                # base color's saturation axis hits its floor at more than one magnitude), so
-                # distinctness is only guaranteed within the first cycle.
+            function check_variants(bg, prefer_darker)
+                n = G.DATATYPE_CYCLE
+                bgc = G.RGB(bg, bg, bg)
                 for l = 0:255
-                    colors =
-                        [DeviceLayout.Graphics.fillcolor(opts, GDSMeta(l, d)) for d = 0:3]
-                    @test length(unique(colors)) == length(colors)
-                    for c in colors
-                        @test isapprox(hue(c), hue(colors[1]); atol=1e-6)
+                    colors = [G.fillcolor(opts, GDSMeta(l, d)) for d = 0:(n - 1)]
+                    base = lch(colors[1])
+                    # One cycle of datatypes is pairwise distinguishable over the background,
+                    # and no variant fades into it
+                    over = [composite(c, bg) for c in colors]
+                    for i = 1:n, j = (i + 1):n
+                        @test G.colordiff(over[i], over[j]) > 3.5
+                    end
+                    for (c, o) in zip(colors, over)
+                        @test G.colordiff(o, bgc) > 6
+                        @test hue_dist(lch(c).h, base.h) < 1
                         @test c[4] == colors[1][4] # alpha preserved
                     end
-                end
-
-                # Hue is preserved well beyond the first cycle too.
-                for d = 4:12
-                    c = DeviceLayout.Graphics.fillcolor(opts, GDSMeta(7, d))
-                    @test isapprox(hue(c), hue(base); atol=1e-6)
-                end
-
-                # Light theme (default): the lightness axis darkens (never lightens further
-                # past the scheme's own maxl_70 bound) and the blend axis moves toward black
-                # (contrast against a light background), both relative to the layer's base
-                # color.
-                for l = 0:255
-                    layer_base = DeviceLayout.Graphics.fillcolor(opts, GDSMeta(l, 0))
-                    base_l = DeviceLayout.Graphics._rgb_to_hsl(layer_base[1:3]...)[3]
-                    base_dist0 = sum(abs, layer_base[1:3])
-                    for d = 1:9
-                        c = DeviceLayout.Graphics.fillcolor(opts, GDSMeta(l, d))
-                        axis = (d - 1) % 3
-                        if axis == 0
-                            @test DeviceLayout.Graphics._rgb_to_hsl(c[1:3]...)[3] <=
-                                  base_l + 1e-9
-                        elseif axis == 2
-                            @test sum(abs, c[1:3]) <= base_dist0 + 1e-9
-                        end
+                    # Colors repeat with the cycle length
+                    @test G.fillcolor(opts, GDSMeta(l, 2n + 3)) == colors[4]
+                    # The first variant moves in the theme's preferred direction unless the
+                    # base is already near that edge of the lightness range
+                    lmin, lmax = G.DATATYPE_LIGHTNESS_RANGE
+                    room = prefer_darker ? base.l - lmin : (100 - lmin) - base.l
+                    if room > (lmax - lmin) / n
+                        @test (lch(colors[2]).l < base.l) == prefer_darker
                     end
                 end
+            end
 
-                # Dark theme: the lightness axis lightens (never darkens further below the
-                # scheme's own minl_30 bound) and the blend axis moves toward white, again
-                # relative to the layer's base color.
-                @test_logs (:info, r"Color scheme set") DeviceLayout.Graphics.set_theme!(
-                    "dark"
-                )
-                for l = 0:255
-                    layer_base = DeviceLayout.Graphics.fillcolor(opts, GDSMeta(l, 0))
-                    base_l = DeviceLayout.Graphics._rgb_to_hsl(layer_base[1:3]...)[3]
-                    base_dist1 = sum(x -> abs(1 - x), layer_base[1:3])
-                    for d = 1:9
-                        c = DeviceLayout.Graphics.fillcolor(opts, GDSMeta(l, d))
-                        axis = (d - 1) % 3
-                        if axis == 0
-                            @test DeviceLayout.Graphics._rgb_to_hsl(c[1:3]...)[3] >=
-                                  base_l - 1e-9
-                        elseif axis == 2
-                            @test sum(x -> abs(1 - x), c[1:3]) <= base_dist1 + 1e-9
-                        end
-                    end
-                end
+            # Force a known theme/`layercolors` state
+            @test_logs (:info, r"Color scheme set") G.set_theme!("light")
+            try
+                # Datatype 0 uses base color
+                @test G.fillcolor(opts, GDSMeta(7, 0)) == G.lcolor(7)
+                check_variants(1.0, true)
 
                 # DemoQPU17's metal_negative = GDSMeta(1, 2): a purple variant of layer 1's
                 # color, rather than the pre-#306 collision with layer 63
                 # (mod(1 + 31*2, 256) == 63), an unrelated green.
-                @test_logs (:info, r"Color scheme set") DeviceLayout.Graphics.set_theme!(
-                    "light"
-                )
-                variant_h = hue(DeviceLayout.Graphics.fillcolor(opts, GDSMeta(1, 2)))
-                @test isapprox(variant_h, hue(DeviceLayout.Graphics.lcolor(1)); atol=1e-6)
-                @test hue_dist(variant_h, hue(DeviceLayout.Graphics.lcolor(63))) > 30
+                variant_h = lch(G.fillcolor(opts, GDSMeta(1, 2))).h
+                @test hue_dist(variant_h, lch(G.lcolor(1)).h) < 1
+                @test hue_dist(variant_h, lch(G.lcolor(63)).h) > 30
 
-                # `theme` selects the palette for one call without touching the global
-                # preference.
-                @test DeviceLayout.Graphics.fillcolor(
-                    Dict{Symbol, Any}(:theme => :dark),
-                    GDSMeta(7, 0)
-                ) == DeviceLayout.Graphics.lcolor(
-                    7,
-                    DeviceLayout.Graphics.DARK_MODE_SCHEME
-                )
-                @test DeviceLayout.Graphics.get_color_scheme() ==
-                      DeviceLayout.Graphics.LIGHT_MODE_SCHEME
-                @test_throws ArgumentError DeviceLayout.Graphics.fillcolor(
-                    Dict{Symbol, Any}(:theme => :sepia),
-                    GDSMeta(7, 0)
-                )
+                @test_logs (:info, r"Color scheme set") G.set_theme!("dark")
+                check_variants(0.0, false)
             finally
-                @test_logs (:info, r"Color scheme set") DeviceLayout.Graphics.set_theme!(
-                    "light"
-                )
+                @test_logs (:info, r"Color scheme set") G.set_theme!("light")
                 Preferences.delete_preferences!(
                     DeviceLayout,
-                    DeviceLayout.Graphics.COLOR_THEME_PREF,
+                    G.COLOR_THEME_PREF,
                     force=true
                 )
             end

@@ -27,6 +27,7 @@ import ..Align: LeftEdge, RightEdge, XCenter, TopEdge, BottomEdge, YCenter
 import FileIO: File, @format_str, stream
 
 using ColorSchemes
+import Colors: RGB, LCHab, colordiff
 using Preferences
 
 # Available color schemes -- Glasbey themes for categorical data
@@ -84,93 +85,62 @@ lcolor(l) = lcolor(l, get_color_scheme())
 # Initialize layercolors with the preferred scheme
 const layercolors = Dict([(i => lcolor(i)) for i = 0:255]...)
 
-function scheme_for_theme(theme)
-    theme_str = string(theme)
-    theme_str ∉ ("light", "dark") &&
-        throw(ArgumentError("theme must be :light or :dark, got: $theme"))
-    return theme_str == "dark" ? DARK_MODE_SCHEME : LIGHT_MODE_SCHEME
-end
+# Datatypes on one layer cycle through this many colors: the layer's base color plus
+# `DATATYPE_CYCLE - 1` lightness levels spread over `DATATYPE_LIGHTNESS_RANGE` (CIELCh L*, for
+# the light theme; mirrored about 50 for the dark theme). The range stops short of the
+# background side so variants keep some contrast against it, and short of the far side so
+# sRGB still has chroma to carry the hue. Fills are drawn at 50% opacity, which roughly halves
+# perceived differences.
+const DATATYPE_CYCLE = 5
+const DATATYPE_LIGHTNESS_RANGE = (15.0, 75.0)
 
-# Convert an (r, g, b) color in [0, 1]^3 to (h, s, l) with h in [0, 360), s, l in [0, 1].
-function _rgb_to_hsl(r, g, b)
-    mx, mn = max(r, g, b), min(r, g, b)
-    l = (mx + mn) / 2
-    Δ = mx - mn
-    Δ == 0 && return (0.0, 0.0, l)
-    s = Δ / (1 - abs(2l - 1))
-    h = if mx == r
-        60 * mod((g - b) / Δ, 6)
-    elseif mx == g
-        60 * ((b - r) / Δ + 2)
-    else
-        60 * ((r - g) / Δ + 4)
+# `convert(RGB, ::LCHab)` silently clamps out-of-gamut channels, which shifts the hue. Detect
+# clipping by round-tripping and, if needed, shrink chroma (bisection) until the color fits in
+# sRGB at the requested lightness and hue.
+function to_srgb(lch::LCHab)
+    fits(c) = colordiff(convert(LCHab, convert(RGB, c)), c) < 0.1
+    fits(lch) && return convert(RGB, lch)
+    lo, hi = 0.0, lch.c
+    for _ = 1:20
+        mid = (lo + hi) / 2
+        fits(LCHab(lch.l, mid, lch.h)) ? (lo = mid) : (hi = mid)
     end
-    return h, s, l
+    return convert(RGB, LCHab(lch.l, lo, lch.h))
 end
-
-# Convert (h, s, l) back to (r, g, b) in [0, 1]^3.
-function _hsl_to_rgb(h, s, l)
-    c = (1 - abs(2l - 1)) * s
-    x = c * (1 - abs(mod(h / 60, 2) - 1))
-    m = l - c / 2
-    r, g, b = if h < 60
-        (c, x, 0.0)
-    elseif h < 120
-        (x, c, 0.0)
-    elseif h < 180
-        (0.0, c, x)
-    elseif h < 240
-        (0.0, x, c)
-    elseif h < 300
-        (x, 0.0, c)
-    else
-        (c, 0.0, x)
-    end
-    return r + m, g + m, b + m
-end
-
-# Step sizes (in normalized HSL / blend units) added per magnitude level in
-# `datatype_variant`. Distinct per axis: for a fully saturated base color (one RGB channel
-# exactly 0, common in the Glasbey scheme), hue-preserving lightness scaling and blending
-# toward black are the same operation up to a scale factor, so a shared step would make the
-# lightness and blend axes produce identical colors at matching magnitudes.
-const DATATYPE_LIGHTNESS_STEP = 0.15
-const DATATYPE_SATURATION_STEP = 0.18
-const DATATYPE_BLEND_STEP = 0.25
 
 """
-    datatype_variant(base, d, scheme)
+    datatype_variant(base, d, prefer_darker)
 
-Derive the fill color for GDS datatype `d` from the `base` color of its layer (i.e. the
-color datatype `0` would get), keeping the same hue so that related datatypes on one layer
-read as variants of each other rather than unrelated categorical colors.
+Derive the fill color for GDS datatype `d` from the `base` color of its layer (the color
+datatype `0` gets), keeping the same CIELCh hue so that datatypes on one layer read as
+variants of each other rather than unrelated categorical colors.
 
-Cycles through changing lightness, saturation, and blending towards background-contrast.
+Colors repeat with period `DATATYPE_CYCLE`. Within a cycle, the remaining datatypes are
+lightness levels spread as evenly as the base color's position in `DATATYPE_LIGHTNESS_RANGE`
+allows, taken first in the preferred direction (darker when `prefer_darker`, i.e. on the
+light theme) and then in the other. Chroma is kept where the sRGB gamut allows.
 """
-function datatype_variant(base, d, scheme)
-    d == 0 && return base
-    r, g, b, a = base
-    k = (d - 1) ÷ 3 + 1
-    axis = (d - 1) % 3
-    darken = scheme == LIGHT_MODE_SCHEME
-    if axis == 0 # lightness: proportional step towards extreme (don't lose hue completely)
-        strength = clamp(k * DATATYPE_LIGHTNESS_STEP, 0.0, 0.9)
-        h, s, l = _rgb_to_hsl(r, g, b)
-        l = darken ? l * (1 - strength) : l + (1 - l) * strength
-        r, g, b = _hsl_to_rgb(h, s, l)
-    elseif axis == 1 # saturation: use floor to keep hue well-defined
-        strength = clamp(k * DATATYPE_SATURATION_STEP, 0.0, 0.9)
-        h, s, l = _rgb_to_hsl(r, g, b)
-        s = clamp(s - strength, 0.05, 1.0)
-        r, g, b = _hsl_to_rgb(h, s, l)
-    else # blend toward background contrast
-        strength = clamp(k * DATATYPE_BLEND_STEP, 0.0, 0.9)
-        target = darken ? 0.0 : 1.0
-        r += (target - r) * strength
-        g += (target - g) * strength
-        b += (target - b) * strength
-    end
-    return (r, g, b, a)
+function datatype_variant(base, d, prefer_darker)
+    slot = mod(d, DATATYPE_CYCLE)
+    slot == 0 && return base
+    lch = convert(LCHab, RGB(base[1], base[2], base[3]))
+    lmin, lmax =
+        prefer_darker ? DATATYPE_LIGHTNESS_RANGE : 100 .- reverse(DATATYPE_LIGHTNESS_RANGE)
+    lmin, lmax = min(lmin, lch.l), max(lmax, lch.l)
+    # Split the levels between the two sides of the base so the smallest gap is as large as
+    # possible.
+    nlevels = DATATYPE_CYCLE - 1
+    gap(n) = min(
+        n == 0 ? Inf : (lch.l - lmin) / n,
+        n == nlevels ? Inf : (lmax - lch.l) / (nlevels - n)
+    )
+    ndown = argmax(gap, 0:nlevels)
+    down = [lch.l - k * (lch.l - lmin) / ndown for k = 1:ndown]
+    up = [lch.l + k * (lmax - lch.l) / (nlevels - ndown) for k = 1:(nlevels - ndown)]
+    first, second = prefer_darker ? (down, up) : (up, down)
+    l = slot <= length(first) ? first[slot] : second[slot - length(first)]
+    rgb = to_srgb(LCHab(l, lch.c, lch.h))
+    return (rgb.r, rgb.g, rgb.b, base[4])
 end
 
 function fillcolor(options, meta)
@@ -180,14 +150,9 @@ function fillcolor(options, meta)
         haskey(colors, meta) && return colors[meta]
         haskey(colors, layer) && return colors[layer]
     end
-    scheme =
-        haskey(options, :theme) ? scheme_for_theme(options[:theme]) : get_color_scheme()
-    base = if haskey(options, :theme)
-        lcolor(mod(layer, length(layercolors)), scheme)
-    else
-        get(layercolors, mod(layer, length(layercolors)), (0.0, 0.0, 0.0, 0.5)) # Fallback in case `layercolors` was given non-consecutive keys
-    end
-    return datatype_variant(base, datatype(meta), scheme)
+    color_index = mod(layer, length(layercolors))
+    base = get(layercolors, color_index, (0.0, 0.0, 0.0, 0.5)) # Fallback in case `layercolors` was given non-consecutive keys
+    return datatype_variant(base, datatype(meta), get_color_scheme() == LIGHT_MODE_SCHEME)
 end
 
 lscale(x::Length, dpi)  = round(Int, NoUnits((x |> inch) * dpi / inch))

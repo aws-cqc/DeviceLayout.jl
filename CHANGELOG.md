@@ -35,11 +35,9 @@ The format of this changelog is based on
     reversed back to the caller's traversal direction, so GDS discretization, stock `render!`, and
     `render_conformal!` all agree on a shared curve.
   - Graphics: datatypes other than `0` on a GDS layer now get a color derived from that
-    layer's base color (same hue, varying lightness, saturation, or blend toward background
-    contrast) instead of an unrelated categorical color from a large index jump. Datatype `0`
-    colors are unchanged. `save`/`show` also accept a per-call `theme` keyword (`:light` or
-    `:dark`) to pick the Glasbey palette for one render without touching the global preference
-    set by `Graphics.set_theme!`.
+    layer's base color (same hue, four evenly spread CIELCh lightness levels, repeating every
+    five datatypes) instead of an unrelated categorical color from a large index jump. Datatype
+    `0` colors are unchanged. (#306)
 
 ## 1.19.0 (2026-09-14)
 

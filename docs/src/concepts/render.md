@@ -102,16 +102,14 @@ and so on. You can save a cell to a graphics file by, e.g. `save("/path/to/file.
     numbers to RGBA tuples. Exact metadata keys allow datatypes on one layer to have different
     colors. For example, `(1.0, 0.0, 0.0, 0.5)` is red with 50% opacity. Layers not given an
     explicit color get one from the Glasbey categorical scheme, keyed by layer number; datatypes
-    other than `0` get a variant of their layer's color (same hue, varying lightness,
-    saturation, or blend toward background contrast) rather than an unrelated color. Layers are
+    other than `0` get a variant of their layer's color with the same hue but a different
+    lightness (stepping darker first on the light theme, lighter first on the dark theme)
+    rather than an unrelated color; the variants repeat every five datatypes. Layers are
     painted in order of ascending `(gdslayer, datatype)`.
   - `background`: `:transparent` (the default), `:white`, `:black`, `nothing`, or an RGB(A)
     tuple with components between zero and one.
   - `bboxes`: Whether to draw yellow bounding boxes around top-level cell arrays or cell
     references (`true`/`false`).
-  - `theme`: `:light` (the default) or `:dark`, selecting the Glasbey scheme used for
-    automatic layer/datatype colors on this call only, without affecting the global preference
-    set by `DeviceLayout.Graphics.set_theme!`.
 
 For example, this produces a high-resolution white-background crop containing only one layer:
 
