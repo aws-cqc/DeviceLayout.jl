@@ -96,6 +96,136 @@ box_selection(::SolidModel, x1, y1, z1, x2, y2, z2; dim=-1, delta=zero(x1)) =
     box_selection(x1, y1, z1, x2, y2, z2; dim=dim, delta=delta) # For use as postrender op
 
 """
+    targeted_fuse!(sm::SolidModel, object_group; bbox=:auto, delta=1e-3 * STP_UNIT, warn=true)
+
+Make the dim-3 physical group `object_group` conformal with the geometry near it. Requires an
+`OpenCascade` kernel.
+
+The fusing region is a bounding box:
+
+  - `bbox=:auto` (default) uses the bounding box of `object_group`, padded by `delta`.
+  - A six-tuple `(xmin, ymin, zmin, xmax, ymax, zmax)` of lengths gives an explicit box, also
+    padded by `delta`. It must intersect `object_group`.
+  - `bbox=nothing` fragments the whole model, exactly like the standard post-render pass.
+
+Every entity of every dimension whose bounding box intersects the region (volumes, but also
+free-standing surfaces and curves such as ports) is submitted to the same three-pass
+fragmentation used by `render!`. Entities outside the region are left untouched and are assumed
+to already be conformal with one another. Like the global pass, fragmentation can retag or drop
+dim-0/1 groups on modified boundaries.
+
+With `warn=true`, a warning is emitted when no other volume lies in the region, and when two
+volumes in the region have overlapping bounding boxes but share no boundary entity (a possible
+pre-existing non-conformal seam that this call will not repair).
+
+Returns the updated dimtags of `object_group`.
+
+!!! note
+
+    The stock `render!` still runs the global fragment after `postrender_ops`, so the pruning
+    only saves work when `targeted_fuse!` is called directly on a finished model or from
+    `render_conformal!` without `fragment_backstop`.
+"""
+function targeted_fuse!(
+    sm::SolidModel{OpenCascade},
+    object_group::Union{String, Symbol};
+    bbox=:auto,
+    delta=1e-3 * STP_UNIT,
+    warn=true
+)
+    gmsh.model.set_current(name(sm))
+    # Validate all keywords before branching on `bbox`. `d` is in STP_UNIT.
+    d = _stp_float(delta)
+    isfinite(d) && d >= 0 ||
+        throw(ArgumentError("targeted_fuse!: delta must be finite and nonnegative"))
+    hasgroup(sm, object_group, 3) || throw(
+        ArgumentError("targeted_fuse!: no dim-3 physical group named \"$object_group\"")
+    )
+    obj = dimtags(sm[object_group, 3])
+    # The group dict can outlive its entities (e.g. consumed by a boolean op).
+    isempty(obj) && throw(
+        ArgumentError(
+            "targeted_fuse!: dim-3 physical group \"$object_group\" has no entities"
+        )
+    )
+
+    if isnothing(bbox)
+        _fragment_three_pass!(sm)
+        return dimtags(sm[object_group, 3])
+    end
+
+    box = _fusion_box(bbox, obj, d)
+    # Diagnostic only; the fragment selects its own entities.
+    neighbors = setdiff(
+        filter(dt -> _boxes_touch(box, bounds3d([dt])), gmsh.model.getEntities(3)),
+        obj
+    )
+    if isempty(neighbors)
+        warn && @warn(
+            "targeted_fuse!: no volume other than \"$object_group\" intersects the fusing " *
+            "region; nothing to fuse. Check `bbox`/`delta` if a neighbour was expected."
+        )
+        return obj
+    end
+    warn && _warn_bbox_overlap_no_boundary(neighbors, d)
+
+    _fragment_three_pass!(sm; box=box)
+    return dimtags(sm[object_group, 3])
+end
+
+targeted_fuse!(::SolidModel, ::Union{String, Symbol}; kwargs...) =
+    throw(ArgumentError("Only OpenCascade kernel supports targeted_fuse!"))
+
+# Region box in STP_UNIT, padded by `d`.
+function _fusion_box(bbox::Symbol, obj, d)
+    bbox === :auto || _invalid_bbox()
+    return bounds3d(obj; delta=d)
+end
+function _fusion_box(bbox::NTuple{6, Any}, obj, d)
+    b = _stp_float.(bbox)
+    all(isfinite, b) ||
+        throw(ArgumentError("targeted_fuse!: bbox coordinates must be finite"))
+    all(b[i] <= b[i + 3] for i = 1:3) || throw(
+        ArgumentError(
+            "targeted_fuse!: bbox minima must not exceed the corresponding maxima"
+        )
+    )
+    box = (b[1] - d, b[2] - d, b[3] - d, b[4] + d, b[5] + d, b[6] + d)
+    # Otherwise neighbours fuse with each other but not with the object.
+    _boxes_touch(box, bounds3d(obj)) ||
+        throw(ArgumentError("targeted_fuse!: bbox does not intersect the object group"))
+    return box
+end
+_fusion_box(bbox, obj, d) = _invalid_bbox()
+_invalid_bbox() = throw(
+    ArgumentError(
+        "targeted_fuse!: bbox must be :auto, nothing, or a 6-tuple " *
+        "(xmin, ymin, zmin, xmax, ymax, zmax)"
+    )
+)
+
+# Overlapping boxes are only a hint: conformal volumes touching along a face, edge, or vertex
+# overlap too. Suspicious pairs are those that overlap yet share no boundary entity.
+function _warn_bbox_overlap_no_boundary(cand, d)
+    bxs = Dict(c => bounds3d([c]; delta=d) for c in cand)
+    pts = Dict(c => _boundary_points(c) for c in cand)
+    for (i, a) in enumerate(cand), b in cand[(i + 1):end]
+        _boxes_touch(bxs[a], bxs[b]) || continue
+        isdisjoint(pts[a], pts[b]) || continue
+        @warn(
+            "targeted_fuse!: bounding boxes of volumes $a and $b overlap but they share no " *
+            "boundary entity — possible pre-existing non-conformal seam near the fusing region " *
+            "(bbox overlap does not guarantee the solids touch)."
+        )
+    end
+    return nothing
+end
+
+# Sharing a point is equivalent to sharing a boundary entity of any dimension.
+_boundary_points(dt::Tuple{Int32, Int32}) =
+    Set(t for (_, t) in gmsh.model.getBoundary([dt], false, false, true))
+
+"""
     translate!(group, dx, dy, dz; copy=true)
     translate!(sm::SolidModel, groupname, dx, dy, dz, groupdim=2; copy=true)
 
@@ -1064,7 +1194,7 @@ end
 
 """
     connected_components(dim::Int, tags::Vector{Int32};
-        detect_non_boundary_contacts=false, 
+        detect_non_boundary_contacts=false,
         non_boundary_contact_tol=0.0)
     connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; kwargs...)
     connected_components(sm::SolidModel, groups, dim=2; kwargs...)

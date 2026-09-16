@@ -1210,12 +1210,26 @@ end
 
 # Adjacent-dimension pairs avoid both exterior boundary loss ([3,2,1], PR #145)
 # and stale OCC bindings when combined ([1,2,3], Gmsh #3446 / issue #172).
-function _fragment_three_pass!(sm::SolidModel)
-    _fragment_and_map!(sm, [0, 1])
-    _fragment_and_map!(sm, [1, 2])
-    _fragment_and_map!(sm, [2, 3])
+# With `box`, each pass uses only entities whose bbox intersects it, rescanned per pass: OCC
+# binds split pieces as new entities while the parent may still reference the original, so
+# walking down from seed volumes would miss them and leave orphans.
+function _fragment_three_pass!(sm::SolidModel; box=nothing)
+    for dims in ([0, 1], [1, 2], [2, 3])
+        _fragment_and_map!(sm, dims; included_entities=_entities_in_box(sm, dims, box))
+    end
     return sm
 end
+
+_entities_in_box(::SolidModel, dims, ::Nothing) = nothing   # all entities of `dims`
+function _entities_in_box(sm::SolidModel, dims, box)
+    gmsh.model.set_current(name(sm))
+    ents = vcat([gmsh.model.get_entities(dim) for dim in dims]...)
+    return filter(dt -> _boxes_touch(box, bounds3d([dt])), ents)
+end
+
+# OCC boxes are loose by ~1e-7 (see `bounds3d`), so touching solids intersect without a tolerance.
+_rect(b) = SpatialIndexing.Rect((b[1], b[2], b[3]), (b[4], b[5], b[6]))
+_boxes_touch(a, b) = SpatialIndexing.intersects(_rect(a), _rect(b))
 
 # Shared orchestrator body called by both `render!` and `render_conformal!`.
 # The two entry points differ only in:
@@ -1437,7 +1451,8 @@ end
 function _fragment_and_map!(
     sm::SolidModel,
     frag_dims;
-    excluded_physical_groups=PhysicalGroup[]
+    excluded_physical_groups=PhysicalGroup[],
+    included_entities=nothing
 )
     gmsh.model.set_current(name(sm))
     # Get the tags of entities in existing groups
@@ -1445,7 +1460,11 @@ function _fragment_and_map!(
         (name, dimtags(pg)) for dim in frag_dims for
         (name, pg) in pairs(dimgroupdict(sm, dim))
     ]
-    allents = vcat([gmsh.model.get_entities(dim) for dim in frag_dims]...)
+    # Restrict fragmentation to a supplied subset when requested.
+    allents =
+        isnothing(included_entities) ?
+        vcat([gmsh.model.get_entities(dim) for dim in frag_dims]...) :
+        collect(included_entities)
 
     # Remove any excluded groups from the fragment.
     if !isempty(excluded_physical_groups)
@@ -1498,11 +1517,17 @@ function _fragment_and_map!(
         kernel(sm).remove(setdiff(allents, frags))
     end
     isempty(entmap) && return _synchronize!(sm)
-    # For each original group,
-    # reassign the group to the fragments its elements were mapped to
+    # Members outside the fragment keep their tags. Groups with members inside are re-added even
+    # when tags were preserved: gmsh drops physical membership on rebuilt entities.
     for (name, dim_tags) in groups
         isempty(dim_tags) && continue
-        sm[name] = vcat((entmap[indexin(dim_tags, allents)])...)
+        idx = indexin(dim_tags, allents)
+        all(isnothing, idx) && continue
+        newtags = Tuple{Int32, Int32}[]
+        for (dt, i) in zip(dim_tags, idx)
+            isnothing(i) ? push!(newtags, dt) : append!(newtags, entmap[i])
+        end
+        sm[name] = newtags
     end
     return _synchronize!(sm)
 end
@@ -1510,7 +1535,8 @@ end
 function _fragment_and_map!(
     ::SolidModel{GmshNative},
     frag_dims;
-    excluded_physical_groups=PhysicalGroup[]
+    excluded_physical_groups=PhysicalGroup[],
+    included_entities=nothing
 ) end
 
 # Assumes `gmsh` has been initialized and the current model has been set beforehand, and that

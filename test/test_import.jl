@@ -298,7 +298,7 @@ end
     gmsh.write(brep)
     gmsh.model.remove()
 
-    # Place the component NOT at the origin: mate it to a Spacer whose far hook is at (100,50)μm.
+    # Place the component not at the origin: mate it to a Spacer whose far hook is at (100,50)μm.
     # A centred cube's centroid follows the component origin, so after mating it must sit at (100,50).
     reset_uniquename!()
     g = SchematicGraph("smc2")
@@ -402,7 +402,7 @@ end
     import DeviceLayout.SolidModels: gmsh, dimtags
     import DeviceLayout: SemanticMeta, GDSMeta, Point, rotation, getx, gety
 
-    # ASYMMETRIC CAD: a 40×10×10 μm bar from the origin. Its centroid (20,5,5) is NOT at the
+    # ASYMMETRIC CAD: a 40×10×10 μm bar from the origin. Its centroid (20,5,5) is not at the
     # component origin, so a rotation actually moves it — orientation is observable (unlike a
     # centred cube). z-centroid is 5.
     _tmp = SolidModel("smcr_author"; overwrite=true)
@@ -599,5 +599,242 @@ end
         gmsh.model.mesh.generate(3)
         _, et, _ = gmsh.model.mesh.getElements(3)
         @test sum(length, et) > 0
+    end
+end
+
+@testitem "targeted_fuse! bounding-box-pruned fusion" setup = [CommonTestSetup] begin
+    using DeviceLayout.SolidModels
+    import DeviceLayout.SolidModels:
+        SolidModel,
+        dimtags,
+        gmsh,
+        targeted_fuse!,
+        _warn_bbox_overlap_no_boundary,
+        _fragment_three_pass!,
+        GmshNative
+    using Unitful: μm
+
+    # A fake "package": two pads (tops at z=10) with a chip resting on them, plus two far-away
+    # boxes the chip never touches. Mirrors a package+chip stitch at (tiny) scale.
+    function build_package(nm)
+        sm = SolidModel(nm; overwrite=true)
+        gmsh.model.set_current(nm)
+        occ = gmsh.model.occ
+        pa = occ.addBox(-40, -40, 0, 30, 30, 10)
+        pb = occ.addBox(10, 10, 0, 30, 30, 10)
+        ch = occ.addBox(-40, -40, 10, 80, 80, 20)   # rests on both pad tops (z=10)
+        f1 = occ.addBox(500, 500, 0, 10, 10, 10)
+        f2 = occ.addBox(-500, -500, 0, 10, 10, 10)
+        occ.synchronize()
+        sm["pad_a"] = [(Int32(3), Int32(pa))]
+        sm["pad_b"] = [(Int32(3), Int32(pb))]
+        sm["chip"]  = [(Int32(3), Int32(ch))]
+        sm["far1"]  = [(Int32(3), Int32(f1))]
+        sm["far2"]  = [(Int32(3), Int32(f2))]
+        return sm
+    end
+    boundary_tags(dts) =
+        Set(abs(t) for (d, t) in gmsh.model.getBoundary(dts, false, false, false))
+    faceset(sm, grp) = boundary_tags(dimtags(sm[grp, 3]))
+    shared(sm, a, b) = length(intersect(faceset(sm, a), faceset(sm, b)))
+    vtags(sm, grp) = Set(t for (d, t) in dimtags(sm[grp, 3]))
+    # Faces on no volume boundary: orphans left by fragmentation, meshed as detached triangles.
+    function orphan_faces(sm)
+        gmsh.model.set_current(SolidModels.name(sm))
+        vf = boundary_tags(gmsh.model.getEntities(3))
+        return [t for (_, t) in gmsh.model.getEntities(2) if !(t in vf)]
+    end
+    function nentities(sm, dim)
+        gmsh.model.set_current(SolidModels.name(sm))
+        return length(gmsh.model.getEntities(dim))
+    end
+    # Tag the chip's bottom (z=10) face before fusing, like a Palace boundary-condition surface.
+    function tag_chip_bottom!(sm)
+        ch = only(dimtags(sm["chip", 3]))
+        function at_z10(dt)
+            bb = gmsh.model.getBoundingBox(dt[1], abs(dt[2]))   # (xmin, ymin, zmin, xmax, ymax, zmax)
+            return bb[3] ≈ 10.0 && bb[6] ≈ 10.0
+        end
+        faces =
+            [(d, abs(t)) for (d, t) in gmsh.model.getBoundary([ch], false, false, false)]
+        sm["chip_bottom"] = filter(at_z10, faces)
+        return nothing
+    end
+    const BOX = (-41μm, -41μm, -1μm, 41μm, 41μm, 31μm)   # chip + both pads, not the far boxes
+
+    @testset "targeted: fuses neighbors, leaves the rest untouched" begin
+        sm = build_package("tf_pruned")
+        far1_before, far2_before = vtags(sm, "far1"), vtags(sm, "far2")
+        targeted_fuse!(sm, "chip"; bbox=BOX)
+        @test shared(sm, "chip", "pad_a") == 1      # conformal interface formed
+        @test shared(sm, "chip", "pad_b") == 1
+        @test shared(sm, "chip", "far1") == 0       # never touched the far boxes
+        @test vtags(sm, "far1") == far1_before      # far entities not re-fragmented
+        @test vtags(sm, "far2") == far2_before
+        gmsh.model.set_current("tf_pruned")
+        gmsh.model.mesh.generate(3)
+        _, et, _ = gmsh.model.mesh.getElements(3)
+        @test sum(length, et) > 0
+        @test minimum(gmsh.model.mesh.getElementQualities(reduce(vcat, et))) > 0.1
+    end
+
+    @testset "targeted matches global: no orphan entities, dim-2 groups land on real faces" begin
+        smg = build_package("tf_global")
+        tag_chip_bottom!(smg)
+        targeted_fuse!(smg, "chip"; bbox=nothing)   # nothing → global fragment
+        @test shared(smg, "chip", "pad_a") == 1
+        @test shared(smg, "chip", "pad_b") == 1
+        @test isempty(orphan_faces(smg))
+        nf_global, nc_global = nentities(smg, 2), nentities(smg, 1)
+
+        for (nm, kw) in (("tf_auto_cmp", (;)), ("tf_box_cmp", (; bbox=BOX)))
+            smt = build_package(nm)
+            tag_chip_bottom!(smt)
+            targeted_fuse!(smt, "chip"; warn=false, kw...)
+            # Same entity counts as the global pass and nothing floating.
+            @test nentities(smt, 2) == nf_global
+            @test nentities(smt, 1) == nc_global
+            @test isempty(orphan_faces(smt))
+            # The pre-tagged bottom face was split into three pieces (pad_a contact, pad_b
+            # contact, remainder), every one of which is a genuine boundary face of the chip.
+            cb = Set(t for (_, t) in dimtags(smt["chip_bottom", 2]))
+            @test length(cb) == 3
+            @test cb ⊆ faceset(smt, "chip")
+        end
+    end
+
+    @testset "free-standing sheet inside the region is fragmented too" begin
+        # A zero-thickness sheet (like a lumped port) in the chip bottom plane, on no volume.
+        function with_sheet(nm)
+            sm = build_package(nm)
+            gmsh.model.set_current(nm)
+            sheet = gmsh.model.occ.addRectangle(-40, -40, 10, 80, 80)
+            gmsh.model.occ.synchronize()
+            sm["sheet"] = [(Int32(2), Int32(sheet))]
+            return sm
+        end
+        smg = with_sheet("tf_sheet_global")
+        targeted_fuse!(smg, "chip"; bbox=nothing)
+        n_global = length(dimtags(smg["sheet", 2]))
+        @test n_global == 3
+
+        smt = with_sheet("tf_sheet_targeted")
+        targeted_fuse!(smt, "chip"; warn=false)
+        sheet_faces = Set(t for (_, t) in dimtags(smt["sheet", 2]))
+        @test length(sheet_faces) == n_global
+        @test sheet_faces ⊆ faceset(smt, "chip")   # every piece is now a chip boundary face
+        @test isempty(orphan_faces(smt))
+    end
+
+    @testset "seam warning" begin
+        sm = SolidModel("tf_warn"; overwrite=true)
+        gmsh.model.set_current("tf_warn")
+        occ = gmsh.model.occ
+        # Two boxes touching only along the edge x = y = 30. Once fragmented they are perfectly
+        # conformal (they share that edge) although their bounding boxes still overlap.
+        e1 = occ.addBox(20, 20, 0, 10, 10, 10)
+        e2 = occ.addBox(30, 30, 0, 10, 10, 10)
+        occ.synchronize()
+        sm["e1"] = [(Int32(3), Int32(e1))]
+        sm["e2"] = [(Int32(3), Int32(e2))]
+        _fragment_three_pass!(sm)
+        # Added after the fragment: two interpenetrating boxes that overlap but share no
+        # topological entity → a genuine non-conformal seam.
+        b1 = occ.addBox(0, 0, 0, 10, 10, 10)
+        b2 = occ.addBox(5, 0, 0, 10, 10, 10)
+        occ.synchronize()
+        @test_logs (:warn,) _warn_bbox_overlap_no_boundary(
+            [(Int32(3), Int32(b1)), (Int32(3), Int32(b2))],
+            0.0
+        )
+        @test_logs _warn_bbox_overlap_no_boundary(
+            vcat(dimtags(sm["e1", 3]), dimtags(sm["e2", 3])),
+            0.0
+        )
+    end
+
+    # A 1D physical group on an edge of `vol_group`, via volume → faces → curves
+    # (getBoundary recursive=true would jump straight to points).
+    function tag_edge!(sm, vol_group, edge_group)
+        pa = [(Int32(3), only(vtags(sm, vol_group)))]
+        faces = gmsh.model.getBoundary(pa, false, false, false)
+        curves = gmsh.model.getBoundary(faces, false, false, false)
+        sm[edge_group] = [(Int32(1), abs(first(curves)[2]))]
+        return nothing
+    end
+
+    @testset "lower-dim groups: far preserved, neighborhood no worse than global" begin
+        # (a) A 1D group far from the box (on far1) is left exactly untouched by targeted fusion.
+        sm = build_package("tf_faredge")
+        tag_edge!(sm, "far1", "far_edge")
+        before = Set(t for (d, t) in dimtags(sm["far_edge", 1]))
+        targeted_fuse!(sm, "chip"; bbox=BOX)
+        @test Set(t for (d, t) in dimtags(sm["far_edge", 1])) == before
+
+        # (b) For an edge inside the fused neighborhood, targeted is no worse than global.
+        # Fragmentation can retag/drop a dim-1 group on a fused boundary under either path.
+        # `dimtags` queries gmsh's current model, so read each result before building the next.
+        sg = build_package("tf_edge_global")
+        tag_edge!(sg, "pad_a", "edge_grp")
+        targeted_fuse!(sg, "chip"; bbox=nothing)
+        n_global = length(dimtags(sg["edge_grp", 1]))
+        st = build_package("tf_edge_targeted")
+        tag_edge!(st, "pad_a", "edge_grp")
+        targeted_fuse!(st, "chip"; bbox=BOX)
+        @test length(dimtags(st["edge_grp", 1])) == n_global
+    end
+
+    @testset "validation and API" begin
+        sm = build_package("tf_valid")
+        # Missing group must error (not silently fall back to a global fragment).
+        @test_throws ArgumentError targeted_fuse!(sm, "nope"; bbox=nothing)
+        # Non-OpenCascade kernel is rejected.
+        smn = SolidModel("tf_native", GmshNative(); overwrite=true)
+        @test_throws ArgumentError targeted_fuse!(smn, "chip")
+        # Symbol group names are accepted and behave like the String form.
+        sm2 = build_package("tf_symbol")
+        @test targeted_fuse!(sm2, :chip; bbox=BOX) == dimtags(sm2["chip", 3])
+        # Targeted selection is the default.
+        sm3 = build_package("tf_auto")
+        far_before = vtags(sm3, "far1")
+        targeted_fuse!(sm3, "chip"; warn=false)
+        @test shared(sm3, "chip", "pad_a") == 1
+        @test shared(sm3, "chip", "pad_b") == 1
+        @test vtags(sm3, "far1") == far_before
+
+        gmsh.model.set_current("tf_valid")
+        @test_throws ArgumentError targeted_fuse!(sm, "chip"; bbox=:invalid)
+        @test_throws ArgumentError targeted_fuse!(sm, "chip"; bbox=(0μm, 1μm))
+        @test_throws ArgumentError targeted_fuse!(
+            sm,
+            "chip";
+            bbox=(1μm, 0μm, 0μm, 0μm, 1μm, 1μm)
+        )
+        # An explicit box that misses the object entirely is a user error, not a no-op.
+        @test_throws ArgumentError targeted_fuse!(
+            sm,
+            "chip";
+            bbox=(100μm, 100μm, 100μm, 110μm, 110μm, 110μm)
+        )
+        # delta is validated regardless of which bbox branch is taken.
+        @test_throws ArgumentError targeted_fuse!(sm, "chip"; delta=-1μm)
+        @test_throws ArgumentError targeted_fuse!(sm, "chip"; delta=-1μm, bbox=nothing)
+        @test_throws ArgumentError targeted_fuse!(sm, "chip"; delta=-1μm, bbox=BOX)
+        # A group whose entities were consumed is caught rather than returning [].
+        gmsh.model.occ.remove(dimtags(sm["chip", 3]))
+        gmsh.model.occ.synchronize()
+        @test_throws ArgumentError targeted_fuse!(sm, "chip")
+    end
+
+    @testset "no neighboring volumes warns and is a no-op" begin
+        sm = SolidModel("tf_isolated"; overwrite=true)
+        gmsh.model.set_current("tf_isolated")
+        vol = gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
+        gmsh.model.occ.synchronize()
+        sm["chip"] = [(Int32(3), Int32(vol))]
+        before = dimtags(sm["chip", 3])
+        @test (@test_logs (:warn,) targeted_fuse!(sm, "chip")) == before
+        @test (@test_logs targeted_fuse!(sm, "chip"; warn=false)) == before
+        @test dimtags(sm["chip", 3]) == before
     end
 end
