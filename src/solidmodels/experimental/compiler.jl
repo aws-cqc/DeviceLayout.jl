@@ -446,7 +446,7 @@ end
 # Same-dimensional inputs produce shared boundary entities at dimension `dim - 1`;
 # mixed-dimensional inputs produce lower-dimensional entities on the higher-dimensional
 # boundary.
-function execute_deferred_interfaces!(sm::SolidModel, interfs::MetaGraphs.MetaDiGraph)
+function realize_interfaces!(sm::SolidModel, interfs::MetaGraphs.MetaDiGraph)
     Graphs.nv(interfs) == 0 && return nothing
 
     dimtag_cache = Dict{Int, Any}()
