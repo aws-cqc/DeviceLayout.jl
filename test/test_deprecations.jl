@@ -54,7 +54,7 @@
             meshing_parameters=SolidModels.MeshingParameters()
         )
         # `apply_size_to_surfaces` has no replacement; it warns and is ignored.
-        @test_deprecated r"`apply_size_to_surfaces` is deprecated" render!(
+        @test_deprecated r"`apply_size_to_surfaces` has no effect" render!(
             sm,
             CoordinateSystem("deprecations", nm),
             meshing_parameters=SolidModels.MeshingParameters(apply_size_to_surfaces=true)
