@@ -206,3 +206,32 @@ end
                halo([A], δ, δ / 2) ≐ difference2d(offset([A], δ), offset([A], δ / 2))
     end
 end
+
+@testitem "GeomLaws O3 fixed: erosion at sharp tips" setup = [CommonTestSetup, LawsSetup] tags =
+    [:geomlaws] begin
+    # Erosion of a convex polygon does not depend on the join type: q ∈ offset(A, −δ)
+    # iff q ∈ A and dist(q, ∂A) ≥ δ, so the inset of a thin triangle is the triangle
+    # bounded by the three inset edges. The phase-2 differential run found Clipper2
+    # misclassifying tips sharper than acos(0.999) ≈ 2.6° in its concavity test: the
+    # inset's tip vertex lands 0.5 δ short of the exact one (a sub-unit-thick sliver,
+    # inside the region tolerance) or, on the second triangle, the inset vanishes for
+    # every join type. Clipper1 is exact on both.
+    for (A, δ, expected) in (
+        (
+            Polygon(Point{Int}[(0, 0), (1000, 0), (0, 40)]),
+            10,
+            Polygon(Point{Int}[(10, 10), (500, 10), (10, 30)])
+        ),
+        (
+            Polygon(Point{Int}[(0, 0), (200, 0), (0, 8)]),
+            3,
+            Polygon(Point{Int}[(3, 3), (50, 3), (3, 5)])
+        )
+    )
+        for j in (Clipper.JoinTypeMiter, Clipper.JoinTypeSquare, Clipper.JoinTypeRound)
+            out = offset([A], -δ; j)
+            @test !isempty(out)
+            @test first(region_within(out, [expected], 2))
+        end
+    end
+end

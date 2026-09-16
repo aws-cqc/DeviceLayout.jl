@@ -96,6 +96,19 @@ end
 height_at(edge, x) =
     edge[1][2] + (x - edge[1][1]) * (edge[2][2] - edge[1][2]) / (edge[2][1] - edge[1][1])
 
+# Squared gap between the bounding boxes of a segment and a point set: zero when they
+# overlap, otherwise a lower bound on the squared distance between the two shapes.
+function box_gap2((a, b, _), pts)
+    gap = zero(Exact)
+    for k = 1:2
+        lo = min(a[k], b[k]) - maximum(p -> p[k], pts)
+        hi = minimum(p -> p[k], pts) - max(a[k], b[k])
+        g = max(lo, hi, zero(Exact))
+        gap += g * g
+    end
+    return gap
+end
+
 # A capsule (segment plus a closed radius-r disk) is convex. If it contains every
 # vertex of a convex cell, it contains the entire cell. Different capsules covering
 # different vertices do NOT suffice; subdivision either proves coverage, finds a
@@ -122,21 +135,35 @@ function cover_triangle(tri, edges, r², remaining, depth=0)
     return (true, nothing)
 end
 
+# The boundary arrangement (cancelled edges and slab events) depends only on the two
+# regions, so callers certifying the same pair at several tolerances can compute it
+# once and pass it in.
+function region_arrangement(X::GridRegion, Y::GridRegion, max_work=1_000_000)
+    remaining = Ref(max_work)
+    edges = boundary_edges(exact_edges(X, Y), remaining)
+    isnothing(edges) && return nothing
+    xs = slab_events(edges, remaining)
+    isnothing(xs) && return nothing
+    return (edges, xs)
+end
+
 function region_certificate(
     X::GridRegion,
     Y::GridRegion,
     tol::Integer;
     subset=false,
-    max_work=1_000_000
+    max_work=1_000_000,
+    arrangement=nothing
 )
     tol >= 0 || throw(ArgumentError("region tolerance must be nonnegative"))
     nvertices(X) + nvertices(Y) <= MAX_VERTICES || return (false, :too_many_vertices)
     canonical_region(X) == canonical_region(Y) && return (true, nothing)
     remaining = Ref(max_work)
-    edges = boundary_edges(exact_edges(X, Y), remaining)
-    isnothing(edges) && return (false, :inconclusive)
-    xs = slab_events(edges, remaining)
-    isnothing(xs) && return (false, :inconclusive)
+    if isnothing(arrangement)
+        arrangement = region_arrangement(X, Y, max_work)
+        isnothing(arrangement) && return (false, :inconclusive)
+    end
+    edges, xs = arrangement
     r² = BigInt(tol)^2
     for i = 1:(length(xs) - 1)
         spend!(remaining, 1 + length(edges)) || return (false, :inconclusive)
@@ -154,13 +181,17 @@ function region_certificate(
             tol == 0 && return (false, (:membership, (x, (y + z) / 2)))
             a, b = (lo, height_at(e, lo)), (hi, height_at(e, hi))
             c, d = (hi, height_at(f, hi)), (lo, height_at(f, lo))
+            # Only edges within tol of the cell can cover any part of it; the
+            # bounding-box gap is a lower bound on the distance, so this keeps a
+            # superset of the candidates and leaves the verdict unchanged.
+            near = filter(g -> box_gap2(g, (a, b, c, d)) <= r², edges)
             # Bisect across the narrow direction first: on the fm lattice a rounding
             # sliver can be 1e11 times longer than it is wide. Longest-edge recursion
             # alone spends its depth budget before separating the two boundary bands.
             l, r = midpoint(a, d), midpoint(b, c)
             for tri in ((a, b, r), (a, r, l), (l, r, c), (l, c, d))
                 iszero(cross2(sub2(tri[2], tri[1]), sub2(tri[3], tri[1]))) && continue
-                result = cover_triangle(tri, edges, r², remaining)
+                result = cover_triangle(tri, near, r², remaining)
                 first(result) || return result
             end
         end
