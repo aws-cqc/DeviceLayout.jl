@@ -6,6 +6,7 @@ function _map_artwork_meta(
     apply_increment::Bool
 )
     return m -> begin
+        m isa LayerRef || return nothing
         source_layer = sourcelayer(m, stack)
         isnothing(source_layer.gds_meta) && return nothing
         apply_increment || return source_layer.gds_meta
@@ -27,7 +28,7 @@ end
         kwargs...
     )
 
-Render `EntityMeta` artwork using the GDS mapping stored in `stack`. Layers with
+Render `LayerRef` artwork using the GDS mapping stored in `stack`. Layers with
 `gds_meta=nothing` are omitted independently of `solidmodel` visibility. Metadata indices
 do not alter datatypes.
 """

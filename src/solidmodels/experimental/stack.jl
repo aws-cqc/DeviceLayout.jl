@@ -102,13 +102,14 @@ function SourceStack(layer_pairs::Pair{Symbol, <:SourceLayer}...; levels)
     return SourceStack(Dict(layer_pairs), Dict(levels))
 end
 
-# Return the source layer identified by a layer symbol or EntityMeta.
+# Return the source layer identified by a layer symbol, layer reference, or locator metadata.
 function sourcelayer(layer::Symbol, stack::SourceStack)
     haskey(stack.layers, layer) ||
         throw(ArgumentError("layer $layer does not exist in source stack"))
     return stack.layers[layer]
 end
-sourcelayer(m::EntityMeta, stack::SourceStack) = sourcelayer(m.layer, stack)
+sourcelayer(meta::Union{LayerRef, LocatorMeta}, stack::SourceStack) =
+    sourcelayer(layer(meta), stack)
 
 # Return the source z coordinate for a layer symbol or SourceLayer.
 function layer_z(layer::SourceLayer, stack::SourceStack)

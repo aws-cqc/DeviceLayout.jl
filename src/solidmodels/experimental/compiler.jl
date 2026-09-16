@@ -1,7 +1,6 @@
 struct PGRecord
     name::String
     layer::Symbol
-    meta::Union{EntityMeta, Nothing}
 end
 
 mutable struct LayerState
@@ -39,7 +38,7 @@ end
 
 Subtract one tool layer, or a grouped tuple or vector of tool layers, from `object`.
 Non-destination inputs remain available unless consumed by adjacent [`Remove`](@ref)
-operations. Generated destination identity collisions are rejected.
+operations. Duplicate internal output PG names are rejected.
 """
 struct Cut{N} <: BooleanOp
     destination::Symbol
@@ -60,12 +59,10 @@ Cut(dest::Symbol, object::Symbol, tools::AbstractVector{Symbol}) =
     Fuse(source)
     Fuse(destination, sources)
 
-Collapse every physical group in one or more source layers into one generated physical
-group in `destination`. Group multiple sources in a tuple or vector. Append to an existing
-destination when it is not a source; include it among the sources to collapse and replace its
-current PGs. Out-of-place sources remain available unless consumed by adjacent [`Remove`](@ref)
-operations. The collapsed result has a new identity and no per-source entity metadata.
-Generated destination identity collisions are rejected.
+Union one or more source layers into `destination`. Group multiple sources in a tuple or
+vector. Append to an existing destination when it is not a source; include it among the
+sources to replace its current geometry. Out-of-place sources remain available unless
+consumed by adjacent [`Remove`](@ref) operations.
 """
 struct Fuse{N} <: BooleanOp
     destination::Symbol
@@ -84,9 +81,9 @@ Fuse(source::Symbol) = Fuse(source, (source,))
     Heal(source)
     Heal(destination, source)
 
-Self-union every physical group in one source layer independently, preserving its identity
-and metadata. In-place healing replaces the source geometry. Assign mode changes only the
-layer-name prefix and preserves the source unless consumed by an adjacent [`Remove`](@ref).
+Heal one source layer. In-place healing replaces its geometry; assign mode writes healed
+geometry to another layer and preserves the source unless consumed by an adjacent
+[`Remove`](@ref).
 """
 struct Heal <: LayerOp
     destination::Symbol
@@ -97,12 +94,10 @@ Heal(source::Symbol) = Heal(source, source)
 """
     Intersect(destination, object, tool)
 
-Compute the intersection of `object` and `tool`. All physical-group pairings are
-intersected independently, so the output can contain up to `|object| × |tool|` physical
-groups. The destination dimension is the lower input dimension. In-place operation consumes
-the replaced OCC input; other inputs remain available unless consumed by adjacent
-[`Remove`](@ref) operations. Object and tool layers must be distinct. Generated destination
-identity collisions are rejected.
+Compute the intersection of `object` and `tool`. The destination dimension is the lower
+input dimension. In-place operation consumes the replaced OCC input; other inputs remain
+available unless consumed by adjacent [`Remove`](@ref) operations. Object and tool layers
+must be distinct.
 """
 struct Intersect <: BooleanOp
     destination::Symbol
@@ -121,7 +116,7 @@ end
 Compute the interface between `object` and `tool`. Same-dimensional inputs produce an
 interface one dimension lower; mixed-dimensional inputs produce an interface at the lower
 input dimension. The destination must differ from both inputs, and every input PG must remain
-available through deferred interface execution. Generated destination identity collisions
+available through deferred interface execution. Duplicate internal output PG names
 are rejected.
 """
 struct GetInterface <: BooleanOp
@@ -235,7 +230,7 @@ end
 Translate `source` by `(dx, dy, dz)`. With `copy=true`, assign an independently addressable
 copy to `destination` and preserve the source. With `copy=false`, `destination` must equal
 `source` and the geometry is translated in place. By default, distinct destinations copy and
-in-place translations move. Generated destination identity collisions are rejected. The
+in-place translations move. Duplicate internal output PG names are rejected. The
 compiler does not check appended copies for geometric overlap.
 """
 struct Translate{X <: Coordinate, Y <: Coordinate, Z <: Coordinate} <: LayerOp
@@ -302,7 +297,7 @@ Remove(source::Symbol; remove_entities::Bool=true) = Remove(source, remove_entit
 
 Sweep `source` through `angle` radians around the axis passing through `origin` in the
 specified axis direction. The one-layer form operates in place. The destination dimension
-is one greater than the source dimension; 3D sources and generated destination identity
+is one greater than the source dimension; 3D sources and duplicate internal output PG-name
 collisions are rejected. The compiler does not check appended revolutions for geometric
 overlap.
 """
@@ -371,12 +366,12 @@ struct _LoweredHeal <: LayerOp
     remove_source::Bool
 end
 
-function initial_registry(metas::AbstractVector{<:EntityMeta}, stack::SourceStack)
+function initial_registry(metas::Set{<:LayerRef}, stack::SourceStack)
     registry = LayerRegistry()
-    for meta in unique(metas)
+    for meta in metas
         source_layer = sourcelayer(meta, stack)
-        (!source_layer.solidmodel || islocator(meta)) && continue
-        record = PGRecord(pgname(meta), meta.layer, meta)
+        source_layer.solidmodel || continue
+        record = PGRecord(string(meta.layer), meta.layer)
         state = get!(registry, meta.layer) do
             return LayerState(PGRecord[], 2)
         end
@@ -779,16 +774,15 @@ function _compile!(cmp::CompilerState, op::Extrude)
     # `keep_interior=false` extrusion) under the generated `:EXTBND_MISC` layer.
     # After the interior solid is subtracted from surrounding volumes by
     # `_flush_interior_solids!`, this boundary becomes an exterior boundary of the final
-    # mesh. Tagging it via `:EXTBND_MISC` lets `_deduplicate_2d_pgs!` split off any sub-PG
-    # whose faces are
-    # exterior-only (or shared with another layer) from sub-PGs whose faces are
-    # purely interior interfaces, avoiding the "mixed boundary attribute" warning
-    # that Palace emits for PGs containing both kinds of faces.
-    function _register_extbnd!(bnd_pg, meta)
+    # mesh. Registering it under `:EXTBND_MISC` as well keeps the sub-PGs that
+    # `_deduplicate_pgs!` splits off (exterior-only faces versus faces shared with
+    # interior interface PGs) cross-referenced from both layers, avoiding the "mixed
+    # boundary attribute" warning that Palace emits for PGs containing both kinds of faces.
+    function _register_extbnd!(bnd_pg)
         if !haskey(cmp.reg, :EXTBND_MISC)
             cmp.reg[:EXTBND_MISC] = LayerState(PGRecord[], 2)
         end
-        return push!(cmp.reg[:EXTBND_MISC].pgs, PGRecord(bnd_pg, :EXTBND_MISC, meta))
+        return push!(cmp.reg[:EXTBND_MISC].pgs, PGRecord(bnd_pg, :EXTBND_MISC))
     end
 
     for record in state.pgs
@@ -811,11 +805,11 @@ function _compile!(cmp::CompilerState, op::Extrude)
                 )
                 push!(cmp.ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
                 push!(get!(cmp.intsol, op.destination, String[]), int_pg)
-                _register_extbnd!(intbnd_pg, record.meta)
+                _register_extbnd!(intbnd_pg)
             else
                 push!(cmp.ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
             end
-            push!(new_records, PGRecord(ext_pg, op.destination, record.meta))
+            push!(new_records, PGRecord(ext_pg, op.destination))
         elseif !source_layer.keep_interior
             # Boundary-only extrusion: extrude to solid, extract boundary, discard interior.
             # The solid is registered for auto-subtraction from surrounding volumes.
@@ -828,14 +822,14 @@ function _compile!(cmp::CompilerState, op::Extrude)
             )
             push!(cmp.ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
             push!(get!(cmp.intsol, op.destination, String[]), ext_pg)
-            push!(new_records, PGRecord(bnd_pg, op.destination, record.meta))
-            _register_extbnd!(bnd_pg, record.meta)
+            push!(new_records, PGRecord(bnd_pg, op.destination))
+            _register_extbnd!(bnd_pg)
         else
             # Standard extrusion: 2D surface → 3D volume
             ext_pg = pg * "__EXN"
             push!(cmp.ops, (ext_pg, SolidModels.extrude_z!, (pg, dz, 2)))
             push!(cmp.ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
-            push!(new_records, PGRecord(ext_pg, op.destination, record.meta))
+            push!(new_records, PGRecord(ext_pg, op.destination))
         end
     end
 
@@ -876,8 +870,7 @@ function _compile!(cmp::CompilerState, op::_LoweredCut)
             )
         end
         push!(compiled, (record, dest_name))
-        mode == :replace_object ||
-            push!(new_records, PGRecord(dest_name, op.destination, nothing))
+        mode == :replace_object || push!(new_records, PGRecord(dest_name, op.destination))
     end
 
     for (idx, (record, dest_name)) in enumerate(compiled)
@@ -895,9 +888,7 @@ function _compile!(cmp::CompilerState, op::_LoweredCut)
 
     if mode == :append
         _require_destination_dimension(cmp.reg, op.destination, dim, "Cut")
-        existing_pgs = [
-            record.name for record in cmp.reg[op.destination].pgs if !islocator(record.meta)
-        ]
+        existing_pgs = [record.name for record in cmp.reg[op.destination].pgs]
         if !isempty(existing_pgs)
             for record in new_records
                 # Keep newly appended PGs disjoint from existing PGs in the same layer.
@@ -958,11 +949,9 @@ function _compile!(cmp::CompilerState, op::_LoweredFuse)
             :remove_object => op.remove_sources
         )
     )
-    new_record = PGRecord(dest_name, op.destination, nothing)
+    new_record = PGRecord(dest_name, op.destination)
     if append_mode
-        existing_pgs = [
-            record.name for record in cmp.reg[op.destination].pgs if !islocator(record.meta)
-        ]
+        existing_pgs = [record.name for record in cmp.reg[op.destination].pgs]
         if !isempty(existing_pgs)
             push!(
                 cmp.ops,
@@ -1019,8 +1008,7 @@ function _compile!(cmp::CompilerState, op::_LoweredHeal)
     new_records = [
         PGRecord(
             _replace_layer_prefix(record.name, op.source, op.destination),
-            op.destination,
-            record.meta
+            op.destination
         ) for record in state.pgs
     ]
     existing_names =
@@ -1045,9 +1033,7 @@ function _compile!(cmp::CompilerState, op::_LoweredHeal)
         )
     end
     if haskey(cmp.reg, op.destination)
-        existing_pgs = [
-            record.name for record in cmp.reg[op.destination].pgs if !islocator(record.meta)
-        ]
+        existing_pgs = [record.name for record in cmp.reg[op.destination].pgs]
         if !isempty(existing_pgs)
             for record in new_records
                 # Ensure added PGs don't have any overlap with existing PGs in the
@@ -1092,9 +1078,7 @@ function _compile!(cmp::CompilerState, op::_LoweredIntersect)
         "Intersect"
     )
     existing_pgs =
-        append_mode ?
-        [record.name for record in cmp.reg[op.destination].pgs if !islocator(record.meta)] :
-        String[]
+        append_mode ? [record.name for record in cmp.reg[op.destination].pgs] : String[]
 
     new_records = PGRecord[]
     for (obj_idx, obj_rec) in enumerate(object_state.pgs)
@@ -1139,7 +1123,7 @@ function _compile!(cmp::CompilerState, op::_LoweredIntersect)
                     )
                 )
             end
-            push!(new_records, PGRecord(dest_name, op.destination, nothing))
+            push!(new_records, PGRecord(dest_name, op.destination))
         end
     end
 
@@ -1159,7 +1143,7 @@ function _compile!(cmp::CompilerState, op::GetInterface)
     obj_dim = obj_state.dim
     tool_dim = tool_state.dim
 
-    new_recs = PGRecord[]
+    new_records = PGRecord[]
     for obj_rec in obj_state.pgs
         for tool_rec in tool_state.pgs
             dest_name =
@@ -1171,11 +1155,12 @@ function _compile!(cmp::CompilerState, op::GetInterface)
                     operation=:get_interface,
                     parameters=(obj_dim, tool_dim)
                 )
-            generated_record_exists(cmp.reg, op.destination, dest_name, new_recs) && throw(
-                ArgumentError(
-                    "GetInterface destination physical group '$dest_name' already exists"
+            generated_record_exists(cmp.reg, op.destination, dest_name, new_records) &&
+                throw(
+                    ArgumentError(
+                        "GetInterface destination physical group '$dest_name' already exists"
+                    )
                 )
-            )
             # All interface calculations are deferred to post-fragmentation. Interfaces of
             # same-dim entities are shared boundary entities (dim-1); interfaces of
             # mixed-dim entities are lo-dim entities on the hi-dim boundary.
@@ -1190,7 +1175,7 @@ function _compile!(cmp::CompilerState, op::GetInterface)
                 obj_rec.layer,
                 tool_rec.layer
             )
-            push!(new_recs, PGRecord(dest_name, op.destination, nothing))
+            push!(new_records, PGRecord(dest_name, op.destination))
         end
     end
 
@@ -1202,9 +1187,9 @@ function _compile!(cmp::CompilerState, op::GetInterface)
        op.destination != op.object &&
        op.destination != op.tool
         _require_destination_dimension(cmp.reg, op.destination, new_dim, "GetInterface")
-        append!(cmp.reg[op.destination].pgs, new_recs)
+        append!(cmp.reg[op.destination].pgs, new_records)
     else
-        cmp.reg[op.destination] = LayerState(new_recs, new_dim)
+        cmp.reg[op.destination] = LayerState(new_records, new_dim)
     end
 
     return nothing
@@ -1263,7 +1248,7 @@ function _compile_unary_layer_op!(
             )
         )
         push!(cmp.ops, lower(dest_name, record))
-        push!(new_records, PGRecord(dest_name, destination, nothing))
+        push!(new_records, PGRecord(dest_name, destination))
     end
 
     if haskey(cmp.reg, destination)
@@ -1301,7 +1286,7 @@ function _compile!(cmp::CompilerState, op::GetBoundary)
         op.destination,
         op.source,
         max(dim - 1, 0);
-        replace=op.destination == op.source,
+        replace=(op.destination == op.source),
         hash_operation=:get_boundary,
         hash_parameters=(
             dim,
@@ -1365,7 +1350,7 @@ function _compile!(cmp::CompilerState, op::Revolve)
         op.destination,
         op.source,
         dim + 1;
-        replace=op.destination == op.source,
+        replace=(op.destination == op.source),
         hash_operation=:revolve,
         hash_parameters=(dim, op.origin, op.axis, op.angle),
         operation_name="Revolve"

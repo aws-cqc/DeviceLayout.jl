@@ -4,7 +4,7 @@
   "title": "DeviceLayout experimental solid-model metadata",
   "type": "object",
   "additionalProperties": false,
-  "required": ["metadata", "physical_groups", "layers", "tagged", "terminals", "ground"],
+  "required": ["metadata", "physical_groups", "layers", "tagged", "ports", "terminals", "ground"],
   "properties": {
     "metadata": {
       "type": "object",
@@ -39,6 +39,10 @@
       "type": "object",
       "additionalProperties": { "$ref": "#/definitions/tagged" }
     },
+    "ports": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/port" }
+    },
     "terminals": {
       "type": "object",
       "additionalProperties": { "$ref": "#/definitions/terminal" }
@@ -54,52 +58,13 @@
       "items": { "type": "string" },
       "uniqueItems": true
     },
-    "role": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["type"],
-      "properties": {
-        "type": {
-          "enum": ["Generic", "Terminal", "Ground", "Tag", "WavePort", "LumpedPort"]
-        },
-        "direction": {
-          "type": "array",
-          "items": { "type": "number" },
-          "minItems": 3,
-          "maxItems": 3
-        }
-      },
-      "allOf": [
-        {
-          "if": { "properties": { "type": { "const": "LumpedPort" } } },
-          "then": { "required": ["direction"] },
-          "else": { "not": { "required": ["direction"] } }
-        }
-      ]
-    },
-    "entity_meta": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["name", "index", "role"],
-      "properties": {
-        "name": { "type": "string" },
-        "index": { "type": "integer" },
-        "role": { "$ref": "#/definitions/role" }
-      }
-    },
     "physical_group": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tag", "dim", "entity_meta"],
+      "required": ["tag", "dim"],
       "properties": {
         "tag": { "type": "integer", "minimum": 1 },
-        "dim": { "type": "integer", "minimum": 0, "maximum": 3 },
-        "entity_meta": {
-          "oneOf": [
-            { "type": "null" },
-            { "$ref": "#/definitions/entity_meta" }
-          ]
-        }
+        "dim": { "type": "integer", "minimum": 0, "maximum": 3 }
       }
     },
     "layer": {
@@ -145,6 +110,24 @@
       "additionalProperties": false,
       "required": ["pgs"],
       "properties": {
+        "pgs": { "$ref": "#/definitions/string_array" }
+      }
+    },
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "index", "type", "layer", "direction", "pgs"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "index": { "type": "integer", "minimum": 1 },
+        "type": { "enum": ["LumpedPort", "WavePort"] },
+        "layer": { "type": "string" },
+        "direction": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
         "pgs": { "$ref": "#/definitions/string_array" }
       }
     },
