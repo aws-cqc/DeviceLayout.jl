@@ -108,10 +108,7 @@ function select!(
         rl.meta isa Union{Tag, Port} || continue
         push!(selections, _select_surface!(sm, registry, rl, bbox_cache))
     end
-    return append!(
-        selections,
-        _select_ccs!(sm, registry, stack, locators, bbox_cache)
-    )
+    return append!(selections, _select_ccs!(sm, registry, stack, locators, bbox_cache))
 end
 
 function _entity_rtree(entity_tags, bbox_cache::Dict{Int32, NTuple{6, Float64}})
@@ -163,7 +160,6 @@ function _layer_entity_tags(sm::SolidModel, registry::LayerRegistry, layer::Symb
     state.dim == 2 || return Set{Int32}()
     tags = Set{Int32}()
     for record in state.pgs
-        SolidModels.hasgroup(sm, record.name, 2) || continue
         union!(tags, SolidModels.entitytags(sm[record.name, 2]))
     end
     return tags

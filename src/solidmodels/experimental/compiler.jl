@@ -510,6 +510,87 @@ function execute_deferred_interfaces!(sm::SolidModel, interfs::MetaGraphs.MetaDi
     return nothing
 end
 
+# Reconcile the registry with the rendered model. Drop records whose PG was never realized
+# (empty operation results, disjoint interfaces) but keep their layer states, and fail if the
+# model holds a PG the registry does not know about. Afterwards, registry records and model
+# PGs correspond one to one.
+function sync_registry!(sm::SolidModel, registry::LayerRegistry)
+    for state in values(registry)
+        pgs = SolidModels.dimgroupdict(sm, state.dim)
+        filter!(record -> haskey(pgs, record.name), state.pgs)
+    end
+    registered = Set((r.name, s.dim) for s in values(registry) for r in s.pgs)
+    unregistered = [
+        (name, dim) for dim = 0:3 for
+        name in keys(SolidModels.dimgroupdict(sm, dim)) if (name, dim) ∉ registered
+    ]
+    isempty(unregistered) || error(
+        "solid model contains physical groups absent from the layer registry: " *
+        join(["'$name' (dimension $dim)" for (name, dim) in unregistered], ", ")
+    )
+    return registry
+end
+
+# Partition entities of dimension `dim` so that each belongs to exactly one PG, as required
+# by Palace (a mesh element may carry only one attribute, and a non-periodic face may not
+# carry multiple boundary elements). Entities are grouped by the exact set of PGs containing
+# them. An entity in a single PG stays there; each set of entities shared by the same
+# combination of PGs is moved into a content-addressed sub-PG that is registered under every
+# layer of every PG in that combination. Because 2D selection PGs created by locator
+# resolution and metal connected components overlap layer PGs, this pass also isolates
+# tagged entities, port surfaces, and connected components.
+function deduplicate_pgs!(sm::SolidModel, registry::LayerRegistry, dim::Int)
+    pgs = SolidModels.dimgroupdict(sm, dim)
+
+    # A PG may be registered under several layers.
+    pg_layers = Dict{String, Set{Symbol}}()
+    for (layer_name, state) in registry
+        state.dim == dim || continue
+        for record in state.pgs
+            push!(get!(Set{Symbol}, pg_layers, record.name), layer_name)
+        end
+    end
+
+    entity_pgs = Dict{Int32, Vector{String}}()
+    for (pg_name, pg) in pgs, t in SolidModels.entitytags(pg)
+        push!(get!(Vector{String}, entity_pgs, t), pg_name)
+    end
+
+    # Sorted PG-name signature → entities shared by exactly those PGs.
+    groups = Dict{Vector{String}, Vector{Int32}}()
+    for (t, names) in entity_pgs
+        length(names) > 1 || continue
+        push!(get!(Vector{Int32}, groups, sort!(names)), t)
+    end
+
+    moved = Dict{String, Set{Int32}}() # original PG → entities moved to sub-PGs
+    for signature in sort!(collect(keys(groups)))
+        tags = sort!(groups[signature])
+        sub_name = "__" * pghash((dim, t) for t in tags)
+        sm[sub_name] = Tuple{Int32, Int32}[(Int32(dim), t) for t in tags]
+        for layer_name in sort!(collect(union((pg_layers[name] for name in signature)...)))
+            push!(registry[layer_name].pgs, PGRecord(sub_name, layer_name))
+        end
+        for name in signature
+            union!(get!(Set{Int32}, moved, name), tags)
+        end
+    end
+
+    for (pg_name, tags) in moved
+        remaining = filter(t -> !(t in tags), SolidModels.entitytags(pgs[pg_name]))
+        if isempty(remaining)
+            SolidModels.gmsh.model.removePhysicalGroups([(dim, pgs[pg_name].grouptag)])
+            delete!(pgs, pg_name)
+            for state in values(registry)
+                filter!(record -> record.name != pg_name, state.pgs)
+            end
+        else
+            sm[pg_name] = Tuple{Int32, Int32}[(Int32(dim), t) for t in remaining]
+        end
+    end
+    return nothing
+end
+
 function pghash(dimtags)
     content = join(sort(["$dim,$tag" for (dim, tag) in dimtags]), "&")
     return bytes2hex(sha1(content))[1:16]
@@ -714,6 +795,13 @@ function compile_ops(
     return cmp.ops, cmp.reg, cmp.dints
 end
 
+# Return every compiled `(name, dim)` PG so the renderer keeps them all and removes the rest.
+function retained_physical_groups(registry::LayerRegistry)
+    return Set(
+        (record.name, state.dim) for state in values(registry) for record in state.pgs
+    )
+end
+
 # Subtract pending interior solids from all 3D volumes in the registry (except the
 # bounding volume if specified), then remove the interior solid PGs (keeping entities
 # so they serve as fragmentation boundaries during `restrict_to_volume!`).
@@ -775,7 +863,7 @@ function _compile!(cmp::CompilerState, op::Extrude)
     # After the interior solid is subtracted from surrounding volumes by
     # `_flush_interior_solids!`, this boundary becomes an exterior boundary of the final
     # mesh. Registering it under `:EXTBND_MISC` as well keeps the sub-PGs that
-    # `_deduplicate_pgs!` splits off (exterior-only faces versus faces shared with
+    # `deduplicate_pgs!` splits off (exterior-only faces versus faces shared with
     # interior interface PGs) cross-referenced from both layers, avoiding the "mixed
     # boundary attribute" warning that Palace emits for PGs containing both kinds of faces.
     function _register_extbnd!(bnd_pg)

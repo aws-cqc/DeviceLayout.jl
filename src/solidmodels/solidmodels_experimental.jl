@@ -24,90 +24,6 @@ include("experimental/serialization.jl")
 using DeviceLayout.SchematicDrivenLayout
 using Logging: with_logger
 
-# Partition entities of dimension `dim` so that each belongs to exactly one PG, as required
-# by Palace (a mesh element may carry only one attribute, and a non-periodic face may not
-# carry multiple boundary elements). Entities are grouped by the exact set of PGs containing
-# them. An entity in a single PG stays there; each set of entities shared by the same
-# combination of PGs is moved into a content-addressed sub-PG that is registered under every
-# layer of every PG in that combination. Because 2D selection PGs created by locator
-# resolution and metal connected components overlap layer PGs, this pass also isolates
-# tagged entities, port surfaces, and connected components.
-function _deduplicate_pgs!(sm::SolidModel, registry::LayerRegistry, dim::Int)
-    pgs = SolidModels.dimgroupdict(sm, dim)
-
-    # A PG may be registered under several layers.
-    pg_layers = Dict{String, Set{Symbol}}()
-    for (layer_name, state) in registry
-        state.dim == dim || continue
-        for record in state.pgs
-            push!(get!(Set{Symbol}, pg_layers, record.name), layer_name)
-        end
-    end
-
-    entity_pgs = Dict{Int32, Vector{String}}()
-    for (pg_name, pg) in pgs, t in SolidModels.entitytags(pg)
-        push!(get!(Vector{String}, entity_pgs, t), pg_name)
-    end
-
-    # Sorted PG-name signature → entities shared by exactly those PGs.
-    groups = Dict{Vector{String}, Vector{Int32}}()
-    for (t, names) in entity_pgs
-        length(names) > 1 || continue
-        push!(get!(Vector{Int32}, groups, sort!(names)), t)
-    end
-
-    moved = Dict{String, Set{Int32}}() # original PG → entities moved to sub-PGs
-    for signature in sort!(collect(keys(groups)))
-        tags = sort!(groups[signature])
-        sub_name = "__" * pghash((dim, t) for t in tags)
-        sm[sub_name] = Tuple{Int32, Int32}[(Int32(dim), t) for t in tags]
-        for layer_name in sort!(collect(union((pg_layers[name] for name in signature)...)))
-            push!(registry[layer_name].pgs, PGRecord(sub_name, layer_name))
-        end
-        for name in signature
-            union!(get!(Set{Int32}, moved, name), tags)
-        end
-    end
-
-    for (pg_name, tags) in moved
-        remaining = filter(t -> !(t in tags), SolidModels.entitytags(pgs[pg_name]))
-        if isempty(remaining)
-            SolidModels.gmsh.model.removePhysicalGroups([(dim, pgs[pg_name].grouptag)])
-            delete!(pgs, pg_name)
-            for state in values(registry)
-                filter!(record -> record.name != pg_name, state.pgs)
-            end
-        else
-            sm[pg_name] = Tuple{Int32, Int32}[(Int32(dim), t) for t in remaining]
-        end
-    end
-    return nothing
-end
-
-# Remove compiler records that not point to a real physical group in the model. Keep empty
-# layer states so their known dimensions remain available to downstream metadata handling.
-function _prune_unrealized_pgs!(sm::SolidModel, registry::LayerRegistry)
-    for state in values(registry)
-        pgs = SolidModels.dimgroupdict(sm, state.dim)
-        filter!(record -> haskey(pgs, record.name), state.pgs)
-    end
-    return registry
-end
-
-function _check_pgs_registered(sm::SolidModel, registry::LayerRegistry)
-    registered =
-        Set((record.name, state.dim) for state in values(registry) for record in state.pgs)
-    unregistered = Tuple{String, Int}[]
-    for dim = 0:3, name in keys(SolidModels.dimgroupdict(sm, dim))
-        (name, dim) in registered || push!(unregistered, (name, dim))
-    end
-    isempty(unregistered) || error(
-        "solid model contains physical groups absent from the layer registry: " *
-        join(["'$name' (dimension $dim)" for (name, dim) in unregistered], ", ")
-    )
-    return nothing
-end
-
 """
     SolidModelTarget(stack)
     SolidModelTarget(stack, operations)
@@ -132,16 +48,6 @@ function _map_meta(target::SolidModelTarget)
         source_layer.solidmodel || return nothing
         return string(meta.layer)
     end
-end
-
-function _retained_physical_groups(reg::LayerRegistry)
-    retained = Set{Tuple{String, Int}}()
-    for state in values(reg)
-        for record in state.pgs
-            push!(retained, (record.name, state.dim))
-        end
-    end
-    return retained
 end
 
 _prefixed(lr::LayerRef, ::String) = lr
@@ -239,7 +145,7 @@ function render!(
             pg_operations, registry, deferred_interfaces =
                 compile_ops(layer_ops, target.stack, registry)
             # Preserve every compiled physical group needed by later finalization passes.
-            retained_groups = _retained_physical_groups(registry)
+            retained_groups = retained_physical_groups(registry)
 
             # Low-level renderer creates and fragments the geometry, then applies
             # the non-interface physical-group operations produced by the compiler.
@@ -256,16 +162,14 @@ function render!(
 
             # Complete global geometry before selecting finalized entities with locators.
             execute_deferred_interfaces!(sm, deferred_interfaces)
-            _prune_unrealized_pgs!(sm, registry)
+            sync_registry!(sm, registry)
             selections = select!(sm, registry, target.stack, locators)
-            # Deduplication registers sub-PGs under the layers of every PG they came from.
-            _check_pgs_registered(sm, registry)
 
             # Partition entities by exact PG membership so each belongs to one PG. Locator
             # selection PGs and metal connected components overlap 2D layer PGs, so this
             # pass also isolates tagged entities, port surfaces, and connected components.
             for dim = 1:3
-                _deduplicate_pgs!(sm, registry, dim)
+                deduplicate_pgs!(sm, registry, dim)
             end
 
             # All geometry and registry mutation is complete; serialization only reads

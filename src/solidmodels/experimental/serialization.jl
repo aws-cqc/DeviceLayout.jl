@@ -45,16 +45,10 @@ function serialize_metadata(
     for (_, state) in registry
         dimension_groups = SolidModels.dimgroupdict(sm, state.dim)
         for record in state.pgs
-            # Skip PGs that do not exist in the solid model (for example, empty deferred
-            # intersections).
-            haskey(dimension_groups, record.name) || continue
-
-            pg_entry = Dict{String, Any}(
+            physical_groups[record.name] = Dict{String, Any}(
                 "tag" => dimension_groups[record.name].grouptag,
                 "dim" => state.dim
             )
-
-            physical_groups[record.name] = pg_entry
         end
     end
 
@@ -72,13 +66,8 @@ function serialize_metadata(
 
     layers_dict = Dict{String, Any}()
     for (layer_name, state) in registry
-        dimension_groups = SolidModels.dimgroupdict(sm, state.dim)
-        pg_names = String[]
-        for record in state.pgs
-            haskey(dimension_groups, record.name) || continue
-            push!(pg_names, record.name)
-        end
-        isempty(pg_names) && continue
+        isempty(state.pgs) && continue
+        pg_names = [record.name for record in state.pgs]
 
         layer_entry = Dict{String, Any}("pgs" => pg_names, "dim" => state.dim)
         if haskey(stack.layers, layer_name)
