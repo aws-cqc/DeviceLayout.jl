@@ -272,7 +272,8 @@ function render!(
             # The flat geometry is the canonical stream of placed annotations.
             locators = resolve_locators(flat, target.stack)
             # Seed compiler state with the physical groups produced directly by artwork.
-            layer_refs = Set{LayerRef}(m for m in element_metadata(flat) if m isa LayerRef)
+            layer_refs =
+                Set{LayerRef}(m for m in element_metadata(flat) if m isa LayerRef)
             registry = initial_registry(layer_refs, target.stack)
             # Prepend required source-layer extrusions to the user-supplied operation schedule.
             layer_ops = vcat(extrusions(target.stack, registry), target.ops)
@@ -334,97 +335,6 @@ function render!(
         end
         sch.logger.stage = previous_logger_stage
     end
-end
-
-# Replace chopped 2D PGs with a smaller human-readable set derived from serialized layer
-# assignments. The result is for visualization only and is not Palace-compatible because
-# entities can belong to multiple PGs.
-function remap_to_visualization_pgs!(sm::SolidModel, metadata::AbstractDict)
-    layers = get(metadata, "layers", Dict{String, Any}())
-    terminals = get(metadata, "terminals", Dict{String, Any}())
-    ground = get(metadata, "ground", Dict{String, Any}())
-    tagged = get(metadata, "tagged", Dict{String, Any}())
-
-    # Helper: union of entity tags across a list of chopped 2D PG names.
-    function _union_entity_tags(pg_names)
-        entity_tags = Set{Int32}()
-        for pg_name in pg_names
-            SolidModels.hasgroup(sm, pg_name, 2) || continue
-            for t in SolidModels.entitytags(sm[pg_name, 2])
-                push!(entity_tags, t)
-            end
-        end
-        return entity_tags
-    end
-
-    # Track which chopped PGs were absorbed and should be removed at the end.
-    absorbed = Set{String}()
-
-    # Pass 1: layers (skip METAL_CC and 3D layers).
-    for (layer_name, layer_data) in layers
-        layer_name == "METAL_CC" && continue
-        get(layer_data, "dim", 2) == 2 || continue
-        pg_names = get(layer_data, "pgs", String[])
-        entity_tags = _union_entity_tags(pg_names)
-        isempty(entity_tags) && continue
-        sm[layer_name] = [(Int32(2), t) for t in sort!(collect(entity_tags))]
-        union!(absorbed, pg_names)
-    end
-
-    # Pass 2: terminals (one PG per CC, named after its terminals).
-    for (cc_name, cc_data) in terminals
-        pg_names = get(cc_data, "pgs", String[])
-        terminal_names = get(cc_data, "locators", String[])
-        if isempty(terminal_names)
-            @warn "Terminal CC '$cc_name' has no terminals; skipping in viz remap."
-            continue
-        end
-        if isempty(pg_names)
-            @warn "Terminal CC '$cc_name' has no PGs; skipping in viz remap."
-            continue
-        end
-        entity_tags = _union_entity_tags(pg_names)
-        isempty(entity_tags) && continue
-        new_name = "TERMINAL_" * join(terminal_names, "+")
-        sm[new_name] = [(Int32(2), t) for t in sort!(collect(entity_tags))]
-        union!(absorbed, pg_names)
-    end
-
-    # Pass 3: ground (single GROUND PG covering all ground CCs).
-    ground_entity_tags = Set{Int32}()
-    for (cc_name, cc_data) in ground
-        pg_names = get(cc_data, "pgs", String[])
-        if isempty(pg_names)
-            @warn "Ground CC '$cc_name' has no PGs; skipping in viz remap."
-            continue
-        end
-        union!(ground_entity_tags, _union_entity_tags(pg_names))
-        union!(absorbed, pg_names)
-    end
-    if !isempty(ground_entity_tags)
-        sm["GROUND"] = [(Int32(2), t) for t in sort!(collect(ground_entity_tags))]
-    end
-
-    # Pass 4: tagged (one PG per tag, named TAG_<tag_name>).
-    for (tag_name, tag_data) in tagged
-        pg_names = get(tag_data, "pgs", String[])
-        if isempty(pg_names)
-            @warn "Tag '$tag_name' has no PGs; skipping in viz remap."
-            continue
-        end
-        entity_tags = _union_entity_tags(pg_names)
-        isempty(entity_tags) && continue
-        sm["TAG_" * tag_name] = [(Int32(2), t) for t in sort!(collect(entity_tags))]
-        union!(absorbed, pg_names)
-    end
-
-    # Remove the absorbed chopped PGs (record only, leaving entities alone).
-    for pg_name in absorbed
-        SolidModels.hasgroup(sm, pg_name, 2) || continue
-        SolidModels.remove_group!(sm, pg_name, 2; recursive=false, remove_entities=false)
-    end
-
-    return sm
 end
 
 end # module SolidModelsExperimental
