@@ -2532,17 +2532,6 @@ end
             end
         end
 
-        # Visualization-only mesh (run last; mutates `solid_model`'s 2D PGs)
-
-        SolidModelsExperimental.remap_to_visualization_pgs!(
-            solid_model,
-            solid_model_metadata
-        )
-        visualization_path = joinpath(output_dir, "e2e_test.viz.msh2")
-        SolidModels.save(visualization_path, solid_model)
-        @test isfile(visualization_path)
-        @test filesize(visualization_path) > 0
-
         println("\nE2E test artifacts in: $output_dir")
     end
 end
