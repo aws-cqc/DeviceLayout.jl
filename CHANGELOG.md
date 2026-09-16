@@ -6,6 +6,24 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - `SolidModels.import_solid!` imports an external CAD solid (STEP, BREP, or IGES) into a
+    `SolidModel`, positioned by an in-plane `ScaledIsometry`, a `z` offset, and an optional
+    uniform `scale`, and registers it as a physical group. Requires the `OpenCascade` kernel.
+    Can also be used as a postrender operation.
+  - `SolidModelComponent` (exported from `SchematicDrivenLayout`) places an imported CAD solid
+    in a schematic. It emits no 2D geometry; during solid-model rendering it contributes an
+    `import_solid!` operation at its solved transform and the z of its layer. `hooks` supplies
+    named mate points, defaulting to a `compass` at the CAD origin.
+  - `SolidModels.partition_material_groups!` and the `material_precedence` keyword of `render!`
+    and `render_conformal!` make the listed physical groups mutually exclusive by priority
+    after fragmentation, so each entity belongs to exactly one material group.
+    `render_conformal!` requires `fragment_backstop=true` when `material_precedence` is nonempty.
+  - `SolidModels.targeted_fuse!` makes a dim-3 physical group (e.g. an imported CAD part)
+    conformal with nearby geometry by fragmenting only the entities inside a bounding box,
+    instead of the whole model.
+
 ### Changed
 
   - Deprecation warnings follow a consistent policy (#300): `Base.depwarn` (visible under
@@ -106,7 +124,7 @@ The format of this changelog is based on
     capping width-only output at 288 pixels high. If neither is supplied, the maximum dimension is capped at 4 inches. Reference bounding boxes render again, and GDS layers
     above 255 receive palette colors instead of all falling back to black.
   - Path termination and `SimpleNoRender` halos now use constant-offset edges instead of the generic
-    functional-offset fallback. The rendered discretization of these halos on curves may change but 
+    functional-offset fallback. The rendered discretization of these halos on curves may change but
     will be geometrically equivalent within tolerance.
   - `SolidModels.revolve!` now accepts unitful axis points and directions, converting point
     coordinates to the solid-model unit and direction components to a common unit. Unitless
