@@ -53,10 +53,12 @@ using ..SolidModels:
     kernel,
     STP_UNIT,
     POINT_MERGE_ATOL,
+    PointsCache,
     _render_orchestrator!,
     _fragment_three_pass!,
     _add_curve!,
-    _get_or_add_point!
+    _get_or_add_point!,
+    _synchronize!
 import DeviceLayout
 import DeviceLayout:
     AbstractCoordinateSystem,
@@ -72,14 +74,17 @@ import DeviceLayout:
     gety,
     points,
     coordinatetype,
-    onenanometer
+    onenanometer,
+    layer,
+    layername
 import DeviceLayout.Paths: bspline_approximation, pathlength
 import DeviceLayout.Polygons: center, r1, r2, angle, iscircle
 import Unitful: ustrip, Length, @u_str, °
 import SpatialIndexing
 import SpatialIndexing: RTree
 
-export render_conformal!, ConformalRenderContext, add_conformal_loop!
+export render_conformal!,
+    render_conformal_groups!, ConformalRenderContext, add_conformal_loop!
 
 """
 Entry in `endpoint_curve_index`: the signed OCC tag of the curve, plus a
@@ -886,6 +891,78 @@ function render_conformal!(
         (fragment!)=fragment_backstop ? _fragment_three_pass! : (_) -> nothing,
         kwargs...
     )
+end
+
+"""
+    render_conformal_groups!(sm, groups; zmap=nothing, map_meta=layername,
+                             context=ConformalRenderContext(), atol=nothing) -> Dict{String, Vector{Int32}}
+
+Emit pre-formed 2D region groups into `sm` through the conformal edge cache, one
+physical group per distinct output name.
+
+`groups` is a mapping from a key to an iterable of [`CurvilinearRegion`](@ref)s
+(the metal / device geometry for that key, already formed by any 2D boolean
+preprocessing). The key is typically a [`SemanticMeta`](@ref), but any key type
+works. `map_meta(key)` produces the physical-group name (a `String`) for a key,
+or `nothing` to skip it; the default `layername` uses the key's layer name.
+`zmap(key)` gives the z-plane for a key's regions (default: `0` in the region
+coordinate type). Keys that map to the same name merge into one physical group.
+
+Unlike [`render_conformal!`](@ref), this does **no** noding: the caller is
+responsible for making shared boundaries conformal beforehand (e.g. with
+[`split_t_junctions!`](@ref)) so that adjacent groups' shared edges carry
+identical vertex sequences. The same edge cache and preconditions as
+`render_conformal!` apply — no overlapping regions within the emitted set, and
+shared curves must share endpoints.
+
+Returns a `Dict` from physical-group name to the OCC surface tags emitted for it.
+"""
+function render_conformal_groups!(
+    sm::SolidModel,
+    groups::AbstractDict;
+    zmap=nothing,
+    map_meta=layername,
+    context::ConformalRenderContext=ConformalRenderContext(),
+    atol=nothing
+)
+    k = kernel(sm)
+    k isa OpenCascade || error(
+        "render_conformal_groups! is only implemented for OpenCascade kernel; " *
+        "got $(typeof(k)). Use render! instead."
+    )
+    points_cache = PointsCache()
+    # Accumulate by NAME, not by key: several keys (e.g. indexed or levelwise
+    # SemanticMeta) may map to the same physical-group name and must merge.
+    group_tags = Dict{String, Vector{Int32}}()
+    for (key, regions) in groups
+        name = map_meta(key)
+        isnothing(name) && continue
+        isempty(regions) && continue
+        z = isnothing(zmap) ? zero(coordinatetype(first(regions))) : zmap(key)
+        tags = get!(group_tags, string(name), Int32[])
+        for region in regions
+            loop_atol = isnothing(atol) ? onenanometer(coordinatetype(region)) : atol
+            outer = _add_conformal_loop!(
+                context,
+                region.exterior,
+                k,
+                z;
+                points_cache,
+                atol=loop_atol
+            )
+            holes = [
+                _add_conformal_loop!(context, h, k, z; points_cache, atol=loop_atol) for
+                h in region.holes
+            ]
+            push!(tags, Int32(k.add_plane_surface([outer; holes...])))
+        end
+    end
+    _synchronize!(sm)
+    for (name, tags) in group_tags
+        isempty(tags) && continue
+        sm[name] = [(Int32(2), t) for t in tags]
+    end
+    return group_tags
 end
 
 end # module ConformalRender
