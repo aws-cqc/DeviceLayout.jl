@@ -1,0 +1,80 @@
+name: Benchmark SolidModel
+
+# Manual only: the QPU17 render takes tens of minutes. Compares a head ref against a base
+# ref in the same job so both run on the same runner, then uploads the JSON results and the
+# markdown comparison as artifacts. See benchmark/solidmodel/README.md.
+on:
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: "Base git ref to compare against (empty = single run, no comparison)"
+        required: false
+        default: "main"
+      workload:
+        description: "Workload"
+        required: true
+        default: "single_transmon"
+        type: choice
+        options:
+          - single_transmon
+          - qpu17
+          - both
+      options:
+        description: "Extra options passed to the run scripts (e.g. --order=2 --scales=1.0,0.5)"
+        required: false
+        default: "--order=1 --scales=1.0 --save-geometry"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v3
+      - name: Instantiate benchmark environment
+        run: julia --project=benchmark -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+      - name: Run head
+        env:
+          WORKLOAD: ${{ inputs.workload }}
+          OPTIONS: ${{ inputs.options }}
+        run: |
+          mkdir -p results
+          for w in $([ "$WORKLOAD" = both ] && echo "single_transmon qpu17" || echo "$WORKLOAD"); do
+            julia --project=benchmark benchmark/solidmodel/run_$w.jl $OPTIONS --out=results/$w-head.json 2>&1 | { grep -v '^Info    :' || true; }
+          done
+      - name: Run base
+        if: ${{ inputs.base_ref != '' }}
+        env:
+          WORKLOAD: ${{ inputs.workload }}
+          OPTIONS: ${{ inputs.options }}
+          BASE_REF: ${{ inputs.base_ref }}
+        run: |
+          # The harness (benchmark/solidmodel) stays at head; only the package under test moves.
+          git worktree add ../base "$BASE_REF"
+          julia --project=benchmark -e 'using Pkg; Pkg.develop(PackageSpec(path="../base")); Pkg.instantiate()'
+          for w in $([ "$WORKLOAD" = both ] && echo "single_transmon qpu17" || echo "$WORKLOAD"); do
+            julia --project=benchmark benchmark/solidmodel/run_$w.jl $OPTIONS --out=results/$w-base.json 2>&1 | { grep -v '^Info    :' || true; }
+          done
+      - name: Compare
+        if: ${{ inputs.base_ref != '' }}
+        env:
+          WORKLOAD: ${{ inputs.workload }}
+        run: |
+          status=0
+          for w in $([ "$WORKLOAD" = both ] && echo "single_transmon qpu17" || echo "$WORKLOAD"); do
+            julia --project=benchmark benchmark/solidmodel/compare.jl results/$w-base.json results/$w-head.json | tee results/$w-comparison.md || status=1
+            cat results/$w-comparison.md >> "$GITHUB_STEP_SUMMARY"
+          done
+          exit $status
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: solidmodel-benchmark
+          path: results/
