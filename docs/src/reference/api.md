@@ -298,6 +298,7 @@ See [Shapes](./shapes.md).
     SolidModels.attributes
     SolidModels.to_primitives
     render!(::SolidModel, ::CoordinateSystem; kwargs...)
+    SolidModels.import_solid!
     SolidModels.save(::File, ::SolidModel)
 ```
 
@@ -321,6 +322,7 @@ See [Shapes](./shapes.md).
     SolidModels.fragment_geom!
     SolidModels.get_boundary
     SolidModels.intersect_geom!
+    SolidModels.partition_material_groups!
     SolidModels.remove_group!
     SolidModels.restrict_to_volume!
     SolidModels.revolve!
