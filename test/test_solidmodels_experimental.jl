@@ -1037,7 +1037,7 @@ end
         @test length(reg[:results].pgs) == 4 # speculative compiler records
         reg[:empty_results] = LayerState([PGRecord("unrealized", :empty_results)], 2)
         SolidModels._postrender!(sm, ops)
-        SolidModelsExperimental._prune_unrealized_pgs!(sm, reg)
+        SolidModelsExperimental.sync_registry!(sm, reg)
         @test length(reg[:results].pgs) == 1
         @test haskey(reg, :empty_results)
         @test isempty(reg[:empty_results].pgs)
@@ -1797,14 +1797,14 @@ end
         SolidModels.gmsh.model.occ.synchronize()
         sm["surface"] = [(Int32(2), Int32(tag))]
 
+        # A model PG absent from the registry is an error; an unrealized record is pruned.
         registry = LayerRegistry()
-        @test_throws ErrorException SolidModelsExperimental._check_pgs_registered(
-            sm,
-            registry
-        )
+        @test_throws ErrorException SolidModelsExperimental.sync_registry!(sm, registry)
 
-        registry[:surface] = LayerState([PGRecord("surface", :surface)], 2)
-        @test isnothing(SolidModelsExperimental._check_pgs_registered(sm, registry))
+        registry[:surface] =
+            LayerState([PGRecord("surface", :surface), PGRecord("missing", :surface)], 2)
+        SolidModelsExperimental.sync_registry!(sm, registry)
+        @test only(registry[:surface].pgs).name == "surface"
     end
 end
 
@@ -2042,7 +2042,7 @@ end
         ),
         :b => LayerState([PGRecord("e2", :b)], 2)
     )
-    SolidModelsExperimental._deduplicate_pgs!(sm, registry, 2)
+    SolidModelsExperimental.deduplicate_pgs!(sm, registry, 2)
 
     pgs = SolidModels.dimgroupdict(sm, 2)
     # Every entity belongs to exactly one PG.
