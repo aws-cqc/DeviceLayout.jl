@@ -84,6 +84,95 @@ lcolor(l) = lcolor(l, get_color_scheme())
 # Initialize layercolors with the preferred scheme
 const layercolors = Dict([(i => lcolor(i)) for i = 0:255]...)
 
+function scheme_for_theme(theme)
+    theme_str = string(theme)
+    theme_str ∉ ("light", "dark") &&
+        throw(ArgumentError("theme must be :light or :dark, got: $theme"))
+    return theme_str == "dark" ? DARK_MODE_SCHEME : LIGHT_MODE_SCHEME
+end
+
+# Convert an (r, g, b) color in [0, 1]^3 to (h, s, l) with h in [0, 360), s, l in [0, 1].
+function _rgb_to_hsl(r, g, b)
+    mx, mn = max(r, g, b), min(r, g, b)
+    l = (mx + mn) / 2
+    Δ = mx - mn
+    Δ == 0 && return (0.0, 0.0, l)
+    s = Δ / (1 - abs(2l - 1))
+    h = if mx == r
+        60 * mod((g - b) / Δ, 6)
+    elseif mx == g
+        60 * ((b - r) / Δ + 2)
+    else
+        60 * ((r - g) / Δ + 4)
+    end
+    return h, s, l
+end
+
+# Convert (h, s, l) back to (r, g, b) in [0, 1]^3.
+function _hsl_to_rgb(h, s, l)
+    c = (1 - abs(2l - 1)) * s
+    x = c * (1 - abs(mod(h / 60, 2) - 1))
+    m = l - c / 2
+    r, g, b = if h < 60
+        (c, x, 0.0)
+    elseif h < 120
+        (x, c, 0.0)
+    elseif h < 180
+        (0.0, c, x)
+    elseif h < 240
+        (0.0, x, c)
+    elseif h < 300
+        (x, 0.0, c)
+    else
+        (c, 0.0, x)
+    end
+    return r + m, g + m, b + m
+end
+
+# Step sizes (in normalized HSL / blend units) added per magnitude level in
+# `datatype_variant`. Distinct per axis: for a fully saturated base color (one RGB channel
+# exactly 0, common in the Glasbey scheme), hue-preserving lightness scaling and blending
+# toward black are the same operation up to a scale factor, so a shared step would make the
+# lightness and blend axes produce identical colors at matching magnitudes.
+const DATATYPE_LIGHTNESS_STEP = 0.15
+const DATATYPE_SATURATION_STEP = 0.18
+const DATATYPE_BLEND_STEP = 0.25
+
+"""
+    datatype_variant(base, d, scheme)
+
+Derive the fill color for GDS datatype `d` from the `base` color of its layer (i.e. the
+color datatype `0` would get), keeping the same hue so that related datatypes on one layer
+read as variants of each other rather than unrelated categorical colors.
+
+Cycles through changing lightness, saturation, and blending towards background-contrast.
+"""
+function datatype_variant(base, d, scheme)
+    d == 0 && return base
+    r, g, b, a = base
+    k = (d - 1) ÷ 3 + 1
+    axis = (d - 1) % 3
+    darken = scheme == LIGHT_MODE_SCHEME
+    if axis == 0 # lightness: proportional step towards extreme (don't lose hue completely)
+        strength = clamp(k * DATATYPE_LIGHTNESS_STEP, 0.0, 0.9)
+        h, s, l = _rgb_to_hsl(r, g, b)
+        l = darken ? l * (1 - strength) : l + (1 - l) * strength
+        r, g, b = _hsl_to_rgb(h, s, l)
+    elseif axis == 1 # saturation: use floor to keep hue well-defined
+        strength = clamp(k * DATATYPE_SATURATION_STEP, 0.0, 0.9)
+        h, s, l = _rgb_to_hsl(r, g, b)
+        s = clamp(s - strength, 0.05, 1.0)
+        r, g, b = _hsl_to_rgb(h, s, l)
+    else # blend toward background contrast
+        strength = clamp(k * DATATYPE_BLEND_STEP, 0.0, 0.9)
+        target = darken ? 0.0 : 1.0
+        r += (target - r) * strength
+        g += (target - g) * strength
+        b += (target - b) * strength
+    end
+    return (r, g, b, a)
+end
+
 function fillcolor(options, meta)
     layer = gdslayer(meta)
     if haskey(options, :layercolors)
@@ -91,8 +180,14 @@ function fillcolor(options, meta)
         haskey(colors, meta) && return colors[meta]
         haskey(colors, layer) && return colors[layer]
     end
-    color_index = mod(layer + 31 * datatype(meta), length(layercolors))
-    return get(layercolors, color_index, (0.0, 0.0, 0.0, 0.5)) # Fallback in case `layercolors` was given non-consecutive keys
+    scheme =
+        haskey(options, :theme) ? scheme_for_theme(options[:theme]) : get_color_scheme()
+    base = if haskey(options, :theme)
+        lcolor(mod(layer, length(layercolors)), scheme)
+    else
+        get(layercolors, mod(layer, length(layercolors)), (0.0, 0.0, 0.0, 0.5)) # Fallback in case `layercolors` was given non-consecutive keys
+    end
+    return datatype_variant(base, datatype(meta), scheme)
 end
 
 lscale(x::Length, dpi)  = round(Int, NoUnits((x |> inch) * dpi / inch))
