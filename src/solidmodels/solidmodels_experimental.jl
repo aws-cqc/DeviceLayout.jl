@@ -50,23 +50,22 @@ function _map_meta(target::SolidModelTarget)
     end
 end
 
-_prefixed(lr::LayerRef, ::String) = lr
-_prefixed(lm::Ground, ::String) = lm
-_prefixed(lm::Terminal, p::String) = Terminal(lm.layer, p * "." * lm.name)
-_prefixed(lm::Tag, p::String) = Tag(lm.layer, p * "." * lm.name)
-_prefixed(lm::P, p::String) where {P <: Port} = P(lm.layer, p * "." * lm.name, lm.index)
-_prefixed(m::DeviceLayout.Meta, ::String) = m
+# Qualify a locator name with the id of the graph node that places it, e.g. `q1.island`.
+_qualified(lm::Terminal, id::String) = Terminal(lm.layer, id * "." * lm.name)
+_qualified(lm::Tag, id::String) = Tag(lm.layer, id * "." * lm.name)
+_qualified(lm::P, id::String) where {P <: Port} = P(lm.layer, id * "." * lm.name, lm.index)
+_qualified(m::DeviceLayout.Meta, ::String) = m
 
-# Create placement-specific metadata copies under each graph node. Apply a node prefix
-# recursively within its component geometry, while child graph nodes receive their own
-# stable prefix. This implements the v1 top-level prefix contract.
-function _prefix_placement_names!(sch::Schematic)
+# Qualify locator names on placement-specific metadata copies under each graph node. The
+# node id applies recursively within its component geometry, while child graph nodes
+# receive their own. This implements the v1 top-level prefix contract.
+function _qualify_locator_names!(sch::Schematic)
     ref_to_node_id = IdDict{Any, String}(ref => node.id for (node, ref) in sch.ref_dict)
     for (node, node_ref) in sch.ref_dict
         node_cs = structure(node_ref)
         metadata = element_metadata(node_cs)
         for i in eachindex(metadata)
-            metadata[i] = _prefixed(metadata[i], node.id)
+            metadata[i] = _qualified(metadata[i], node.id)
         end
         for (i, ref) in pairs(refs(node_cs))
             haskey(ref_to_node_id, ref) && continue
@@ -76,7 +75,7 @@ function _prefix_placement_names!(sch::Schematic)
             # map_metadata resolves each placement-specific component copy here. The active
             # recovery context caches that result so flattening does not resolve it again.
             ref_copy.structure =
-                map_metadata(structure(ref), meta -> _prefixed(meta, node.id))
+                map_metadata(structure(ref), meta -> _qualified(meta, node.id))
             refs(node_cs)[i] = ref_copy
         end
     end
@@ -130,7 +129,7 @@ function render!(
             # Prefix placement names and flatten once under the same recovery scope so
             # geometry failures are logged once and strict=:no can continue.
             flat = DeviceLayout.SchematicDrivenLayout.with_geometry_resolution_context() do
-                    _prefix_placement_names!(sch_copy)
+                    _qualify_locator_names!(sch_copy)
                     return DeviceLayout.flatten(sch_copy.coordinate_system)
                 end
             # The flat geometry is the canonical stream of placed annotations.
@@ -161,7 +160,7 @@ function render!(
             )
 
             # Complete global geometry before selecting finalized entities with locators.
-            execute_deferred_interfaces!(sm, deferred_interfaces)
+            realize_interfaces!(sm, deferred_interfaces)
             sync_registry!(sm, registry)
             selections = select!(sm, registry, target.stack, locators)
 
