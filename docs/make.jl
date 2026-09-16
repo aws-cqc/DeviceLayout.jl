@@ -29,7 +29,7 @@ makedocs(
     checkdocs=:none,
     format=Documenter.HTML(
         prettyurls=true,
-        assets=["assets/favicon.ico"],
+        assets=["assets/favicon.ico", "assets/dark_figures.css"],
         size_threshold=400_000,
         collapselevel=1
     ),

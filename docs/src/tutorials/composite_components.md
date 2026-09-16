@@ -192,7 +192,7 @@ tech = ProcessTechnology(ExamplePDK.LAYER_RECORD, (;))
 target = ArtworkTarget(tech)
 cell = Cell("transmon_demo")
 render!(cell, sch, target)
-save("transmon_demo.svg", cell);
+save("transmon_demo.svg", cell; background=:white);
 nothing # hide
 ```
 

@@ -33,7 +33,7 @@ using DeviceLayout, DeviceLayout.PreferredUnits, FileIO # hide
 c = Cell("main", nm)
 p = radial_cut(20μm, π / 2, 5μm)
 render!(c, p, GDSMeta(1))
-save("radial_cut.svg", flatten(c));
+save("radial_cut.svg", flatten(c); background=:white);
 nothing; # hide
 ```
 
@@ -48,7 +48,7 @@ using DeviceLayout, DeviceLayout.PreferredUnits, FileIO # hide
 c = Cell("main", nm)
 p = radial_stub(20μm, π / 2, 5μm, 1μm)
 render!(c, p, GDSMeta(1))
-save("radial_stub.svg", flatten(c));
+save("radial_stub.svg", flatten(c); background=:white);
 nothing; # hide
 ```
 
@@ -73,7 +73,7 @@ using DeviceLayout, DeviceLayout.PreferredUnits, FileIO # hide
 c = Cell("main", nm)
 checkerboard!(c, 20μm, 10, false, GDSMeta(2))
 checkerboard!(c, 20μm, 10, true, GDSMeta(3))
-save("checkers.svg", flatten(c));
+save("checkers.svg", flatten(c); background=:white);
 nothing; # hide
 ```
 
@@ -87,7 +87,7 @@ Example for `grating!`:
 using DeviceLayout, DeviceLayout.PreferredUnits, FileIO # hide
 c = Cell("main", nm)
 grating!(c, 100nm, 100nm, 5μm, GDSMeta(3))
-save("grating.svg", flatten(c));
+save("grating.svg", flatten(c); background=:white);
 nothing; # hide
 ```
 
@@ -102,7 +102,7 @@ using DeviceLayout, DeviceLayout.PreferredUnits, FileIO # hide
 fingers = Cell("fingers", nm)
 wide, length, fingergap, fingeroffset, npairs, skiplast = 1μm, 20μm, 1μm, 3μm, 5, true
 interdigit!(fingers, wide, length, fingergap, fingeroffset, npairs, skiplast, GDSMeta(5))
-save("fingers_only.svg", flatten(fingers));
+save("fingers_only.svg", flatten(fingers); background=:white);
 nothing; # hide
 ```
 
@@ -135,7 +135,7 @@ attach!(
     i=2
 )
 render!(c, p, GDSMeta(0))
-save("fingers.svg", flatten(c));
+save("fingers.svg", flatten(c); background=:white);
 nothing; # hide
 ```
 

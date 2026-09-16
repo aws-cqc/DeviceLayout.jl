@@ -68,7 +68,7 @@ end
 c = Cell("test")
 render!.(c, paths, GDSMeta())
 render!(c, channel_path, GDSMeta(1))
-save("straight_channel.svg", c; width=6inch, height=2inch);
+save("straight_channel.svg", c; width=6inch, height=2inch, background=:white);
 nothing; # hide
 ```
 
@@ -106,7 +106,7 @@ end
 c = Cell("test")
 render!.(c, paths, GDSMeta())
 render!(c, channel_path, GDSMeta(1))
-save("bspline_channel.svg", c; width=6inch, height=4inch);
+save("bspline_channel.svg", c; width=6inch, height=4inch, background=:white);
 nothing; # hide
 ```
 
@@ -142,7 +142,7 @@ end
 c = Cell("test")
 render!.(c, paths, GDSMeta())
 render!(c, channel_path, GDSMeta(1))
-save("compound_channel.svg", c; width=6inch, height=4inch);
+save("compound_channel.svg", c; width=6inch, height=4inch, background=:white);
 nothing; # hide
 ```
 
