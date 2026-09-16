@@ -1,6 +1,117 @@
-struct LocatorRecord
-    meta::EntityMeta
-    position::NTuple{3, Float64}
+"""
+    Locator(p::Point)
+    Locator(x, y)
+
+A `Point` wrapper marking the position of a locator. Use `place!` to add it to
+geometry structures, like any other geometry entity.
+"""
+struct Locator{T} <: DeviceLayout.GeometryEntity{T}
+    p::DeviceLayout.Point{T}
+end
+Locator(x, y) = Locator(DeviceLayout.Point(x, y))
+
+coords(loc::Locator) = loc.p
+
+Base.convert(::Type{Locator{T}}, loc::Locator) where {T} =
+    Locator(convert(DeviceLayout.Point{T}, loc.p))
+Base.convert(::Type{Locator{T}}, loc::Locator{T}) where {T} = loc
+Base.convert(::Type{DeviceLayout.GeometryEntity{T}}, loc::Locator) where {T} =
+    convert(Locator{T}, loc)
+
+DeviceLayout.transform(loc::Locator, f::DeviceLayout.Transformation) = Locator(f(loc.p))
+DeviceLayout.to_polygons(::Locator{T}) where {T} = DeviceLayout.Polygon{T}[]
+
+# ─── Resolution against flat geometry ────────────────────────────────────────
+
+# A locator resolved against the flat geometry: its position in model units at its layer's
+# z and, for ports, the direction of the `WithDirection`-styled layer entity containing it.
+struct ResolvedLocator
+    r::NTuple{3, Float64}
+    meta::LocatorMeta
+    direction::Union{Nothing, Vector{Float64}}
+end
+ResolvedLocator(r, meta::LocatorMeta) = ResolvedLocator(r, meta, nothing)
+
+# Resolve every placed locator whose layer is part of the solid model.
+function resolve_locators(flat, stack::SourceStack)
+    directed = Tuple{Any, Symbol, Any}[] # (entity, layer, direction)
+    placed = Tuple{Locator, LocatorMeta}[]
+    for (entity, meta) in zip(elements(flat), element_metadata(flat))
+        if meta isa LayerRef
+            direction = DeviceLayout.extract_direction(entity)
+            isnothing(direction) || push!(directed, (entity, meta.layer, direction))
+        elseif meta isa LocatorMeta
+            entity isa Locator || throw(
+                ArgumentError(
+                    "locator metadata $(nameof(typeof(meta))) must annotate a Locator " *
+                    "point entity"
+                )
+            )
+            push!(placed, (entity, meta))
+        end
+    end
+
+    locators = ResolvedLocator[]
+    for (loc, lm) in placed
+        sourcelayer(lm, stack).solidmodel || continue
+        lm isa Union{Tag, Port} &&
+            any(rl -> rl.meta == lm, locators) &&
+            throw(ArgumentError("duplicate locators with metadata $lm"))
+        p = coords(loc)
+        r = _stp_float.((getx(p), gety(p), layer_z(lm.layer, stack)))
+        direction = lm isa Port ? _port_direction(lm, p, directed) : nothing
+        push!(locators, ResolvedLocator(r, lm, direction))
+    end
+    return locators
+end
+
+# Return the direction of the single `WithDirection`-styled entity on the port's layer that
+# contains `p`, as a unit vector.
+function _port_direction(lm::Port, p, directed)
+    matches = filter(directed) do (entity, layer, _)
+        layer == lm.layer || return false
+        box = bounds(entity)
+        ll, ur = lowerleft(box), upperright(box)
+        # containment check assumes underlying port entity is rectangular
+        return (getx(ll) <= getx(p) <= getx(ur)) && (gety(ll) <= gety(p) <= gety(ur))
+    end
+    length(matches) == 1 || throw(
+        ArgumentError(
+            "port locator $lm must lie in exactly one `WithDirection`-styled entity on " *
+            "layer :$(lm.layer); found $(length(matches))"
+        )
+    )
+    turns = Float64(ustrip(°, matches[1][3])) / 180
+    return Float64[cospi(turns), sinpi(turns), 0.0]
+end
+
+# ─── Selection of finalized entities ─────────────────────────────────────────
+
+# Finalized 2D entities selected by locators: the single entity containing a tag or port
+# locator, or a metal connected component together with the terminal and ground locators on
+# it. Each selection is added to the model as a PG so that deduplication isolates it, and
+# serialization names it after its locators.
+struct Selection
+    entity_tags::Vector{Int32}
+    locators::Vector{ResolvedLocator}
+end
+
+function select!(
+    sm::SolidModel,
+    registry::LayerRegistry,
+    stack::SourceStack,
+    locators::Vector{ResolvedLocator}
+)
+    bbox_cache = Dict{Int32, NTuple{6, Float64}}()
+    selections = Selection[]
+    for rl in locators
+        rl.meta isa Union{Tag, Port} || continue
+        push!(selections, _select_surface!(sm, registry, rl, bbox_cache))
+    end
+    return append!(
+        selections,
+        _select_ccs!(sm, registry, stack, locators, bbox_cache)
+    )
 end
 
 function _entity_rtree(entity_tags, bbox_cache::Dict{Int32, NTuple{6, Float64}})
@@ -18,8 +129,9 @@ function _entity_rtree(entity_tags, bbox_cache::Dict{Int32, NTuple{6, Float64}})
     return tree
 end
 
-function _containing_entity_tag(locator::LocatorRecord, entity_rtree; tol=1e-6)
-    x, y, z = locator.position
+# Return the tag of the coplanar entity in the tree containing the locator, or 0 if none.
+function _containing_entity_tag(rl::ResolvedLocator, entity_rtree; tol=_stp_float(1nm))
+    x, y, z = rl.r
     query = SpatialIndexing.Rect((x - tol, y - tol, z - tol), (x + tol, y + tol, z + tol))
     candidates = SpatialIndexing.intersects_with(entity_rtree, query)
     found_tag = Int32(0)
@@ -38,221 +150,90 @@ function _containing_entity_tag(locator::LocatorRecord, entity_rtree; tol=1e-6)
     end
     if count > 1
         error(
-            "locator '$(locator.meta.name)' at $(locator.position) matched " *
+            "locator $(rl.meta) at $(rl.r) matched " *
             "$count entities; expected exactly 1 on a fragmented plane"
         )
     end
     return found_tag
 end
 
-# Identify electrostatic terminals and ground from connected metal components. Locator
-# positions are matched with exact point-in-surface queries. Return terminal locator names,
-# ground component names, and the surface tags in each connected component.
-function add_terminals!(
+function _layer_entity_tags(sm::SolidModel, registry::LayerRegistry, layer::Symbol)
+    haskey(registry, layer) || return Set{Int32}()
+    state = registry[layer]
+    state.dim == 2 || return Set{Int32}()
+    tags = Set{Int32}()
+    for record in state.pgs
+        SolidModels.hasgroup(sm, record.name, 2) || continue
+        union!(tags, SolidModels.entitytags(sm[record.name, 2]))
+    end
+    return tags
+end
+
+# Select the single finalized entity on the locator's layer that contains it and add it as a
+# PG under that layer. The entity also belongs to a layer PG, so deduplication will isolate it
+# to its own sub-PG and remove this one
+function _select_surface!(
+    sm::SolidModel,
+    registry::LayerRegistry,
+    rl::ResolvedLocator,
+    bbox_cache::Dict{Int32, NTuple{6, Float64}}
+)
+    lm = rl.meta
+    tags = _layer_entity_tags(sm, registry, lm.layer)
+    isempty(tags) &&
+        throw(ArgumentError("locator with metadata $lm references an unrealized 2D layer"))
+    entity_tag = _containing_entity_tag(rl, _entity_rtree(tags, bbox_cache))
+    iszero(entity_tag) && throw(
+        ArgumentError(
+            "locator with metadata $lm failed to select any entities in layer $(lm.layer)"
+        )
+    )
+    pg_name = "__" * bytes2hex(sha1(repr(lm)))[1:16]
+    sm[pg_name] = [(Int32(2), entity_tag)]
+    push!(registry[lm.layer].pgs, PGRecord(pg_name, lm.layer))
+    return Selection([entity_tag], [rl])
+end
+
+# Select every connected component of the METAL source layers as a PG under `:METAL_CC` and
+# attach the terminal and ground locators lying on it.
+function _select_ccs!(
     sm::SolidModel,
     registry::LayerRegistry,
     stack::SourceStack,
-    locators::Vector{LocatorRecord},
-    bbox_cache::Dict{Int32, NTuple{6, Float64}}=Dict{Int32, NTuple{6, Float64}}()
+    locators::Vector{ResolvedLocator},
+    bbox_cache::Dict{Int32, NTuple{6, Float64}}
 )
-    terminals = Dict{String, Vector{String}}()
-    ground = String[]
-    cc_entity_tags = Dict{String, Vector{Int32}}()
-
-    # Collect all 2D PGs whose layer material is METAL (including Tag PGs, which
-    # are real mesh entities; only Terminal/Ground locators are excluded)
     metal_pg_names = String[]
     for (layer_name, state) in registry
-        !haskey(stack.layers, layer_name) && continue
-        source_layer = stack.layers[layer_name]
-        source_layer.material != METAL && continue
-        state.dim != 2 && continue
-        for record in state.pgs
-            if islocator(record.meta)
-                role = record.meta.role
-                (role isa Terminal || role isa Ground) && continue
-            end
-            push!(metal_pg_names, record.name)
-        end
+        source_layer = get(stack.layers, layer_name, nothing)
+        isnothing(source_layer) && continue
+        (source_layer.material == METAL && state.dim == 2) || continue
+        append!(metal_pg_names, record.name for record in state.pgs)
     end
-
-    isempty(metal_pg_names) && return (; terminals, ground, cc_entity_tags)
+    isempty(metal_pg_names) && return Selection[]
 
     ccs = SolidModels.connected_components(sm, metal_pg_names)
-
-    # Build a map from surface entity tag -> CC index
-    tag_to_cc = Dict{Tuple{Int32, Int32}, Int}()
-    for (idx, cc) in enumerate(ccs)
-        for dimtag in cc
-            tag_to_cc[dimtag] = idx
-        end
-    end
-
-    # For each CC, compute a hash name and assign PG
-    cc_names = Vector{String}(undef, length(ccs))
-    cc_locators = Dict{String, Vector{String}}()
-    for (idx, cc) in enumerate(ccs)
-        cc_name = string(:METAL_CC) * "__" * pghash(cc)
-        cc_names[idx] = cc_name
+    cc_names = ["METAL_CC__" * pghash(cc) for cc in ccs]
+    for (cc_name, cc) in zip(cc_names, ccs)
         sm[cc_name] = cc
-        cc_locators[cc_name] = String[]
-        cc_entity_tags[cc_name] = Int32[tag for (_, tag) in cc]
     end
-    registry[:METAL_CC] =
-        LayerState([PGRecord(name, :METAL_CC, nothing) for name in cc_names], 2)
+    registry[:METAL_CC] = LayerState([PGRecord(name, :METAL_CC) for name in cc_names], 2)
 
-    # Assign locator names to CCs using gmsh.model.isInside for exact point-in-surface
-    # geometric queries. For each locator, find the single coplanar entity that contains
-    # its center point, then associate the locator with that entity's CC.
-    # Only Terminal and Ground locators participate (Tags are handled by
-    # add_tagged_pgs!).
-    ground_cc_indices = Set{Int}()
-    terminal_locators = filter(
-        locator -> locator.meta.role isa Terminal || locator.meta.role isa Ground,
-        locators
-    )
-    candidate_tags = Int32[dimtag[2] for dimtag in keys(tag_to_cc)]
-    entity_rtree = _entity_rtree(candidate_tags, bbox_cache)
-    for locator in terminal_locators
-        meta = locator.meta
-        matched_tag = _containing_entity_tag(locator, entity_rtree)
-        matched_cc_idx = iszero(matched_tag) ? 0 : tag_to_cc[(Int32(2), matched_tag)]
-        if iszero(matched_cc_idx)
-            @warn "$(nameof(typeof(meta.role))) locator '$(meta.name)' at " *
-                  "$(locator.position) did not match any metal connected component"
-        elseif meta.role isa Ground
-            push!(ground_cc_indices, matched_cc_idx)
+    selections = [Selection(Int32[tag for (_, tag) in cc], ResolvedLocator[]) for cc in ccs]
+    tag_to_cc = Dict{Int32, Int}(tag => i for (i, cc) in enumerate(ccs) for (_, tag) in cc)
+    entity_rtree = _entity_rtree(keys(tag_to_cc), bbox_cache)
+    for rl in locators
+        rl.meta isa Union{Terminal, Ground} || continue
+        entity_tag = _containing_entity_tag(rl, entity_rtree)
+        if iszero(entity_tag)
+            @warn "$(rl.meta) at $(rl.r) did not match any metal connected component"
         else
-            push!(cc_locators[cc_names[matched_cc_idx]], meta.name)
+            push!(selections[tag_to_cc[entity_tag]].locators, rl)
         end
     end
-
-    # Partition into terminals and ground
-    for (idx, cc_name) in enumerate(cc_names)
-        if idx in ground_cc_indices
-            push!(ground, cc_name)
-        else
-            if isempty(cc_locators[cc_name])
-                @warn "Metal CC '$cc_name' has no locators " *
-                      "(neither Terminal nor Ground). Did you forget a Ground locator?"
-            end
-            terminals[cc_name] = cc_locators[cc_name]
-        end
+    for (cc_name, sel) in zip(cc_names, selections)
+        isempty(sel.locators) && @warn "Metal connected component '$cc_name' has no " *
+              "Terminal or Ground locator. Did you forget a Ground locator?"
     end
-
-    return (; terminals, ground, cc_entity_tags)
-end
-
-# ─── Tag locator resolution ──────────────────────────────────────────────────
-
-# Resolve Tag locators after fragmentation by creating a dedicated PG for the containing
-# 2D entity. Duplicate deferred interfaces that reference the parent PG so each Tag receives
-# corresponding interface PGs. Return the resolved PG name, locator name, and layer.
-function add_tagged_pgs!(
-    sm::SolidModel,
-    registry::LayerRegistry,
-    locators::Vector{LocatorRecord},
-    deferred_interfaces::MetaGraphs.MetaDiGraph,
-    bbox_cache::Dict{Int32, NTuple{6, Float64}}=Dict{Int32, NTuple{6, Float64}}()
-)
-    tag_records = Tuple{String, String, Symbol}[]
-    tag_locators = filter(locator -> locator.meta.role isa Tag, locators)
-    tree_type = typeof(SpatialIndexing.RTree{Float64, 3}(Int32))
-    layer_trees = Dict{Symbol, tree_type}()
-
-    for locator in tag_locators
-        meta = locator.meta
-        # A Tag is meaningful only within its declared source layer. Searching all 2D
-        # groups could attach it to an unrelated coplanar or overlapping layer.
-        haskey(registry, meta.layer) || continue
-        layer_state = registry[meta.layer]
-        layer_state.dim == 2 || continue
-        entity_rtree = get!(layer_trees, meta.layer) do
-            tags = Set{Int32}()
-            for record in layer_state.pgs
-                SolidModels.hasgroup(sm, record.name, 2) || continue
-                union!(tags, SolidModels.entitytags(sm[record.name, 2]))
-            end
-            return _entity_rtree(tags, bbox_cache)
-        end
-
-        found_tag = _containing_entity_tag(locator, entity_rtree)
-        if found_tag == 0
-            @warn "Tag locator '$(meta.name)' at $(locator.position) did not " *
-                  "match any 2D entity"
-            continue
-        end
-
-        pg_name = pgname(meta)
-
-        # Create PG in the solid model
-        sm[pg_name] = Tuple{Int32, Int32}[(Int32(2), found_tag)]
-
-        # Remove tagged entity from all other 2D PGs on the same layer and
-        # duplicate deferred interfaces for the Tag PG
-        parent_pg_names = String[]
-        if haskey(registry, meta.layer) && registry[meta.layer].dim == 2
-            for record in registry[meta.layer].pgs
-                SolidModels.hasgroup(sm, record.name, 2) || continue
-                existing_dimtags = SolidModels.dimtags(sm[record.name, 2])
-                filtered = filter(dimtag -> dimtag[2] != found_tag, existing_dimtags)
-                if length(filtered) < length(existing_dimtags)
-                    sm[record.name] = filtered
-                    push!(parent_pg_names, record.name)
-                end
-            end
-        end
-
-        # For each deferred interface that references a parent PG as object,
-        # add a parallel entry with the Tag PG as object
-        for parent_name in parent_pg_names
-            parent_key = (:pg, parent_name, 2)
-            haskey(deferred_interfaces, parent_key, :key) || continue
-            parent = deferred_interfaces[parent_key, :key]
-            for operation in collect(Graphs.outneighbors(deferred_interfaces, parent))
-                MetaGraphs.get_prop(deferred_interfaces, operation, :kind) == :interface ||
-                    continue
-                _, tool = operation_pgs(deferred_interfaces, operation)
-                tool_name = MetaGraphs.get_prop(deferred_interfaces, tool, :name)
-                tool_dim = MetaGraphs.get_prop(deferred_interfaces, tool, :dim)
-                dest_layer =
-                    MetaGraphs.get_prop(deferred_interfaces, operation, :dest_layer)
-                _, tool_layer =
-                    MetaGraphs.get_prop(deferred_interfaces, operation, :parent_layers)
-                dest_pg =
-                    string(dest_layer) *
-                    "__" *
-                    ophash(
-                        pg_name,
-                        [tool_name];
-                        operation=:get_interface,
-                        parameters=(2, tool_dim)
-                    )
-                generated_record_exists(registry, dest_layer, dest_pg) && continue
-                defer_interface!(
-                    deferred_interfaces,
-                    dest_pg,
-                    pg_name,
-                    tool_name,
-                    2,
-                    tool_dim,
-                    dest_layer,
-                    meta.layer,
-                    tool_layer
-                )
-                push!(registry[dest_layer].pgs, PGRecord(dest_pg, dest_layer, nothing))
-            end
-        end
-
-        # Add to registry
-        record = PGRecord(pg_name, meta.layer, meta)
-        if haskey(registry, meta.layer)
-            push!(registry[meta.layer].pgs, record)
-        else
-            registry[meta.layer] = LayerState([record], 2)
-        end
-        push!(tag_records, (pg_name, meta.name, meta.layer))
-    end
-
-    return tag_records
+    return selections
 end
