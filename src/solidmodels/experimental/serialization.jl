@@ -1,15 +1,3 @@
-function _resolve_split_pgs(pg::String, split_results::AbstractDict, sm::SolidModel)
-    if haskey(split_results, pg)
-        return String[
-            name for (name, _) in split_results[pg] if SolidModels.hasgroup(sm, name, 2)
-        ]
-    elseif SolidModels.hasgroup(sm, pg, 2)
-        return [pg]
-    else
-        return String[]
-    end
-end
-
 function _entity_pg_map(sm::SolidModel)
     tag_to_pgs = Dict{Int32, Vector{String}}()
     for (name, pg) in SolidModels.dimgroupdict(sm, 2)
@@ -31,24 +19,18 @@ end
 # ─── Metadata JSON serialization ─────────────────────────────────────────────
 
 """
-    serialize_metadata(
-        registry, terminal_result, tag_records, split_results,
-        deferred_interfaces, stack, sm,
-        lumped_port_directions
-    ) -> Dict{String, Any}
+    serialize_metadata(registry, selections, deferred_interfaces, stack, sm)
+        -> Dict{String, Any}
 
 Serialize the finalized solid model to a schema-version `1.0.0`, JSON-compatible
 metadata dictionary. Length values are expressed in micrometers.
 """
 function serialize_metadata(
     registry::LayerRegistry,
-    terminal_result::NamedTuple{(:terminals, :ground, :cc_entity_tags)},
-    tag_records::Vector{Tuple{String, String, Symbol}},
-    split_results::AbstractDict,
+    selections::Vector{Selection},
     deferred_interfaces::MetaGraphs.MetaDiGraph,
     stack::SourceStack,
-    sm::SolidModel,
-    lumped_port_directions::Dict{String, Vector{Float64}}
+    sm::SolidModel
 )
     metadata = Dict{String, Any}(
         "schema_version" => "1.0.0",
@@ -71,28 +53,6 @@ function serialize_metadata(
                 "tag" => dimension_groups[record.name].grouptag,
                 "dim" => state.dim
             )
-
-            # Entity metadata.
-            if !isnothing(record.meta)
-                meta = record.meta
-                role_dict = Dict{String, Any}("type" => string(meta.role))
-                if meta.role isa LumpedPort
-                    source_name = pgname(meta)
-                    haskey(lumped_port_directions, source_name) || error(
-                        "internal metadata serialization error: LumpedPort record " *
-                        "'$(record.name)' has no resolved direction for source identity " *
-                        "'$source_name'"
-                    )
-                    role_dict["direction"] = lumped_port_directions[source_name]
-                end
-                pg_entry["entity_meta"] = Dict{String, Any}(
-                    "name" => meta.name,
-                    "index" => meta.index,
-                    "role" => role_dict
-                )
-            else
-                pg_entry["entity_meta"] = nothing
-            end
 
             physical_groups[record.name] = pg_entry
         end
@@ -136,40 +96,64 @@ function serialize_metadata(
         layers_dict[string(layer_name)] = layer_entry
     end
 
-    # Build tagged dict: Tag locators → their underlying PGs after dedup
-    tagged_dict = Dict{String, Any}()
-    for (pg_name, locator_name, layer_name) in tag_records
-        sub_pg_names = _resolve_split_pgs(pg_name, split_results, sm)
-        tagged_dict[locator_name] =
-            Dict{String, Any}("pgs" => sub_pg_names, "layer" => string(layer_name))
-    end
-
-    # Build an entity-tag -> PGs map
+    # Name each selection after its locators, resolving its entity tags to final PGs.
     entity_to_pgs = _entity_pg_map(sm)
-
-    # Build terminals dict with sub-PG references
-    terminals_dict = Dict{String, Any}()
-    for (cc_name, cclocators) in terminal_result.terminals
-        cc_entity_tags = get(terminal_result.cc_entity_tags, cc_name, Int32[])
-        sub_pg_names = _resolve_entity_pgs(entity_to_pgs, cc_entity_tags)
-        terminals_dict[cc_name] =
-            Dict{String, Any}("pgs" => sub_pg_names, "locators" => cclocators)
-    end
-
-    # Build ground dict with sub-PG references
-    ground_dict = Dict{String, Any}()
-    for cc_name in terminal_result.ground
-        cc_entity_tags = get(terminal_result.cc_entity_tags, cc_name, Int32[])
-        sub_pg_names = _resolve_entity_pgs(entity_to_pgs, cc_entity_tags)
-        ground_dict[cc_name] = Dict{String, Any}("pgs" => sub_pg_names)
+    sections = (;
+        tagged=Dict{String, Any}(),
+        ports=Dict{String, Any}(),
+        terminals=Dict{String, Any}(),
+        ground=Dict{String, Any}()
+    )
+    for sel in selections
+        _serialize!(sections, sel, _resolve_entity_pgs(entity_to_pgs, sel.entity_tags))
     end
 
     return Dict{String, Any}(
         "metadata" => metadata,
         "physical_groups" => physical_groups,
         "layers" => layers_dict,
-        "tagged" => tagged_dict,
-        "terminals" => terminals_dict,
-        "ground" => ground_dict
+        "tagged" => sections.tagged,
+        "ports" => sections.ports,
+        "terminals" => sections.terminals,
+        "ground" => sections.ground
     )
+end
+
+# A tag or port selection has exactly one locator. A metal connected component has any
+# number of terminal and ground locators and is ground if any of them is a `Ground`.
+function _serialize!(sections, sel::Selection, pgs::Vector{String})
+    if any(rl -> rl.meta isa Union{Tag, Port}, sel.locators)
+        rl = only(sel.locators)
+        return _serialize!(sections, rl, rl.meta, pgs)
+    end
+    cc_name = "METAL_CC__" * pghash((2, t) for t in sel.entity_tags)
+    if any(rl -> rl.meta isa Ground, sel.locators)
+        sections.ground[cc_name] = Dict{String, Any}("pgs" => pgs)
+    else
+        names = [rl.meta.name for rl in sel.locators]
+        sections.terminals[cc_name] = Dict{String, Any}("pgs" => pgs, "locators" => names)
+    end
+    return sections
+end
+
+function _serialize!(sections, ::ResolvedLocator, lm::Tag, pgs::Vector{String})
+    haskey(sections.tagged, lm.name) &&
+        throw(ArgumentError("duplicate serialized tags with name '$(lm.name)'"))
+    sections.tagged[lm.name] = Dict{String, Any}("pgs" => pgs, "layer" => string(lm.layer))
+    return sections
+end
+
+function _serialize!(sections, rl::ResolvedLocator, lm::Port, pgs::Vector{String})
+    key = lm.index == 1 ? lm.name : "$(lm.name)_$(lm.index)"
+    haskey(sections.ports, key) &&
+        throw(ArgumentError("duplicate serialized ports with name '$key'"))
+    sections.ports[key] = Dict{String, Any}(
+        "name" => lm.name,
+        "index" => lm.index,
+        "type" => string(nameof(typeof(lm))),
+        "layer" => string(lm.layer),
+        "direction" => rl.direction,
+        "pgs" => pgs
+    )
+    return sections
 end

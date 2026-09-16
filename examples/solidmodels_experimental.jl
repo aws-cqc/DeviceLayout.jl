@@ -3,7 +3,7 @@ using DeviceLayout
 using DeviceLayout.SchematicDrivenLayout
 using DeviceLayout.SolidModels
 using DeviceLayout.SolidModelsExperimental:
-    EntityMeta, LumpedPort, NULL, SolidModelTarget, SourceLayer, SourceStack
+    LayerRef, Locator, LumpedPort, NULL, SolidModelTarget, SourceLayer, SourceStack
 using FileIO
 import JSON
 import Unitful: μm
@@ -12,12 +12,10 @@ build_dir = joinpath(@__DIR__, "build", "solidmodels_experimental")
 mkpath(build_dir)
 
 geometry = CoordinateSystem("device", μm)
-place!(geometry, centered(Rectangle(100μm, 60μm)), EntityMeta(:metal; name="island"))
-place!(
-    geometry,
-    WithDirection(π / 2)(Rectangle(Point(55μm, -10μm), Point(60μm, 10μm))),
-    EntityMeta(:port; name="drive", role=LumpedPort)
-)
+place!(geometry, centered(Rectangle(100μm, 60μm)), LayerRef(:metal))
+port = WithDirection(π / 2)(Rectangle(Point(55μm, -10μm), Point(60μm, 10μm)))
+place!(geometry, port, LayerRef(:port))
+place!(geometry, Locator(center(bounds(port))), LumpedPort(:port, "drive"))
 
 component = BasicComponent(geometry)
 graph = SchematicGraph("solidmodels_experimental")

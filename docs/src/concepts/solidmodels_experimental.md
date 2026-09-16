@@ -10,17 +10,19 @@ Palace configuration, and downstream translation are intentionally outside Devic
     `ProcessTechnology`, `SchematicDrivenLayout.SolidModelTarget`, and `ArtworkTarget`
     pipeline is unchanged.
 
-## Entity metadata and source stacks
+## Layer references, locators, and source stacks
 
-Geometry participating in this pipeline uses `EntityMeta`:
+Geometry participating in this pipeline uses `LayerRef`; legacy `SemanticMeta` geometry is
+ignored so migrated and legacy components can coexist:
 
 ```julia
 using DeviceLayout
 using DeviceLayout.SolidModelsExperimental:
     Cut,
     DIELECTRIC,
-    EntityMeta,
     GetBoundary,
+    LayerRef,
+    Locator,
     LumpedPort,
     METAL,
     NULL,
@@ -33,18 +35,18 @@ import JSON
 using Unitful: μm, °
 
 coordinate_system = CoordinateSystem("device", μm)
-metal = EntityMeta(:metal; name="island", role=Terminal())
-port = EntityMeta(:port; name="jj", role=LumpedPort)
+place!(coordinate_system, Rectangle(100μm, 100μm), LayerRef(:metal))
 port_geometry = Rectangle(5μm, 20μm) |> WithDirection(90°)
-place!(coordinate_system, port_geometry, port)
+place!(coordinate_system, port_geometry, LayerRef(:port))
+place!(coordinate_system, Locator(center(bounds(port_geometry))), LumpedPort(:port, "jj"))
+place!(coordinate_system, Locator(0μm, 0μm), Terminal(:metal, "island"))
 ```
 
-`LumpedPort` is a role, while its required in-plane orientation belongs to the geometry's
-`WithDirection` style. The angle is measured counterclockwise from local +X and is transformed
-through rotations and reflections during placement. Metadata serializes the final orientation
-as `[cos(theta), sin(theta), 0.0]`. Occurrences that share one physical-group identity must
-have equal final directions; otherwise give them distinct `EntityMeta` `name` or `index`
-values.
+A `Locator` marks a single point; locator resolution only uses that point, so no bounding
+shape is needed. `LumpedPort` and `WavePort` locators must sit inside directed port
+geometry. The required `WithDirection` style belongs to that port geometry, not the locator.
+Its angle is transformed through placement rotations and reflections and serialized as
+`[cos(theta), sin(theta), 0.0]`.
 
 The layer is a plain `Symbol`. A `SourceStack` is authoritative for its assembly level,
 z position, material class, extrusion, and output visibility:
@@ -65,15 +67,14 @@ stack = SourceStack(
 )
 ```
 
-Every placed `EntityMeta` layer must exist in the stack, and every level referenced by a
-source layer must exist in `stack.levels`. Validation happens before Gmsh is invoked.
-`solidmodel=false` hides a layer from mesh geometry and returned metadata while leaving it
-eligible for GDS. Conversely, `gds_meta=nothing` hides only artwork. Locator roles
-(`Terminal`, `Ground`, and `Tag`) are excluded from mesh geometry and retained for
-post-fragmentation discovery.
+Every placed `LayerRef` and locator layer must exist in the stack, and every level referenced
+by a source layer must exist in `stack.levels`. `solidmodel=false` hides a layer from mesh
+geometry and returned metadata while leaving it eligible for GDS. Conversely,
+`gds_meta=nothing` hides only artwork. Locators are excluded from mesh geometry and resolved
+against finalized geometry.
 
-Unlike `SemanticMeta`, `EntityMeta` has no `facing` behavior. Components used on another
-chip must explicitly map to that chip's layer symbol.
+`SemanticMeta` and its `facing` behavior remain unchanged but are ignored by this pipeline.
+`LayerRef` has no `facing` behavior because `SourceStack` owns vertical placement.
 
 ## Rendering
 
@@ -105,27 +106,20 @@ The public operation types are:
 |:--|:--|
 | `Extrude(layer)` | Extrude a source-stack layer using its configured thickness. |
 | `Cut(destination, object, tools)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector. Follow it with `Remove` to remove inputs. |
-| `Fuse(source)` or `Fuse(destination, sources)` | Collapse every PG in one or more source layers into one generated PG. Append when an existing destination is not a source; include it among the sources to collapse and replace its current PGs. Other sources remain unless removed explicitly later. |
-| `Heal(source)` or `Heal(destination, source)` | Union each PG in one source independently, preserving its identity and metadata. Assign mode replaces only the layer-name prefix, preserves the source, and may append to an existing destination. |
+| `Fuse(source)` or `Fuse(destination, sources)` | Union one or more source layers. Other sources remain unless removed explicitly later. |
+| `Heal(source)` or `Heal(destination, source)` | Heal source geometry in place or assign it to another layer. |
 | `SolidModelsExperimental.Intersect(destination, object, tool)` | Compute pairwise OCC intersections across the object and tool PGs. Follow it with `Remove` to consume either input layer. |
 | `GetInterface(destination, object, tool)` | Resolve a deferred interface after fragmentation. The destination must differ from both inputs, whose PG identities must remain available through deferred execution. |
 | `RestrictTo(volume)` | Restrict the model to a 3D bounding-volume layer containing exactly one physical group. |
 | `GetBoundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries into a new destination or replace the source in place. Appending to an existing unrelated destination is rejected. Boundaries from multiple source PGs are expected to be disjoint. |
-| `Translate(source, dx, dy, dz; copy)` or `Translate(destination, source, dx, dy, dz; copy)` | Translate a layer. In-place calls move by default; distinct destinations copy and preserve the source by default. Out-of-place `copy=false` is invalid. Generated identity collisions are rejected; the compiler does not check appended copies for geometric overlap. |
+| `Translate(source, dx, dy, dz; copy)` or `Translate(destination, source, dx, dy, dz; copy)` | Translate a layer. In-place calls move by default; distinct destinations copy and preserve the source by default. Out-of-place `copy=false` is invalid. Duplicate internal output PG names are rejected; the compiler does not check appended copies for geometric overlap. |
 | `Remove(source; remove_entities)` | Remove a layer, or do nothing if it is absent. |
-| `Revolve(source, origin, axis, angle)` or `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. The one-layer form operates in place. Three-dimensional sources and generated identity collisions are rejected; appended revolutions are not checked for geometric overlap. |
+| `Revolve(source, origin, axis, angle)` or `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. The one-layer form operates in place. Three-dimensional sources and duplicate internal output PG names are rejected; appended revolutions are not checked for geometric overlap. |
 | `SetPeriodic(first, second)` | Pair two distinct 2D periodic layers containing exactly one physical group each. |
 
-`Fuse` always collapses all source PGs into one new identity. For example,
-`Fuse(:metal)` replaces one layer in place, while `Fuse(:combined, (:metal, :ground))`
-appends one fused PG when `:combined` already exists. Including the destination explicitly,
-as in `Fuse(:metal, (:metal, :added_metal))`, collapses and replaces its current PGs.
-Other sources remain available unless a following `Remove` consumes them. `Heal(:metal)`
-instead heals each PG in place without changing
-its identity. `Heal(:clean_metal, :metal)` assigns healed PGs to another layer by replacing
-only their `metal__` name prefix; assigning to an existing destination appends the healed PGs
-while preserving both the source layer and existing destination records. Follow either
-out-of-place operation with `Remove` to consume source layers explicitly.
+Layer operations have geometric and source-lifetime semantics but no user-facing PG identity
+semantics. Internal PG names and cardinality may change as needed. Functional identity is
+applied after geometry construction by terminal, ground, tag, and port locators.
 
 A destination equal to a source layer also replaces that layer for boundary, translation,
 and revolution operations. Cut supports replacing its object or a tool layer, and
@@ -137,7 +131,7 @@ Gmsh rendering begins.
 
 The schematic renderer builds a private geometry/reference copy. It does not mutate the
 input schematic or component geometry caches. Each graph-node placement prefixes nonempty
-entity names with its stable node ID (for example, `q1.island`). The v1 contract applies one
+locator names with its stable node ID (for example, `q1.island`). The v1 contract applies one
 top-level node prefix recursively within that placement; arbitrary-depth composite paths are
 not yet encoded. Locator centers retain every hierarchical reference occurrence and its
 accumulated transform. The lower-level solid-model renderer performs the only flatten.
@@ -171,13 +165,13 @@ render!(
 ```
 
 For multiple selected levels, both layer and datatype are offset by the selected-level
-position. `EntityMeta.index` does not alter the datatype.
+position. `LayerRef` carries no datatype index.
 
 ## Migrating from the legacy pipeline
 
-Migration is not a target substitution. Components must first replace `SemanticMeta` with
-`EntityMeta`, explicitly map opposite-chip variants to layer symbols, and supply a complete
-`SourceStack`. The legacy technology and targets remain supported and are
-not deprecated by this feature.
+Migration is not a target substitution. Components opt geometry in by replacing
+`SemanticMeta` with `LayerRef`, add explicit locators, map opposite-chip variants to layer
+symbols, and supply a complete `SourceStack`. Unported `SemanticMeta` geometry is ignored,
+allowing gradual component migration. The legacy technology and targets remain supported.
 
 See `examples/solidmodels_experimental.jl` for a small end-to-end example.

@@ -1,19 +1,21 @@
 module SolidModelsExperimental
 
 using SHA
-import Graphs
+using Graphs
 using Logging
-import MetaGraphs
-import SpatialIndexing
+using MetaGraphs
+using SpatialIndexing
 using Unitful
 using DeviceLayout
-using DeviceLayout: Coordinate, GDSMeta, μm, ustrip
+using DeviceLayout: Coordinate, GDSMeta, nm, μm, ustrip, element_metadata, elements
+using DeviceLayout.SchematicDrivenLayout:
+    Schematic, check_render_strict, close_logfile, reopen_logfile
 using ..SolidModels
 using ..SolidModels: SolidModel, _stp_float
 
-import DeviceLayout: layer, layerindex, name, render!
+import DeviceLayout: layer, render!, place!
 
-include("experimental/entitymeta.jl")
+include("experimental/metadata.jl")
 include("experimental/stack.jl")
 include("experimental/artwork.jl")
 include("experimental/compiler.jl")
@@ -22,256 +24,69 @@ include("experimental/serialization.jl")
 using DeviceLayout.SchematicDrivenLayout
 using Logging: with_logger
 
-import DeviceLayout: element_metadata, elements
-import DeviceLayout.SchematicDrivenLayout:
-    Schematic, check_render_strict, close_logfile, reopen_logfile
+# Partition entities of dimension `dim` so that each belongs to exactly one PG, as required
+# by Palace (a mesh element may carry only one attribute, and a non-periodic face may not
+# carry multiple boundary elements). Entities are grouped by the exact set of PGs containing
+# them. An entity in a single PG stays there; each set of entities shared by the same
+# combination of PGs is moved into a content-addressed sub-PG that is registered under every
+# layer of every PG in that combination. Because 2D selection PGs created by locator
+# resolution and metal connected components overlap layer PGs, this pass also isolates
+# tagged entities, port surfaces, and connected components.
+function _deduplicate_pgs!(sm::SolidModel, registry::LayerRegistry, dim::Int)
+    pgs = SolidModels.dimgroupdict(sm, dim)
 
-# ─── 2D PG deduplication ─────────────────────────────────────────────────────
-
-# Split 2D PGs with mixed layer-membership signatures into layer-homogeneous sub-PGs.
-# Cross-reference each sub-PG from every layer in its signature so the registry can recover
-# each layer's complete surface without assigning mesh faces to overlapping PGs.
-function _deduplicate_2d_pgs!(sm::SolidModel, registry::LayerRegistry)
-    # Phase 1: Build entity → layer membership map
-    pg_to_layer = Dict{String, Symbol}()
+    # A PG may be registered under several layers.
+    pg_layers = Dict{String, Set{Symbol}}()
     for (layer_name, state) in registry
-        state.dim != 2 && continue
+        state.dim == dim || continue
         for record in state.pgs
-            pg_to_layer[record.name] = layer_name
+            push!(get!(Set{Symbol}, pg_layers, record.name), layer_name)
         end
     end
 
-    entity_layers = Dict{Int32, Set{Symbol}}()  # entity tag → set of layers
-    for (pg_name, pg) in SolidModels.dimgroupdict(sm, 2)
-        layer = get(pg_to_layer, pg_name, nothing)
-        isnothing(layer) && continue
-        for t in SolidModels.entitytags(pg)
-            layers_set = get!(Set{Symbol}, entity_layers, t)
-            push!(layers_set, layer)
+    entity_pgs = Dict{Int32, Vector{String}}()
+    for (pg_name, pg) in pgs, t in SolidModels.entitytags(pg)
+        push!(get!(Vector{String}, entity_pgs, t), pg_name)
+    end
+
+    # Sorted PG-name signature → entities shared by exactly those PGs.
+    groups = Dict{Vector{String}, Vector{Int32}}()
+    for (t, names) in entity_pgs
+        length(names) > 1 || continue
+        push!(get!(Vector{Int32}, groups, sort!(names)), t)
+    end
+
+    moved = Dict{String, Set{Int32}}() # original PG → entities moved to sub-PGs
+    for signature in sort!(collect(keys(groups)))
+        tags = sort!(groups[signature])
+        sub_name = "__" * pghash((dim, t) for t in tags)
+        sm[sub_name] = Tuple{Int32, Int32}[(Int32(dim), t) for t in tags]
+        for layer_name in sort!(collect(union((pg_layers[name] for name in signature)...)))
+            push!(registry[layer_name].pgs, PGRecord(sub_name, layer_name))
+        end
+        for name in signature
+            union!(get!(Set{Int32}, moved, name), tags)
         end
     end
 
-    # Phase 2: For each PG, group entities by membership signature.
-    # Identify which PGs need splitting.
-    # signature = sorted tuple of layers (frozen for use as dict key)
-    Signature = Tuple{Vararg{Symbol}}
-
-    pgs_to_split = Dict{String, Dict{Signature, Vector{Int32}}}()
-    for (pg_name, pg) in SolidModels.dimgroupdict(sm, 2)
-        haskey(pg_to_layer, pg_name) || continue
-        tags = SolidModels.entitytags(pg)
-        isempty(tags) && continue
-
-        groups = Dict{Signature, Vector{Int32}}()
-        for t in tags
-            signature = Tuple(sort!(collect(get(entity_layers, t, Set{Symbol}()))))
-            tag_list = get!(Vector{Int32}, groups, signature)
-            push!(tag_list, t)
-        end
-
-        # If there's only one group and its signature matches the PG's own layer alone,
-        # no split needed (homogeneous PG)
-        if length(groups) == 1
-            only_sig = first(keys(groups))
-            pg_layer = pg_to_layer[pg_name]
-            if length(only_sig) == 1 && only_sig[1] == pg_layer
-                continue
+    for (pg_name, tags) in moved
+        remaining = filter(t -> !(t in tags), SolidModels.entitytags(pgs[pg_name]))
+        if isempty(remaining)
+            SolidModels.gmsh.model.removePhysicalGroups([(dim, pgs[pg_name].grouptag)])
+            delete!(pgs, pg_name)
+            for state in values(registry)
+                filter!(record -> record.name != pg_name, state.pgs)
             end
+        else
+            sm[pg_name] = Tuple{Int32, Int32}[(Int32(dim), t) for t in remaining]
         end
-
-        pgs_to_split[pg_name] = groups
-    end
-
-    # Phase 3: Split heterogeneous PGs into sub-PGs
-    # Track: original PG name → list of (sub_pg_name, signature) created from it
-    split_results = Dict{String, Vector{Tuple{String, Signature}}}()
-
-    for (pg_name, groups) in pgs_to_split
-        pg_layer = pg_to_layer[pg_name]
-        sub_pgs = Tuple{String, Signature}[]
-
-        for (signature, tags) in groups
-            if length(signature) == 1 && signature[1] == pg_layer && length(groups) > 1
-                # Residual: entities exclusive to this PG's own layer — keep original name
-                sub_name = pg_name
-            else
-                # Shared or foreign: generate a content-addressed name
-                sub_name = "__" * pghash((2, tag) for tag in tags)
-            end
-            push!(sub_pgs, (sub_name, signature))
-
-            # Create or update the PG in Gmsh
-            if sub_name == pg_name
-                # Rewrite the original PG to contain only its residual entities
-                sm[pg_name] = Tuple{Int32, Int32}[(Int32(2), t) for t in tags]
-            else
-                # Create new sub-PG
-                sm[sub_name] = Tuple{Int32, Int32}[(Int32(2), t) for t in tags]
-            end
-        end
-
-        # If the original PG name was NOT used as residual, remove it from the model
-        if !any(name == pg_name for (name, _) in sub_pgs)
-            if SolidModels.hasgroup(sm, pg_name, 2)
-                grouptag = sm[pg_name, 2].grouptag
-                SolidModels.gmsh.model.removePhysicalGroups([(2, grouptag)])
-                delete!(SolidModels.dimgroupdict(sm, 2), pg_name)
-            end
-        end
-
-        split_results[pg_name] = sub_pgs
-    end
-
-    # Phase 4: Remove duplicate entity assignments.
-    # After splitting, entities that were in multiple original PGs now have a dedicated
-    # sub-PG. Remove them from any other PG that still contains them.
-    entity_owner = Dict{Int32, String}()  # entity tag → owning PG name
-    # First assign: sub-PGs take priority (they were just created with exact entity sets)
-    for (_, sub_pgs) in split_results
-        for (sub_name, _) in sub_pgs
-            SolidModels.hasgroup(sm, sub_name, 2) || continue
-            for t in SolidModels.entitytags(sm[sub_name, 2])
-                entity_owner[t] = sub_name
-            end
-        end
-    end
-    # Then assign remaining entities from unsplit PGs
-    for (pg_name, pg) in SolidModels.dimgroupdict(sm, 2)
-        for t in SolidModels.entitytags(pg)
-            if !haskey(entity_owner, t)
-                entity_owner[t] = pg_name
-            end
-        end
-    end
-
-    # Rewrite any PG that contains entities it doesn't own
-    for (pg_name, pg) in collect(SolidModels.dimgroupdict(sm, 2))
-        current_tags = SolidModels.entitytags(pg)
-        owned_tags = Int32[t for t in current_tags if get(entity_owner, t, "") == pg_name]
-        if length(owned_tags) < length(current_tags)
-            if isempty(owned_tags)
-                SolidModels.gmsh.model.removePhysicalGroups([(2, pg.grouptag)])
-                delete!(SolidModels.dimgroupdict(sm, 2), pg_name)
-            else
-                sm[pg_name] = Tuple{Int32, Int32}[(Int32(2), t) for t in owned_tags]
-            end
-        end
-    end
-
-    # Phase 5: Update registry cross-references.
-    # For each sub-PG, add it to all layers in its signature.
-    for (original_pg_name, sub_pgs) in split_results
-        original_layer = pg_to_layer[original_pg_name]
-
-        for (sub_name, signature) in sub_pgs
-            # Create a PGRecord for the sub-PG
-            sub_record = PGRecord(sub_name, original_layer, nothing)
-
-            for layer_name in signature
-                !haskey(registry, layer_name) && continue
-                registry[layer_name].dim != 2 && continue
-                # Avoid duplicates
-                any(record -> record.name == sub_name, registry[layer_name].pgs) && continue
-                push!(registry[layer_name].pgs, sub_record)
-            end
-        end
-
-        # Remove the original PG from registry if it was fully replaced
-        if !any(name == original_pg_name for (name, _) in sub_pgs)
-            if haskey(registry, original_layer)
-                filter!(
-                    record -> record.name != original_pg_name,
-                    registry[original_layer].pgs
-                )
-            end
-        end
-    end
-
-    return split_results
-end
-
-# Split 2D PGs spanning multiple connected components into content-addressed sub-PGs and
-# update the registry and prior layer-partition results.
-function _split_shared_cc_pgs!(
-    sm::SolidModel,
-    registry::LayerRegistry,
-    split_results::AbstractDict,
-    cc_entity_tags::Dict{String, Vector{Int32}}
-)
-    entity_to_cc = Dict{Int32, String}(
-        tag => cc_name for (cc_name, tags) in cc_entity_tags for tag in tags
-    )
-    Signature = Tuple{Vararg{Symbol}}
-
-    for (pg_name, pg) in collect(SolidModels.dimgroupdict(sm, 2))
-        cc_groups = Dict{String, Vector{Int32}}()
-        non_cc_tags = Int32[]
-        for tag in SolidModels.entitytags(pg)
-            cc_name = get(entity_to_cc, tag, nothing)
-            if isnothing(cc_name)
-                push!(non_cc_tags, tag)
-            else
-                push!(get!(Vector{Int32}, cc_groups, cc_name), tag)
-            end
-        end
-        length(cc_groups) <= 1 && continue
-
-        cc_names = sort!(collect(keys(cc_groups)))
-        tag_groups = [vcat(non_cc_tags, cc_groups[first(cc_names)])]
-        append!(tag_groups, [cc_groups[cc_name] for cc_name in cc_names[2:end]])
-
-        sub_names = String[]
-        for tags in tag_groups
-            sub_name = "__" * pghash((2, tag) for tag in tags)
-            sm[sub_name] = Tuple{Int32, Int32}[(Int32(2), tag) for tag in tags]
-            push!(sub_names, sub_name)
-        end
-
-        registered_layers = Symbol[]
-        for (layer_name, state) in registry
-            state.dim == 2 || continue
-            matching_records = filter(record -> record.name == pg_name, state.pgs)
-            isempty(matching_records) && continue
-            push!(registered_layers, layer_name)
-            filter!(record -> record.name != pg_name, state.pgs)
-
-            meta = first(matching_records).meta
-            for sub_name in sub_names
-                any(record -> record.name == sub_name, state.pgs) && continue
-                push!(state.pgs, PGRecord(sub_name, layer_name, meta))
-            end
-        end
-
-        replaced_in_split_results = false
-        for original_name in collect(keys(split_results))
-            sub_pgs = split_results[original_name]
-            updated_sub_pgs = similar(sub_pgs, 0)
-            for (sub_name, signature) in sub_pgs
-                if sub_name == pg_name
-                    append!(updated_sub_pgs, [(name, signature) for name in sub_names])
-                    replaced_in_split_results = true
-                else
-                    push!(updated_sub_pgs, (sub_name, signature))
-                end
-            end
-            split_results[original_name] = unique(updated_sub_pgs)
-        end
-        if !replaced_in_split_results
-            signature = Tuple(sort!(unique(registered_layers)))
-            split_results[pg_name] =
-                Tuple{String, Signature}[(sub_name, signature) for sub_name in sub_names]
-        end
-
-        grouptag = sm[pg_name, 2].grouptag
-        SolidModels.gmsh.model.removePhysicalGroups([(2, grouptag)])
-        delete!(SolidModels.dimgroupdict(sm, 2), pg_name)
     end
     return nothing
 end
 
 # Remove compiler records that not point to a real physical group in the model. Keep empty
 # layer states so their known dimensions remain available to downstream metadata handling.
-function _prune_unrealized_pgs!(registry::LayerRegistry, sm::SolidModel)
+function _prune_unrealized_pgs!(sm::SolidModel, registry::LayerRegistry)
     for state in values(registry)
         pgs = SolidModels.dimgroupdict(sm, state.dim)
         filter!(record -> haskey(pgs, record.name), state.pgs)
@@ -354,10 +169,10 @@ SolidModelTarget(stack::SourceStack{L, T}, ops::AbstractVector{<:LayerOp}) where
 
 function _map_meta(target::SolidModelTarget)
     return meta -> begin
-        meta isa EntityMeta || return nothing
+        meta isa LayerRef || return nothing
         source_layer = sourcelayer(meta, target.stack)
-        (!source_layer.solidmodel || islocator(meta)) && return nothing
-        return pgname(meta)
+        source_layer.solidmodel || return nothing
+        return string(meta.layer)
     end
 end
 
@@ -365,18 +180,18 @@ function _retained_physical_groups(reg::LayerRegistry)
     retained = Set{Tuple{String, Int}}()
     for state in values(reg)
         for record in state.pgs
-            islocator(record.meta) && continue
             push!(retained, (record.name, state.dim))
         end
     end
     return retained
 end
 
-function _prefixed_meta(m::EntityMeta, prefix::String)
-    isempty(m.name) && return m
-    return EntityMeta(m.layer; name=prefix * "." * m.name, index=m.index, role=m.role)
-end
-_prefixed_meta(m::DeviceLayout.Meta, ::String) = m
+_prefixed(lr::LayerRef, ::String) = lr
+_prefixed(lm::Ground, ::String) = lm
+_prefixed(lm::Terminal, p::String) = Terminal(lm.layer, p * "." * lm.name)
+_prefixed(lm::Tag, p::String) = Tag(lm.layer, p * "." * lm.name)
+_prefixed(lm::P, p::String) where {P <: Port} = P(lm.layer, p * "." * lm.name, lm.index)
+_prefixed(m::DeviceLayout.Meta, ::String) = m
 
 # Create placement-specific metadata copies under each graph node. Apply a node prefix
 # recursively within its component geometry, while child graph nodes receive their own
@@ -386,10 +201,10 @@ function _prefix_placement_names!(sch::Schematic)
     for (node, node_ref) in sch.ref_dict
         node_cs = structure(node_ref)
         metadata = element_metadata(node_cs)
-        for idx in eachindex(metadata)
-            metadata[idx] = _prefixed_meta(metadata[idx], node.id)
+        for i in eachindex(metadata)
+            metadata[i] = _prefixed(metadata[i], node.id)
         end
-        for (idx, ref) in pairs(refs(node_cs))
+        for (i, ref) in pairs(refs(node_cs))
             haskey(ref_to_node_id, ref) && continue
             # Copy only the mutable reference shell. map_metadata independently copies the
             # referenced structure, so recursively copying it here would be redundant.
@@ -397,8 +212,8 @@ function _prefix_placement_names!(sch::Schematic)
             # map_metadata resolves each placement-specific component copy here. The active
             # recovery context caches that result so flattening does not resolve it again.
             ref_copy.structure =
-                map_metadata(structure(ref), meta -> _prefixed_meta(meta, node.id))
-            refs(node_cs)[idx] = ref_copy
+                map_metadata(structure(ref), meta -> _prefixed(meta, node.id))
+            refs(node_cs)[i] = ref_copy
         end
     end
     return sch
@@ -454,55 +269,11 @@ function render!(
                     _prefix_placement_names!(sch_copy)
                     return DeviceLayout.flatten(sch_copy.coordinate_system)
                 end
-            # The flat geometry is the canonical stream of placed metadata occurrences.
-            # Collect compiler metadata and role-specific geometric info.
-            lumped_port_directions = Dict{String, Vector{Float64}}()
-            metas = EntityMeta[]
-            locator_candidates = Tuple{Any, EntityMeta}[]
-            for (entity, meta) in zip(elements(flat), element_metadata(flat))
-                meta isa EntityMeta || continue
-                push!(metas, meta)
-                if meta.role isa LumpedPort
-                    pg_name = pgname(meta)
-                    local_direction = DeviceLayout.extract_direction(entity)
-                    isnothing(local_direction) && throw(
-                        ArgumentError(
-                            "placed LumpedPort '$pg_name' has no WithDirection style; " *
-                            "annotate its geometry with `WithDirection(angle)`"
-                        )
-                    )
-                    haskey(lumped_port_directions, pg_name) && throw(
-                        ArgumentError(
-                            "multiple placed LumpedPort occurrences in physical group " *
-                            "'$pg_name'; assign distinct EntityMeta `name` or " *
-                            "`index` values"
-                        )
-                    )
-                    turns = Float64(ustrip(°, local_direction)) / 180
-                    direction = Float64[cospi(turns), sinpi(turns), 0.0]
-                    lumped_port_directions[pg_name] = direction
-                elseif islocator(meta)
-                    push!(locator_candidates, (entity, meta))
-                end
-            end
-
-            # Resolve locators only after every port is validated, preserving error priority.
-            locators = LocatorRecord[]
-            for (entity, meta) in locator_candidates
-                meta.role isa Terminal && isempty(meta.name) && continue
-                meta.role isa Tag &&
-                    isempty(meta.name) &&
-                    throw(ArgumentError("tag locators must have a nonempty name"))
-                source_layer = sourcelayer(meta, target.stack)
-                source_layer.solidmodel || continue
-                r = center(bounds(entity))
-                position =
-                    _stp_float.((getx(r), gety(r), layer_z(meta.layer, target.stack)))
-                push!(locators, LocatorRecord(meta, position))
-            end
-
+            # The flat geometry is the canonical stream of placed annotations.
+            locators = resolve_locators(flat, target.stack)
             # Seed compiler state with the physical groups produced directly by artwork.
-            registry = initial_registry(metas, target.stack)
+            layer_refs = Set{LayerRef}(m for m in element_metadata(flat) if m isa LayerRef)
+            registry = initial_registry(layer_refs, target.stack)
             # Prepend required source-layer extrusions to the user-supplied operation schedule.
             layer_ops = vcat(extrusions(target.stack, registry), target.ops)
             # Compile layer operations and defer interface discovery until after fragmentation.
@@ -526,43 +297,28 @@ function render!(
                 kwargs...
             )
 
-            # Cache entity bounding boxes across both locator-resolution passes.
-            bbox_cache = Dict{Int32, NTuple{6, Float64}}()
-
-            # Create tagged PGs first because this routine removes tagged surfaces from
-            # their parent PGs and adds them to the deferred interfaces.
-            # Execute all interfaces next, then discover connected metal components.
-            tag_records =
-                add_tagged_pgs!(sm, registry, locators, deferred_interfaces, bbox_cache)
+            # Complete global geometry before selecting finalized entities with locators.
             execute_deferred_interfaces!(sm, deferred_interfaces)
-            _prune_unrealized_pgs!(registry, sm)
-            # Downstream discovery assumes every realized PG has semantic registry data.
+            _prune_unrealized_pgs!(sm, registry)
+            selections = select!(sm, registry, target.stack, locators)
+            # Deduplication registers sub-PGs under the layers of every PG they came from.
             _check_pgs_registered(sm, registry)
-            terminal_result =
-                add_terminals!(sm, registry, target.stack, locators, bbox_cache)
 
-            # First partition PGs by identical layer-membership signatures, then split
-            # any remaining PG that spans multiple metal connected components. Keeping
-            # these passes separate makes each transformation and its bookkeeping clear.
-            split_results = _deduplicate_2d_pgs!(sm, registry)
-            _split_shared_cc_pgs!(
-                sm,
-                registry,
-                split_results,
-                terminal_result.cc_entity_tags
-            )
+            # Partition entities by exact PG membership so each belongs to one PG. Locator
+            # selection PGs and metal connected components overlap 2D layer PGs, so this
+            # pass also isolates tagged entities, port surfaces, and connected components.
+            for dim = 1:3
+                _deduplicate_pgs!(sm, registry, dim)
+            end
 
             # All geometry and registry mutation is complete; serialization only reads
             # the finalized model and graph metadata.
             return serialize_metadata(
                 registry,
-                terminal_result,
-                tag_records,
-                split_results,
+                selections,
                 deferred_interfaces,
                 target.stack,
-                sm,
-                lumped_port_directions
+                sm
             )
         end
         # Apply strictness only after all render and finalization warnings are logged.
@@ -588,16 +344,6 @@ function remap_to_visualization_pgs!(sm::SolidModel, metadata::AbstractDict)
     terminals = get(metadata, "terminals", Dict{String, Any}())
     ground = get(metadata, "ground", Dict{String, Any}())
     tagged = get(metadata, "tagged", Dict{String, Any}())
-    physical_groups = get(metadata, "physical_groups", Dict{String, Any}())
-
-    # PGs whose entity_meta is non-null already have useful names — keep them
-    # in place and never remove them.
-    keep_existing = Set{String}()
-    for (pg_name, pg_data) in physical_groups
-        if !isnothing(get(pg_data, "entity_meta", nothing))
-            push!(keep_existing, pg_name)
-        end
-    end
 
     # Helper: union of entity tags across a list of chopped 2D PG names.
     function _union_entity_tags(pg_names)
@@ -622,18 +368,15 @@ function remap_to_visualization_pgs!(sm::SolidModel, metadata::AbstractDict)
         entity_tags = _union_entity_tags(pg_names)
         isempty(entity_tags) && continue
         sm[layer_name] = [(Int32(2), t) for t in sort!(collect(entity_tags))]
-        for pg_name in pg_names
-            pg_name in keep_existing && continue
-            push!(absorbed, pg_name)
-        end
+        union!(absorbed, pg_names)
     end
 
-    # Pass 2: terminals (one PG per CC, named after the locators).
+    # Pass 2: terminals (one PG per CC, named after its terminals).
     for (cc_name, cc_data) in terminals
         pg_names = get(cc_data, "pgs", String[])
-        locators = get(cc_data, "locators", String[])
-        if isempty(locators)
-            @warn "Terminal CC '$cc_name' has no locators; skipping in viz remap."
+        terminal_names = get(cc_data, "locators", String[])
+        if isempty(terminal_names)
+            @warn "Terminal CC '$cc_name' has no terminals; skipping in viz remap."
             continue
         end
         if isempty(pg_names)
@@ -642,12 +385,9 @@ function remap_to_visualization_pgs!(sm::SolidModel, metadata::AbstractDict)
         end
         entity_tags = _union_entity_tags(pg_names)
         isempty(entity_tags) && continue
-        new_name = "TERMINAL_" * join(locators, "+")
+        new_name = "TERMINAL_" * join(terminal_names, "+")
         sm[new_name] = [(Int32(2), t) for t in sort!(collect(entity_tags))]
-        for pg_name in pg_names
-            pg_name in keep_existing && continue
-            push!(absorbed, pg_name)
-        end
+        union!(absorbed, pg_names)
     end
 
     # Pass 3: ground (single GROUND PG covering all ground CCs).
@@ -659,10 +399,7 @@ function remap_to_visualization_pgs!(sm::SolidModel, metadata::AbstractDict)
             continue
         end
         union!(ground_entity_tags, _union_entity_tags(pg_names))
-        for pg_name in pg_names
-            pg_name in keep_existing && continue
-            push!(absorbed, pg_name)
-        end
+        union!(absorbed, pg_names)
     end
     if !isempty(ground_entity_tags)
         sm["GROUND"] = [(Int32(2), t) for t in sort!(collect(ground_entity_tags))]
@@ -678,10 +415,7 @@ function remap_to_visualization_pgs!(sm::SolidModel, metadata::AbstractDict)
         entity_tags = _union_entity_tags(pg_names)
         isempty(entity_tags) && continue
         sm["TAG_" * tag_name] = [(Int32(2), t) for t in sort!(collect(entity_tags))]
-        for pg_name in pg_names
-            pg_name in keep_existing && continue
-            push!(absorbed, pg_name)
-        end
+        union!(absorbed, pg_names)
     end
 
     # Remove the absorbed chopped PGs (record only, leaving entities alone).
