@@ -2,7 +2,7 @@
 
 Run the `:geomlaws` testitems using `TestEnv.activate()` and
 `TestItemRunner.run_tests(pkgdir(DeviceLayout); filter=ti -> :geomlaws in ti.tags)`.
-`GEOMLAWS_EXAMPLES` sets the valid-example budget (default 100), and
+`GEOMLAWS_EXAMPLES` sets the valid-example budget (default 50), and
 `GEOMLAWS_SEED` sets the seed (default 20260908; `random` for exploration).
 `@lawcheck` fails a successful Supposition search that exhausted its attempt limit
 without reaching that budget. Its nested testset reports valid examples and attempts.
@@ -68,6 +68,13 @@ alone cannot identify the owner of an exception. Exemptions fail closed in both 
 All other zero edges, wrong winding, and proper crossings fail. Fixed-tree ledger
 reproducers demand that even those duplicate cut endpoints disappear, independently
 of whether a clipping-kernel change stops generating the affected tree.
+
+## Differential runs
+
+`differential/` holds the scripts that compare two clipping kernels on the same
+generated and corpus inputs and classify every disagreement; see its README. The
+definitions shared with the laws live in `lawslib.jl`, which `setup.jl` wraps in the
+`LawsSetup` snippet.
 
 ## Limits
 
