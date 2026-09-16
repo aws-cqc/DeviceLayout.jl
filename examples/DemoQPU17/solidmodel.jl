@@ -8,6 +8,7 @@
 #     include("solidmodel.jl") # defines the functions below and builds the schematic/target
 #
 #   Then drive the simulation interactively:
+#     schematic, artwork, target = qpu17_solidmodel_setup() # plan + render artwork (~1 min)
 #     sm   = qpu17_solidmodel(schematic, target)       # render geometry (~30 min)
 #     conn = verify_port_connectivity(sm, schematic)   # check + assert port shorts/opens
 #     DeviceLayout.save(joinpath(@__DIR__, "qpu17.xao"), sm)  # optional: save geometry
@@ -27,15 +28,21 @@ using FileIO, JSON
 
 include("DemoQPU17.jl")
 
-schematic, artwork = DemoQPU17.qpu17_demo(savegds=true)
+"""
+    qpu17_solidmodel_setup(; savegds=true, dir=@__DIR__) -> (schematic, artwork, target)
 
-place!(schematic.coordinate_system, bounds(schematic.coordinate_system), SIMULATED_AREA)
+Run `DemoQPU17.qpu17_demo`, add the `SIMULATED_AREA` bounding the whole schematic, and
+build the single-chip `SolidModelTarget` that retains every port and lumped-element group.
+"""
+function qpu17_solidmodel_setup(; savegds=true, dir=@__DIR__)
+    schematic, artwork = DemoQPU17.qpu17_demo(; savegds, dir)
+    place!(schematic.coordinate_system, bounds(schematic.coordinate_system), SIMULATED_AREA)
 
-target = ExamplePDK.SINGLECHIP_SOLIDMODEL_TARGET
-if length(target.rendering_options.retained_physical_groups) < 10
+    target = deepcopy(ExamplePDK.SINGLECHIP_SOLIDMODEL_TARGET)
     ports = [("port_$i", 2) for i = 1:42]
     lumped_elements = [("lumped_element_$i", 2) for i = 1:34]
     append!(target.rendering_options.retained_physical_groups, ports, lumped_elements)
+    return schematic, artwork, target
 end
 
 function qpu17_solidmodel(schematic, target)
@@ -346,13 +353,13 @@ function palace_job(config::Dict; palace_build=nothing, np=0, nt=1)
 end
 
 """
-    mesh_family(sm::SolidModel; scales=[1.0, 0.5, 0.25], basename="qpu17", order=2)
+    mesh_family(sm::SolidModel; scales=[1.0, 0.5, 0.25], basename="qpu17", order=2, dir=@__DIR__)
         -> Vector{String}
 
 Generate a sequence of meshes on the already-rendered `sm`, one per entry of `scales`, by
 setting `SolidModels.mesh_scale(s)`, clearing any existing mesh, and regenerating 1D/2D/3D
-at the requested element `order`. Each mesh is saved to `\$basename.h\$i.msh2` next to this
-script, where `i` is the index into `scales` (0-based).
+at the requested element `order`. Each mesh is saved to `\$basename.h\$i.msh2` in `dir`
+(by default, next to this script), where `i` is the index into `scales` (0-based).
 
 Returns the vector of absolute filenames, in the same order as `scales`, suitable for
 passing to `configfile(sm; mesh_file=...)` or `eigenmode_configfile(sm, schematic; mesh_file=...)`.
@@ -365,7 +372,8 @@ function mesh_family(
     sm::SolidModel;
     scales=[1.0, 0.5, 0.25],
     basename="qpu17",
-    order=2
+    order=2,
+    dir=@__DIR__
 )
     # Quadratic elements, with high-order optimization enabled (default).
     SolidModels.mesh_order(order)
@@ -380,7 +388,7 @@ function mesh_family(
         @time "Generating 2D Mesh ($label)" SolidModels.gmsh.model.mesh.generate(2)
         @time "Generating 3D Mesh ($label)" SolidModels.gmsh.model.mesh.generate(3)
 
-        path = joinpath(@__DIR__, "$(basename).h$(i - 1).msh2")
+        path = joinpath(dir, "$(basename).h$(i - 1).msh2")
         @time "Saving $path" save(path, sm)
         push!(files, path)
     end

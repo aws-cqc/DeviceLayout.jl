@@ -13,6 +13,10 @@ The format of this changelog is based on
     postrendering operation, along with the resulting entity count, bounding box, and elapsed
     time. Operations are logged before they run, so the operation responsible for a failure is
     the last one logged. (#266)
+  - Single-shot SolidModel rendering and meshing benchmarks in `benchmark/solidmodel/` for the
+    single-transmon and DemoQPU17 workloads, with a comparison script and a manual
+    `Benchmark SolidModel` GitHub workflow. `examples/DemoQPU17/solidmodel.jl` now wraps its
+    setup in `qpu17_solidmodel_setup` instead of running it at include time.
 
 ### Changed
 
