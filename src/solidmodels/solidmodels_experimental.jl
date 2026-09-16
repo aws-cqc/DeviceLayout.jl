@@ -108,48 +108,6 @@ function _check_pgs_registered(sm::SolidModel, registry::LayerRegistry)
     return nothing
 end
 
-# Warn when non-NULL 3D source layers remaining in the registry have overlapping z-ranges,
-# a pattern that can create overlapping volumes and fail during OCC fragmentation.
-function _warn_potential_overlaps(registry::LayerRegistry, stack::SourceStack)
-    # Collect all 3D source layers with material in the final registry
-    extruded_source_layers = Set{Symbol}()
-    for (layer_name, state) in registry
-        state.dim == 3 || continue
-        haskey(stack.layers, layer_name) || continue
-        stack.layers[layer_name].material == NULL && continue
-        push!(extruded_source_layers, layer_name)
-    end
-
-    length(extruded_source_layers) < 2 && return nothing
-
-    # Compute actual z-ranges using pair-derived thickness when needed.
-    layer_z_ranges = Dict{Symbol, Tuple{Float64, Float64}}()
-    for layer_name in extruded_source_layers
-        source_layer = stack.layers[layer_name]
-        z_base = _stp_float(layer_z(layer_name, stack))
-        dz = _stp_float(thickness(source_layer, stack))
-        z_min = min(z_base, z_base + dz)
-        z_max = max(z_base, z_base + dz)
-        layer_z_ranges[layer_name] = (z_min, z_max)
-    end
-
-    for layer_a in extruded_source_layers
-        za_min, za_max = layer_z_ranges[layer_a]
-        for layer_b in extruded_source_layers
-            layer_b <= layer_a && continue
-            zb_min, zb_max = layer_z_ranges[layer_b]
-            if za_min <= zb_max && zb_min <= za_max
-                @warn "Layers $layer_a and $layer_b are both 3D volumes with overlapping " *
-                      "z-ranges that remain in the final registry. If they occupy the " *
-                      "same spatial region, one must be subtracted from the other to " *
-                      "avoid OCC geometry failures."
-            end
-        end
-    end
-
-    return nothing
-end
-
 """
     SolidModelTarget(stack)
     SolidModelTarget(stack, operations)
@@ -283,8 +241,6 @@ function render!(
             # Preserve every compiled physical group needed by later finalization passes.
             retained_groups = _retained_physical_groups(registry)
 
-            # Warn about source-layer volume overlaps before invoking the geometry kernel.
-            _warn_potential_overlaps(registry, target.stack)
             # Low-level renderer creates and fragments the geometry, then applies
             # the non-interface physical-group operations produced by the compiler.
             SolidModels.render!(
