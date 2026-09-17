@@ -1010,3 +1010,105 @@
         @test all(length(points(h)) >= 3 for rr in out for h in rr.holes)
     end
 end
+
+@testitem "render_conformal!(sm, sch, target)" setup = [CommonTestSetup, QuietGmshSetup] begin
+    using .SchematicDrivenLayout
+    using DeviceLayout: Point, Rectangle, centered, coordinatetype
+    using DeviceLayout.Polygons: Circle
+    using DeviceLayout.SolidModels: gmsh, hasgroup, entitytags
+
+    # A minimal single-chip schematic exercising the orchestrator: a writeable
+    # ground area, a `metal_negative` circle cut from it (curved feature), and a
+    # fabrication-only `not_simulated` fill square that must be dropped from the
+    # simulation model. `prerender_ops` form `metal = writeable_area − metal_negative`
+    # with curve-preserving booleans.
+    function conformal_target_schematic()
+        cs = CoordinateSystem("test")
+        place!(cs, centered(Rectangle(200μm, 200μm)), :writeable_area)
+        # Curved cutout — a circle — so `metal` gets a native arc boundary.
+        place!(cs, Circle(Point(0.0μm, 0.0μm), 40μm), :metal_negative)
+        # Fabrication-only fill: must NOT appear in the simulation metal.
+        place!(
+            cs,
+            not_simulated(centered(Rectangle(20μm, 20μm)) + Point(70μm, 70μm)),
+            :metal_negative
+        )
+
+        tech = ProcessTechnology((;), (; thickness=(; chip_area=525μm)))
+        g = SchematicGraph("test")
+        add_node!(g, BasicComponent(cs))
+        sch = plan(g; log_dir=nothing)
+        check!(sch)
+
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            prerender_ops=[(
+                "metal",
+                difference2d_curved!,
+                ("writeable_area", "metal_negative")
+            )],
+            retained_physical_groups=[("metal", 2)]
+        )
+        return sch, target
+    end
+
+    @testset "forms metal group with curve-preserving prerender_ops" begin
+        sch, target = conformal_target_schematic()
+        sm = SolidModel("conformal_target"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            @test_nowarn render_conformal!(sm, sch, target)
+            # `metal` group emitted, exactly one surface (ground with one hole).
+            @test hasgroup(sm, "metal", 2)
+            @test length(entitytags(sm["metal", 2])) == 1
+            # 2D scope: no 3D volumes built here.
+            gmsh.model.set_current(sm.name)
+            @test isempty(gmsh.model.getEntities(3))
+            # The circular cut is preserved as native arcs — a chord render of a
+            # circle would have zero curved 1D entities.
+            ncurved = count(gmsh.model.getEntities(1)) do (d, t)
+                ty = gmsh.model.getType(d, t)
+                return occursin("Circle", ty) ||
+                       occursin("Ellipse", ty) ||
+                       occursin("BSpline", ty)
+            end
+            @test ncurved > 0
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "drops fabrication-only (not_simulated) fill" begin
+        sch, target = conformal_target_schematic()
+        sm = SolidModel("conformal_nosim"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm, sch, target)
+            # metal = writeable_area − metal_negative. The `not_simulated` fill
+            # square, had it been kept, would cut an additional hole into the
+            # ground plane. With the fill dropped, the single metal surface has
+            # exactly two curve loops: the outer square and the one circular hole.
+            # (Counting loops is robust to OCC's signed-area hole convention.)
+            gmsh.model.set_current(sm.name)
+            SolidModels._synchronize!(sm)
+            tags = entitytags(sm["metal", 2])
+            @test length(tags) == 1
+            nloops = sum(length(gmsh.model.occ.getCurveLoops(t)[1]) for t in tags)
+            @test nloops == 2
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "SolidModelTarget carries prerender_ops through the constructor" begin
+        tech = ProcessTechnology((;), (; thickness=(; chip_area=525μm)))
+        target = SolidModelTarget(
+            tech;
+            prerender_ops=[("metal", union2d_curved!, ("metal_negative",))]
+        )
+        @test length(target.prerenderer) == 1
+        @test target.prerenderer[1][1] == "metal"
+        @test isempty(target.postrenderer)
+    end
+end
