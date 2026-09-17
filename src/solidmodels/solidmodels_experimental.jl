@@ -11,7 +11,7 @@ using DeviceLayout: Coordinate, GDSMeta, nm, μm, ustrip, element_metadata, elem
 using DeviceLayout.SchematicDrivenLayout:
     Schematic, check_render_strict, close_logfile, reopen_logfile
 using ..SolidModels
-using ..SolidModels: SolidModel, _stp_float
+using ..SolidModels: SolidModel, STP_UNIT, _stp_float
 
 import DeviceLayout: layer, render!, place!
 
@@ -138,11 +138,10 @@ function render!(
             layer_refs =
                 Set{LayerRef}(m for m in element_metadata(flat) if m isa LayerRef)
             registry = initial_registry(layer_refs, target.stack)
-            # Prepend required source-layer extrusions to the user-supplied operation schedule.
-            layer_ops = vcat(extrusions(target.stack, registry), target.ops)
             # Compile layer operations and defer interface discovery until after fragmentation.
             pg_operations, registry, deferred_interfaces =
-                compile_ops(layer_ops, target.stack, registry)
+                compile_ops(target.ops, target.stack, registry)
+            check_declared_thicknesses(registry, target.stack)
             # Preserve every compiled physical group needed by later finalization passes.
             retained_groups = retained_physical_groups(registry)
 
@@ -160,6 +159,8 @@ function render!(
             )
 
             # Complete global geometry before selecting finalized entities with locators.
+            # Void hollowed solids first so interfaces see volumes without their interiors.
+            hollow!(sm, registry)
             realize_interfaces!(sm, deferred_interfaces)
             sync_registry!(sm, registry)
             selections = select!(sm, registry, target.stack, locators)

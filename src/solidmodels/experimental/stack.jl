@@ -1,24 +1,22 @@
 """
-    SourceLayer(material; level=1, height=0μm, thickness=0μm,
-                contour_only=false, keep_interior=true, gds_meta=nothing,
+    SourceLayer(material; level=1, offset=0μm, thickness=0μm, gds_meta=nothing,
                 solidmodel=true)
 
 Describe one symbol-keyed source layer. Set `material` to `METAL`, `DIELECTRIC`, or
 `NULL` to classify the solid-model region.
-`level` selects an assembly level; a pair extrudes between two levels and derives its
-effective thickness from the [`SourceStack`](@ref). `height` offsets the selected level,
-while `thickness` sets the explicit extrusion distance for a single level. `contour_only`
-creates a swept shell, and `keep_interior=false` retains only boundary geometry.
+`level` selects the assembly level at which the layer's 2D geometry is placed; `offset`
+displaces it from that level. `thickness` declares the layer's extrusion distance, or a
+level pair `level=a => b` declares that the layer spans from level `a` to level `b` (with
+`offset` then a pair of displacements at each end). Declared thicknesses are built by an
+explicit [`Extrude`](@ref) operation, which validates against the declaration.
 `gds_meta=nothing` hides the layer only from artwork; `solidmodel=false` hides it only from
 solid-model geometry and metadata.
 """
 struct SourceLayer{T <: Coordinate}
     material::Material
     level::Union{Int, Pair{Int, Int}}
-    height::Union{T, NTuple{2, T}}
+    offset::Union{T, NTuple{2, T}}
     thickness::T
-    contour_only::Bool
-    keep_interior::Bool
     gds_meta::Union{GDSMeta, Nothing}
     solidmodel::Bool
 end
@@ -26,28 +24,24 @@ end
 function SourceLayer(
     material::Material;
     level::Union{Int, Pair{Int, Int}}=1,
-    height::Union{Coordinate, NTuple{2, Coordinate}}=0μm,
+    offset::Union{Coordinate, NTuple{2, Coordinate}}=0μm,
     thickness::Coordinate=0μm,
-    contour_only::Bool=false,
-    keep_interior::Bool=true,
     gds_meta::Union{GDSMeta, Nothing}=nothing,
     solidmodel::Bool=true
 )
-    if height isa Tuple
-        h1, h2 = height
-        T = promote_type(typeof(h1), typeof(h2), typeof(thickness))
-        converted_height = (convert(T, h1), convert(T, h2))
+    if offset isa Tuple
+        o1, o2 = offset
+        T = promote_type(typeof(o1), typeof(o2), typeof(thickness))
+        converted_offset = (convert(T, o1), convert(T, o2))
     else
-        T = promote_type(typeof(height), typeof(thickness))
-        converted_height = convert(T, height)
+        T = promote_type(typeof(offset), typeof(thickness))
+        converted_offset = convert(T, offset)
     end
     return SourceLayer{T}(
         material,
         level,
-        converted_height,
+        converted_offset,
         convert(T, thickness),
-        contour_only,
-        keep_interior,
         gds_meta,
         solidmodel
     )
@@ -72,7 +66,7 @@ struct SourceStack{L <: SourceLayer, T <: Coordinate}
         # Check that all fields representing lengths are either all unitless or all unitful
         coordinates = Any[]
         for source_layer in values(layers)
-            push!(coordinates, source_layer.height...)
+            push!(coordinates, source_layer.offset...)
             push!(coordinates, source_layer.thickness)
         end
         append!(coordinates, values(levels))
@@ -113,14 +107,14 @@ sourcelayer(meta::Union{LayerRef, LocatorMeta}, stack::SourceStack) =
 
 # Return the source z coordinate for a layer symbol or SourceLayer.
 function layer_z(layer::SourceLayer, stack::SourceStack)
-    return stack.levels[first(layer.level)] + first(layer.height)
+    return stack.levels[first(layer.level)] + first(layer.offset)
 end
 layer_z(layer::Symbol, stack::SourceStack) = layer_z(sourcelayer(layer, stack), stack)
 
 # Return a source layer's explicit or level-pair-derived extrusion thickness.
 function thickness(layer::SourceLayer, stack::SourceStack)
     layer.level isa Pair || return layer.thickness
-    source_z = stack.levels[first(layer.level)] + first(layer.height)
-    destination_z = stack.levels[last(layer.level)] + last(layer.height)
+    source_z = stack.levels[first(layer.level)] + first(layer.offset)
+    destination_z = stack.levels[last(layer.level)] + last(layer.offset)
     return destination_z - source_z
 end

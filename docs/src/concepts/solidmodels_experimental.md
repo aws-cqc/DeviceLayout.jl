@@ -49,7 +49,7 @@ Its angle is transformed through placement rotations and reflections and seriali
 `[cos(theta), sin(theta), 0.0]`.
 
 The layer is a plain `Symbol`. A `SourceStack` is authoritative for its assembly level,
-z position, material class, extrusion, and output visibility:
+z position, material class, declared thickness, and output visibility:
 
 ```julia
 using Unitful: μm
@@ -68,7 +68,10 @@ stack = SourceStack(
 ```
 
 Every placed `LayerRef` and locator layer must exist in the stack, and every level referenced
-by a source layer must exist in `stack.levels`. `solidmodel=false` hides a layer from mesh
+by a source layer must exist in `stack.levels`. A declared `thickness` (or a level span
+`level=a => b`) describes the brick a layer forms in the final stack; it is built by an
+explicit `Extrude` operation, and rendering fails if a declared thickness is never extruded
+or an extrusion disagrees with it. `solidmodel=false` hides a layer from mesh
 geometry and returned metadata while leaving it eligible for GDS. Conversely,
 `gds_meta=nothing` hides only artwork. Locators are excluded from mesh geometry and resolved
 against finalized geometry.
@@ -85,14 +88,16 @@ target = SolidModelTarget(stack)
 metadata = render!(solid_model, checked_schematic, target)
 ```
 
-Source-layer extrusions are scheduled automatically. Target operations describe subsequent
-layer-level booleans, boundary extraction, restriction, translation, revolution, or periodic
-pairing and are compiled to physical-group operations. Operations are immutable, typed
+Target operations describe the complete construction sequence: extrusion, layer-level
+booleans, boundary extraction, hollowing, restriction, translation, revolution, or periodic
+pairing. They are compiled to physical-group operations. Operations are immutable, typed
 objects; invalid argument and keyword types are rejected when they are constructed. For
 example:
 
 ```julia
 ops = [
+    Extrude(:substrate),
+    Extrude(:bounding_volume),
     Cut(:vacuum, :bounding_volume, :substrate),
     GetBoundary(:xmin, :vacuum; direction="x", position="min"),
     Translate(:shifted_port, :port, 10μm, 0μm, 0μm)
@@ -104,7 +109,8 @@ The public operation types are:
 
 | Type | Meaning |
 |:--|:--|
-| `Extrude(layer)` | Extrude a source-stack layer using its configured thickness. |
+| `Extrude(source)`, `Extrude(source, dz)`, `Extrude(source; to_level, offset)`, or `Extrude(destination, source, …)` | Extrude a 1D or 2D layer along z. A source-stack layer is built to its declared thickness or level span; an explicit `dz` or target level is required for generated layers and must agree with the declaration otherwise. The one-layer forms operate in place; 3D sources are rejected. |
+| `Hollow(layer)` | Replace a 3D layer by its boundary shell and remove the enclosed volume from the model after fragmentation, so the interior is absent from the mesh regardless of which other volumes it overlaps. Shells are `GetBoundary(:x, :x); Extrude(:x)`. |
 | `Cut(destination, object, tools)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector. Follow it with `Remove` to remove inputs. |
 | `Fuse(source)` or `Fuse(destination, sources)` | Union one or more source layers. Other sources remain unless removed explicitly later. |
 | `Heal(source)` or `Heal(destination, source)` | Heal source geometry in place or assign it to another layer. |
