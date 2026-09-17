@@ -194,7 +194,7 @@ render!(c, pa1, GDSMeta(0))
 render!(c, pa2, GDSMeta(1))
 save(
     "intersect_circle.svg",
-    flatten(c);
+    c;
     layercolors=merge(DeviceLayout.Graphics.layercolors, Dict(1 => (0, 0, 0, 1))),
     background=:white
 );
@@ -238,7 +238,7 @@ c = Cell("test", nm)
 render!(c, pa, GDSMeta(1))
 save(
     "intersect_spiral.svg",
-    flatten(c);
+    c;
     layercolors=merge(DeviceLayout.Graphics.layercolors, Dict(1 => (0, 0, 0, 1))),
     background=:white
 );

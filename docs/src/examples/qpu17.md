@@ -12,13 +12,7 @@ To run the example, we `include` [the file `DemoQPU17.jl`](https://github.com/aw
 using DeviceLayout, FileIO
 include("../../../examples/DemoQPU17/DemoQPU17.jl")
 @time "Total" schematic, artwork = DemoQPU17.qpu17_demo(savegds=false)
-@time "Saving" save(
-    "qpu17.png",
-    flatten(artwork),
-    width=12 * 72,
-    height=12 * 72,
-    background=:white
-);
+@time "Saving" save("qpu17.png", artwork, width=12 * 72, height=12 * 72, background=:white);
 nothing # hide
 ```
 
@@ -30,13 +24,7 @@ Note that the timings above are around 95% compilation. If we wanted to tweak so
 
 ```@example 1
 @time "Total" schematic, artwork = DemoQPU17.qpu17_demo(savegds=false)
-@time "Saving" save(
-    "qpu17.png",
-    flatten(artwork),
-    width=12 * 72,
-    height=12 * 72,
-    background=:white
-);
+@time "Saving" save("qpu17.png", artwork, width=12 * 72, height=12 * 72, background=:white);
 nothing # hide
 ```
 
@@ -44,13 +32,7 @@ The example includes a utility to turn the schematic into a "false color" drawin
 
 ```@example 1
 falsecolor = DemoQPU17.false_color_layout!(schematic) # modify and render to Cell
-save(
-    "qpu17_falsecolor.png",
-    flatten(falsecolor),
-    width=12 * 72,
-    height=12 * 72,
-    background=:white
-);
+save("qpu17_falsecolor.png", falsecolor, width=12 * 72, height=12 * 72, background=:white);
 nothing # hide
 ```
 
