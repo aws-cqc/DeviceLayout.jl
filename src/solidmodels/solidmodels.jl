@@ -377,9 +377,18 @@ function Base.setindex!(sm::SolidModel, dimtags, groupname::String)
             pg = sm[groupname, dim]
             gmsh.model.remove_physical_groups([(dim, pg.grouptag)])
         end
+        # gmsh keeps physical names in a registry that outlives the group table: booleans and
+        # synchronization drop groups but not their names, and a stale name silently leaves a
+        # re-created group unnamed. Clear it first; the loop below re-names other dimensions.
+        gmsh.model.removePhysicalName(groupname)
         tag = gmsh.model.addPhysicalGroup(dim, tags, -1, groupname)
         dimgroupdict(sm, dim)[groupname] = PhysicalGroup(groupname, sm, dim, tag)
         gmsh.model.setPhysicalName(dim, tag, groupname)
+        for d = 0:3
+            d == dim && continue
+            hasgroup(sm, groupname, d) &&
+                gmsh.model.setPhysicalName(d, sm[groupname, d].grouptag, groupname)
+        end
     end
 end
 Base.setindex!(sm::SolidModel, dimtags, name::Symbol) = setindex!(sm, dimtags, string(name))

@@ -320,6 +320,39 @@ end
     end
 end
 
+@testitem "Physical group names survive a stale name registry" setup = [CommonTestSetup] begin
+    using DeviceLayout.SolidModels
+    import DeviceLayout.SolidModels: gmsh, dimtags, dimgroupdict
+
+    sm = SolidModel("stale_names"; overwrite=true)
+    gmsh.model.set_current("stale_names")
+    a = gmsh.model.occ.addBox(0, 0, 0, 1, 1, 1)
+    b = gmsh.model.occ.addBox(2, 0, 0, 1, 1, 1)
+    gmsh.model.occ.synchronize()
+    pgname(pg) = gmsh.model.getPhysicalName(pg.dim, pg.grouptag)
+
+    @testset "re-registering a name after the table was wiped" begin
+        sm["part"] = [(3, a)]
+        @test pgname(sm["part", 3]) == "part"
+        # Booleans followed by a synchronize drop group entries but keep their names registered.
+        gmsh.model.removePhysicalGroups()
+        delete!(dimgroupdict(sm, 3), "part")
+        sm["part"] = [(3, b)]
+        @test length(dimtags(sm["part", 3])) == 1
+        @test pgname(sm["part", 3]) == "part"
+    end
+
+    @testset "same name in two dimensions keeps both names" begin
+        f = gmsh.model.getBoundary([(3, a)], false, false, false)[1]
+        sm["mixed"] = [(2, abs(f[2])), (3, a)]
+        @test pgname(sm["mixed", 2]) == "mixed"
+        @test pgname(sm["mixed", 3]) == "mixed"
+        sm["mixed"] = [(3, b)]                  # replace the dim-3 group only
+        @test pgname(sm["mixed", 3]) == "mixed"
+        @test pgname(sm["mixed", 2]) == "mixed" # dim-2 name restored after the clear
+    end
+end
+
 @testitem "SolidModel CAD import conformal fusion" setup = [CommonTestSetup] begin
     using DeviceLayout.SolidModels
     import DeviceLayout.SolidModels: import_solid!, dimtags, gmsh, _fragment_and_map!

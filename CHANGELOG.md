@@ -46,6 +46,10 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - Assigning a physical group to a `SolidModel` by name now clears any stale entry for that
+    name in gmsh's name registry first. Booleans and synchronization drop group-table entries
+    but keep names registered, and a stale name silently left the re-created group unnamed, so
+    it was written to `.xao` as `G_<dim>_<tag>`.
   - `polytext!` names glyph cells by Unicode codepoint (e.g. `PolyTextSansMono_U0041`) instead
     of by the character itself, so upper- and lowercase glyphs no longer produce cell names that
     collide under the GDS writer's case-insensitive duplicate check, and glyphs for characters
