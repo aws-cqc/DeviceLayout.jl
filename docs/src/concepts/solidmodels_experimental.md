@@ -112,28 +112,29 @@ The public operation types are:
 | `Extrude(source)`, `Extrude(source, dz)`, `Extrude(source; to_level, offset)`, or `Extrude(destination, source, …)` | Extrude a 1D or 2D layer along z. A source-stack layer is built to its declared thickness or level span; an explicit `dz` or target level is required for generated layers and must agree with the declaration otherwise. The one-layer forms operate in place; 3D sources are rejected. |
 | `Hollow(layer)` | Replace a 3D layer by its boundary shell and remove the enclosed volume from the model after fragmentation, so the interior is absent from the mesh regardless of which other volumes it overlaps. Shells are `GetBoundary(:x, :x); Extrude(:x)`. |
 | `Cut(destination, object, tools)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector. Follow it with `Remove` to remove inputs. |
-| `Fuse(source)` or `Fuse(destination, sources)` | Union one or more source layers. Other sources remain unless removed explicitly later. |
-| `Heal(source)` or `Heal(destination, source)` | Heal source geometry in place or assign it to another layer. |
-| `SolidModelsExperimental.Intersect(destination, object, tool)` | Compute pairwise OCC intersections across the object and tool PGs. Follow it with `Remove` to consume either input layer. |
-| `GetInterface(destination, object, tool)` | Resolve a deferred interface after fragmentation. The destination must differ from both inputs, whose PG identities must remain available through deferred execution. |
-| `RestrictTo(volume)` | Restrict the model to a 3D bounding-volume layer containing exactly one physical group. |
-| `GetBoundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries into a new destination or replace the source in place. Appending to an existing unrelated destination is rejected. Boundaries from multiple source PGs are expected to be disjoint. |
-| `Translate(source, dx, dy, dz; copy)` or `Translate(destination, source, dx, dy, dz; copy)` | Translate a layer. In-place calls move by default; distinct destinations copy and preserve the source by default. Out-of-place `copy=false` is invalid. Duplicate internal output PG names are rejected; the compiler does not check appended copies for geometric overlap. |
+| `Fuse(source)` or `Fuse(destination, sources)` | Union one or more source layers; the one-layer form heals a layer in place. Other sources remain unless removed explicitly later. |
+| `SolidModelsExperimental.Intersect(destination, object, tool)` | Compute the OCC intersection of two layers. Follow it with `Remove` to consume either input layer. |
+| `GetInterface(destination, object, tool)` | Resolve a deferred interface after fragmentation. The destination must be new, and the inputs' PG identities must remain available through deferred execution. |
+| `RestrictTo(volume)` | Restrict the model to a 3D bounding-volume layer. |
+| `GetBoundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries into a new destination or replace the source in place. |
+| `Translate(source, dx, dy, dz)` or `Translate(destination, source, dx, dy, dz)` | Translate a layer. The one-layer form moves it in place; a distinct destination receives a copy and the source is preserved. |
 | `Remove(source; remove_entities)` | Remove a layer, or do nothing if it is absent. |
-| `Revolve(source, origin, axis, angle)` or `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. The one-layer form operates in place. Three-dimensional sources and duplicate internal output PG names are rejected; appended revolutions are not checked for geometric overlap. |
-| `SetPeriodic(first, second)` | Pair two distinct 2D periodic layers containing exactly one physical group each. |
+| `Revolve(source, origin, axis, angle)` or `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. The one-layer form operates in place. Three-dimensional sources are rejected. |
+| `SetPeriodic(first, second)` | Pair two distinct 2D periodic layers. |
 
-Layer operations have geometric and source-lifetime semantics but no user-facing PG identity
-semantics. Internal PG names and cardinality may change as needed. Functional identity is
-applied after geometry construction by terminal, ground, tag, and port locators.
+Until rendering, every layer holds exactly one physical group named after the layer, and every
+operation produces one layer from its inputs. A destination must therefore be either new or
+one of the operation's own inputs, in which case the result replaces that input; naming an
+existing unrelated layer is rejected. To accumulate several results in one layer, compute them
+into distinct layers and `Fuse` them. Layer operations have geometric and source-lifetime
+semantics but no user-facing PG identity semantics: after rendering, deduplication and locator
+resolution may split a layer into several PGs, and functional identity is applied by
+terminal, ground, tag, and port locators.
 
-A destination equal to a source layer also replaces that layer for boundary, translation,
-and revolution operations. Cut supports replacing its object or a tool layer, and
-`GetInterface` creates or appends a deferred interface layer. Generated destinations need not
-appear in `SourceStack`, but every referenced source must exist in the compiler registry when
-the operation is reached. Typed constructors reject malformed operations before compilation,
-while unavailable source layers and incompatible destination dimensions are rejected before
-Gmsh rendering begins.
+Generated destinations need not appear in `SourceStack`, but every referenced source must
+exist in the compiler registry when the operation is reached. Typed constructors reject
+malformed operations before compilation, while unavailable source layers and existing
+destinations are rejected before Gmsh rendering begins.
 
 The schematic renderer builds a private geometry/reference copy. It does not mutate the
 input schematic or component geometry caches. Each graph-node placement prefixes nonempty

@@ -1,14 +1,12 @@
-struct PGRecord
-    name::String
-    layer::Symbol
-end
-
+# Physical groups of a layer, their dimension, and the extrusion distance in STP units once
+# extruded. Until rendering, every layer holds exactly one PG, named after the layer; the
+# post-render passes (locator selection, deduplication) add further PGs.
 mutable struct LayerState
-    pgs::Vector{PGRecord}
+    pgs::Vector{String}
     dim::Int
-    dz::Union{Nothing, Float64} # extrusion distance in STP units, once extruded
+    dz::Union{Nothing, Float64}
 end
-LayerState(pgs::Vector{PGRecord}, dim::Int) = LayerState(pgs, dim, nothing)
+LayerState(pgs::Vector{String}, dim::Int) = LayerState(pgs, dim, nothing)
 
 const LayerRegistry = Dict{Symbol, LayerState}
 
@@ -60,9 +58,9 @@ Extrude(source::Symbol, dz::Coordinate) = Extrude(source, source, dz)
 """
     Cut(destination, object, tools)
 
-Subtract one tool layer, or a grouped tuple or vector of tool layers, from `object`.
-Non-destination inputs remain available unless consumed by adjacent [`Remove`](@ref)
-operations. Duplicate internal output PG names are rejected.
+Subtract one tool layer, or a grouped tuple or vector of tool layers, from `object`. The
+destination must be new or one of the inputs. Non-destination inputs remain available unless
+consumed by adjacent [`Remove`](@ref) operations.
 """
 struct Cut{N} <: BooleanOp
     destination::Symbol
@@ -84,9 +82,9 @@ Cut(dest::Symbol, object::Symbol, tools::AbstractVector{Symbol}) =
     Fuse(destination, sources)
 
 Union one or more source layers into `destination`. Group multiple sources in a tuple or
-vector. Append to an existing destination when it is not a source; include it among the
-sources to replace its current geometry. Out-of-place sources remain available unless
-consumed by adjacent [`Remove`](@ref) operations.
+vector; the one-layer form heals a layer in place, merging its own overlapping or coincident
+geometry. The destination must be new or one of the sources. Out-of-place sources remain
+available unless consumed by adjacent [`Remove`](@ref) operations.
 """
 struct Fuse{N} <: BooleanOp
     destination::Symbol
@@ -102,26 +100,12 @@ Fuse(dest::Symbol, sources::AbstractVector{Symbol}) = Fuse(dest, Tuple(sources))
 Fuse(source::Symbol) = Fuse(source, (source,))
 
 """
-    Heal(source)
-    Heal(destination, source)
-
-Heal one source layer. In-place healing replaces its geometry; assign mode writes healed
-geometry to another layer and preserves the source unless consumed by an adjacent
-[`Remove`](@ref).
-"""
-struct Heal <: LayerOp
-    destination::Symbol
-    source::Symbol
-end
-Heal(source::Symbol) = Heal(source, source)
-
-"""
     Intersect(destination, object, tool)
 
 Compute the intersection of `object` and `tool`. The destination dimension is the lower
-input dimension. In-place operation consumes the replaced OCC input; other inputs remain
-available unless consumed by adjacent [`Remove`](@ref) operations. Object and tool layers
-must be distinct.
+input dimension. The destination must be new or one of the inputs; in-place operation
+consumes the replaced OCC input, and other inputs remain available unless consumed by
+adjacent [`Remove`](@ref) operations. Object and tool layers must be distinct.
 """
 struct Intersect <: BooleanOp
     destination::Symbol
@@ -139,9 +123,8 @@ end
 
 Compute the interface between `object` and `tool`. Same-dimensional inputs produce an
 interface one dimension lower; mixed-dimensional inputs produce an interface at the lower
-input dimension. The destination must differ from both inputs, and every input PG must remain
-available through deferred interface execution. Duplicate internal output PG names
-are rejected.
+input dimension. The destination must be new, and every input PG must remain available
+through deferred interface execution.
 """
 struct GetInterface <: BooleanOp
     destination::Symbol
@@ -158,7 +141,7 @@ end
 """
     RestrictTo(volume)
 
-Restrict the model to a 3D bounding-volume layer containing exactly one physical group.
+Restrict the model to a 3D bounding-volume layer.
 """
 struct RestrictTo <: LayerOp
     volume::Symbol
@@ -169,9 +152,7 @@ end
              direction="all", position="all")
 
 Extract the boundary of `source` into `destination`. Use `direction` and `position` to
-select axis-aligned boundary entities. The destination must be new or equal to `source`;
-appending to an existing unrelated layer is rejected. Boundaries produced from multiple
-source PGs are expected to be disjoint.
+select axis-aligned boundary entities. The destination must be new or equal to `source`.
 """
 struct GetBoundary <: LayerOp
     destination::Symbol
@@ -248,14 +229,11 @@ function exterior_boundaries(bounding_volume_layer::Symbol)
 end
 
 """
-    Translate(source, dx, dy, dz; copy=false)
-    Translate(destination, source, dx, dy, dz; copy=destination != source)
+    Translate(source, dx, dy, dz)
+    Translate(destination, source, dx, dy, dz)
 
-Translate `source` by `(dx, dy, dz)`. With `copy=true`, assign an independently addressable
-copy to `destination` and preserve the source. With `copy=false`, `destination` must equal
-`source` and the geometry is translated in place. By default, distinct destinations copy and
-in-place translations move. Duplicate internal output PG names are rejected. The
-compiler does not check appended copies for geometric overlap.
+Translate `source` by `(dx, dy, dz)`. The one-layer form moves the layer in place; a distinct
+destination receives a translated copy and the source is preserved.
 """
 struct Translate{X <: Coordinate, Y <: Coordinate, Z <: Coordinate} <: LayerOp
     destination::Symbol
@@ -263,45 +241,9 @@ struct Translate{X <: Coordinate, Y <: Coordinate, Z <: Coordinate} <: LayerOp
     dx::X
     dy::Y
     dz::Z
-    copy::Bool
-    function Translate{X, Y, Z}(
-        destination::Symbol,
-        source::Symbol,
-        dx::X,
-        dy::Y,
-        dz::Z,
-        copy::Bool
-    ) where {X <: Coordinate, Y <: Coordinate, Z <: Coordinate}
-        !copy &&
-            destination != source &&
-            throw(ArgumentError("Translate with copy=false requires destination == source"))
-        return new{X, Y, Z}(destination, source, dx, dy, dz, copy)
-    end
 end
-Translate(
-    destination::Symbol,
-    source::Symbol,
-    dx::X,
-    dy::Y,
-    dz::Z,
-    copy::Bool
-) where {X <: Coordinate, Y <: Coordinate, Z <: Coordinate} =
-    Translate{X, Y, Z}(destination, source, dx, dy, dz, copy)
-Translate(
-    destination::Symbol,
-    source::Symbol,
-    dx::Coordinate,
-    dy::Coordinate,
-    dz::Coordinate;
-    copy::Bool=destination != source
-) = Translate(destination, source, dx, dy, dz, copy)
-Translate(
-    source::Symbol,
-    dx::Coordinate,
-    dy::Coordinate,
-    dz::Coordinate;
-    copy::Bool=false
-) = Translate(source, source, dx, dy, dz, copy)
+Translate(source::Symbol, dx::Coordinate, dy::Coordinate, dz::Coordinate) =
+    Translate(source, source, dx, dy, dz)
 
 """
     Remove(source; remove_entities=true)
@@ -321,9 +263,7 @@ Remove(source::Symbol; remove_entities::Bool=true) = Remove(source, remove_entit
 
 Sweep `source` through `angle` radians around the axis passing through `origin` in the
 specified axis direction. The one-layer form operates in place. The destination dimension
-is one greater than the source dimension; 3D sources and duplicate internal output PG-name
-collisions are rejected. The compiler does not check appended revolutions for geometric
-overlap.
+is one greater than the source dimension; 3D sources are rejected.
 """
 struct Revolve <: LayerOp
     destination::Symbol
@@ -356,13 +296,12 @@ struct Hollow <: LayerOp
 end
 
 # Internal registry layer holding hollowed solids until `hollow!` removes them.
-const HOLLOWED = :__hollowed
+const _HOLLOWED = :__hollowed
 
 """
     SetPeriodic(first, second)
 
-Pair two distinct, parallel, axis-aligned 2D periodic layers containing exactly one physical
-group each.
+Pair two distinct, parallel, axis-aligned 2D periodic layers.
 """
 struct SetPeriodic <: LayerOp
     first::Symbol
@@ -398,153 +337,68 @@ struct _LoweredFuse{N} <: BooleanOp
     remove_sources::Bool
 end
 
-struct _LoweredHeal <: LayerOp
-    destination::Symbol
-    source::Symbol
-    remove_source::Bool
-end
-
 function initial_registry(metas::Set{<:LayerRef}, stack::SourceStack)
     registry = LayerRegistry()
     for meta in metas
-        source_layer = sourcelayer(meta, stack)
-        source_layer.solidmodel || continue
-        record = PGRecord(string(meta.layer), meta.layer)
-        state = get!(registry, meta.layer) do
-            return LayerState(PGRecord[], 2)
-        end
-        any(existing -> existing.name == record.name, state.pgs) || push!(state.pgs, record)
+        sourcelayer(meta, stack).solidmodel || continue
+        registry[meta.layer] = LayerState([string(meta.layer)], 2)
     end
     return registry
 end
 
-# Directed bipartite graph of unique PG vertices and deferred-interface vertices. Edges
-# `PG → interface → PG` identify object and tool roles; execution caches Gmsh data once per
-# PG vertex, then evaluates each interface vertex using in-memory set intersections.
-# Interface vertices also retain destination and parent layers for metadata serialization.
-function _deferred_interface_graph()
-    graph = MetaGraphs.MetaDiGraph()
-    MetaGraphs.set_indexing_prop!(graph, :key)
-    return graph
+# An interface between two layers, computed after fragmentation from the entity memberships
+# of their PGs. Layers hold one PG named after them at compile time, so layer names identify
+# the PGs; the dimensions are recorded so later operations cannot silently replace an input.
+struct DeferredInterface
+    destination::Symbol
+    object::Symbol
+    tool::Symbol
+    obj_dim::Int
+    tool_dim::Int
 end
 
-function _pg_vertex!(graph::MetaGraphs.MetaDiGraph, name::String, dim::Int)
-    key = (:pg, name, dim)
-    haskey(graph, key, :key) && return graph[key, :key]
-    Graphs.add_vertex!(
-        graph,
-        Dict{Symbol, Any}(:kind => :pg, :key => key, :name => name, :dim => dim)
-    )
-    return Graphs.nv(graph)
-end
-
-function defer_interface!(
-    graph::MetaGraphs.MetaDiGraph,
-    dest_pg::String,
-    obj_pg::String,
-    tool_pg::String,
-    obj_dim::Int,
-    tool_dim::Int,
-    dest_layer::Symbol,
-    obj_layer::Symbol,
-    tool_layer::Symbol
-)
-    key = (:interface, dest_pg)
-    haskey(graph, key, :key) &&
-        throw(ArgumentError("GetInterface destination '$dest_pg' is already defined"))
-    obj = _pg_vertex!(graph, obj_pg, obj_dim)
-    tool = _pg_vertex!(graph, tool_pg, tool_dim)
-    Graphs.add_vertex!(
-        graph,
-        Dict{Symbol, Any}(
-            :kind => :interface,
-            :key => key,
-            :dest_pg => dest_pg,
-            :dest_layer => dest_layer,
-            :parent_layers => (obj_layer, tool_layer)
-        )
-    )
-    operation = Graphs.nv(graph)
-    Graphs.add_edge!(graph, obj, operation)
-    Graphs.add_edge!(graph, operation, tool)
-    return operation
-end
-
-interface_vertices(graph::MetaGraphs.MetaDiGraph) = filter(
-    vertex -> MetaGraphs.get_prop(graph, vertex, :kind) == :interface,
-    Graphs.vertices(graph)
-)
-
-function operation_pgs(graph::MetaGraphs.MetaDiGraph, operation::Integer)
-    return only(Graphs.inneighbors(graph, operation)),
-    only(Graphs.outneighbors(graph, operation))
-end
-
-# After fragmentation, compute interface PGs as set intersections of entity memberships.
-# Same-dimensional inputs produce shared boundary entities at dimension `dim - 1`;
-# mixed-dimensional inputs produce lower-dimensional entities on the higher-dimensional
-# boundary.
-function realize_interfaces!(sm::SolidModel, interfs::MetaGraphs.MetaDiGraph)
-    Graphs.nv(interfs) == 0 && return nothing
-
-    dimtag_cache = Dict{Int, Any}()
-    boundary_cache = Dict{Int, Any}()
-
-    function _pg_dimtags(vertex)
-        return get!(dimtag_cache, vertex) do
-            name = MetaGraphs.get_prop(interfs, vertex, :name)
-            dim = MetaGraphs.get_prop(interfs, vertex, :dim)
-            SolidModels.hasgroup(sm, name, dim) || return nothing
-            return SolidModels.dimtags(sm[name, dim])
+# After fragmentation, compute interface PGs as set intersections of entity memberships, in
+# order, so an interface may consume an earlier one. Same-dimensional inputs share boundary
+# entities at dimension `dim - 1`; mixed-dimensional inputs share lower-dimensional entities
+# on the higher-dimensional boundary. Interfaces with an unrealized input or an empty result
+# create no PG.
+function realize_interfaces!(sm::SolidModel, interfaces::Vector{DeferredInterface})
+    entities = Dict{Tuple{Symbol, Int}, Set{Int32}}()
+    boundaries = Dict{Tuple{Symbol, Int}, Dict{Int, Set{Int32}}}()
+    function _entities(layer, dim)
+        return get!(entities, (layer, dim)) do
+            SolidModels.hasgroup(sm, string(layer), dim) || return Set{Int32}()
+            return Set(SolidModels.entitytags(sm[string(layer), dim]))
         end
     end
-
-    function _pg_boundary_tags(vertex, boundary_dim)
-        boundaries = get!(boundary_cache, vertex) do
-            dimtags = _pg_dimtags(vertex)
-            isnothing(dimtags) && return nothing
-            boundary_dimtags =
-                SolidModels.gmsh.model.getBoundary(dimtags, false, false, false)
+    function _boundary(layer, dim, boundary_dim)
+        by_dim = get!(boundaries, (layer, dim)) do
+            dimtags = [(Int32(dim), t) for t in _entities(layer, dim)]
             result = Dict{Int, Set{Int32}}()
-            for (dim, tag) in boundary_dimtags
-                push!(get!(Set{Int32}, result, Int(dim)), Int32(abs(tag)))
+            for (d, t) in SolidModels.gmsh.model.getBoundary(dimtags, false, false, false)
+                push!(get!(Set{Int32}, result, Int(d)), Int32(abs(t)))
             end
             return result
         end
-        isnothing(boundaries) && return nothing
-        return get(boundaries, boundary_dim, Set{Int32}())
+        return get(by_dim, boundary_dim, Set{Int32}())
     end
 
-    for operation in interface_vertices(interfs)
-        object, tool = operation_pgs(interfs, operation)
-        obj_dim = MetaGraphs.get_prop(interfs, object, :dim)
-        tool_dim = MetaGraphs.get_prop(interfs, tool, :dim)
-        dest_pg = MetaGraphs.get_prop(interfs, operation, :dest_pg)
-
-        if obj_dim == tool_dim
-            boundary_dim = obj_dim - 1
-            obj_tags = _pg_boundary_tags(object, boundary_dim)
-            tool_tags = _pg_boundary_tags(tool, boundary_dim)
-            (isnothing(obj_tags) || isnothing(tool_tags)) && continue
-            interface_tags = intersect(obj_tags, tool_tags)
-            isempty(interface_tags) && continue
-            sm[dest_pg] =
-                Tuple{Int32, Int32}[(Int32(boundary_dim), tag) for tag in interface_tags]
+    for di in interfaces
+        if di.obj_dim == di.tool_dim
+            dim = di.obj_dim - 1
+            tags = intersect(
+                _boundary(di.object, di.obj_dim, dim),
+                _boundary(di.tool, di.tool_dim, dim)
+            )
         else
-            lo_dim = min(obj_dim, tool_dim)
-            lo = obj_dim <= tool_dim ? object : tool
-            hi = obj_dim <= tool_dim ? tool : object
-            lo_dimtags = _pg_dimtags(lo)
-            hi_tags = _pg_boundary_tags(hi, lo_dim)
-            (isnothing(lo_dimtags) || isnothing(hi_tags)) && continue
-            lo_tags = Set(Int32(tag) for (_, tag) in lo_dimtags)
-            interface_tags = intersect(lo_tags, hi_tags)
-            isempty(interface_tags) && continue
-            sm[dest_pg] =
-                Tuple{Int32, Int32}[(Int32(lo_dim), tag) for tag in interface_tags]
+            (lo, lo_dim), (hi, hi_dim) =
+                sort([(di.object, di.obj_dim), (di.tool, di.tool_dim)]; by=last)
+            dim = lo_dim
+            tags = intersect(_entities(lo, lo_dim), _boundary(hi, hi_dim, lo_dim))
         end
+        isempty(tags) && continue
+        sm[string(di.destination)] = Tuple{Int32, Int32}[(Int32(dim), t) for t in tags]
     end
-
     return nothing
 end
 
@@ -555,9 +409,9 @@ end
 function sync_registry!(sm::SolidModel, registry::LayerRegistry)
     for state in values(registry)
         pgs = SolidModels.dimgroupdict(sm, state.dim)
-        filter!(record -> haskey(pgs, record.name), state.pgs)
+        filter!(name -> haskey(pgs, name), state.pgs)
     end
-    registered = Set((r.name, s.dim) for s in values(registry) for r in s.pgs)
+    registered = Set((name, s.dim) for s in values(registry) for name in s.pgs)
     unregistered = [
         (name, dim) for dim = 0:3 for
         name in keys(SolidModels.dimgroupdict(sm, dim)) if (name, dim) ∉ registered
@@ -584,8 +438,8 @@ function deduplicate_pgs!(sm::SolidModel, registry::LayerRegistry, dim::Int)
     pg_layers = Dict{String, Set{Symbol}}()
     for (layer_name, state) in registry
         state.dim == dim || continue
-        for record in state.pgs
-            push!(get!(Set{Symbol}, pg_layers, record.name), layer_name)
+        for name in state.pgs
+            push!(get!(Set{Symbol}, pg_layers, name), layer_name)
         end
     end
 
@@ -607,7 +461,7 @@ function deduplicate_pgs!(sm::SolidModel, registry::LayerRegistry, dim::Int)
         sub_name = "__" * pghash((dim, t) for t in tags)
         sm[sub_name] = Tuple{Int32, Int32}[(Int32(dim), t) for t in tags]
         for layer_name in sort!(collect(union((pg_layers[name] for name in signature)...)))
-            push!(registry[layer_name].pgs, PGRecord(sub_name, layer_name))
+            push!(registry[layer_name].pgs, sub_name)
         end
         for name in signature
             union!(get!(Set{Int32}, moved, name), tags)
@@ -620,7 +474,7 @@ function deduplicate_pgs!(sm::SolidModel, registry::LayerRegistry, dim::Int)
             SolidModels.gmsh.model.removePhysicalGroups([(dim, pgs[pg_name].grouptag)])
             delete!(pgs, pg_name)
             for state in values(registry)
-                filter!(record -> record.name != pg_name, state.pgs)
+                filter!(name -> name != pg_name, state.pgs)
             end
         else
             sm[pg_name] = Tuple{Int32, Int32}[(Int32(dim), t) for t in remaining]
@@ -634,45 +488,11 @@ function pghash(dimtags)
     return bytes2hex(sha1(content))[1:16]
 end
 
-function ophash(obj_pg::String, tool_pgs::Vector{String}; operation::Symbol, parameters=())
-    content =
-        join((string(operation), obj_pg, join(sort(tool_pgs), "&"), repr(parameters)), "\0")
-    return bytes2hex(sha1(content))[1:16]
-end
-
-function generated_record_exists(
-    reg::LayerRegistry,
-    dest::Symbol,
-    name::String,
-    pending::Vector{PGRecord}=PGRecord[]
-)
-    any(record -> record.name == name, pending) && return true
-    return haskey(reg, dest) && any(record -> record.name == name, reg[dest].pgs)
-end
-
-function _require_destination_dimension(
-    reg::LayerRegistry,
-    dest::Symbol,
-    dim::Int,
-    operation_name::AbstractString
-)
-    if haskey(reg, dest) && reg[dest].dim != dim
-        throw(
-            ArgumentError(
-                "$operation_name destination layer :$dest has dimension $(reg[dest].dim), " *
-                "so dimension $dim physical groups cannot be appended"
-            )
-        )
-    end
-    return nothing
-end
-
 source_layers(op::Extrude) = (op.source,)
 source_layers(op::Hollow) = (op.layer,)
 source_layers(op::Cut) = (op.object, op.tools...)
 source_layers(op::Intersect) = (op.object, op.tool)
 source_layers(op::Fuse) = op.sources
-source_layers(op::Heal) = (op.source,)
 source_layers(op::GetInterface) = (op.object, op.tool)
 source_layers(op::RestrictTo) = (op.volume,)
 source_layers(op::GetBoundary) = (op.source,)
@@ -684,7 +504,6 @@ source_layers(op::SetPeriodic) = (op.first, op.second)
 source_layers(op::_LoweredCut) = (op.object, op.tools...)
 source_layers(op::_LoweredIntersect) = (op.object, op.tool)
 source_layers(op::_LoweredFuse) = op.sources
-source_layers(op::_LoweredHeal) = (op.source,)
 
 function _lower_with_removals(op::Intersect, removals::Vector{Remove})
     absorb_object =
@@ -735,20 +554,12 @@ function _lower_with_removals(op::Fuse, removals::Vector{Remove})
     return _LoweredFuse(op.destination, op.sources, remove_sources), absorbed
 end
 
-function _lower_with_removals(op::Heal, removals::Vector{Remove})
-    remove_source =
-        op.destination != op.source &&
-        any(r -> r.source == op.source && r.remove_entities, removals)
-    absorbed = remove_source ? Set{Symbol}((op.source,)) : Set{Symbol}()
-    return _LoweredHeal(op.destination, op.source, remove_source), absorbed
-end
-
 function _absorb_removals(ops::AbstractVector{<:LayerOp})
     result = LayerOp[]
     i = firstindex(ops)
     while i <= lastindex(ops)
         op = ops[i]
-        if !(op isa Union{Cut, Intersect, Fuse, Heal})
+        if !(op isa Union{Cut, Intersect, Fuse})
             push!(result, op)
             i += 1
             continue
@@ -783,28 +594,21 @@ function _validate_source_layers(op::LayerOp, registry::LayerRegistry)
 end
 
 function _check_deferred_inputs_registered(cmp)
-    for operation in interface_vertices(cmp.dints)
-        for vertex in operation_pgs(cmp.dints, operation)
-            name = MetaGraphs.get_prop(cmp.dints, vertex, :name)
-            dim = MetaGraphs.get_prop(cmp.dints, vertex, :dim)
-            registered = any(values(cmp.reg)) do state
-                return state.dim == dim && any(record -> record.name == name, state.pgs)
-            end
-            registered || throw(
-                ArgumentError(
-                    "GetInterface input physical group '$name' at dimension $dim must " *
-                    "remain available through deferred execution"
-                )
+    for di in cmp.dints, (layer, dim) in ((di.object, di.obj_dim), (di.tool, di.tool_dim))
+        haskey(cmp.reg, layer) && cmp.reg[layer].dim == dim || throw(
+            ArgumentError(
+                "GetInterface input layer :$layer at dimension $dim must remain " *
+                "available through deferred execution"
             )
-        end
+        )
     end
     return nothing
 end
 
-struct CompilerState{S <: SourceStack}
+struct _CompilerState{S <: SourceStack}
     ops::Vector{Tuple}                       # Compiled physical-group operations
     reg::LayerRegistry                       # Evolving layer-to-PG registry
-    dints::MetaGraphs.MetaDiGraph             # Deferred interface operations
+    dints::Vector{DeferredInterface}         # Interfaces computed after fragmentation
     stack::S                                 # Source-layer geometry configuration
 end
 
@@ -815,7 +619,7 @@ function compile_ops(
     stack::SourceStack,
     registry::LayerRegistry
 )
-    cmp = CompilerState(Tuple[], deepcopy(registry), _deferred_interface_graph(), stack)
+    cmp = _CompilerState(Tuple[], deepcopy(registry), DeferredInterface[], stack)
     for op in _absorb_removals(ops)
         _validate_source_layers(op, cmp.reg)
         _compile!(cmp, op)
@@ -842,15 +646,24 @@ end
 
 # Return every compiled `(name, dim)` PG so the renderer keeps them all and removes the rest.
 function retained_physical_groups(registry::LayerRegistry)
-    return Set(
-        (record.name, state.dim) for state in values(registry) for record in state.pgs
-    )
+    return Set((name, state.dim) for state in values(registry) for name in state.pgs)
+end
+
+# Compile-time layers hold exactly one PG, named after the layer.
+_pg(cmp::_CompilerState, layer::Symbol) = only(cmp.reg[layer].pgs)
+
+# Register the layer produced by an operation. A destination must be new or one of the
+# operation's own inputs, in which case the caller updates the existing state instead.
+function _create!(cmp::_CompilerState, destination::Symbol, dim::Int)
+    haskey(cmp.reg, destination) &&
+        throw(ArgumentError("destination layer :$destination already exists"))
+    return cmp.reg[destination] = LayerState([string(destination)], dim)
 end
 
 # Resolve the extrusion distance of an `Extrude`. Source-stack layers must agree with their
 # declaration; generated layers need an explicit `dz`, or a `to_level` resolved against the
 # source geometry's z when the operation executes.
-function _extrusion_distance(cmp::CompilerState, op::Extrude)
+function _extrusion_distance(cmp::_CompilerState, op::Extrude)
     source_layer = get(cmp.stack.layers, op.source, nothing)
     target_z = if isnothing(op.to_level)
         nothing
@@ -909,60 +722,46 @@ function _extrude_to_z!(
     abs(zmax - zmin) < _stp_float(1nm) || error(
         "Extrude to_level requires planar source geometry; '$pg_name' spans z ∈ [$zmin, $zmax]"
     )
-    isnothing(destination.dz) ||
-        isapprox(destination.dz, z - zmin; atol=_stp_float(1nm)) ||
-        error("Extrude to_level resolved inconsistent distances for layer PGs")
     destination.dz = z - zmin
     return SolidModels.extrude_z!(sm, pg_name, (z - zmin) * STP_UNIT, dim)
 end
 
-function _compile!(cmp::CompilerState, op::Extrude)
+function _compile!(cmp::_CompilerState, op::Extrude)
     dim = cmp.reg[op.source].dim
     dim < 3 || throw(ArgumentError("Extrude cannot process a 3D layer"))
     dz = _extrusion_distance(cmp, op)
+    source_pg = _pg(cmp, op.source)
     replace = op.destination == op.source
-    # Created here so a runtime-resolved distance can be recorded on it when the operation
-    # executes; `_compile_unary_layer_op!` appends to an existing destination.
-    state = get!(() -> LayerState(PGRecord[], dim + 1), cmp.reg, op.destination)
-    _compile_unary_layer_op!(
-        cmp,
-        op.destination,
-        op.source,
-        dim + 1;
-        replace,
-        hash_operation=:extrude,
-        hash_parameters=(dim, dz),
-        operation_name="Extrude"
-    ) do destination, record
-        dz isa Tuple &&
-            return (destination, _extrude_to_z!, (record.name, last(dz), dim, state))
-        return (destination, SolidModels.extrude_z!, (record.name, dz, dim))
+    state = replace ? cmp.reg[op.source] : _create!(cmp, op.destination, dim + 1)
+    if dz isa Tuple
+        # The distance is only known once the source geometry exists; the operation records
+        # it on the state when it executes.
+        push!(
+            cmp.ops,
+            (string(op.destination), _extrude_to_z!, (source_pg, last(dz), dim, state))
+        )
+    else
+        push!(
+            cmp.ops,
+            (string(op.destination), SolidModels.extrude_z!, (source_pg, dz, dim))
+        )
+        state.dz = _stp_float(dz)
     end
-    # In place, the source geometry is consumed by the extrusion.
     if replace
-        for record in state.pgs
-            push!(cmp.ops, ("_rm", SolidModels.remove_group!, (record.name, dim)))
-        end
+        # The source geometry is consumed by the extrusion.
+        push!(cmp.ops, ("_rm", SolidModels.remove_group!, (source_pg, dim)))
+        state.dim = dim + 1
     end
-    dz isa Tuple || (state.dz = _stp_float(dz))
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::Hollow)
+function _compile!(cmp::_CompilerState, op::Hollow)
     state = cmp.reg[op.layer]
     state.dim == 3 || throw(ArgumentError("Hollow requires a 3D layer"))
-    hollowed = get!(() -> LayerState(PGRecord[], 3), cmp.reg, HOLLOWED)
-    shells = PGRecord[]
-    for record in state.pgs
-        shell = string(op.layer, "__", ophash(record.name, String[]; operation=:hollow))
-        push!(
-            cmp.ops,
-            (shell, SolidModels.get_boundary, (record.name, 3), :oriented => false)
-        )
-        push!(shells, PGRecord(shell, op.layer))
-        push!(hollowed.pgs, PGRecord(record.name, HOLLOWED))
-    end
-    state.pgs = shells
+    solid_pg = _pg(cmp, op.layer)
+    # The shell takes the layer's name at dimension 2; the solid is parked for `hollow!`.
+    push!(cmp.ops, (solid_pg, SolidModels.get_boundary, (solid_pg, 3), :oriented => false))
+    push!(get!(() -> LayerState(String[], 3), cmp.reg, _HOLLOWED).pgs, solid_pg)
     state.dim = 2
     return nothing
 end
@@ -971,14 +770,14 @@ end
 # Faces that bounded only removed volumes are removed as well. Must run before interfaces are
 # realized so that volume boundaries no longer include faces toward voided interiors.
 function hollow!(sm::SolidModel, registry::LayerRegistry)
-    haskey(registry, HOLLOWED) || return nothing
+    haskey(registry, _HOLLOWED) || return nothing
     faces = Set{Int32}()
-    for record in registry[HOLLOWED].pgs
-        SolidModels.hasgroup(sm, record.name, 3) || continue
-        for tag in SolidModels.entitytags(sm[record.name, 3])
+    for name in registry[_HOLLOWED].pgs
+        SolidModels.hasgroup(sm, name, 3) || continue
+        for tag in SolidModels.entitytags(sm[name, 3])
             union!(faces, last(SolidModels.gmsh.model.getAdjacencies(3, tag)))
         end
-        SolidModels.remove_group!(sm[record.name, 3]; recursive=false, remove_entities=true)
+        SolidModels.remove_group!(sm[name, 3]; recursive=false, remove_entities=true)
     end
     SolidModels._synchronize!(sm)
     dangling = Tuple{Int32, Int32}[
@@ -989,140 +788,50 @@ function hollow!(sm::SolidModel, registry::LayerRegistry)
         SolidModels.gmsh.model.occ.remove(dangling, false)
         SolidModels._synchronize!(sm)
     end
-    delete!(registry, HOLLOWED)
+    delete!(registry, _HOLLOWED)
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::_LoweredCut)
-    object_state = cmp.reg[op.object]
-    dim = object_state.dim
-    tool_pg_names =
-        String[record.name for tool_layer in op.tools for record in cmp.reg[tool_layer].pgs]
-    mode = if op.destination == op.object
-        :replace_object
-    elseif op.destination in op.tools
-        :replace_tool
-    elseif haskey(cmp.reg, op.destination)
-        :append
-    else
-        :create
-    end
-
-    new_records = PGRecord[]
-    compiled = Tuple{PGRecord, String}[]
-    for record in object_state.pgs
-        dest_name = if mode == :replace_object
-            record.name
-        else
-            string(op.destination) *
-            "__" *
-            ophash(record.name, tool_pg_names; operation=:cut, parameters=(dim,))
-        end
-        if mode != :replace_object &&
-           generated_record_exists(cmp.reg, op.destination, dest_name, new_records)
-            throw(
-                ArgumentError("Cut destination physical group '$dest_name' already exists")
-            )
-        end
-        push!(compiled, (record, dest_name))
-        mode == :replace_object || push!(new_records, PGRecord(dest_name, op.destination))
-    end
-
-    for (idx, (record, dest_name)) in enumerate(compiled)
-        push!(
-            cmp.ops,
-            (
-                dest_name,
-                SolidModels.difference_geom!,
-                (record.name, tool_pg_names, dim, dim),
-                :remove_object => op.remove_object,
-                :remove_tool => op.remove_tool && idx == length(compiled)
-            )
+function _compile!(cmp::_CompilerState, op::_LoweredCut)
+    dim = cmp.reg[op.object].dim
+    object_pg = _pg(cmp, op.object)
+    tool_pgs = [_pg(cmp, tool) for tool in op.tools]
+    op.destination in (op.object, op.tools...) || _create!(cmp, op.destination, dim)
+    push!(
+        cmp.ops,
+        (
+            string(op.destination),
+            SolidModels.difference_geom!,
+            (object_pg, tool_pgs, dim, dim),
+            :remove_object => op.remove_object,
+            :remove_tool => op.remove_tool
         )
-    end
-
-    if mode == :append
-        _require_destination_dimension(cmp.reg, op.destination, dim, "Cut")
-        existing_pgs = [record.name for record in cmp.reg[op.destination].pgs]
-        if !isempty(existing_pgs)
-            for record in new_records
-                # Keep newly appended PGs disjoint from existing PGs in the same layer.
-                push!(
-                    cmp.ops,
-                    (
-                        record.name,
-                        SolidModels.difference_geom!,
-                        (record.name, existing_pgs, dim, dim),
-                        :remove_object => true,
-                        :remove_tool => false
-                    )
-                )
-            end
+    )
+    if op.remove_tool
+        for tool in op.tools
+            tool != op.destination && delete!(cmp.reg, tool)
         end
-        append!(cmp.reg[op.destination].pgs, new_records)
-    elseif mode != :replace_object
-        cmp.reg[op.destination] = LayerState(new_records, dim)
     end
-
-    # Flush removed references from registry
-    if !isempty(compiled)
-        if op.remove_tool
-            for tool_layer in op.tools
-                tool_layer != op.destination && delete!(cmp.reg, tool_layer)
-            end
-        end
-        op.remove_object && op.destination != op.object && delete!(cmp.reg, op.object)
-    end
-
+    op.remove_object && op.destination != op.object && delete!(cmp.reg, op.object)
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::_LoweredFuse)
+function _compile!(cmp::_CompilerState, op::_LoweredFuse)
     dims = unique([cmp.reg[source].dim for source in op.sources])
     length(dims) == 1 ||
         throw(ArgumentError("Fuse source layers must have equal dimensions"))
     dim = only(dims)
-    source_pgs =
-        sort!([record.name for source in op.sources for record in cmp.reg[source].pgs])
-    isempty(source_pgs) && throw(ArgumentError("Fuse requires at least one physical group"))
-
-    dest_name =
-        string(op.destination) *
-        "__" *
-        ophash(first(source_pgs), source_pgs[2:end]; operation=:fuse, parameters=(dim,))
-    generated_record_exists(cmp.reg, op.destination, dest_name) &&
-        throw(ArgumentError("Fuse destination physical group '$dest_name' already exists"))
-
-    append_mode = haskey(cmp.reg, op.destination) && op.destination ∉ op.sources
-    append_mode && _require_destination_dimension(cmp.reg, op.destination, dim, "Fuse")
+    source_pgs = [_pg(cmp, source) for source in op.sources]
+    op.destination in op.sources || _create!(cmp, op.destination, dim)
     push!(
         cmp.ops,
         (
-            dest_name,
+            string(op.destination),
             SolidModels.union_geom!,
             (source_pgs, dim),
             :remove_object => op.remove_sources
         )
     )
-    new_record = PGRecord(dest_name, op.destination)
-    if append_mode
-        existing_pgs = [record.name for record in cmp.reg[op.destination].pgs]
-        if !isempty(existing_pgs)
-            push!(
-                cmp.ops,
-                (
-                    dest_name,
-                    SolidModels.difference_geom!,
-                    (dest_name, existing_pgs, dim, dim),
-                    :remove_object => true,
-                    :remove_tool => false
-                )
-            )
-        end
-        push!(cmp.reg[op.destination].pgs, new_record)
-    else
-        cmp.reg[op.destination] = LayerState([new_record], dim)
-    end
     if op.remove_sources
         for source in op.sources
             source != op.destination && delete!(cmp.reg, source)
@@ -1131,394 +840,128 @@ function _compile!(cmp::CompilerState, op::_LoweredFuse)
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::_LoweredHeal)
-    state = cmp.reg[op.source]
-    if op.destination == op.source
-        for record in state.pgs
-            push!(
-                cmp.ops,
-                (
-                    record.name,
-                    SolidModels.union_geom!,
-                    (record.name, state.dim),
-                    :remove_object => true
-                )
-            )
-        end
-        return nothing
-    end
-
-    haskey(cmp.reg, op.destination) &&
-        _require_destination_dimension(cmp.reg, op.destination, state.dim, "Heal")
-    new_records = [
-        PGRecord(
-            string(op.destination, "__", ophash(record.name, String[]; operation=:heal)),
-            op.destination
-        ) for record in state.pgs
-    ]
-    existing_names =
-        haskey(cmp.reg, op.destination) ?
-        Set(record.name for record in cmp.reg[op.destination].pgs) : Set{String}()
-    collision = findfirst(record -> record.name in existing_names, new_records)
-    isnothing(collision) || throw(
-        ArgumentError(
-            "Heal destination physical-group name '$(new_records[collision].name)' already exists"
+function _compile!(cmp::_CompilerState, op::_LoweredIntersect)
+    obj_dim = cmp.reg[op.object].dim
+    tool_dim = cmp.reg[op.tool].dim
+    push!(
+        cmp.ops,
+        (
+            string(op.destination),
+            SolidModels.intersect_geom!,
+            (_pg(cmp, op.object), _pg(cmp, op.tool), obj_dim, tool_dim),
+            :remove_object => op.remove_object,
+            :remove_tool => op.remove_tool
         )
     )
-
-    for (record, new_record) in zip(state.pgs, new_records)
-        push!(
-            cmp.ops,
-            (
-                new_record.name,
-                SolidModels.union_geom!,
-                (record.name, state.dim),
-                :remove_object => op.remove_source
-            )
-        )
-    end
-    if haskey(cmp.reg, op.destination)
-        existing_pgs = [record.name for record in cmp.reg[op.destination].pgs]
-        if !isempty(existing_pgs)
-            for record in new_records
-                # Ensure added PGs don't have any overlap with existing PGs in the
-                # destination layer
-                push!(
-                    cmp.ops,
-                    (
-                        record.name,
-                        SolidModels.difference_geom!,
-                        (record.name, existing_pgs, state.dim, state.dim),
-                        :remove_object => true,
-                        :remove_tool => false
-                    )
-                )
-            end
-        end
-        append!(cmp.reg[op.destination].pgs, new_records)
+    if op.destination in (op.object, op.tool)
+        cmp.reg[op.destination].dim = min(obj_dim, tool_dim)
     else
-        cmp.reg[op.destination] = LayerState(new_records, state.dim)
-    end
-    op.remove_source && delete!(cmp.reg, op.source)
-    return nothing
-end
-
-function _compile!(cmp::CompilerState, op::_LoweredIntersect)
-    object_state = cmp.reg[op.object]
-    tool_state = cmp.reg[op.tool]
-    isempty(object_state.pgs) &&
-        throw(ArgumentError("Intersect object layer must contain a physical group"))
-    isempty(tool_state.pgs) &&
-        throw(ArgumentError("Intersect tool layer must contain a physical group"))
-
-    destination_dim = min(object_state.dim, tool_state.dim)
-    append_mode =
-        haskey(cmp.reg, op.destination) &&
-        op.destination != op.object &&
-        op.destination != op.tool
-    append_mode && _require_destination_dimension(
-        cmp.reg,
-        op.destination,
-        destination_dim,
-        "Intersect"
-    )
-    existing_pgs =
-        append_mode ? [record.name for record in cmp.reg[op.destination].pgs] : String[]
-
-    new_records = PGRecord[]
-    for (obj_idx, obj_rec) in enumerate(object_state.pgs)
-        for (tool_idx, tool_rec) in enumerate(tool_state.pgs)
-            dest_name =
-                string(op.destination) *
-                "__" *
-                ophash(
-                    obj_rec.name,
-                    [tool_rec.name];
-                    operation=:intersect,
-                    parameters=(object_state.dim, tool_state.dim)
-                )
-            remove_object = op.remove_object && tool_idx == length(tool_state.pgs)
-            remove_tool = op.remove_tool && obj_idx == length(object_state.pgs)
-            generated_record_exists(cmp.reg, op.destination, dest_name, new_records) &&
-                throw(
-                    ArgumentError(
-                        "Intersect destination physical group '$dest_name' already exists in layer " *
-                        ":$(op.destination)"
-                    )
-                )
-            push!(
-                cmp.ops,
-                (
-                    dest_name,
-                    SolidModels.intersect_geom!,
-                    (obj_rec.name, tool_rec.name, object_state.dim, tool_state.dim),
-                    :remove_object => remove_object,
-                    :remove_tool => remove_tool
-                )
-            )
-            if append_mode && !isempty(existing_pgs)
-                push!(
-                    cmp.ops,
-                    (
-                        dest_name,
-                        SolidModels.difference_geom!,
-                        (dest_name, existing_pgs, destination_dim, destination_dim),
-                        :remove_object => true,
-                        :remove_tool => false
-                    )
-                )
-            end
-            push!(new_records, PGRecord(dest_name, op.destination))
-        end
-    end
-
-    if append_mode
-        append!(cmp.reg[op.destination].pgs, new_records)
-    else
-        cmp.reg[op.destination] = LayerState(new_records, destination_dim)
+        _create!(cmp, op.destination, min(obj_dim, tool_dim))
     end
     op.remove_object && op.object != op.destination && delete!(cmp.reg, op.object)
     op.remove_tool && op.tool != op.destination && delete!(cmp.reg, op.tool)
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::GetInterface)
-    obj_state = cmp.reg[op.object]
-    tool_state = cmp.reg[op.tool]
-    obj_dim = obj_state.dim
-    tool_dim = tool_state.dim
-
-    new_records = PGRecord[]
-    for obj_rec in obj_state.pgs
-        for tool_rec in tool_state.pgs
-            dest_name =
-                string(op.destination) *
-                "__" *
-                ophash(
-                    obj_rec.name,
-                    [tool_rec.name];
-                    operation=:get_interface,
-                    parameters=(obj_dim, tool_dim)
-                )
-            generated_record_exists(cmp.reg, op.destination, dest_name, new_records) &&
-                throw(
-                    ArgumentError(
-                        "GetInterface destination physical group '$dest_name' already exists"
-                    )
-                )
-            # All interface calculations are deferred to post-fragmentation. Interfaces of
-            # same-dim entities are shared boundary entities (dim-1); interfaces of
-            # mixed-dim entities are lo-dim entities on the hi-dim boundary.
-            defer_interface!(
-                cmp.dints,
-                dest_name,
-                obj_rec.name,
-                tool_rec.name,
-                obj_dim,
-                tool_dim,
-                op.destination,
-                obj_rec.layer,
-                tool_rec.layer
-            )
-            push!(new_records, PGRecord(dest_name, op.destination))
-        end
-    end
-
-    # Result dimension: mixed-dim entites produce entities at min(d1, d2).
-    # Same-dim entities (e.g. 3D∩3D) produce shared boundaries at dim-1.
-    new_dim = obj_dim == tool_dim ? obj_dim - 1 : min(obj_dim, tool_dim)
-
-    if haskey(cmp.reg, op.destination) &&
-       op.destination != op.object &&
-       op.destination != op.tool
-        _require_destination_dimension(cmp.reg, op.destination, new_dim, "GetInterface")
-        append!(cmp.reg[op.destination].pgs, new_records)
-    else
-        cmp.reg[op.destination] = LayerState(new_records, new_dim)
-    end
-
+function _compile!(cmp::_CompilerState, op::GetInterface)
+    obj_dim = cmp.reg[op.object].dim
+    tool_dim = cmp.reg[op.tool].dim
+    # Same-dimensional inputs share boundary entities one dimension lower; mixed-dimensional
+    # inputs share lower-dimensional entities on the higher-dimensional boundary. Computed
+    # after fragmentation.
+    dim = obj_dim == tool_dim ? obj_dim - 1 : min(obj_dim, tool_dim)
+    _create!(cmp, op.destination, dim)
+    push!(
+        cmp.dints,
+        DeferredInterface(op.destination, op.object, op.tool, obj_dim, tool_dim)
+    )
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::RestrictTo)
-    state = cmp.reg[op.volume]
-    state.dim == 3 ||
+function _compile!(cmp::_CompilerState, op::RestrictTo)
+    cmp.reg[op.volume].dim == 3 ||
         throw(ArgumentError("RestrictTo bounding volume layer :$(op.volume) must be 3D"))
-    bv_pgs = state.pgs
-    length(bv_pgs) == 1 || throw(
-        ArgumentError(
-            "RestrictTo bounding volume layer :$(op.volume) must contain exactly one physical group"
-        )
-    )
-    bv_pg = bv_pgs[1].name
-    push!(cmp.ops, ("restrict", SolidModels.restrict_to_volume!, (bv_pg,)))
+    push!(cmp.ops, ("restrict", SolidModels.restrict_to_volume!, (_pg(cmp, op.volume),)))
     return nothing
 end
 
-# Compile the shared replace and create/append modes for one-source layer operations.
-function _compile_unary_layer_op!(
-    lower,
-    cmp::CompilerState,
-    destination::Symbol,
-    source::Symbol,
-    destination_dim::Int;
-    replace::Bool,
-    hash_operation::Symbol,
-    hash_parameters,
-    operation_name::AbstractString
-)
-    state = cmp.reg[source]
-    if replace
-        for record in state.pgs
-            push!(cmp.ops, lower(record.name, record))
-        end
-        state.dim = destination_dim
-        return nothing
-    end
-
-    new_records = PGRecord[]
-    for record in state.pgs
-        dest_name =
-            string(destination) *
-            "__" *
-            ophash(
-                record.name,
-                String[];
-                operation=hash_operation,
-                parameters=hash_parameters
-            )
-        generated_record_exists(cmp.reg, destination, dest_name, new_records) && throw(
-            ArgumentError(
-                "$operation_name destination physical group '$dest_name' already exists"
-            )
+function _compile!(cmp::_CompilerState, op::GetBoundary)
+    dim = cmp.reg[op.source].dim
+    source_pg = _pg(cmp, op.source)
+    replace = op.destination == op.source
+    state = replace ? cmp.reg[op.source] : _create!(cmp, op.destination, dim)
+    state.dim = max(dim - 1, 0)
+    push!(
+        cmp.ops,
+        (
+            string(op.destination),
+            SolidModels.get_boundary,
+            (source_pg, dim),
+            :combined => op.combined,
+            :oriented => op.oriented,
+            :recursive => op.recursive,
+            :direction => op.direction,
+            :position => op.position
         )
-        push!(cmp.ops, lower(dest_name, record))
-        push!(new_records, PGRecord(dest_name, destination))
-    end
-
-    if haskey(cmp.reg, destination)
-        _require_destination_dimension(
-            cmp.reg,
-            destination,
-            destination_dim,
-            operation_name
-        )
-        append!(cmp.reg[destination].pgs, new_records)
-    else
-        cmp.reg[destination] = LayerState(new_records, destination_dim)
-    end
+    )
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::GetBoundary)
-    op.destination != op.source &&
-        haskey(cmp.reg, op.destination) &&
-        throw(
-            ArgumentError(
-                "GetBoundary destination layer :$(op.destination) already exists"
-            )
-        )
+function _compile!(cmp::_CompilerState, op::Translate)
     dim = cmp.reg[op.source].dim
-    kwargs = (
-        :combined => op.combined,
-        :oriented => op.oriented,
-        :recursive => op.recursive,
-        :direction => op.direction,
-        :position => op.position
-    )
-    return _compile_unary_layer_op!(
-        cmp,
-        op.destination,
-        op.source,
-        max(dim - 1, 0);
-        replace=(op.destination == op.source),
-        hash_operation=:get_boundary,
-        hash_parameters=(
-            dim,
-            op.combined,
-            op.oriented,
-            op.recursive,
-            op.direction,
-            op.position
-        ),
-        operation_name="GetBoundary"
-    ) do destination, record
-        return (destination, SolidModels.get_boundary, (record.name, dim), kwargs...)
-    end
-end
-
-function _compile!(cmp::CompilerState, op::Translate)
-    dim = cmp.reg[op.source].dim
-    _compile_unary_layer_op!(
-        cmp,
-        op.destination,
-        op.source,
-        dim;
-        replace=op.destination == op.source && !op.copy,
-        hash_operation=:translate,
-        hash_parameters=(op.dx, op.dy, op.dz),
-        operation_name="Translate"
-    ) do destination, record
-        return (
-            destination,
+    source_pg = _pg(cmp, op.source)
+    copy = op.destination != op.source
+    copy && _create!(cmp, op.destination, dim)
+    push!(
+        cmp.ops,
+        (
+            string(op.destination),
             SolidModels.translate!,
-            (record.name, op.dx, op.dy, op.dz),
-            :copy => op.copy
+            (source_pg, op.dx, op.dy, op.dz),
+            :copy => copy
         )
-    end
+    )
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::Remove)
+function _compile!(cmp::_CompilerState, op::Remove)
     haskey(cmp.reg, op.source) || return nothing
-    state = cmp.reg[op.source]
-    for record in state.pgs
-        push!(
-            cmp.ops,
-            (
-                "_rm",
-                SolidModels.remove_group!,
-                (record.name, state.dim),
-                :remove_entities => op.remove_entities
-            )
+    push!(
+        cmp.ops,
+        (
+            "_rm",
+            SolidModels.remove_group!,
+            (_pg(cmp, op.source), cmp.reg[op.source].dim),
+            :remove_entities => op.remove_entities
         )
-    end
+    )
     delete!(cmp.reg, op.source)
     return nothing
 end
 
-function _compile!(cmp::CompilerState, op::Revolve)
+function _compile!(cmp::_CompilerState, op::Revolve)
     dim = cmp.reg[op.source].dim
     dim < 3 || throw(ArgumentError("Revolve cannot process a 3D layer"))
-    return _compile_unary_layer_op!(
-        cmp,
-        op.destination,
-        op.source,
-        dim + 1;
-        replace=(op.destination == op.source),
-        hash_operation=:revolve,
-        hash_parameters=(dim, op.origin, op.axis, op.angle),
-        operation_name="Revolve"
-    ) do destination, record
-        return (
-            destination,
+    source_pg = _pg(cmp, op.source)
+    replace = op.destination == op.source
+    state = replace ? cmp.reg[op.source] : _create!(cmp, op.destination, dim)
+    state.dim = dim + 1
+    push!(
+        cmp.ops,
+        (
+            string(op.destination),
             SolidModels.revolve!,
-            (record.name, dim, op.origin..., op.axis..., op.angle)
+            (source_pg, dim, op.origin..., op.axis..., op.angle)
         )
-    end
+    )
+    return nothing
 end
 
-function _compile!(cmp::CompilerState, op::SetPeriodic)
-    first_state = cmp.reg[op.first]
-    second_state = cmp.reg[op.second]
-    first_state.dim == 2 && second_state.dim == 2 ||
+function _compile!(cmp::_CompilerState, op::SetPeriodic)
+    cmp.reg[op.first].dim == 2 && cmp.reg[op.second].dim == 2 ||
         throw(ArgumentError("SetPeriodic layers must both be 2D"))
-    length(first_state.pgs) == 1 && length(second_state.pgs) == 1 || throw(
-        ArgumentError("SetPeriodic layers must each contain exactly one physical group")
-    )
-
-    first_pg = only(first_state.pgs).name
-    second_pg = only(second_state.pgs).name
+    first_pg = _pg(cmp, op.first)
+    second_pg = _pg(cmp, op.second)
     push!(
         cmp.ops,
         ("Periodic_$first_pg", SolidModels.set_periodic!, (first_pg, second_pg, 2, 2))

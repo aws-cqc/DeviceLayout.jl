@@ -121,12 +121,13 @@ end
     using DeviceLayout.SolidModels
     using DeviceLayout.SolidModelsExperimental:
         Cut,
+        DeferredInterface,
         Extrude,
         Fuse,
         GetBoundary,
         GetInterface,
-        Heal,
         Hollow,
+        Intersect,
         METAL,
         NULL,
         Remove,
@@ -136,7 +137,6 @@ end
         SourceLayer,
         SourceStack,
         Translate,
-        PGRecord,
         LayerState,
         LayerRegistry,
         compile_ops,
@@ -178,23 +178,15 @@ end
         :flat => SourceLayer(METAL; level=1, thickness=0μm);
         levels=(1 => 0μm, 2 => 3μm)
     )
-    metal_pg = "metal__a"
-    voids_pg = "voids__b"
-    shell_pg = "shell__c"
-    span_pg = "span__d"
-    flat_pg = "flat__e"
+    # Before rendering, every layer holds one PG named after it.
     registry = LayerRegistry(
-        :metal => LayerState([PGRecord(metal_pg, :metal)], 2),
-        :voids => LayerState([PGRecord(voids_pg, :voids)], 2),
-        :shell => LayerState([PGRecord(shell_pg, :shell)], 2),
-        :span => LayerState([PGRecord(span_pg, :span)], 2),
-        :flat => LayerState([PGRecord(flat_pg, :flat)], 2)
+        layer => LayerState([string(layer)], 2) for
+        layer in (:metal, :voids, :shell, :span, :flat)
     )
+    with(registry, extra...) = merge(deepcopy(registry), LayerRegistry(extra...))
+    lowered(ops, f) = only(filter(op -> op[2] == f, ops))
 
     @testset "Utils" begin
-        @test SolidModelsExperimental.ophash("object", ["tool"]; operation=:cut) !=
-              SolidModelsExperimental.ophash("object", ["tool"]; operation=:intersect)
-
         @test length(exterior_boundaries(:volume)) == 6
     end
 
@@ -207,17 +199,14 @@ end
         ops, reg, dints = compile_ops([Extrude(:metal)], stack, registry)
         @test reg[:metal].dim == 3
         @test reg[:metal].dz == 2.0
-        @test only(reg[:metal].pgs).name == metal_pg
-        @test only(filter(op -> op[2] == SolidModels.extrude_z!, ops))[3] ==
-              (metal_pg, 2μm, 2)
-        @test only(filter(op -> op[2] == SolidModels.remove_group!, ops))[3] ==
-              (metal_pg, 2)
-        @test isempty(SolidModelsExperimental.interface_vertices(dints))
+        @test only(reg[:metal].pgs) == "metal"
+        @test lowered(ops, SolidModels.extrude_z!)[3] == ("metal", 2μm, 2)
+        @test lowered(ops, SolidModels.remove_group!)[3] == ("metal", 2)
+        @test isempty(dints)
 
         # A level span declares the thickness between its two ends.
         ops, reg, _ = compile_ops([Extrude(:span)], stack, registry)
-        @test only(filter(op -> op[2] == SolidModels.extrude_z!, ops))[3] ==
-              (span_pg, 4μm, 2)
+        @test lowered(ops, SolidModels.extrude_z!)[3] == ("span", 4μm, 2)
         @test reg[:span].dz == 4.0
 
         # Explicit distances and target levels must agree with the declaration.
@@ -242,25 +231,23 @@ end
         @test reg[:metal].dim == 2
         @test reg[:solid].dim == 3
         @test reg[:solid].dz == 2.0
-        @test !any(op -> op[2] == SolidModels.remove_group!, ops)
-        @test startswith(only(reg[:solid].pgs).name, "solid__")
+        @test only(reg[:solid].pgs) == "solid"
+        @test only(ops) == ("solid", SolidModels.extrude_z!, ("metal", 2μm, 2))
 
         # Walls: extrude the 1D outline of a surface.
         ops, reg, _ =
             compile_ops([GetBoundary(:shell, :shell), Extrude(:shell)], stack, registry)
-        ext = only(filter(op -> op[2] == SolidModels.extrude_z!, ops))
-        @test ext[3] == (shell_pg, 2μm, 1)
+        @test lowered(ops, SolidModels.extrude_z!)[3] == ("shell", 2μm, 1)
         @test reg[:shell].dim == 2
 
         # Generated layers need an explicit distance or target level.
-        generated = deepcopy(registry)
-        generated[:generated] = LayerState([PGRecord("generated", :generated)], 2)
+        generated = with(registry, :generated => LayerState(["generated"], 2))
         @test_throws ArgumentError compile_ops([Extrude(:generated)], stack, generated)
         ops, reg, _ = compile_ops([Extrude(:generated, 3μm)], stack, generated)
         @test reg[:generated].dim == 3
         @test reg[:generated].dz == 3.0
         ops, reg, _ = compile_ops([Extrude(:generated; to_level=2)], stack, generated)
-        to_z = only(filter(op -> op[2] == SolidModelsExperimental._extrude_to_z!, ops))
+        to_z = lowered(ops, SolidModelsExperimental._extrude_to_z!)
         @test to_z[3][1:3] == ("generated", 3.0, 2)
         @test to_z[3][4] === reg[:generated] # the distance is recorded here at execution
         @test isnothing(reg[:generated].dz)
@@ -284,14 +271,14 @@ end
     @testset "Hollow" begin
         @test_throws ArgumentError compile_ops([Hollow(:metal)], stack, registry)
         ops, reg, _ = compile_ops([Extrude(:metal), Hollow(:metal)], stack, registry)
-        shell = only(reg[:metal].pgs)
+        # The shell takes the layer's name at dimension 2 while the solid awaits removal.
         @test reg[:metal].dim == 2
         @test reg[:metal].dz == 2.0
-        @test startswith(shell.name, "metal__")
-        bnd = only(filter(op -> op[2] == SolidModels.get_boundary, ops))
-        @test bnd[1] == shell.name && bnd[3] == (metal_pg, 3)
-        @test only(reg[SolidModelsExperimental.HOLLOWED].pgs).name == metal_pg
-        @test reg[SolidModelsExperimental.HOLLOWED].dim == 3
+        @test only(reg[:metal].pgs) == "metal"
+        bnd = lowered(ops, SolidModels.get_boundary)
+        @test bnd[1] == "metal" && bnd[3] == ("metal", 3)
+        @test only(reg[SolidModelsExperimental._HOLLOWED].pgs) == "metal"
+        @test reg[SolidModelsExperimental._HOLLOWED].dim == 3
     end
 
     @testset "Cut" begin
@@ -299,143 +286,99 @@ end
         @test Cut(:dest, :metal, [:tool]).tools == (:tool,)
         @test_throws MethodError Cut(:bad, :metal, :first_tool, :second_tool)
         @test_throws ArgumentError Cut(:bad, :metal, Symbol[])
-
         @test_throws ArgumentError compile_ops(
             [Cut(:new_layer, :missing, :metal)],
             stack,
             registry
         )
 
-        ops, reg, _ = compile_ops([Cut(:voids, :metal, :voids)], stack, registry)
-        op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
-        @test op[3] == (metal_pg, [voids_pg], 2, 2)
-        @test startswith(op[1], "voids") # destination layer
-        # destination layer is now generated, so its name contains the op hash
-        @test op[1] != voids_pg
+        # A new destination preserves both inputs.
+        ops, reg, _ = compile_ops([Cut(:cut, :metal, :voids)], stack, registry)
+        op = only(ops)
+        @test op[1:3] == ("cut", SolidModels.difference_geom!, ("metal", ["voids"], 2, 2))
         @test (:remove_object => false) in op
         @test (:remove_tool => false) in op
-        @test length(reg[:metal].pgs) == 1
-        @test length(reg[:voids].pgs) == 1
+        @test reg[:cut].dim == 2
+        @test only(reg[:cut].pgs) == "cut"
+        @test haskey(reg, :metal) && haskey(reg, :voids)
 
+        # In place, the result replaces the object or the tool it is named after.
+        ops, reg, _ = compile_ops([Cut(:metal, :metal, :voids)], stack, registry)
+        @test only(ops)[1] == "metal"
+        @test haskey(reg, :metal) && haskey(reg, :voids)
+        ops, reg, _ = compile_ops([Cut(:voids, :metal, :voids)], stack, registry)
+        @test only(ops)[1] == "voids"
+        @test only(ops)[3] == ("metal", ["voids"], 2, 2)
+
+        # Adjacent removals of the object or of all tools are absorbed into the OCC call.
         ops, reg, _ =
             compile_ops([Cut(:cut, :metal, :voids), Remove(:metal)], stack, registry)
-        op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
-        @test startswith(op[1], "cut")
-        @test op[3] == (metal_pg, [voids_pg], 2, 2)
-        @test (:remove_object => true) in op
-        @test all(op -> op[2] != SolidModels.remove_group!, ops) # removal was absorbed
+        @test (:remove_object => true) in only(ops)
         @test !haskey(reg, :metal)
-
         ops, reg, _ =
             compile_ops([Cut(:cut, :metal, :voids), Remove(:voids)], stack, registry)
-        op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
-        @test startswith(op[1], "cut")
-        @test op[3] == (metal_pg, [voids_pg], 2, 2)
-        @test (:remove_tool => true) in op
-        @test all(op -> op[2] != SolidModels.remove_group!, ops) # removal was absorbed
+        @test (:remove_tool => true) in only(ops)
         @test !haskey(reg, :voids)
-
-        ops, reg, _ = compile_ops([Cut(:metal, :metal, :voids)], stack, registry)
-        op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
-        @test op[1] == metal_pg # modifying object in-place retains its name
-        @test op[3] == (metal_pg, [voids_pg], 2, 2)
-        @test (:remove_object => false) in op
-        @test haskey(reg, :metal)
-        @test haskey(reg, :voids)
-
         ops, reg, _ =
             compile_ops([Cut(:metal, :metal, :voids), Remove(:voids)], stack, registry)
-        op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
-        @test op[1] == metal_pg # modifying object in-place retains its name
-        @test op[3] == (metal_pg, [voids_pg], 2, 2)
-        @test (:remove_object => false) in op
-        @test (:remove_tool => true) in op
-        @test haskey(reg, :metal)
-        @test !haskey(reg, :voids)
+        @test (:remove_object => false) in only(ops)
+        @test (:remove_tool => true) in only(ops)
+        @test haskey(reg, :metal) && !haskey(reg, :voids)
 
-        reg = deepcopy(registry)
-        second_metal_pg = "metal__second"
-        push!(reg[:metal].pgs, PGRecord(second_metal_pg, :metal))
-        second_voids_pg = "voids__second"
-        push!(reg[:voids].pgs, PGRecord(second_voids_pg, :voids))
-        ops, reg, _ = compile_ops([Cut(:cut, :metal, :voids), Remove(:voids)], stack, reg)
-        ops = filter(op -> op[2] == SolidModels.difference_geom!, ops)
-        @test reg[:cut].dim == 2
-        @test length(reg[:cut].pgs) == 2 # one for each metal object
-        @test all(op -> startswith(op[3][1], "metal"), ops)
-        @test all(op -> length(op[3][2]) == 2, ops) # two void PGs subtracted from each object
-        @test getindex.(ops, Ref(5)) == [:remove_tool => false, :remove_tool => true]
-
-        # Partial tool removal cannot be represented by OCC's all-tools removal flag,
-        # so the Remove operation is not absorbed into the preceding Cut.
+        # Partial tool removal cannot be represented by OCC's all-tools removal flag.
         ops, reg, _ = compile_ops(
             [Cut(:cut, :metal, (:voids, :shell)), Remove(:voids)],
             stack,
             registry
         )
-        op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
-        @test (:remove_tool => false) in op
+        @test (:remove_tool => false) in lowered(ops, SolidModels.difference_geom!)
         @test any(op -> op[2] == SolidModels.remove_group!, ops)
-        @test !haskey(reg, :voids)
-        @test haskey(reg, :shell)
+        @test !haskey(reg, :voids) && haskey(reg, :shell)
 
         # Removing the destination means removing the result, so it is not absorbed.
         ops, reg, _ =
             compile_ops([Cut(:metal, :metal, :voids), Remove(:metal)], stack, registry)
-        op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
-        @test (:remove_object => false) in op
+        @test (:remove_object => false) in lowered(ops, SolidModels.difference_geom!)
         @test any(op -> op[2] == SolidModels.remove_group!, ops)
         @test !haskey(reg, :metal)
 
-        # A non-adjacent removal remains a separate operation until a more comprehensive
-        # compiler can prove that folding it is safe.
+        # A non-adjacent removal remains a separate operation.
         ops, reg, _ = compile_ops(
             [Cut(:cut, :metal, :voids), GetBoundary(:edge, :metal), Remove(:metal)],
             stack,
             registry
         )
-        op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
-        @test (:remove_object => false) in op
+        @test (:remove_object => false) in lowered(ops, SolidModels.difference_geom!)
         @test any(op -> op[2] == SolidModels.remove_group!, ops)
         @test !haskey(reg, :metal)
 
-        # Independent repeats request the same internal output PG name and are rejected.
+        # A destination must be new or one of the inputs.
         cut = Cut(:cut, :metal, :voids)
         @test_throws ArgumentError compile_ops([cut, cut], stack, registry)
-        @test_throws ArgumentError compile_ops([cut, cut, Remove(:metal)], stack, registry)
+        @test_throws ArgumentError compile_ops(
+            [Cut(:shell, :metal, :voids)],
+            stack,
+            registry
+        )
 
-        # Replace-object repeats operate on the previous result under the same internal PG name.
+        # In-place repeats operate on the previous result.
         ops, reg, _ = compile_ops(
             [Cut(:metal, :metal, :voids), Cut(:metal, :metal, :voids)],
             stack,
             registry
         )
         @test length(ops) == 2
-        @test all(op -> op[1] == metal_pg, ops)
-        @test all(op -> op[3] == (metal_pg, [voids_pg], 2, 2), ops)
-        @test only(reg[:metal].pgs).name == metal_pg
+        @test all(op -> op[1] == "metal", ops)
+        @test only(reg[:metal].pgs) == "metal"
 
-        # Replace-tool repeats use the first difference as the second call's tool.
-        ops, reg, _ = compile_ops(
-            [Cut(:voids, :metal, :voids), Cut(:voids, :metal, :voids)],
-            stack,
-            registry
-        )
-        @test length(ops) == 2
-        @test ops[2][3] == (metal_pg, [ops[1][1]], 2, 2)
-        @test ops[2][1] != ops[1][1]
-        @test only(reg[:voids].pgs).name == ops[2][1]
-
-        # Explicit chains consume a named result from the preceding Cut.
+        # Explicit chains consume the named result of the preceding Cut.
         ops, reg, _ = compile_ops(
             [Cut(:first, :metal, :voids), Cut(:second, :first, :shell)],
             stack,
             registry
         )
-        @test length(ops) == 2
-        @test ops[2][3] == (ops[1][1], [shell_pg], 2, 2)
-        @test haskey(reg, :first)
-        @test haskey(reg, :second)
+        @test ops[2][3] == ("first", ["shell"], 2, 2)
+        @test haskey(reg, :first) && haskey(reg, :second)
     end
 
     @testset "GetBoundary" begin
@@ -464,33 +407,19 @@ end
         # Creating a boundary preserves the source and registers a layer one dimension lower.
         ops, reg, _ = compile_ops([op], stack, registry)
         op = only(ops)
-        @test op[2] == SolidModels.get_boundary
-        @test op[3] == (metal_pg, 2)
+        @test op[1:3] == ("edge", SolidModels.get_boundary, ("metal", 2))
         @test (:combined => false) in op
         @test (:oriented => false) in op
         @test (:recursive => true) in op
         @test (:direction => "z") in op
         @test (:position => "max") in op
         @test reg[:edge].dim == 1
-        @test only(reg[:edge].pgs).name == op[1]
+        @test only(reg[:edge].pgs) == "edge"
         @test haskey(reg, :metal)
 
-        # Every source PG produces one boundary operation and registry record.
-        reg = deepcopy(registry)
-        second_pg = "metal__second"
-        push!(reg[:metal].pgs, PGRecord(second_pg, :metal))
-        ops, reg, _ = compile_ops([GetBoundary(:edge, :metal)], stack, reg)
-        @test length(ops) == 2
-        @test Set(op[3] for op in ops) == Set([(metal_pg, 2), (second_pg, 2)])
-        @test length(reg[:edge].pgs) == 2
-        @test Set(record.name for record in reg[:edge].pgs) == Set(op[1] for op in ops)
-
-        # Independent repeats request the same internal output PG name and are rejected.
+        # A destination must be new or the source.
         bnd = GetBoundary(:edge, :metal)
         @test_throws ArgumentError compile_ops([bnd, bnd], stack, registry)
-
-        # Appending to an existing unrelated destination is rejected, even for a distinct
-        # boundary selection.
         @test_throws ArgumentError compile_ops(
             [
                 GetBoundary(:edge, :metal; direction="x"),
@@ -500,105 +429,54 @@ end
             registry
         )
 
-        reg = deepcopy(registry)
-        reg[:edge] = LayerState([PGRecord("existing", :edge)], 1)
-        @test_throws ArgumentError compile_ops([GetBoundary(:edge, :metal)], stack, reg)
-
-        # In-place extraction retains its internal PG name while lowering dimension.
-        ops, reg, _ = compile_ops([GetBoundary(:metal, :metal)], stack, registry)
-        op = only(ops)
-        @test op[1] == metal_pg
-        @test op[3] == (metal_pg, 2)
-        @test reg[:metal].dim == 1
-
-        # Repeated in-place extraction executes at each dimension without going below 0D.
+        # In-place extraction lowers the dimension under the same name, never below 0D.
         bnd = GetBoundary(:metal, :metal)
         ops, reg, _ = compile_ops([bnd, bnd, bnd], stack, registry)
-        @test length(ops) == 3
-        @test getindex.(ops, Ref(3)) == [(metal_pg, 2), (metal_pg, 1), (metal_pg, 0)]
+        @test getindex.(ops, Ref(3)) == [("metal", 2), ("metal", 1), ("metal", 0)]
+        @test all(op -> op[1] == "metal", ops)
         @test reg[:metal].dim == 0
-        @test all(op -> op[1] == metal_pg, ops)
 
-        # Explicit chains consume a named boundary result from the preceding operation.
+        # Explicit chains consume the named boundary of the preceding operation.
         ops, reg, _ = compile_ops(
             [GetBoundary(:edges, :metal), GetBoundary(:points, :edges)],
             stack,
             registry
         )
-        @test length(ops) == 2
-        @test ops[2][3] == (ops[1][1], 1)
+        @test ops[2][3] == ("edges", 1)
         @test reg[:edges].dim == 1
         @test reg[:points].dim == 0
-
-        # An out-of-place 0D boundary remains a valid, potentially unrealized 0D layer.
-        reg = deepcopy(registry)
-        point_pg = "point__source"
-        reg[:point] = LayerState([PGRecord(point_pg, :point)], 0)
-        ops, reg, _ = compile_ops([GetBoundary(:empty, :point)], stack, reg)
-        @test only(ops)[3] == (point_pg, 0)
-        @test reg[:empty].dim == 0
-
-        # Existing unrelated destinations must have the boundary dimension.
-        reg = deepcopy(registry)
-        reg[:edge] = LayerState([PGRecord("wrong_dimension", :edge)], 2)
-        @test_throws ArgumentError compile_ops([GetBoundary(:edge, :metal)], stack, reg)
     end
 
     @testset "Translate" begin
         @test Translate(:metal, 1μm, 0μm, 0μm).destination == :metal
         @test Translate(:metal, 1μm, 0μm, 0μm).source == :metal
-        @test !Translate(:metal, 1μm, 0μm, 0μm).copy
-        @test !Translate(:metal, :metal, 1μm, 0μm, 0μm).copy
-        @test Translate(:shifted, :metal, 1μm, 0μm, 0μm).copy
 
+        # A distinct destination receives a copy; in place, the layer moves.
         ops, reg, _ =
             compile_ops([Translate(:shifted, :metal, 1μm, 0μm, 0μm)], stack, registry)
+        @test only(ops)[1:3] ==
+              ("shifted", SolidModels.translate!, ("metal", 1μm, 0μm, 0μm))
+        @test (:copy => true) in only(ops)
         @test haskey(reg, :metal)
         @test reg[:shifted].dim == 2
-        @test only(ops)[2] == SolidModels.translate!
-        @test (:copy => true) in only(ops)
-
-        @test_throws ArgumentError Translate(:moved, :metal, 1μm, 0μm, 0μm; copy=false)
-
-        # Independent repeats request the same internal output PG name.
-        translate = Translate(:shifted, :metal, 1μm, 0μm, 0μm)
-        @test_throws ArgumentError compile_ops([translate, translate], stack, registry)
-
-        # Distinct translations may append to one destination; disjointness is the
-        # caller's responsibility.
-        ops, reg, _ = compile_ops(
-            [
-                Translate(:shifted, :metal, 1μm, 0μm, 0μm),
-                Translate(:shifted, :metal, 2μm, 0μm, 0μm)
-            ],
-            stack,
-            registry
-        )
-        names = getfield.(reg[:shifted].pgs, :name)
-        @test length(names) == 2
-        @test allunique(names)
-        @test count(op -> op[2] == SolidModels.translate!, ops) == 2
-
-        # In-place noncopying translations accumulate on the previous result.
         ops, reg, _ = compile_ops(
             [Translate(:metal, 1μm, 0μm, 0μm), Translate(:metal, 1μm, 0μm, 0μm)],
             stack,
             registry
         )
-        @test length(ops) == 2
-        @test all(op -> op[1] == metal_pg, ops)
-        @test all(op -> (:copy => false) in op, ops)
-        @test only(reg[:metal].pgs).name == metal_pg
+        @test all(op -> op[1] == "metal" && (:copy => false) in op, ops)
+        @test only(reg[:metal].pgs) == "metal"
 
-        # Repeating an in-place copy would recreate the first internal output PG name.
-        in_place_copy = Translate(:metal, :metal, 1μm, 0μm, 0μm; copy=true)
+        # A destination must be new or the source.
+        translate = Translate(:shifted, :metal, 1μm, 0μm, 0μm)
+        @test_throws ArgumentError compile_ops([translate, translate], stack, registry)
         @test_throws ArgumentError compile_ops(
-            [in_place_copy, in_place_copy],
+            [Translate(:voids, :metal, 1μm, 0μm, 0μm)],
             stack,
             registry
         )
 
-        # Explicit chains consume the translated result from the preceding operation.
+        # Explicit chains consume the translated result of the preceding operation.
         ops, reg, _ = compile_ops(
             [
                 Translate(:shifted_x, :metal, 1μm, 0μm, 0μm),
@@ -607,18 +485,8 @@ end
             stack,
             registry
         )
-        @test length(ops) == 2
-        @test ops[2][3][1] == ops[1][1]
-        @test haskey(reg, :shifted_x)
-        @test haskey(reg, :shifted_xy)
-
-        reg = deepcopy(registry)
-        reg[:shifted] = LayerState([PGRecord("wrong_dimension", :shifted)], 3)
-        @test_throws ArgumentError compile_ops(
-            [Translate(:shifted, :metal, 1μm, 0μm, 0μm)],
-            stack,
-            reg
-        )
+        @test ops[2][3][1] == "shifted_x"
+        @test haskey(reg, :shifted_x) && haskey(reg, :shifted_xy)
     end
 
     @testset "Fuse" begin
@@ -634,106 +502,69 @@ end
             registry
         )
 
-        # Even one source is collapsed into one generated PG with a new internal PG name.
+        # In place, a single source is healed into itself.
         ops, reg, _ = compile_ops([Fuse(:metal)], stack, registry)
-        op = only(ops)
-        @test startswith(op[1], "metal__")
-        @test op[1] != metal_pg
-        @test op[2] == SolidModels.union_geom!
-        @test op[3] == ([metal_pg], 2)
-        @test (:remove_object => true) in op
-        @test only(reg[:metal].pgs).name == op[1]
+        @test only(ops)[1:3] == ("metal", SolidModels.union_geom!, (["metal"], 2))
+        @test (:remove_object => true) in only(ops)
+        @test only(reg[:metal].pgs) == "metal"
 
-        # Every PG in a single source participates in the same collapsed result.
-        reg = deepcopy(registry)
-        second_pg = "metal__second"
-        push!(reg[:metal].pgs, PGRecord(second_pg, :metal))
-        ops, reg, _ = compile_ops([Fuse(:combined, (:metal,))], stack, reg)
-        op = only(ops)
-        @test op[3] == (sort([metal_pg, second_pg]), 2)
-        @test (:remove_object => false) in op
-        @test haskey(reg, :metal)
-        @test length(reg[:combined].pgs) == 1
-        @test only(reg[:combined].pgs).name == op[1]
-
-        # Multiple sources collapse into the same one-PG representation.
+        # Multiple sources are preserved and fused into a new destination.
         ops, reg, _ = compile_ops([Fuse(:combined, (:metal, :voids))], stack, registry)
-        op = only(ops)
-        @test startswith(op[1], "combined__")
-        @test op[2] == SolidModels.union_geom!
-        @test op[3] == (sort([metal_pg, voids_pg]), 2)
-        @test (:remove_object => false) in op
-        @test haskey(reg, :metal)
-        @test haskey(reg, :voids)
-        @test only(reg[:combined].pgs).name == op[1]
+        @test only(ops)[1:3] ==
+              ("combined", SolidModels.union_geom!, (["metal", "voids"], 2))
+        @test (:remove_object => false) in only(ops)
+        @test haskey(reg, :metal) && haskey(reg, :voids)
+        @test only(reg[:combined].pgs) == "combined"
 
-        # An unrelated existing destination receives one appended, disjoint fused PG.
-        ops, reg, _ = compile_ops([Fuse(:metal, (:voids,))], stack, registry)
-        union_op = only(filter(op -> op[2] == SolidModels.union_geom!, ops))
-        difference_op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
-        @test union_op[3] == ([voids_pg], 2)
-        @test difference_op[3] == (union_op[1], [metal_pg], 2, 2)
-        @test length(reg[:metal].pgs) == 2
-        @test reg[:metal].pgs[1].name == metal_pg
-        @test reg[:metal].pgs[2].name == union_op[1]
-        @test haskey(reg, :voids)
+        # One source into a new destination heals it there and preserves it unless removed.
+        ops, reg, _ =
+            compile_ops([Fuse(:clean, (:metal,)), Remove(:metal)], stack, registry)
+        @test only(ops)[1:3] == ("clean", SolidModels.union_geom!, (["metal"], 2))
+        @test (:remove_object => true) in only(ops)
+        @test !haskey(reg, :metal)
 
-        # Including the destination among the sources collapses and replaces its PGs.
+        # Including the destination among the sources replaces its geometry.
         ops, reg, _ = compile_ops([Fuse(:metal, (:metal, :voids))], stack, registry)
-        op = only(ops)
-        @test op[3] == (sort([metal_pg, voids_pg]), 2)
-        @test length(reg[:metal].pgs) == 1
-        @test only(reg[:metal].pgs).name == op[1]
-        @test (:remove_object => false) in op
+        @test only(ops)[1] == "metal"
+        @test only(reg[:metal].pgs) == "metal"
         @test haskey(reg, :voids)
 
-        # Independent repeats request the same internal output PG name and are rejected.
+        # A destination must be new or one of the sources.
         fuse = Fuse(:combined, (:metal, :voids))
         @test_throws ArgumentError compile_ops([fuse, fuse], stack, registry)
+        @test_throws ArgumentError compile_ops(
+            [Fuse(:shell, (:metal, :voids))],
+            stack,
+            registry
+        )
 
-        # Stateful in-place repeats fuse the result produced by the previous call.
-        ops, reg, _ = compile_ops([Fuse(:metal), Fuse(:metal)], stack, registry)
-        @test length(ops) == 2
-        @test ops[2][3] == ([ops[1][1]], 2)
-        @test ops[2][1] != ops[1][1]
-        @test only(reg[:metal].pgs).name == ops[2][1]
-
-        # Explicit chains consume a named fused result from the preceding operation.
+        # Explicit chains consume the named result of the preceding Fuse.
         ops, reg, _ = compile_ops(
             [Fuse(:combined, (:metal, :voids)), Fuse(:all, (:combined, :shell))],
             stack,
             registry
         )
-        @test length(ops) == 2
-        @test ops[2][3] == (sort([ops[1][1], shell_pg]), 2)
-        @test haskey(reg, :combined)
-        @test haskey(reg, :all)
+        @test ops[2][3] == (["combined", "shell"], 2)
+        @test haskey(reg, :combined) && haskey(reg, :all)
 
-        # Explicit removal controls source lifetime and is folded only when all
-        # non-destination sources are removed.
+        # Removal is folded in only when every non-destination source is removed.
         ops, reg, _ = compile_ops(
             [Fuse(:combined, (:metal, :voids)), Remove(:metal)],
             stack,
             registry
         )
-        union_op = only(filter(op -> op[2] == SolidModels.union_geom!, ops))
-        @test (:remove_object => false) in union_op
+        @test (:remove_object => false) in lowered(ops, SolidModels.union_geom!)
         @test any(op -> op[2] == SolidModels.remove_group!, ops)
-        @test !haskey(reg, :metal)
-        @test haskey(reg, :voids)
-
+        @test !haskey(reg, :metal) && haskey(reg, :voids)
         ops, reg, _ = compile_ops(
             [Fuse(:combined, (:metal, :voids)), Remove(:metal), Remove(:voids)],
             stack,
             registry
         )
-        union_op = only(ops)
-        @test union_op[2] == SolidModels.union_geom!
-        @test (:remove_object => true) in union_op
-        @test !haskey(reg, :metal)
-        @test !haskey(reg, :voids)
+        @test (:remove_object => true) in only(ops)
+        @test !haskey(reg, :metal) && !haskey(reg, :voids)
 
-        # Sources must be dimensionally homogeneous and contain at least one PG.
+        # Sources must be dimensionally homogeneous.
         reg = deepcopy(registry)
         reg[:voids].dim = 3
         @test_throws ArgumentError compile_ops(
@@ -741,332 +572,96 @@ end
             stack,
             reg
         )
-        reg = deepcopy(registry)
-        empty!(reg[:metal].pgs)
-        @test_throws ArgumentError compile_ops([Fuse(:metal)], stack, reg)
-
-        reg = deepcopy(registry)
-        reg[:combined] = LayerState([PGRecord("combined__existing", :combined)], 3)
-        @test_throws ArgumentError compile_ops(
-            [Fuse(:combined, (:metal, :voids))],
-            stack,
-            reg
-        )
-    end
-
-    @testset "Heal" begin
-        @test Heal(:metal).destination == :metal
-        @test Heal(:combined, :metal).source == :metal
-        @test_throws ArgumentError compile_ops([Heal(:combined, :missing)], stack, registry)
-
-        # In-place healing preserves PG internal PG names.
-        ops, reg, _ = compile_ops([Heal(:metal)], stack, registry)
-        op = only(ops)
-        @test op[1] == metal_pg
-        @test op[2] == SolidModels.union_geom!
-        @test op[3] == (metal_pg, 2)
-        @test (:remove_object => true) in op
-
-        # Stateful repeats heal the result again under the same internal PG.
-        ops, reg, _ = compile_ops([Heal(:metal), Heal(:metal)], stack, registry)
-        @test length(ops) == 2
-        @test all(op -> op[1] == metal_pg, ops)
-        @test all(op -> op[3] == (metal_pg, 2), ops)
-        @test all(op -> (:remove_object => true) in op, ops)
-
-        reg = deepcopy(registry)
-        second_pg = "metal__second"
-        push!(reg[:metal].pgs, PGRecord(second_pg, :metal))
-        ops, reg, _ = compile_ops([Heal(:metal)], stack, reg)
-        @test length(ops) == 2
-        @test Set(op[1] for op in ops) == Set((metal_pg, second_pg))
-
-        # Assign mode creates a content-addressed PG and preserves the source records.
-        healed(name, destination) = string(
-            destination,
-            "__",
-            SolidModelsExperimental.ophash(name, String[]; operation=:heal)
-        )
-        ops, reg, _ = compile_ops([Heal(:combined, :metal)], stack, registry)
-        op = only(ops)
-        expected_name = healed(metal_pg, :combined)
-        @test op[1] == expected_name
-        @test op[3] == (metal_pg, 2)
-        @test only(reg[:combined].pgs).name == expected_name
-        @test (:remove_object => false) in op
-        @test haskey(reg, :metal)
-
-        # Independent repeats request the same internal PG and are rejected, even when the
-        # second call would otherwise absorb a source removal.
-        heal = Heal(:combined, :metal)
-        @test_throws ArgumentError compile_ops([heal, heal], stack, registry)
-        @test_throws ArgumentError compile_ops(
-            [heal, heal, Remove(:metal)],
-            stack,
-            registry
-        )
-
-        # Explicit chains name each result from its immediate source.
-        ops, reg, _ =
-            compile_ops([Heal(:clean, :metal), Heal(:cleaner, :clean)], stack, registry)
-        clean_name = healed(metal_pg, :clean)
-        cleaner_name = healed(clean_name, :cleaner)
-        @test length(ops) == 2
-        @test ops[1][1] == clean_name
-        @test ops[2][1] == cleaner_name
-        @test ops[2][3] == (clean_name, 2)
-        @test haskey(reg, :metal)
-        @test haskey(reg, :clean)
-
-        reg = deepcopy(registry)
-        push!(reg[:metal].pgs, PGRecord(second_pg, :metal))
-        ops, reg, _ = compile_ops([Heal(:combined, :metal)], stack, reg)
-        expected_second = healed(second_pg, :combined)
-        @test Set(op[1] for op in ops) == Set((expected_name, expected_second))
-        @test Set(record.name for record in reg[:combined].pgs) ==
-              Set((expected_name, expected_second))
-        @test haskey(reg, :metal)
-
-        # Assigning to an existing destination appends disjoint PGs.
-        reg = deepcopy(registry)
-        existing_pg = "combined__existing"
-        reg[:combined] = LayerState([PGRecord(existing_pg, :combined)], 2)
-        ops, reg, _ = compile_ops([Heal(:combined, :metal)], stack, reg)
-        union_op = only(filter(op -> op[2] == SolidModels.union_geom!, ops))
-        difference_op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
-        @test union_op[1] == expected_name
-        @test difference_op[3] == (expected_name, [existing_pg], 2, 2)
-        @test (:remove_object => true) in difference_op
-        @test (:remove_tool => false) in difference_op
-        @test Set(record.name for record in reg[:combined].pgs) ==
-              Set((existing_pg, expected_name))
-        @test (:remove_object => false) in union_op
-        @test haskey(reg, :metal)
-
-        # An adjacent explicit removal is folded into the native heal operation.
-        ops, reg, _ =
-            compile_ops([Heal(:combined, :metal), Remove(:metal)], stack, registry)
-        op = only(ops)
-        @test op[2] == SolidModels.union_geom!
-        @test (:remove_object => true) in op
-        @test !haskey(reg, :metal)
-
-        # Output PG name collisions fail rather than being renamed.
-        reg = deepcopy(registry)
-        reg[:combined] = LayerState([PGRecord(expected_name, :combined)], 2)
-        @test_throws ArgumentError compile_ops([Heal(:combined, :metal)], stack, reg)
-
-        reg = deepcopy(registry)
-        reg[:combined] = LayerState([PGRecord("combined__existing", :combined)], 3)
-        @test_throws ArgumentError compile_ops([Heal(:combined, :metal)], stack, reg)
     end
 
     @testset "Intersect" begin
-        intersect = SolidModelsExperimental.Intersect(:intersection, :metal, :voids)
+        intersect = Intersect(:intersection, :metal, :voids)
         @test intersect.destination == :intersection
         @test intersect.object == :metal
         @test intersect.tool == :voids
-        @test_throws ArgumentError SolidModelsExperimental.Intersect(:self, :metal, :metal)
+        @test_throws ArgumentError Intersect(:self, :metal, :metal)
         @test_throws ArgumentError compile_ops(
-            [SolidModelsExperimental.Intersect(:intersection, :missing, :voids)],
-            stack,
-            registry
-        )
-        @test_throws ArgumentError compile_ops(
-            [SolidModelsExperimental.Intersect(:intersection, :metal, :missing)],
+            [Intersect(:intersection, :missing, :voids)],
             stack,
             registry
         )
 
-        # One object-tool pair produces one generated OCC intersection.
+        # A new destination preserves both inputs.
         ops, reg, _ = compile_ops([intersect], stack, registry)
         op = only(ops)
-        @test op[1] ==
-              "intersection__" * SolidModelsExperimental.ophash(
-            metal_pg,
-            [voids_pg];
-            operation=:intersect,
-            parameters=(2, 2)
-        )
-        @test op[2] == SolidModels.intersect_geom!
-        @test op[3] == (metal_pg, voids_pg, 2, 2)
+        @test op[1:3] ==
+              ("intersection", SolidModels.intersect_geom!, ("metal", "voids", 2, 2))
         @test (:remove_object => false) in op
         @test (:remove_tool => false) in op
         @test reg[:intersection].dim == 2
-        @test only(reg[:intersection].pgs).name == op[1]
-        @test haskey(reg, :metal)
-        @test haskey(reg, :voids)
+        @test only(reg[:intersection].pgs) == "intersection"
+        @test haskey(reg, :metal) && haskey(reg, :voids)
 
         # Mixed-dimensional inputs produce a layer at the lower input dimension.
-        reg = deepcopy(registry)
-        volume_pg = "volume__source"
-        reg[:volume] = LayerState([PGRecord(volume_pg, :volume)], 3)
-        ops, reg, _ = compile_ops(
-            [SolidModelsExperimental.Intersect(:surface, :volume, :metal)],
-            stack,
-            reg
-        )
-        @test only(ops)[3] == (volume_pg, metal_pg, 3, 2)
+        reg = with(registry, :volume => LayerState(["volume"], 3))
+        ops, reg, _ = compile_ops([Intersect(:surface, :volume, :metal)], stack, reg)
+        @test only(ops)[3] == ("volume", "metal", 3, 2)
         @test reg[:surface].dim == 2
+        reg = with(registry, :volume => LayerState(["volume"], 3))
+        ops, reg, _ = compile_ops([Intersect(:volume, :volume, :metal)], stack, reg)
+        @test reg[:volume].dim == 2
 
-        # Every object-tool PG pair receives an independent internal output PG name.
-        reg = deepcopy(registry)
-        second_metal_pg = "metal__second"
-        second_voids_pg = "voids__second"
-        push!(reg[:metal].pgs, PGRecord(second_metal_pg, :metal))
-        push!(reg[:voids].pgs, PGRecord(second_voids_pg, :voids))
-        ops, reg, _ = compile_ops([intersect], stack, reg)
-        @test length(ops) == 4
-        @test length(reg[:intersection].pgs) == 4
-        @test Set(op[3][1:2] for op in ops) == Set(
-            (object, tool) for object in (metal_pg, second_metal_pg) for
-            tool in (voids_pg, second_voids_pg)
-        )
-
-        # Generated destination collisions are rejected.
+        # A destination must be new or one of the inputs.
         @test_throws ArgumentError compile_ops([intersect, intersect], stack, registry)
-
-        # Appending clips new results against existing destination PGs.
-        reg = deepcopy(registry)
-        existing_pg = "existing"
-        reg[:intersection] = LayerState([PGRecord(existing_pg, :intersection)], 2)
-        ops, reg, _ = compile_ops([intersect], stack, reg)
-        intersection_op = only(filter(op -> op[2] == SolidModels.intersect_geom!, ops))
-        difference_op = only(filter(op -> op[2] == SolidModels.difference_geom!, ops))
-        @test difference_op[3] == (intersection_op[1], [existing_pg], 2, 2)
-        @test (:remove_object => true) in difference_op
-        @test (:remove_tool => false) in difference_op
-        @test reg[:intersection].pgs[1].name == existing_pg
-        @test reg[:intersection].pgs[2].name == intersection_op[1]
-
-        reg = deepcopy(registry)
-        reg[:intersection] = LayerState([PGRecord("wrong_dimension", :intersection)], 3)
-        @test_throws ArgumentError compile_ops([intersect], stack, reg)
-
-        # Aliased destinations replace the corresponding source layer.
-        ops, reg, _ = compile_ops(
-            [SolidModelsExperimental.Intersect(:metal, :metal, :voids)],
+        @test_throws ArgumentError compile_ops(
+            [Intersect(:shell, :metal, :voids)],
             stack,
             registry
         )
-        @test length(ops) == 1
+
+        # In place, the result replaces the input it is named after, which OCC consumes.
+        ops, reg, _ = compile_ops([Intersect(:metal, :metal, :voids)], stack, registry)
         @test (:remove_object => true) in only(ops)
         @test (:remove_tool => false) in only(ops)
-        @test reg[:metal].dim == 2
-        @test only(reg[:metal].pgs).name == only(ops)[1]
+        @test only(reg[:metal].pgs) == "metal"
         @test haskey(reg, :voids)
-
-        ops, reg, _ = compile_ops(
-            [SolidModelsExperimental.Intersect(:voids, :metal, :voids)],
-            stack,
-            registry
-        )
-        @test length(ops) == 1
+        ops, reg, _ = compile_ops([Intersect(:voids, :metal, :voids)], stack, registry)
         @test (:remove_object => false) in only(ops)
         @test (:remove_tool => true) in only(ops)
-        @test only(reg[:voids].pgs).name == only(ops)[1]
         @test haskey(reg, :metal)
 
-        # Object and tool lifetime is controlled by adjacent Remove operations.
+        # Input lifetime is controlled by adjacent Remove operations.
         ops, reg, _ =
             compile_ops([intersect, Remove(:metal), Remove(:voids)], stack, registry)
-        op = only(ops)
-        @test (:remove_object => true) in op
-        @test (:remove_tool => true) in op
-        @test !haskey(reg, :metal)
-        @test !haskey(reg, :voids)
-
-        ops, reg, _ = compile_ops([intersect, Remove(:metal)], stack, registry)
-        op = only(ops)
-        @test (:remove_object => true) in op
-        @test (:remove_tool => false) in op
-        @test !haskey(reg, :metal)
-        @test haskey(reg, :voids)
-
+        @test (:remove_object => true) in only(ops)
+        @test (:remove_tool => true) in only(ops)
+        @test !haskey(reg, :metal) && !haskey(reg, :voids)
         ops, reg, _ = compile_ops([intersect, Remove(:voids)], stack, registry)
-        op = only(ops)
-        @test (:remove_object => false) in op
-        @test (:remove_tool => true) in op
-        @test haskey(reg, :metal)
-        @test !haskey(reg, :voids)
-
-        # Removal flags are scheduled only on each PG's final cross-product use.
-        reg = deepcopy(registry)
-        push!(reg[:metal].pgs, PGRecord(second_metal_pg, :metal))
-        push!(reg[:voids].pgs, PGRecord(second_voids_pg, :voids))
-        ops, reg, _ = compile_ops([intersect, Remove(:metal), Remove(:voids)], stack, reg)
-        @test getindex.(ops, Ref(4)) == [
-            :remove_object => false,
-            :remove_object => true,
-            :remove_object => false,
-            :remove_object => true
-        ]
-        @test getindex.(ops, Ref(5)) == [
-            :remove_tool => false,
-            :remove_tool => false,
-            :remove_tool => true,
-            :remove_tool => true
-        ]
-        @test !haskey(reg, :metal)
-        @test !haskey(reg, :voids)
+        @test (:remove_object => false) in only(ops)
+        @test (:remove_tool => true) in only(ops)
+        @test haskey(reg, :metal) && !haskey(reg, :voids)
 
         # A removal naming an aliased destination applies to the result and is not absorbed.
         ops, reg, _ = compile_ops(
-            [SolidModelsExperimental.Intersect(:metal, :metal, :voids), Remove(:metal)],
+            [Intersect(:metal, :metal, :voids), Remove(:metal)],
             stack,
             registry
         )
-        intersection_op = only(filter(op -> op[2] == SolidModels.intersect_geom!, ops))
-        @test (:remove_object => true) in intersection_op
         @test any(op -> op[2] == SolidModels.remove_group!, ops)
         @test !haskey(reg, :metal)
 
-        # A following removal does not make a duplicate internal output PG name valid.
-        @test_throws ArgumentError compile_ops(
-            [intersect, intersect, Remove(:metal)],
-            stack,
-            registry
-        )
-
-        # Empty source layers cannot produce a cross product.
-        reg = deepcopy(registry)
-        empty!(reg[:metal].pgs)
-        @test_throws ArgumentError compile_ops([intersect], stack, reg)
-        reg = deepcopy(registry)
-        empty!(reg[:voids].pgs)
-        @test_throws ArgumentError compile_ops([intersect], stack, reg)
-
-        # OCC may realize fewer than A*B nonempty destination PGs.
-        sm = SolidModel("intersect_cross_product"; overwrite=true)
+        # An empty OCC result leaves an unrealized layer that `sync_registry!` empties.
+        sm = SolidModel("intersect_empty"; overwrite=true)
         SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
-        rectangles = (
-            "object_1" => (0.0, 0.0, 2.0, 2.0),
-            "object_2" => (10.0, 0.0, 2.0, 2.0),
-            "tool_1" => (1.0, 0.0, 2.0, 2.0),
-            "tool_2" => (20.0, 0.0, 2.0, 2.0)
-        )
-        reg = LayerRegistry()
-        for (name, (x, y, dx, dy)) in rectangles
-            tag = SolidModels.gmsh.model.occ.addRectangle(x, y, 0.0, dx, dy)
+        for (name, x) in (("object", 0.0), ("tool", 10.0))
+            tag = SolidModels.gmsh.model.occ.addRectangle(x, 0.0, 0.0, 2.0, 2.0)
             SolidModels.gmsh.model.occ.synchronize()
             sm[name] = [(Int32(2), Int32(tag))]
         end
-        reg[:objects] =
-            LayerState([PGRecord("object_1", :objects), PGRecord("object_2", :objects)], 2)
-        reg[:tools] =
-            LayerState([PGRecord("tool_1", :tools), PGRecord("tool_2", :tools)], 2)
-        ops, reg, _ = compile_ops(
-            [SolidModelsExperimental.Intersect(:results, :objects, :tools)],
-            stack,
-            reg
+        reg = LayerRegistry(
+            :object => LayerState(["object"], 2),
+            :tool => LayerState(["tool"], 2)
         )
-        @test length(reg[:results].pgs) == 4 # speculative compiler records
-        reg[:empty_results] = LayerState([PGRecord("unrealized", :empty_results)], 2)
+        ops, reg, _ = compile_ops([Intersect(:result, :object, :tool)], stack, reg)
         SolidModels._postrender!(sm, ops)
         SolidModelsExperimental.sync_registry!(sm, reg)
-        @test length(reg[:results].pgs) == 1
-        @test haskey(reg, :empty_results)
-        @test isempty(reg[:empty_results].pgs)
+        @test haskey(reg, :result)
+        @test isempty(reg[:result].pgs)
     end
 
     @testset "GetInterface" begin
@@ -1077,115 +672,37 @@ end
             stack,
             registry
         )
-        @test_throws ArgumentError compile_ops(
-            [GetInterface(:interface, :metal, :missing)],
-            stack,
-            registry
-        )
 
         # Same-dimensional inputs produce a deferred boundary one dimension lower.
         ops, reg, dints =
-            compile_ops([GetInterface(:interface, :metal, :metal)], stack, registry)
+            compile_ops([GetInterface(:interface, :metal, :voids)], stack, registry)
         @test isempty(ops)
         @test reg[:interface].dim == 1
-        @test only(reg[:interface].pgs).name ==
-              "interface__" * SolidModelsExperimental.ophash(
-            metal_pg,
-            [metal_pg];
-            operation=:get_interface,
-            parameters=(2, 2)
-        )
-        op = only(SolidModelsExperimental.interface_vertices(dints))
-        obj, tool = SolidModelsExperimental.operation_pgs(dints, op)
-        @test obj == tool
-        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, obj, :name) == metal_pg
-        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, obj, :dim) == 2
-        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :dest_pg) ==
-              only(reg[:interface].pgs).name
-        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :dest_layer) ==
-              :interface
-        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :parent_layers) ==
-              (:metal, :metal)
-        @test haskey(reg, :metal)
+        @test only(reg[:interface].pgs) == "interface"
+        @test only(dints) == DeferredInterface(:interface, :metal, :voids, 2, 2)
+        @test haskey(reg, :metal) && haskey(reg, :voids)
 
-        # Mixed-dimensional inputs produce an interface at the lower dimension.
-        reg = deepcopy(registry)
-        volume_pg = "volume__source"
-        reg[:volume] = LayerState([PGRecord(volume_pg, :volume)], 3)
-        ops, reg, dints = compile_ops([GetInterface(:surface, :metal, :volume)], stack, reg)
-        @test isempty(ops)
-        @test reg[:surface].dim == 2
-        op = only(SolidModelsExperimental.interface_vertices(dints))
-        obj, tool = SolidModelsExperimental.operation_pgs(dints, op)
-        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, obj, :dim) == 2
-        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, tool, :dim) == 3
-        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :parent_layers) ==
-              (:metal, :volume)
-
-        # Behavior is symmetric
-        delete!(reg, :surface)
-        ops, reg, dints = compile_ops([GetInterface(:surface, :volume, :metal)], stack, reg)
-        @test isempty(ops)
-        @test reg[:surface].dim == 2
-        op = only(SolidModelsExperimental.interface_vertices(dints))
-        obj, tool = SolidModelsExperimental.operation_pgs(dints, op)
-        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, obj, :dim) == 3
-        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, tool, :dim) == 2
-        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :parent_layers) ==
-              (:volume, :metal)
-
-        # Every object-tool PG pair produces one deferred interface and registry record.
-        reg = deepcopy(registry)
-        second_metal_pg = "metal__second"
-        push!(reg[:metal].pgs, PGRecord(second_metal_pg, :metal))
-        volume_pg = "volume__first"
-        second_volume_pg = "volume__second"
-        reg[:volume] = LayerState(
-            [PGRecord(volume_pg, :volume), PGRecord(second_volume_pg, :volume)],
-            3
-        )
-        ops, reg, dints = compile_ops([GetInterface(:surface, :metal, :volume)], stack, reg)
-        dops = SolidModelsExperimental.interface_vertices(dints)
-        @test isempty(ops)
-        @test length(dops) == 4
-        @test length(reg[:surface].pgs) == 4
-        @test Set(
-            SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :dest_pg) for op in dops
-        ) == Set(record.name for record in reg[:surface].pgs)
-        @test all(dops) do op
-            return SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :parent_layers) ==
-                   (:metal, :volume)
+        # Mixed-dimensional inputs produce an interface at the lower dimension, symmetrically.
+        reg = with(registry, :volume => LayerState(["volume"], 3))
+        for (object, tool) in ((:metal, :volume), (:volume, :metal))
+            ops, out, dints =
+                compile_ops([GetInterface(:surface, object, tool)], stack, reg)
+            @test isempty(ops)
+            @test out[:surface].dim == 2
+            @test only(dints) ==
+                  DeferredInterface(:surface, object, tool, reg[object].dim, reg[tool].dim)
         end
 
-        # Repeated independent interfaces request the same internal PG and are rejected.
+        # A destination must be new.
         interface = GetInterface(:interface, :metal, :voids)
         @test_throws ArgumentError compile_ops([interface, interface], stack, registry)
-
-        # Distinct interfaces append to an existing compatible destination.
-        ops, reg, dints = compile_ops(
-            [
-                GetInterface(:interface, :metal, :voids),
-                GetInterface(:interface, :metal, :shell)
-            ],
+        @test_throws ArgumentError compile_ops(
+            [interface, GetInterface(:interface, :metal, :shell)],
             stack,
             registry
         )
-        @test isempty(ops)
-        @test reg[:interface].dim == 1
-        @test length(reg[:interface].pgs) == 2
-        @test length(SolidModelsExperimental.interface_vertices(dints)) == 2
 
-        reg = deepcopy(registry)
-        existing = PGRecord("existing", :interface)
-        reg[:interface] = LayerState([existing], 1)
-        ops, reg, dints =
-            compile_ops([GetInterface(:interface, :metal, :voids)], stack, reg)
-        @test isempty(ops)
-        @test reg[:interface].pgs[1] == existing
-        @test length(reg[:interface].pgs) == 2
-        @test length(SolidModelsExperimental.interface_vertices(dints)) == 1
-
-        # Explicit chains consume an earlier deferred destination without aliasing inputs.
+        # Explicit chains consume an earlier deferred destination.
         ops, reg, dints = compile_ops(
             [
                 GetInterface(:metal_voids, :metal, :voids),
@@ -1194,93 +711,21 @@ end
             stack,
             registry
         )
-        @test isempty(ops)
         @test reg[:metal_voids].dim == 1
         @test reg[:chained].dim == 1
-        dops = SolidModelsExperimental.interface_vertices(dints)
-        @test length(dops) == 2
-        chained = only(
-            op for op in dops if
-            SolidModelsExperimental.MetaGraphs.get_prop(dints, op, :dest_layer) == :chained
-        )
-        @test SolidModelsExperimental.MetaGraphs.get_prop(dints, chained, :parent_layers) ==
-              (:metal_voids, :shell)
+        @test last(dints) == DeferredInterface(:chained, :metal_voids, :shell, 1, 2)
 
-        # Deferred inputs must retain the same registered PG name and dimension.
+        # Deferred inputs must retain their registered PG name and dimension.
         @test_throws ArgumentError compile_ops([interface, Remove(:metal)], stack, registry)
         @test_throws ArgumentError compile_ops(
             [interface, GetBoundary(:metal, :metal)],
             stack,
             registry
         )
-
-        # Out-of-place operations may use a deferred input while preserving it.
         ops, reg, dints =
             compile_ops([interface, GetBoundary(:edge, :metal)], stack, registry)
         @test length(ops) == 1
-        @test haskey(reg, :metal)
-        @test haskey(reg, :edge)
-        @test length(SolidModelsExperimental.interface_vertices(dints)) == 1
-
-        # Existing unrelated destinations must have the interface dimension.
-        reg = deepcopy(registry)
-        reg[:interface] = LayerState([PGRecord("existing", :interface)], 2)
-        @test_throws ArgumentError compile_ops(
-            [GetInterface(:interface, :metal, :voids)],
-            stack,
-            reg
-        )
-
-        # Deferred PG vertices are reused, and duplicate destination identities fail
-        # without leaving orphan vertices.
-        dints = SolidModelsExperimental._deferred_interface_graph()
-        SolidModelsExperimental.defer_interface!(
-            dints,
-            "ab",
-            "a",
-            "b",
-            2,
-            3,
-            :interface,
-            :a,
-            :b
-        )
-        SolidModelsExperimental.defer_interface!(
-            dints,
-            "ac",
-            "a",
-            "c",
-            2,
-            3,
-            :interface,
-            :a,
-            :c
-        )
-        @test SolidModelsExperimental.Graphs.nv(dints) == 5 # 3 PGs + 2 operations
-        @test length(SolidModelsExperimental.interface_vertices(dints)) == 2
-        @test_throws ArgumentError SolidModelsExperimental.defer_interface!(
-            dints,
-            "ab",
-            "a",
-            "b",
-            2,
-            3,
-            :interface,
-            :a,
-            :b
-        )
-        @test_throws ArgumentError SolidModelsExperimental.defer_interface!(
-            dints,
-            "ab",
-            "new_a",
-            "new_b",
-            2,
-            3,
-            :interface,
-            :new_a,
-            :new_b
-        )
-        @test SolidModelsExperimental.Graphs.nv(dints) == 5
+        @test haskey(reg, :metal) && haskey(reg, :edge)
     end
 
     @testset "Revolve" begin
@@ -1297,62 +742,35 @@ end
             registry
         )
 
-        # The registry tracks the swept dimension; render cleanup removes lower-dimensional PGs.
+        # A new destination is registered one dimension higher and preserves the source.
         ops, reg, _ = compile_ops([rev], stack, registry)
-        op = only(ops)
-        @test startswith(op[1], "revolved")
-        @test op[2] == SolidModels.revolve!
-        @test op[3] == (metal_pg, 2, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, Float64(π))
+        @test only(ops) == (
+            "revolved",
+            SolidModels.revolve!,
+            ("metal", 2, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, Float64(π))
+        )
         @test reg[:revolved].dim == 3
-        @test only(reg[:revolved].pgs).name == op[1]
+        @test only(reg[:revolved].pgs) == "revolved"
         @test haskey(reg, :metal)
 
-        # In-place revolution advances the layer dimension while retaining its internal PG name.
-        rev = Revolve(:metal, :metal, (1, 2, 3), (0, 1, 0), π / 2)
-        ops, reg, _ = compile_ops([rev], stack, registry)
-        op = only(ops)
-        @test op[2] == SolidModels.revolve!
-        @test op[1] == metal_pg
-        @test op[3] == (metal_pg, 2, 1.0, 2.0, 3.0, 0.0, 1.0, 0.0, π / 2)
-        @test reg[:metal].dim == 3
-
-        # Every source PG is revolved and registered independently.
-        reg = deepcopy(registry)
-        second_pg = "metal__second"
-        push!(reg[:metal].pgs, PGRecord(second_pg, :metal))
-        ops, reg, _ =
-            compile_ops([Revolve(:revolved, :metal, (0, 0, 0), (1, 0, 0), π)], stack, reg)
-        @test length(ops) == 2
-        @test length(reg[:revolved].pgs) == 2
-        @test Set(op[3][1] for op in ops) == Set((metal_pg, second_pg))
-
-        # Independent repeats request the same internal output PG name and are rejected.
-        rev = Revolve(:revolved, :metal, (0, 0, 0), (0, 0, 1), π)
-        @test_throws ArgumentError compile_ops([rev, rev], stack, registry)
-
-        # Lower-dimensional sources advance by exactly one dimension.
-        reg = deepcopy(registry)
-        line_pg = "line__source"
-        reg[:line] = LayerState([PGRecord(line_pg, :line)], 1)
-        ops, reg, _ =
-            compile_ops([Revolve(:surface, :line, (0, 0, 0), (0, 0, 1), π)], stack, reg)
-        @test only(ops)[3][2] == 1
-        @test reg[:surface].dim == 2
-
-        # In-place repeats advance through successive dimensions.
-        reg = deepcopy(registry)
-        reg[:line] = LayerState([PGRecord(line_pg, :line)], 1)
+        # In place, repeats advance through successive dimensions under the same name.
+        reg = with(registry, :line => LayerState(["line"], 1))
         revolve_line = Revolve(:line, (0, 0, 0), (0, 0, 1), π)
         ops, reg, _ = compile_ops([revolve_line, revolve_line], stack, reg)
-        @test length(ops) == 2
-        @test ops[1][3][2] == 1
-        @test ops[2][3][2] == 2
+        @test getindex.(ops, Ref(3)) .|> (args -> args[2]) == [1, 2]
+        @test all(op -> op[1] == "line", ops)
         @test reg[:line].dim == 3
-        @test all(op -> op[1] == line_pg, ops)
 
-        # Explicit chains consume the named result from the preceding revolution.
-        reg = deepcopy(registry)
-        reg[:line] = LayerState([PGRecord(line_pg, :line)], 1)
+        # A destination must be new or the source.
+        @test_throws ArgumentError compile_ops([rev, rev], stack, registry)
+        @test_throws ArgumentError compile_ops(
+            [Revolve(:voids, :metal, (0, 0, 0), (0, 0, 1), π)],
+            stack,
+            registry
+        )
+
+        # Explicit chains consume the named result of the preceding revolution.
+        reg = with(registry, :line => LayerState(["line"], 1))
         ops, reg, _ = compile_ops(
             [
                 Revolve(:surface, :line, (0, 0, 0), (0, 0, 1), π),
@@ -1361,39 +779,14 @@ end
             stack,
             reg
         )
-        @test length(ops) == 2
-        @test ops[2][3][1] == ops[1][1]
-        @test ops[2][3][2] == 2
+        @test ops[2][3][1:2] == ("surface", 2)
         @test reg[:surface].dim == 2
         @test reg[:volume].dim == 3
 
-        # Distinct revolutions may append when their generated identities differ.
-        ops, reg, _ = compile_ops(
-            [
-                Revolve(:revolved, :metal, (0, 0, 0), (0, 0, 1), π),
-                Revolve(:revolved, :voids, (0, 0, 0), (1, 0, 0), π)
-            ],
-            stack,
-            registry
-        )
-        @test length(ops) == 2
-        @test length(reg[:revolved].pgs) == 2
-        @test allunique(record.name for record in reg[:revolved].pgs)
-
         # OCC cannot sweep a volume into a fourth dimension.
-        reg = deepcopy(registry)
-        reg[:volume] = LayerState([PGRecord("volume", :volume)], 3)
+        reg = with(registry, :volume => LayerState(["volume"], 3))
         @test_throws ArgumentError compile_ops(
             [Revolve(:invalid, :volume, (0, 0, 0), (0, 0, 1), π)],
-            stack,
-            reg
-        )
-
-        # Existing destinations must have the swept dimension.
-        reg = deepcopy(registry)
-        reg[:revolved] = LayerState([PGRecord("existing", :revolved)], 2)
-        @test_throws ArgumentError compile_ops(
-            [Revolve(:revolved, :metal, (0, 0, 0), (0, 0, 1), π)],
             stack,
             reg
         )
@@ -1409,124 +802,65 @@ end
             stack,
             registry
         )
-        @test_throws ArgumentError compile_ops(
-            [SetPeriodic(:metal, :missing)],
-            stack,
-            registry
-        )
 
-        # A pair of single-PG 2D layers maps directly to the native operation.
-        ops, reg, dints = compile_ops([periodic], stack, registry)
-        op = only(ops)
-        @test op[1] == "Periodic_$(metal_pg)"
-        @test op[2] == SolidModels.set_periodic!
-        @test op[3] == (metal_pg, voids_pg, 2, 2)
+        # A pair of 2D layers maps directly to the native operation without registry changes.
+        ops, reg, dints = compile_ops([periodic, periodic], stack, registry)
+        @test all(
+            op ->
+                op ==
+                ("Periodic_metal", SolidModels.set_periodic!, ("metal", "voids", 2, 2)),
+            ops
+        )
         @test reg[:metal].dim == 2
         @test reg[:voids].dim == 2
-        @test isempty(SolidModelsExperimental.interface_vertices(dints))
-
-        # Repeated periodic operations execute without changing registry state.
-        ops, reg, _ = compile_ops([periodic, periodic], stack, registry)
-        @test length(ops) == 2
-        @test all(op -> op[2] == SolidModels.set_periodic!, ops)
-        @test all(op -> op[3] == (metal_pg, voids_pg, 2, 2), ops)
+        @test isempty(dints)
 
         # Native periodic pairing supports only surface groups.
         reg = deepcopy(registry)
         reg[:metal].dim = 1
         @test_throws ArgumentError compile_ops([periodic], stack, reg)
-
         reg = deepcopy(registry)
         reg[:voids].dim = 3
-        @test_throws ArgumentError compile_ops([periodic], stack, reg)
-
-        # Positional pairing of multiple PG records is intentionally unsupported.
-        reg = deepcopy(registry)
-        second_metal_pg = "metal__second"
-        push!(reg[:metal].pgs, PGRecord(second_metal_pg, :metal))
-        @test_throws ArgumentError compile_ops([periodic], stack, reg)
-
-        reg = deepcopy(registry)
-        second_voids_pg = "voids__second"
-        push!(reg[:voids].pgs, PGRecord(second_voids_pg, :voids))
         @test_throws ArgumentError compile_ops([periodic], stack, reg)
     end
 
     @testset "RestrictTo" begin
         @test_throws ArgumentError compile_ops([RestrictTo(:missing)], stack, registry)
-
-        # Restriction requires a 3D bounding-volume layer.
         @test_throws ArgumentError compile_ops([RestrictTo(:metal)], stack, registry)
 
-        volume_pg = "volume__source"
-        volume_record = PGRecord(volume_pg, :volume)
-        reg = deepcopy(registry)
-        reg[:volume] = LayerState([volume_record], 3)
-        ops, out_reg, dints = compile_ops([RestrictTo(:volume)], stack, reg)
-        op = only(ops)
-        @test op[1] == "restrict"
-        @test op[2] == SolidModels.restrict_to_volume!
-        @test op[3] == (volume_pg,)
-        @test out_reg[:volume].dim == 3
-        @test only(out_reg[:volume].pgs) == volume_record
-        @test Set(keys(out_reg)) == Set(keys(reg))
-        @test isempty(SolidModelsExperimental.interface_vertices(dints))
-
-        # Repeated restrictions execute independently without changing registry state.
-        ops, out_reg, _ =
+        # Restriction maps to the native operation without registry changes.
+        reg = with(registry, :volume => LayerState(["volume"], 3))
+        ops, out, dints =
             compile_ops([RestrictTo(:volume), RestrictTo(:volume)], stack, reg)
-        @test length(ops) == 2
-        @test all(op -> op[2] == SolidModels.restrict_to_volume!, ops)
-        @test all(op -> op[3] == (volume_pg,), ops)
-        @test only(out_reg[:volume].pgs) == volume_record
-
-        # A multi-PG layer cannot map to the native single-PG restriction operation.
-        reg = deepcopy(reg)
-        second_pg = "volume__second"
-        push!(reg[:volume].pgs, PGRecord(second_pg, :volume))
-        @test_throws ArgumentError compile_ops([RestrictTo(:volume)], stack, reg)
+        @test all(
+            op -> op == ("restrict", SolidModels.restrict_to_volume!, ("volume",)),
+            ops
+        )
+        @test keys(out) == keys(reg)
+        @test out[:volume].dim == 3
+        @test isempty(dints)
     end
 
     @testset "Remove" begin
         @test Remove(:metal).remove_entities
         @test !Remove(:metal; remove_entities=false).remove_entities
 
-        # Removing a layer emits one native operation per PG and deletes its registry entry.
+        # Removing a layer emits one native operation and deletes its registry entry.
         ops, reg, dints = compile_ops([Remove(:metal)], stack, registry)
-        op = only(ops)
-        @test op[1] == "_rm"
-        @test op[2] == SolidModels.remove_group!
-        @test op[3] == (metal_pg, 2)
-        @test (:remove_entities => true) in op
-        @test !haskey(reg, :metal)
-        @test isempty(SolidModelsExperimental.interface_vertices(dints))
-        @test haskey(reg, :voids)
-
-        # Physical-group-only removal still deletes the layer registry entry.
+        @test only(ops)[1:3] == ("_rm", SolidModels.remove_group!, ("metal", 2))
+        @test (:remove_entities => true) in only(ops)
+        @test !haskey(reg, :metal) && haskey(reg, :voids)
+        @test isempty(dints)
         ops, reg, _ = compile_ops([Remove(:metal; remove_entities=false)], stack, registry)
-        op = only(ops)
-        @test op[3] == (metal_pg, 2)
-        @test (:remove_entities => false) in op
-        @test !haskey(reg, :metal)
-
-        # Every PG in the layer is removed with the requested entity behavior.
-        reg = deepcopy(registry)
-        second_pg = "metal__second"
-        push!(reg[:metal].pgs, PGRecord(second_pg, :metal))
-        ops, reg, _ = compile_ops([Remove(:metal; remove_entities=false)], stack, reg)
-        @test length(ops) == 2
-        @test Set(op[3] for op in ops) == Set([(metal_pg, 2), (second_pg, 2)])
-        @test all(op -> (:remove_entities => false) in op, ops)
+        @test (:remove_entities => false) in only(ops)
         @test !haskey(reg, :metal)
 
         # Missing and repeated removals are no-ops, matching remove_group! behavior.
         ops, reg, _ = compile_ops([Remove(:missing)], stack, registry)
         @test isempty(ops)
         @test Set(keys(reg)) == Set(keys(registry))
-
         ops, reg, _ = compile_ops([Remove(:metal), Remove(:metal)], stack, registry)
         @test length(ops) == 1
-        @test !haskey(reg, :metal)
 
         # Later operations cannot use a layer removed earlier in the sequence.
         @test_throws ArgumentError compile_ops(
@@ -1547,13 +881,11 @@ end
         Fuse,
         GetBoundary,
         GetInterface,
-        Heal,
         Hollow,
         LayerRef,
         LayerRegistry,
         LayerState,
         NULL,
-        PGRecord,
         Remove,
         RestrictTo,
         Revolve,
@@ -1827,7 +1159,7 @@ end
         for layer in (:bump, :foot), (_, tag) in layer_dimtags(result, layer)
             @test !isempty(first(SolidModels.gmsh.model.getAdjacencies(2, tag)))
         end
-        @test !haskey(layers, String(SolidModelsExperimental.HOLLOWED))
+        @test !haskey(layers, String(SolidModelsExperimental._HOLLOWED))
         # to_level on a generated layer, and walls from a 1D outline.
         @test layers["copy"]["dim"] == 3
         @test layers["copy"]["thickness"] ≈ 2.0 atol = 1e-9
@@ -1889,10 +1221,9 @@ end
         registry = LayerRegistry()
         @test_throws ErrorException SolidModelsExperimental.sync_registry!(sm, registry)
 
-        registry[:surface] =
-            LayerState([PGRecord("surface", :surface), PGRecord("missing", :surface)], 2)
+        registry[:surface] = LayerState(["surface", "missing"], 2)
         SolidModelsExperimental.sync_registry!(sm, registry)
-        @test only(registry[:surface].pgs).name == "surface"
+        @test only(registry[:surface].pgs) == "surface"
     end
 end
 
@@ -2019,7 +1350,7 @@ end
 @testitem "Tag resolution" begin
     using DeviceLayout
     using DeviceLayout.SolidModels
-    using DeviceLayout.SolidModelsExperimental: Tag, PGRecord, LayerState, LayerRegistry
+    using DeviceLayout.SolidModelsExperimental: Tag, LayerState, LayerRegistry
 
     sm = SolidModel("tag_layer"; overwrite=true)
     SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
@@ -2028,10 +1359,8 @@ end
     SolidModels.gmsh.model.occ.synchronize()
     sm["layer_a"] = [(Int32(2), Int32(first_tag))]
     sm["layer_b"] = [(Int32(2), Int32(second_tag))]
-    registry = LayerRegistry(
-        :a => LayerState([PGRecord("layer_a", :a)], 2),
-        :b => LayerState([PGRecord("layer_b", :b)], 2)
-    )
+    registry =
+        LayerRegistry(:a => LayerState(["layer_a"], 2), :b => LayerState(["layer_b"], 2))
     rl = SolidModelsExperimental.ResolvedLocator((5.0, 5.0, 0.0), Tag(:a, "tag"))
     bbox_cache = Dict{Int32, NTuple{6, Float64}}()
     sel = SolidModelsExperimental._select_surface!(sm, registry, rl, bbox_cache)
@@ -2039,7 +1368,7 @@ end
     @test sel.entity_tags == [Int32(first_tag)]
     # The selection PG is an ordinary PG registered under the locator's layer.
     @test keys(registry) == Set([:a, :b])
-    selection_pg = only(filter(r -> r.name != "layer_a", registry[:a].pgs)).name
+    selection_pg = only(filter(!=("layer_a"), registry[:a].pgs))
     @test SolidModels.entitytags(sm[selection_pg, 2]) == [Int32(first_tag)]
     @test length(registry[:b].pgs) == 1
 
@@ -2104,7 +1433,7 @@ end
 @testitem "Deduplication partitions entities by PG membership" begin
     using DeviceLayout
     using DeviceLayout.SolidModels
-    using DeviceLayout.SolidModelsExperimental: PGRecord, LayerState, LayerRegistry
+    using DeviceLayout.SolidModelsExperimental: LayerState, LayerRegistry
 
     sm = SolidModel("dedup_membership"; overwrite=true)
     SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
@@ -2119,16 +1448,8 @@ end
     sm["e2"] = [(Int32(2), e2)]
     sm["e3"] = [(Int32(2), e3)]
     registry = LayerRegistry(
-        :a => LayerState(
-            [
-                PGRecord("e123", :a),
-                PGRecord("e12", :a),
-                PGRecord("e2", :a),
-                PGRecord("e3", :a)
-            ],
-            2
-        ),
-        :b => LayerState([PGRecord("e2", :b)], 2)
+        :a => LayerState(["e123", "e12", "e2", "e3"], 2),
+        :b => LayerState(["e2"], 2)
     )
     SolidModelsExperimental.deduplicate_pgs!(sm, registry, 2)
 
@@ -2144,10 +1465,10 @@ end
     @test !any(haskey(pgs, n) for n in ("e123", "e12", "e2", "e3"))
     @test length(pgs) == 3
     # Sub-PGs are registered under the union of their members' layers.
-    @test Set(r.name for r in registry[:a].pgs) == Set(keys(pgs))
-    @test only(registry[:b].pgs).name == only(owners[e2])
-    # Every registered record exists in the model.
-    @test all(haskey(pgs, r.name) for s in values(registry) for r in s.pgs)
+    @test Set(registry[:a].pgs) == Set(keys(pgs))
+    @test only(registry[:b].pgs) == only(owners[e2])
+    # Every registered PG exists in the model.
+    @test all(haskey(pgs, name) for s in values(registry) for name in s.pgs)
 end
 
 @testitem "Strictness modes" begin
@@ -2193,10 +1514,10 @@ end
         Cut,
         DIELECTRIC,
         Extrude,
+        Fuse,
         GetBoundary,
         GetInterface,
         Ground,
-        Heal,
         LayerRef,
         Locator,
         LocatorMeta,
@@ -2357,7 +1678,7 @@ end
             Remove(:CHIP_OUTLINE),
             Cut(:CUTOUT, :METAL_NEG, :PORTS),
             Remove(:METAL_NEG),
-            Heal(:METAL_POS),
+            Fuse(:METAL_POS),
             Cut(:VACUUM, :BOUNDING_VOLUME, :SUBSTRATE_BOTTOM),
             RestrictTo(:BOUNDING_VOLUME),
             # Extract the six BOUNDING_VOLUME boundaries as EXTBND_XMIN,
