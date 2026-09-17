@@ -28,7 +28,7 @@ metadata dictionary. Length values are expressed in micrometers.
 function serialize_metadata(
     registry::LayerRegistry,
     selections::Vector{Selection},
-    deferred_interfaces::MetaGraphs.MetaDiGraph,
+    deferred_interfaces::Vector{DeferredInterface},
     stack::SourceStack,
     sm::SolidModel
 )
@@ -44,32 +44,24 @@ function serialize_metadata(
     physical_groups = Dict{String, Any}()
     for (_, state) in registry
         dimension_groups = SolidModels.dimgroupdict(sm, state.dim)
-        for record in state.pgs
-            physical_groups[record.name] = Dict{String, Any}(
-                "tag" => dimension_groups[record.name].grouptag,
+        for name in state.pgs
+            physical_groups[name] = Dict{String, Any}(
+                "tag" => dimension_groups[name].grouptag,
                 "dim" => state.dim
             )
         end
     end
 
     # Build layers map: layer name → {pgs, layer metadata, parents (for interfaces)}
-    interface_layer_parents = Dict{Symbol, Vector{String}}()
-    for operation in interface_vertices(deferred_interfaces)
-        dest_layer = MetaGraphs.get_prop(deferred_interfaces, operation, :dest_layer)
-        parents = get!(Vector{String}, interface_layer_parents, dest_layer)
-        parent_layers = MetaGraphs.get_prop(deferred_interfaces, operation, :parent_layers)
-        for parent_layer in parent_layers
-            parent_name = string(parent_layer)
-            parent_name in parents || push!(parents, parent_name)
-        end
-    end
+    interface_layer_parents = Dict(
+        di.destination => unique([string(di.object), string(di.tool)]) for
+        di in deferred_interfaces
+    )
 
     layers_dict = Dict{String, Any}()
     for (layer_name, state) in registry
         isempty(state.pgs) && continue
-        pg_names = [record.name for record in state.pgs]
-
-        layer_entry = Dict{String, Any}("pgs" => pg_names, "dim" => state.dim)
+        layer_entry = Dict{String, Any}("pgs" => copy(state.pgs), "dim" => state.dim)
         if haskey(stack.layers, layer_name)
             source_layer = stack.layers[layer_name]
             layer_entry["type"] = "source"
