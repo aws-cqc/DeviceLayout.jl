@@ -212,7 +212,7 @@ cell = Cell("resonator_feedline", nm)
 render!(cell, sch, target)
 
 save("resonator_feedline.gds", cell)
-save("resonator_feedline.svg", cell);
+save("resonator_feedline.svg", cell; background=:white);
 nothing # hide
 ```
 

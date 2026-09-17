@@ -153,7 +153,12 @@ elements(cr)
 Our `Rounded` `ClippedPolygon` has been reduced to a mere `Polygon`, as necessary to represent it within the GDSII format. It's also what we need in order to use the SVG backend:
 
 ```@example 1
-save("dogbone.svg", cr; layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)));
+save(
+    "dogbone.svg",
+    cr;
+    layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)),
+    background=:white
+);
 nothing; # hide
 ```
 
@@ -194,7 +199,12 @@ The entities making up the `Path` are rendered into `Polygon`s, but the `Geometr
 Let's see how it looks:
 
 ```@example 1
-save("dogbone_path.svg", c; layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)));
+save(
+    "dogbone_path.svg",
+    c;
+    layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)),
+    background=:white
+);
 nothing; # hide
 ```
 
@@ -212,7 +222,8 @@ addref!(c_wrapper, sref(c, rot=90°))
 save( # hide
     "rotated_dogbone_path.svg", # hide
     flatten(c_wrapper); # hide
-    layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)) # hide
+    layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)), # hide
+    background=:white # hide
 ); # hide
 nothing; # hide
 ```
@@ -266,7 +277,8 @@ cell = Cell(cs; map_meta=m -> layer_record[layer(m)])
 save( # hide
     "cs_dogbone_path.svg", # hide
     flatten(cell); # hide
-    layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)) # hide
+    layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)), # hide
+    background=:white # hide
 ); # hide
 nothing; # hide
 ```
