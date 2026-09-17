@@ -159,8 +159,8 @@ function _layer_entity_tags(sm::SolidModel, registry::LayerRegistry, layer::Symb
     state = registry[layer]
     state.dim == 2 || return Set{Int32}()
     tags = Set{Int32}()
-    for record in state.pgs
-        union!(tags, SolidModels.entitytags(sm[record.name, 2]))
+    for name in state.pgs
+        union!(tags, SolidModels.entitytags(sm[name, 2]))
     end
     return tags
 end
@@ -186,7 +186,7 @@ function _select_surface!(
     )
     pg_name = "__" * bytes2hex(sha1(repr(lm)))[1:16]
     sm[pg_name] = [(Int32(2), entity_tag)]
-    push!(registry[lm.layer].pgs, PGRecord(pg_name, lm.layer))
+    push!(registry[lm.layer].pgs, pg_name)
     return Selection([entity_tag], [rl])
 end
 
@@ -204,7 +204,7 @@ function _select_ccs!(
         source_layer = get(stack.layers, layer_name, nothing)
         isnothing(source_layer) && continue
         (source_layer.material == METAL && state.dim == 2) || continue
-        append!(metal_pg_names, record.name for record in state.pgs)
+        append!(metal_pg_names, state.pgs)
     end
     isempty(metal_pg_names) && return Selection[]
 
@@ -213,7 +213,7 @@ function _select_ccs!(
     for (cc_name, cc) in zip(cc_names, ccs)
         sm[cc_name] = cc
     end
-    registry[:METAL_CC] = LayerState([PGRecord(name, :METAL_CC) for name in cc_names], 2)
+    registry[:METAL_CC] = LayerState(cc_names, 2)
 
     selections = [Selection(Int32[tag for (_, tag) in cc], ResolvedLocator[]) for cc in ccs]
     tag_to_cc = Dict{Int32, Int}(tag => i for (i, cc) in enumerate(ccs) for (_, tag) in cc)
