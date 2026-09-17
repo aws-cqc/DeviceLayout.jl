@@ -145,6 +145,29 @@ function bspline_approximation(
     # rtol is accepted for API consistency with render-time callers (e.g. OffsetSegment).
     # The internal _testvals sampling grid is construction-time, not render-time, and
     # intentionally stays at the package default atol.
+    #
+    # Canonicalize traversal direction before approximating. The refinement loop
+    # is not reversal-symmetric, so this ensures a segment and its reverse are
+    # approximated by the same splines between the same split points, before being
+    # reversed back to the original traversal direction if necessary. This is
+    # particularly important in the common case where the segment and its reverse
+    # describe a shared boundary between two faces.
+    #
+    # Compare endpoints with a tolerance band rather than exact `>`: `reverse` need
+    # not swap the endpoints bitwise, so an exact comparison can pick the "larger"
+    # endpoint for both a segment and its reverse (when their coordinates differ
+    # only at the ulp level), which would reverse both and defeat the point. Order
+    # by x, then y, treating differences within `tol` as equal (so nearly-coincident
+    # endpoints never flip on floating-point noise).
+    tol = 2 * DeviceLayout.onenanometer(T)
+    p_start, p_stop = p0(f), p1(f)
+    dx, dy = getx(p_start) - getx(p_stop), gety(p_start) - gety(p_stop)
+    is_descending = abs(dx) > tol ? dx > zero(dx) : (abs(dy) > tol ? dy > zero(dy) : false)
+    if is_descending
+        return reverse(
+            bspline_approximation(reverse(f); atol=atol, maxits=maxits, rtol=rtol)
+        )
+    end
     # Sample points from f and use them to create the BSpline interpolation
     approx = _initial_guess(f)
     # Sample a dense set of points to test approximation against
