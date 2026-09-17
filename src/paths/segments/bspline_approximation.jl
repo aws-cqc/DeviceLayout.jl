@@ -236,6 +236,29 @@ function bspline_approximation(
     rtol=nothing
 ) where {T}
     # rtol is accepted for API consistency with render-time callers (e.g. OffsetSegment).
+    #
+    # Canonicalize traversal direction before approximating. The refinement is
+    # not exactly reversal-symmetric, so this ensures a segment and its reverse are
+    # approximated by the same splines between the same split points, before being
+    # reversed back to the original traversal direction if necessary. This is
+    # particularly important in the common case where the segment and its reverse
+    # describe a shared boundary between two faces.
+    #
+    # Compare endpoints with a tolerance band rather than exact `>`: `reverse` need
+    # not swap the endpoints bitwise, so an exact comparison can pick the "larger"
+    # endpoint for both a segment and its reverse (when their coordinates differ
+    # only at the ulp level), which would reverse both and defeat the point. Order
+    # by x, then y, treating differences within `tol` as equal (so nearly-coincident
+    # endpoints never flip on floating-point noise).
+    tol = 2 * DeviceLayout.onenanometer(T)
+    p_start, p_stop = p0(f), p1(f)
+    dx, dy = getx(p_start) - getx(p_stop), gety(p_start) - gety(p_stop)
+    is_descending = abs(dx) > tol ? dx > zero(dx) : (abs(dy) > tol ? dy > zero(dy) : false)
+    if is_descending
+        return reverse(
+            bspline_approximation(reverse(f); atol=atol, maxits=maxits, rtol=rtol)
+        )
+    end
     approxs = BSpline{T}[]
     err = _approx!(approxs, f, atol, 0, maxits)
     if err > atol
@@ -273,110 +296,6 @@ function _approx!(approxs, f::Paths.Segment{T}, atol, depth, maxdepth) where {T}
     end
     push!(approxs, approx)
     return err > tol ? err : zero(T)
-end
-
-# Approximate f with a BSpline.
-#
-# `errmetric` selects how candidate error is estimated:
-#   :gaussfit (default) — Gauss-point metric plus closed-form fitting of the
-#       candidate tangent magnitudes before subdividing (see above).
-#   :gauss — Gauss-point metric with fixed-magnitude candidates only.
-#   :dense — legacy metric: project a dense (package-default atol) sampling of
-#       the exact curve onto the candidate's polyline discretization. Retained
-#       for comparison during the transition; note its accept/reject decision
-#       carries a noise floor of order atol (the polyline's own chord error),
-#       and samples whose normal ray misses the candidate polyline are silently
-#       dropped from the estimate, which can accept out-of-tolerance results
-#       near cusps without warning.
-function bspline_approximation(
-    f::Paths.Segment{T};
-    atol=_default_curve_atol(T),
-    maxits=10,
-    rtol=nothing,
-    errmetric=:gaussfit
-) where {T}
-    errmetric === :gauss && return _bspline_approximation_gauss(f; atol, maxits)
-    errmetric === :gaussfit &&
-        return _bspline_approximation_gauss(f; atol, maxits, fit=true)
-    # rtol is accepted for API consistency with render-time callers (e.g. OffsetSegment).
-    # The internal _testvals sampling grid is construction-time, not render-time, and
-    # intentionally stays at the package default atol.
-    #
-    # Canonicalize traversal direction before approximating. The refinement loop
-    # is not reversal-symmetric, so this ensures a segment and its reverse are
-    # approximated by the same splines between the same split points, before being
-    # reversed back to the original traversal direction if necessary. This is
-    # particularly important in the common case where the segment and its reverse
-    # describe a shared boundary between two faces.
-    #
-    # Compare endpoints with a tolerance band rather than exact `>`: `reverse` need
-    # not swap the endpoints bitwise, so an exact comparison can pick the "larger"
-    # endpoint for both a segment and its reverse (when their coordinates differ
-    # only at the ulp level), which would reverse both and defeat the point. Order
-    # by x, then y, treating differences within `tol` as equal (so nearly-coincident
-    # endpoints never flip on floating-point noise).
-    tol = 2 * DeviceLayout.onenanometer(T)
-    p_start, p_stop = p0(f), p1(f)
-    dx, dy = getx(p_start) - getx(p_stop), gety(p_start) - gety(p_stop)
-    is_descending = abs(dx) > tol ? dx > zero(dx) : (abs(dy) > tol ? dy > zero(dy) : false)
-    if is_descending
-        return reverse(
-            bspline_approximation(reverse(f); atol=atol, maxits=maxits, rtol=rtol)
-        )
-    end
-    # Sample points from f and use them to create the BSpline interpolation
-    approx = _initial_guess(f)
-    # Sample a dense set of points to test approximation against
-    # (These testvals can be reused, although currently it's only reused for offsets of BSplines)
-    testvals = _testvals(f, approx)
-    # Calculate the maximum distance between approx and its projection onto the
-    # discretization of the exact curve given by testvals
-    err = _approximation_error(f, approx, testvals)
-    # Double the number of interpolation points until the error is below tolerance
-    refine = 1
-    segs = Segment{T}[f]
-    approxs = BSpline{T}[approx]
-    seg_errs = T[err]
-    split_tv = [testvals]
-    while err > atol
-        if refine > maxits
-            @warn """
-            Maximum error $err > tolerance $atol after $(refine-1) refinement iterations.
-            Check curve $f for cusps and self-intersections, which may cause approximation to fail.
-            Increase `maxits` or manually split path to refine further, or increase `atol` to relax tolerance.
-            """
-            break
-        end
-        err = 0.0 * oneunit(T)
-        idx = 1
-        while idx <= length(segs)
-            if seg_errs[idx] > atol # Only split if tolerance is not yet met
-                seg = segs[idx]
-                approx = approxs[idx]
-                tv = split_tv[idx]
-                # Split segment and corresponding testvals in half by pathlength
-                # (for offset paths this splits by underlying pathlength, not arclength of offset)
-                halfseg_length = pathlength(seg) / 2
-                subsegs = split(seg, halfseg_length)
-                sub_tvs = _split_testvals(tv, seg)
-                # Get approximation and estimate error for each subsegment
-                approx_and_err = map(zip(subsegs, sub_tvs)) do (subseg, sub_tv)
-                    approx = _initial_guess(subseg; len=halfseg_length)
-                    seg_err = _approximation_error(subseg, approx, sub_tv)
-                    return approx, seg_err
-                end
-                splice!(segs, idx, subsegs)
-                splice!(approxs, idx, first.(approx_and_err))
-                splice!(seg_errs, idx, last.(approx_and_err))
-                splice!(split_tv, idx, sub_tvs)
-                idx += 1 # Extra increment because we increased length(segs) by 1
-            end
-            idx += 1
-        end
-        err = maximum(seg_errs)
-        refine = refine + 1
-    end
-    return CompoundSegment(convert(Vector{Segment{T}}, approxs))
 end
 
 bspline_approximation(b::Paths.BSpline; kwargs...) = copy(b)
