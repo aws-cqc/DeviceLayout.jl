@@ -6,7 +6,9 @@ end
 mutable struct LayerState
     pgs::Vector{PGRecord}
     dim::Int
+    dz::Union{Nothing, Float64} # extrusion distance in STP units, once extruded
 end
+LayerState(pgs::Vector{PGRecord}, dim::Int) = LayerState(pgs, dim, nothing)
 
 const LayerRegistry = Dict{Symbol, LayerState}
 
@@ -15,23 +17,45 @@ abstract type LayerOp end
 abstract type BooleanOp <: LayerOp end
 
 """
-    Extrude(layer)
+    Extrude(source)
+    Extrude(source, dz)
+    Extrude(source; to_level, offset=nothing)
+    Extrude(destination, source[, dz]; to_level, offset)
 
-Extrude a source layer using the thickness and contour behavior in its [`SourceLayer`](@ref).
+Extrude a 1D or 2D layer along z. The one-argument forms build a source-stack layer to its
+declared thickness or level span. An explicit distance `dz`, or a target level `to_level`
+displaced by `offset`, is required for generated layers and must agree with the
+declaration for source-stack layers. The one-layer forms operate in place; a distinct
+destination receives a copy. 3D sources are rejected.
 """
 struct Extrude <: LayerOp
     destination::Symbol
-end
-
-function extrusions(stack::SourceStack, reg::LayerRegistry)
-    operations = LayerOp[]
-    for (layer_name, source_layer) in stack.layers
-        haskey(reg, layer_name) || continue
-        iszero(thickness(source_layer, stack)) && continue
-        push!(operations, Extrude(layer_name))
+    source::Symbol
+    dz::Union{Nothing, Coordinate}
+    to_level::Union{Nothing, Int}
+    offset::Union{Nothing, Coordinate}
+    function Extrude(
+        destination::Symbol,
+        source::Symbol,
+        dz::Union{Nothing, Coordinate},
+        to_level::Union{Nothing, Int},
+        offset::Union{Nothing, Coordinate}
+    )
+        !isnothing(dz) &&
+            !isnothing(to_level) &&
+            throw(ArgumentError("Extrude accepts either dz or to_level, not both"))
+        isnothing(to_level) &&
+            !isnothing(offset) &&
+            throw(ArgumentError("Extrude offset requires to_level"))
+        return new(destination, source, dz, to_level, offset)
     end
-    return operations
 end
+Extrude(destination::Symbol, source::Symbol; to_level=nothing, offset=nothing) =
+    Extrude(destination, source, nothing, to_level, offset)
+Extrude(destination::Symbol, source::Symbol, dz::Coordinate) =
+    Extrude(destination, source, dz, nothing, nothing)
+Extrude(source::Symbol; kwargs...) = Extrude(source, source; kwargs...)
+Extrude(source::Symbol, dz::Coordinate) = Extrude(source, source, dz)
 
 """
     Cut(destination, object, tools)
@@ -319,6 +343,20 @@ function Revolve(
 end
 Revolve(source::Symbol, origin::NTuple{3, <:Real}, axis::NTuple{3, <:Real}, angle::Real) =
     Revolve(source, source, origin, axis, angle)
+
+"""
+    Hollow(layer)
+
+Replace a 3D layer by its boundary shell and remove the enclosed volume from the model after
+fragmentation, so the interior is absent from the final mesh regardless of operation order
+and of which other volumes it overlaps.
+"""
+struct Hollow <: LayerOp
+    layer::Symbol
+end
+
+# Internal registry layer holding hollowed solids until `hollow!` removes them.
+const HOLLOWED = :__hollowed
 
 """
     SetPeriodic(first, second)
@@ -629,7 +667,8 @@ function _require_destination_dimension(
     return nothing
 end
 
-source_layers(op::Extrude) = (op.destination,)
+source_layers(op::Extrude) = (op.source,)
+source_layers(op::Hollow) = (op.layer,)
 source_layers(op::Cut) = (op.object, op.tools...)
 source_layers(op::Intersect) = (op.object, op.tool)
 source_layers(op::Fuse) = op.sources
@@ -766,7 +805,6 @@ struct CompilerState{S <: SourceStack}
     ops::Vector{Tuple}                       # Compiled physical-group operations
     reg::LayerRegistry                       # Evolving layer-to-PG registry
     dints::MetaGraphs.MetaDiGraph             # Deferred interface operations
-    intsol::Dict{Symbol, Vector{String}}      # Pending temporary interior solids
     stack::S                                 # Source-layer geometry configuration
 end
 
@@ -777,22 +815,29 @@ function compile_ops(
     stack::SourceStack,
     registry::LayerRegistry
 )
-    cmp = CompilerState(
-        Tuple[],
-        deepcopy(registry),
-        _deferred_interface_graph(),
-        Dict{Symbol, Vector{String}}(),
-        stack
-    )
-    optimized_ops = _absorb_removals(ops)
-    for op in optimized_ops
+    cmp = CompilerState(Tuple[], deepcopy(registry), _deferred_interface_graph(), stack)
+    for op in _absorb_removals(ops)
         _validate_source_layers(op, cmp.reg)
-        op isa RestrictTo && _flush_interior_solids!(cmp, op.volume)
         _compile!(cmp, op)
         _check_deferred_inputs_registered(cmp)
     end
-    _flush_interior_solids!(cmp, nothing)
     return cmp.ops, cmp.reg, cmp.dints
+end
+
+# Every source-stack layer still in the compiled registry with a declared thickness must have
+# been built by an `Extrude`, so the stack and the model never disagree.
+function check_declared_thicknesses(registry::LayerRegistry, stack::SourceStack)
+    for (layer_name, state) in registry
+        source_layer = get(stack.layers, layer_name, nothing)
+        isnothing(source_layer) && continue
+        iszero(thickness(source_layer, stack)) && continue
+        isnothing(state.dz) && throw(
+            ArgumentError(
+                "source layer :$layer_name declares a thickness but is never extruded"
+            )
+        )
+    end
+    return nothing
 end
 
 # Return every compiled `(name, dim)` PG so the renderer keeps them all and removes the rest.
@@ -802,127 +847,149 @@ function retained_physical_groups(registry::LayerRegistry)
     )
 end
 
-# Subtract pending interior solids from all 3D volumes in the registry (except the
-# bounding volume if specified), then remove the interior solid PGs (keeping entities
-# so they serve as fragmentation boundaries during `restrict_to_volume!`).
-function _flush_interior_solids!(cmp::CompilerState, bv_layer::Union{Symbol, Nothing})
-    isempty(cmp.intsol) && return nothing
-
-    interior_pg_names = String[]
-    for pgs in values(cmp.intsol)
-        append!(interior_pg_names, pgs)
+# Resolve the extrusion distance of an `Extrude`. Source-stack layers must agree with their
+# declaration; generated layers need an explicit `dz`, or a `to_level` resolved against the
+# source geometry's z when the operation executes.
+function _extrusion_distance(cmp::CompilerState, op::Extrude)
+    source_layer = get(cmp.stack.layers, op.source, nothing)
+    target_z = if isnothing(op.to_level)
+        nothing
+    else
+        haskey(cmp.stack.levels, op.to_level) || throw(
+            ArgumentError("Extrude references missing assembly level $(op.to_level)")
+        )
+        level_z = cmp.stack.levels[op.to_level]
+        level_z + (isnothing(op.offset) ? zero(level_z) : op.offset)
     end
 
-    for (layer_name, state) in cmp.reg
-        state.dim != 3 && continue
-        layer_name == bv_layer && continue
-        for record in state.pgs
-            push!(
-                cmp.ops,
-                (
-                    record.name,
-                    SolidModels.difference_geom!,
-                    (record.name, interior_pg_names, 3, 3),
-                    :remove_object => true,
-                    :remove_tool => false
+    if isnothing(source_layer)
+        isnothing(op.dz) &&
+            isnothing(target_z) &&
+            throw(
+                ArgumentError(
+                    "Extrude of generated layer :$(op.source) requires dz or to_level"
                 )
             )
-        end
+        return isnothing(op.dz) ? (:to_z, _stp_float(target_z)) : op.dz
     end
 
-    # Remove interior solid PGs (keep entities so they act as fragmentation boundaries)
-    for pgs in values(cmp.intsol)
-        for pg_name in pgs
-            push!(
-                cmp.ops,
-                ("_rm", SolidModels.remove_group!, (pg_name, 3), :remove_entities => false)
-            )
-        end
+    declared = thickness(source_layer, cmp.stack)
+    iszero(declared) &&
+        throw(ArgumentError("source layer :$(op.source) declares no thickness to extrude"))
+    requested = if !isnothing(op.dz)
+        op.dz
+    elseif !isnothing(target_z)
+        target_z - layer_z(source_layer, cmp.stack)
+    else
+        declared
     end
+    requested == declared || throw(
+        ArgumentError(
+            "Extrude of :$(op.source) by $requested disagrees with its declared " *
+            "thickness $declared"
+        )
+    )
+    return declared
+end
 
-    empty!(cmp.intsol)
-    return nothing
+# Extrude a physical group so that its planar source geometry reaches `z` (STP units), and
+# record the resolved distance on the destination layer's state.
+function _extrude_to_z!(
+    sm::SolidModel,
+    pg_name::String,
+    z::Float64,
+    dim::Int,
+    destination::LayerState
+)
+    SolidModels.hasgroup(sm, pg_name, dim) || return Tuple{Int32, Int32}[]
+    dimtags = SolidModels.dimtags(sm[pg_name, dim])
+    points = SolidModels.gmsh.model.getBoundary(dimtags, false, false, true)
+    zs = [SolidModels.gmsh.model.getValue(0, abs(tag), Float64[])[3] for (_, tag) in points]
+    zmin, zmax = extrema(zs)
+    abs(zmax - zmin) < _stp_float(1nm) || error(
+        "Extrude to_level requires planar source geometry; '$pg_name' spans z ∈ [$zmin, $zmax]"
+    )
+    isnothing(destination.dz) ||
+        isapprox(destination.dz, z - zmin; atol=_stp_float(1nm)) ||
+        error("Extrude to_level resolved inconsistent distances for layer PGs")
+    destination.dz = z - zmin
+    return SolidModels.extrude_z!(sm, pg_name, (z - zmin) * STP_UNIT, dim)
 end
 
 function _compile!(cmp::CompilerState, op::Extrude)
-    !haskey(cmp.stack.layers, op.destination) && throw(
-        ArgumentError(
-            "Extrude cannot process generated layer :$(op.destination) because it requires " *
-            "a SourceStack entry"
-        )
-    )
-    source_layer = cmp.stack.layers[op.destination]
-    dz = thickness(source_layer, cmp.stack)
-    iszero(dz) && return nothing
-
-    state = cmp.reg[op.destination]
-    new_records = PGRecord[]
-
-    # Helper: register `bnd_pg` (the full boundary of an interior solid produced by a
-    # `keep_interior=false` extrusion) under the generated `:EXTBND_MISC` layer.
-    # After the interior solid is subtracted from surrounding volumes by
-    # `_flush_interior_solids!`, this boundary becomes an exterior boundary of the final
-    # mesh. Registering it under `:EXTBND_MISC` as well keeps the sub-PGs that
-    # `deduplicate_pgs!` splits off (exterior-only faces versus faces shared with
-    # interior interface PGs) cross-referenced from both layers, avoiding the "mixed
-    # boundary attribute" warning that Palace emits for PGs containing both kinds of faces.
-    function _register_extbnd!(bnd_pg)
-        if !haskey(cmp.reg, :EXTBND_MISC)
-            cmp.reg[:EXTBND_MISC] = LayerState(PGRecord[], 2)
-        end
-        return push!(cmp.reg[:EXTBND_MISC].pgs, PGRecord(bnd_pg, :EXTBND_MISC))
+    dim = cmp.reg[op.source].dim
+    dim < 3 || throw(ArgumentError("Extrude cannot process a 3D layer"))
+    dz = _extrusion_distance(cmp, op)
+    replace = op.destination == op.source
+    # Created here so a runtime-resolved distance can be recorded on it when the operation
+    # executes; `_compile_unary_layer_op!` appends to an existing destination.
+    state = get!(() -> LayerState(PGRecord[], dim + 1), cmp.reg, op.destination)
+    _compile_unary_layer_op!(
+        cmp,
+        op.destination,
+        op.source,
+        dim + 1;
+        replace,
+        hash_operation=:extrude,
+        hash_parameters=(dim, dz),
+        operation_name="Extrude"
+    ) do destination, record
+        dz isa Tuple &&
+            return (destination, _extrude_to_z!, (record.name, last(dz), dim, state))
+        return (destination, SolidModels.extrude_z!, (record.name, dz, dim))
     end
+    # In place, the source geometry is consumed by the extrusion.
+    if replace
+        for record in state.pgs
+            push!(cmp.ops, ("_rm", SolidModels.remove_group!, (record.name, dim)))
+        end
+    end
+    dz isa Tuple || (state.dz = _stp_float(dz))
+    return nothing
+end
 
+function _compile!(cmp::CompilerState, op::Hollow)
+    state = cmp.reg[op.layer]
+    state.dim == 3 || throw(ArgumentError("Hollow requires a 3D layer"))
+    hollowed = get!(() -> LayerState(PGRecord[], 3), cmp.reg, HOLLOWED)
+    shells = PGRecord[]
     for record in state.pgs
-        pg = record.name
-        if source_layer.contour_only
-            # Extrude the contour (1D boundary of 2D surface) to form a shell
-            ctr_pg = pg * "__CTR"
-            ext_pg = pg * "__CTREXT"
-            push!(cmp.ops, (ctr_pg, SolidModels.get_boundary, (pg, 2), :oriented => false))
-            push!(cmp.ops, (ext_pg, SolidModels.extrude_z!, (ctr_pg, dz, 1)))
-            push!(cmp.ops, ("_rm", SolidModels.remove_group!, (ctr_pg, 1)))
-            if !source_layer.keep_interior
-                # Also extrude the 2D surface into a solid for interior subtraction
-                int_pg = pg * "__INT"
-                intbnd_pg = pg * "__INTBND"
-                push!(cmp.ops, (int_pg, SolidModels.extrude_z!, (pg, dz, 2)))
-                push!(
-                    cmp.ops,
-                    (intbnd_pg, SolidModels.get_boundary, (int_pg, 3), :oriented => false)
-                )
-                push!(cmp.ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
-                push!(get!(cmp.intsol, op.destination, String[]), int_pg)
-                _register_extbnd!(intbnd_pg)
-            else
-                push!(cmp.ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
-            end
-            push!(new_records, PGRecord(ext_pg, op.destination))
-        elseif !source_layer.keep_interior
-            # Boundary-only extrusion: extrude to solid, extract boundary, discard interior.
-            # The solid is registered for auto-subtraction from surrounding volumes.
-            ext_pg = pg * "__EXN"
-            bnd_pg = pg * "__EXTBND"
-            push!(cmp.ops, (ext_pg, SolidModels.extrude_z!, (pg, dz, 2)))
-            push!(
-                cmp.ops,
-                (bnd_pg, SolidModels.get_boundary, (ext_pg, 3), :oriented => false)
-            )
-            push!(cmp.ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
-            push!(get!(cmp.intsol, op.destination, String[]), ext_pg)
-            push!(new_records, PGRecord(bnd_pg, op.destination))
-            _register_extbnd!(bnd_pg)
-        else
-            # Standard extrusion: 2D surface → 3D volume
-            ext_pg = pg * "__EXN"
-            push!(cmp.ops, (ext_pg, SolidModels.extrude_z!, (pg, dz, 2)))
-            push!(cmp.ops, ("_rm", SolidModels.remove_group!, (pg, 2)))
-            push!(new_records, PGRecord(ext_pg, op.destination))
-        end
+        shell = string(op.layer, "__", ophash(record.name, String[]; operation=:hollow))
+        push!(
+            cmp.ops,
+            (shell, SolidModels.get_boundary, (record.name, 3), :oriented => false)
+        )
+        push!(shells, PGRecord(shell, op.layer))
+        push!(hollowed.pgs, PGRecord(record.name, HOLLOWED))
     end
+    state.pgs = shells
+    state.dim = 2
+    return nothing
+end
 
-    new_dim = source_layer.contour_only ? 2 : (source_layer.keep_interior ? 3 : 2)
-    cmp.reg[op.destination] = LayerState(new_records, new_dim)
+# Remove the volumes of hollowed layers from the fragmented model, leaving their shells.
+# Faces that bounded only removed volumes are removed as well. Must run before interfaces are
+# realized so that volume boundaries no longer include faces toward voided interiors.
+function hollow!(sm::SolidModel, registry::LayerRegistry)
+    haskey(registry, HOLLOWED) || return nothing
+    faces = Set{Int32}()
+    for record in registry[HOLLOWED].pgs
+        SolidModels.hasgroup(sm, record.name, 3) || continue
+        for tag in SolidModels.entitytags(sm[record.name, 3])
+            union!(faces, last(SolidModels.gmsh.model.getAdjacencies(3, tag)))
+        end
+        SolidModels.remove_group!(sm[record.name, 3]; recursive=false, remove_entities=true)
+    end
+    SolidModels._synchronize!(sm)
+    dangling = Tuple{Int32, Int32}[
+        (Int32(2), tag) for
+        tag in faces if isempty(first(SolidModels.gmsh.model.getAdjacencies(2, tag)))
+    ]
+    if !isempty(dangling)
+        SolidModels.gmsh.model.occ.remove(dangling, false)
+        SolidModels._synchronize!(sm)
+    end
+    delete!(registry, HOLLOWED)
     return nothing
 end
 
@@ -1064,16 +1131,6 @@ function _compile!(cmp::CompilerState, op::_LoweredFuse)
     return nothing
 end
 
-function _replace_layer_prefix(name::String, source::Symbol, destination::Symbol)
-    prefix = string(source, "__")
-    startswith(name, prefix) || throw(
-        ArgumentError(
-            "Heal source physical-group name '$name' does not begin with layer prefix '$prefix'"
-        )
-    )
-    return string(destination, "__", chop(name; head=length(prefix), tail=0))
-end
-
 function _compile!(cmp::CompilerState, op::_LoweredHeal)
     state = cmp.reg[op.source]
     if op.destination == op.source
@@ -1095,7 +1152,7 @@ function _compile!(cmp::CompilerState, op::_LoweredHeal)
         _require_destination_dimension(cmp.reg, op.destination, state.dim, "Heal")
     new_records = [
         PGRecord(
-            _replace_layer_prefix(record.name, op.source, op.destination),
+            string(op.destination, "__", ophash(record.name, String[]; operation=:heal)),
             op.destination
         ) for record in state.pgs
     ]

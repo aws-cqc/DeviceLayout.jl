@@ -34,7 +34,7 @@
     @test (layer(wave), name(wave), layerindex(wave)) == (:ports, "readout", 3)
 
     simple_layer = SourceLayer(NULL; thickness=10.0nm)
-    offset_layer = SourceLayer(NULL; thickness=15μm, height=5μm)
+    offset_layer = SourceLayer(NULL; thickness=15μm, offset=5μm)
     stack = SourceStack(:a => simple_layer, :b => offset_layer; levels=(1 => 0.0nm))
     @test simple_layer.level == 1
     @test SolidModelsExperimental.thickness(simple_layer, stack) == 10.0nm
@@ -42,11 +42,11 @@
 
     pair_layer = SourceLayer(NULL; level=1 => 2)
     offset_pair_layer =
-        SourceLayer(DIELECTRIC; level=1 => 2, height=(10μm, -10μm), gds_meta=GDSMeta(8, 2))
+        SourceLayer(DIELECTRIC; level=1 => 2, offset=(10μm, -10μm), gds_meta=GDSMeta(8, 2))
     @test first(offset_pair_layer.level) == 1
     @test last(offset_pair_layer.level) == 2
-    @test first(offset_pair_layer.height) == 10μm
-    @test last(offset_pair_layer.height) == -10μm
+    @test first(offset_pair_layer.offset) == 10μm
+    @test last(offset_pair_layer.offset) == -10μm
     stack = SourceStack(:substrate => offset_pair_layer; levels=(1 => 0μm, 2 => 500μm))
     @test SolidModelsExperimental.thickness(pair_layer, stack) == 500μm
     @test SolidModelsExperimental.thickness(stack.layers[:substrate], stack) == 480μm
@@ -65,12 +65,12 @@
         levels=(1 => 0.0,)
     )
     # Mixed length types (all unitful)
-    layer = SourceLayer(NULL; level=1 => 2, height=(10μm, -5.4μm))
+    layer = SourceLayer(NULL; level=1 => 2, offset=(10μm, -5.4μm))
     stack = SourceStack(:substrate => layer; levels=(1 => 0μm, 2 => 500000.3nm))
 
     mixed_types_stack = SourceStack(
         :integer => SourceLayer(NULL),
-        :floating => SourceLayer(NULL; height=0.0μm, thickness=0.0μm);
+        :floating => SourceLayer(NULL; offset=0.0μm, thickness=0.0μm);
         levels=(1 => 0.0μm,)
     )
     @test typeof(mixed_types_stack).parameters[1] === SourceLayer
@@ -126,6 +126,7 @@ end
         GetBoundary,
         GetInterface,
         Heal,
+        Hollow,
         METAL,
         NULL,
         Remove,
@@ -171,28 +172,22 @@ end
 
     stack = SourceStack(
         :metal => SourceLayer(METAL; level=1, thickness=2μm),
-        :voids => SourceLayer(NULL; level=1, thickness=2μm, keep_interior=false),
-        :shell => SourceLayer(METAL; level=1, thickness=2μm, contour_only=true),
-        :hollow_shell => SourceLayer(
-            METAL;
-            level=1,
-            thickness=2μm,
-            contour_only=true,
-            keep_interior=false
-        ),
+        :voids => SourceLayer(NULL; level=1, thickness=2μm),
+        :shell => SourceLayer(METAL; level=1, thickness=2μm),
+        :span => SourceLayer(NULL; level=1 => 2, offset=(0μm, 1μm)),
         :flat => SourceLayer(METAL; level=1, thickness=0μm);
-        levels=(1 => 0μm,)
+        levels=(1 => 0μm, 2 => 3μm)
     )
     metal_pg = "metal__a"
     voids_pg = "voids__b"
     shell_pg = "shell__c"
-    hollow_shell_pg = "hollow_shell__d"
+    span_pg = "span__d"
     flat_pg = "flat__e"
     registry = LayerRegistry(
         :metal => LayerState([PGRecord(metal_pg, :metal)], 2),
         :voids => LayerState([PGRecord(voids_pg, :voids)], 2),
         :shell => LayerState([PGRecord(shell_pg, :shell)], 2),
-        :hollow_shell => LayerState([PGRecord(hollow_shell_pg, :hollow_shell)], 2),
+        :span => LayerState([PGRecord(span_pg, :span)], 2),
         :flat => LayerState([PGRecord(flat_pg, :flat)], 2)
     )
 
@@ -204,69 +199,99 @@ end
     end
 
     @testset "Extrude" begin
-        # Standard extrusion replaces the source surface with a volume.
+        @test_throws ArgumentError Extrude(:metal, :metal, 2μm, 2, nothing)
+        @test_throws ArgumentError Extrude(:metal; offset=1μm)
+
+        # In place, a declared thickness replaces the source surface with a volume and
+        # consumes the surface.
         ops, reg, dints = compile_ops([Extrude(:metal)], stack, registry)
-        src = metal_pg
-        out = only(reg[:metal].pgs)
         @test reg[:metal].dim == 3
-        @test only(filter(op -> op[2] == SolidModels.extrude_z!, ops))[3] == (src, 2μm, 2)
-        @test only(filter(op -> op[2] == SolidModels.remove_group!, ops))[3] == (src, 2)
+        @test reg[:metal].dz == 2.0
+        @test only(reg[:metal].pgs).name == metal_pg
+        @test only(filter(op -> op[2] == SolidModels.extrude_z!, ops))[3] ==
+              (metal_pg, 2μm, 2)
+        @test only(filter(op -> op[2] == SolidModels.remove_group!, ops))[3] ==
+              (metal_pg, 2)
         @test isempty(SolidModelsExperimental.interface_vertices(dints))
 
-        # A zero-thickness source is left unchanged.
-        ops, reg, _ = compile_ops([Extrude(:flat)], stack, registry)
-        @test isempty(ops)
-        @test reg[:flat].dim == 2
-        @test only(reg[:flat].pgs).name == flat_pg
+        # A level span declares the thickness between its two ends.
+        ops, reg, _ = compile_ops([Extrude(:span)], stack, registry)
+        @test only(filter(op -> op[2] == SolidModels.extrude_z!, ops))[3] ==
+              (span_pg, 4μm, 2)
+        @test reg[:span].dz == 4.0
 
-        # Contour-only extrusion keeps only the swept shell's vertical walls.
-        ops, reg, _ = compile_ops([Extrude(:shell)], stack, registry)
-        src = shell_pg
-        bnd = only(filter(op -> op[2] == SolidModels.get_boundary, ops))
+        # Explicit distances and target levels must agree with the declaration.
+        @test compile_ops([Extrude(:metal, 2μm)], stack, registry)[2][:metal].dim == 3
+        @test compile_ops([Extrude(:span; to_level=2, offset=1μm)], stack, registry)[2][:span].dim ==
+              3
+        @test_throws ArgumentError compile_ops([Extrude(:metal, 1μm)], stack, registry)
+        @test_throws ArgumentError compile_ops(
+            [Extrude(:metal; to_level=2)],
+            stack,
+            registry
+        )
+        @test_throws ArgumentError compile_ops([Extrude(:flat)], stack, registry)
+        @test_throws ArgumentError compile_ops(
+            [Extrude(:metal; to_level=7)],
+            stack,
+            registry
+        )
+
+        # A distinct destination receives a copy and leaves the source in place.
+        ops, reg, _ = compile_ops([Extrude(:solid, :metal)], stack, registry)
+        @test reg[:metal].dim == 2
+        @test reg[:solid].dim == 3
+        @test reg[:solid].dz == 2.0
+        @test !any(op -> op[2] == SolidModels.remove_group!, ops)
+        @test startswith(only(reg[:solid].pgs).name, "solid__")
+
+        # Walls: extrude the 1D outline of a surface.
+        ops, reg, _ =
+            compile_ops([GetBoundary(:shell, :shell), Extrude(:shell)], stack, registry)
         ext = only(filter(op -> op[2] == SolidModels.extrude_z!, ops))
-        @test bnd[3] == (src, 2)
-        @test ext[3] == (bnd[1], 2μm, 1)
+        @test ext[3] == (shell_pg, 2μm, 1)
         @test reg[:shell].dim == 2
-        @test only(reg[:shell].pgs).name == ext[1]
-        @test !haskey(reg, :EXTBND_MISC) # no interior solids were flush (keep_interior=true)
-        # so no external boundaries were added to EXTBND_MISC tracking layer
 
-        # A hollow contour also creates a temporary interior and registers its boundary.
-        ops, reg, _ = compile_ops([Extrude(:hollow_shell)], stack, registry)
-        src = hollow_shell_pg
-        int = only(
-            filter(op -> op[2] == SolidModels.extrude_z! && op[3] == (src, 2μm, 2), ops)
-        )
-        intbnd = only(
-            filter(op -> op[2] == SolidModels.get_boundary && op[3] == (int[1], 3), ops)
-        )
-        @test reg[:hollow_shell].dim == 2
-        @test only(reg[:EXTBND_MISC].pgs).name == intbnd[1]
-        @test any(op -> op[2] == SolidModels.remove_group! && op[3] == (int[1], 3), ops)
+        # Generated layers need an explicit distance or target level.
+        generated = deepcopy(registry)
+        generated[:generated] = LayerState([PGRecord("generated", :generated)], 2)
+        @test_throws ArgumentError compile_ops([Extrude(:generated)], stack, generated)
+        ops, reg, _ = compile_ops([Extrude(:generated, 3μm)], stack, generated)
+        @test reg[:generated].dim == 3
+        @test reg[:generated].dz == 3.0
+        ops, reg, _ = compile_ops([Extrude(:generated; to_level=2)], stack, generated)
+        to_z = only(filter(op -> op[2] == SolidModelsExperimental._extrude_to_z!, ops))
+        @test to_z[3][1:3] == ("generated", 3.0, 2)
+        @test to_z[3][4] === reg[:generated] # the distance is recorded here at execution
+        @test isnothing(reg[:generated].dz)
 
-        # Interior solids are subtracted from every existing volume before cleanup.
-        ops, reg, _ = compile_ops([Extrude(:metal), Extrude(:voids)], stack, registry)
-        extruded_metal_pg = only(reg[:metal].pgs).name
-        voids_src = voids_pg
-        int = only(
-            op[1] for op in ops if
-            op[2] == SolidModels.extrude_z! && op[3][1] == voids_src && op[3][3] == 2
+        # 3D layers cannot be extruded.
+        extruded = compile_ops([Extrude(:metal)], stack, registry)[2]
+        @test_throws ArgumentError compile_ops([Extrude(:metal)], stack, extruded)
+
+        # Every declared thickness still in the registry must have been built.
+        _, reg, _ = compile_ops([Extrude(:metal)], stack, registry)
+        @test_throws ArgumentError SolidModelsExperimental.check_declared_thicknesses(
+            reg,
+            stack
         )
-        @test any(ops) do op
-            return op[2] == SolidModels.difference_geom! &&
-                   op[3] == (extruded_metal_pg, [int], 3, 3)
+        for layer in (:voids, :shell, :span)
+            delete!(reg, layer)
         end
-        @test any(ops) do op
-            return op[2] == SolidModels.remove_group! &&
-                   op[3] == (int, 3) &&
-                   (:remove_entities => false) in op
-        end
-        @test reg[:metal].dim == 3
-        @test reg[:voids].dim == 2
+        @test isnothing(SolidModelsExperimental.check_declared_thicknesses(reg, stack))
+    end
 
-        generated_reg = deepcopy(registry)
-        generated_reg[:generated] = LayerState([PGRecord("generated", :generated)], 2)
-        @test_throws ArgumentError compile_ops([Extrude(:generated)], stack, generated_reg)
+    @testset "Hollow" begin
+        @test_throws ArgumentError compile_ops([Hollow(:metal)], stack, registry)
+        ops, reg, _ = compile_ops([Extrude(:metal), Hollow(:metal)], stack, registry)
+        shell = only(reg[:metal].pgs)
+        @test reg[:metal].dim == 2
+        @test reg[:metal].dz == 2.0
+        @test startswith(shell.name, "metal__")
+        bnd = only(filter(op -> op[2] == SolidModels.get_boundary, ops))
+        @test bnd[1] == shell.name && bnd[3] == (metal_pg, 3)
+        @test only(reg[SolidModelsExperimental.HOLLOWED].pgs).name == metal_pg
+        @test reg[SolidModelsExperimental.HOLLOWED].dim == 3
     end
 
     @testset "Cut" begin
@@ -756,10 +781,15 @@ end
         @test length(ops) == 2
         @test Set(op[1] for op in ops) == Set((metal_pg, second_pg))
 
-        # Assign mode changes the internal layer prefix and preserves the source records.
+        # Assign mode creates a content-addressed PG and preserves the source records.
+        healed(name, destination) = string(
+            destination,
+            "__",
+            SolidModelsExperimental.ophash(name, String[]; operation=:heal)
+        )
         ops, reg, _ = compile_ops([Heal(:combined, :metal)], stack, registry)
         op = only(ops)
-        expected_name = replace(metal_pg, "metal__" => "combined__"; count=1)
+        expected_name = healed(metal_pg, :combined)
         @test op[1] == expected_name
         @test op[3] == (metal_pg, 2)
         @test only(reg[:combined].pgs).name == expected_name
@@ -776,11 +806,11 @@ end
             registry
         )
 
-        # Explicit chains preserve the internal name suffix through successive layer prefixes.
+        # Explicit chains name each result from its immediate source.
         ops, reg, _ =
             compile_ops([Heal(:clean, :metal), Heal(:cleaner, :clean)], stack, registry)
-        clean_name = replace(metal_pg, "metal__" => "clean__"; count=1)
-        cleaner_name = replace(clean_name, "clean__" => "cleaner__"; count=1)
+        clean_name = healed(metal_pg, :clean)
+        cleaner_name = healed(clean_name, :cleaner)
         @test length(ops) == 2
         @test ops[1][1] == clean_name
         @test ops[2][1] == cleaner_name
@@ -791,7 +821,7 @@ end
         reg = deepcopy(registry)
         push!(reg[:metal].pgs, PGRecord(second_pg, :metal))
         ops, reg, _ = compile_ops([Heal(:combined, :metal)], stack, reg)
-        expected_second = replace(second_pg, "metal__" => "combined__"; count=1)
+        expected_second = healed(second_pg, :combined)
         @test Set(op[1] for op in ops) == Set((expected_name, expected_second))
         @test Set(record.name for record in reg[:combined].pgs) ==
               Set((expected_name, expected_second))
@@ -821,13 +851,9 @@ end
         @test (:remove_object => true) in op
         @test !haskey(reg, :metal)
 
-        # Identity collisions and noncanonical source names fail rather than being renamed.
+        # Output PG name collisions fail rather than being renamed.
         reg = deepcopy(registry)
         reg[:combined] = LayerState([PGRecord(expected_name, :combined)], 2)
-        @test_throws ArgumentError compile_ops([Heal(:combined, :metal)], stack, reg)
-
-        reg = deepcopy(registry)
-        reg[:metal] = LayerState([PGRecord("custom", :metal)], 2)
         @test_throws ArgumentError compile_ops([Heal(:combined, :metal)], stack, reg)
 
         reg = deepcopy(registry)
@@ -1517,10 +1543,12 @@ end
     using DeviceLayout.SolidModels
     using DeviceLayout.SolidModelsExperimental:
         Cut,
+        Extrude,
         Fuse,
         GetBoundary,
         GetInterface,
         Heal,
+        Hollow,
         LayerRef,
         LayerRegistry,
         LayerState,
@@ -1580,7 +1608,7 @@ end
     function flat_stack(layers...; thickness=0μm)
         return SourceStack(
             (
-                layer => SourceLayer(NULL; level=1, height=0μm, thickness=thickness) for
+                layer => SourceLayer(NULL; level=1, offset=0μm, thickness=thickness) for
                 layer in layers
             )...;
             levels=(1 => 0μm,)
@@ -1651,8 +1679,8 @@ end
             "compiler_geometry_sparse_intersections",
             geometry,
             SourceStack(
-                :objects => SourceLayer(NULL; level=1, height=0.0, thickness=0.0),
-                :tools => SourceLayer(NULL; level=1, height=0.0, thickness=0.0);
+                :objects => SourceLayer(NULL; level=1, offset=0.0, thickness=0.0),
+                :tools => SourceLayer(NULL; level=1, offset=0.0, thickness=0.0);
                 levels=(1 => 0.0,)
             ),
             [SolidModelsExperimental.Intersect(:intersections, :objects, :tools)]
@@ -1672,6 +1700,8 @@ end
             geometry,
             flat_stack(:left, :right; thickness=1μm),
             [
+                Extrude(:left),
+                Extrude(:right),
                 GetInterface(:interface, :left, :right),
                 GetInterface(:interface_copy, :left, :right),
                 GetInterface(:self_interface, :left, :left)
@@ -1709,6 +1739,7 @@ end
             mixed_geometry,
             mixed_stack,
             [
+                Extrude(:volume),
                 GetInterface(:lower_first, :surface, :volume),
                 GetInterface(:higher_first, :volume, :surface)
             ]
@@ -1750,6 +1781,63 @@ end
             1e-6
     end
 
+    @testset "Explicit extrusion and hollowing" begin
+        geometry = CoordinateSystem("hollow", μm)
+        place!(geometry, _rectangle(0.0, 0.0, 4.0, 4.0), LayerRef(:box))
+        place!(geometry, _rectangle(1.0, 1.0, 2.0, 2.0), LayerRef(:bump))
+        place!(geometry, _rectangle(1.0, 2.5, 2.0, 3.5), LayerRef(:foot))
+        place!(geometry, _rectangle(3.0, 1.0, 3.5, 1.5), LayerRef(:outline))
+        stack = SourceStack(
+            :box => SourceLayer(NULL; level=1, thickness=2μm),
+            :bump => SourceLayer(NULL; level=1, offset=0.5μm, thickness=1μm),
+            :foot => SourceLayer(NULL; level=1, thickness=1μm),
+            :outline => SourceLayer(NULL; level=1, thickness=1μm);
+            levels=(1 => 0μm, 2 => 2μm)
+        )
+        result = render_case(
+            "compiler_geometry_hollow",
+            geometry,
+            stack,
+            [
+                Extrude(:box),
+                Extrude(:bump),
+                Hollow(:bump),
+                Extrude(:foot),
+                Hollow(:foot),
+                # A generated layer reaches a target level from its own z at execution.
+                Translate(:copy, :outline, 0μm, 2μm, 0μm),
+                Extrude(:copy; to_level=2),
+                # Walls: extrude the outline rather than the surface.
+                GetBoundary(:outline, :outline),
+                Extrude(:outline),
+                # Interfaces are realized after hollowing, so the box boundary excludes faces
+                # toward removed interiors.
+                GetInterface(:box_foot, :box, :foot)
+            ]
+        )
+        layers = result.metadata["layers"]
+        @test layer_measure(result, :box_foot) ≈ 5.0 atol = 1e-8
+        # Hollowed interiors are gone from the model; the shells remain as the layers.
+        @test layer_measure(result, :box) ≈ 4.0 * 4.0 * 2.0 - 2.0 atol = 1e-8
+        @test layers["bump"]["dim"] == 2
+        @test layers["bump"]["thickness"] == 1.0
+        @test layer_measure(result, :bump) ≈ 6.0 atol = 1e-8
+        # A solid on the box floor loses its floor face, which bounded nothing else.
+        @test layer_measure(result, :foot) ≈ 5.0 atol = 1e-8
+        for layer in (:bump, :foot), (_, tag) in layer_dimtags(result, layer)
+            @test !isempty(first(SolidModels.gmsh.model.getAdjacencies(2, tag)))
+        end
+        @test !haskey(layers, String(SolidModelsExperimental.HOLLOWED))
+        # to_level on a generated layer, and walls from a 1D outline.
+        @test layers["copy"]["dim"] == 3
+        @test layers["copy"]["thickness"] ≈ 2.0 atol = 1e-9
+        @test layer_measure(result, :copy) ≈ 0.5 atol = 1e-8
+        @test collect(layer_bbox(result, :copy)) ≈ [3.0, 3.0, 0.0, 3.5, 3.5, 2.0] atol =
+            1e-6
+        @test layers["outline"]["dim"] == 2
+        @test layer_measure(result, :outline) ≈ 2.0 atol = 1e-8
+    end
+
     @testset "Global restriction" begin
         geometry = CoordinateSystem("restricted", μm)
         place!(geometry, _rectangle(0.0, 0.0, 3.0, 1.0), LayerRef(:target))
@@ -1758,7 +1846,7 @@ end
             "compiler_geometry_restricted",
             geometry,
             flat_stack(:target, :bounds; thickness=1μm),
-            [RestrictTo(:bounds)]
+            [Extrude(:target), Extrude(:bounds), RestrictTo(:bounds)]
         )
         @test layer_measure(result, :target) ≈ 1.0 atol = 1e-8
         @test collect(layer_bbox(result, :target)) ≈ [1.0, 0.0, 0.0, 2.0, 1.0, 1.0] atol =
@@ -2076,7 +2164,7 @@ end
     schematic = plan(graph; log_dir=mktempdir()) |> check!
     target = SolidModelTarget(
         SourceStack(
-            :metal => SourceLayer(METAL; level=1, height=0.0, thickness=0.0);
+            :metal => SourceLayer(METAL; level=1, offset=0.0, thickness=0.0);
             levels=(1 => 0.0,)
         )
     )
@@ -2104,6 +2192,7 @@ end
     using DeviceLayout.SolidModelsExperimental:
         Cut,
         DIELECTRIC,
+        Extrude,
         GetBoundary,
         GetInterface,
         Ground,
@@ -2255,13 +2344,15 @@ end
             :BOUNDING_VOLUME => SourceLayer(
                 NULL;
                 level=0 => 1,
-                height=(-500μm, 500μm),
+                offset=(-500μm, 500μm),
                 gds_meta=nothing
             );
             levels=(0 => -500.0μm, 1 => 0.0μm)
         )
 
         ops = [
+            Extrude(:SUBSTRATE_BOTTOM),
+            Extrude(:BOUNDING_VOLUME),
             Cut(:METAL_POS, :CHIP_OUTLINE, :METAL_NEG),
             Remove(:CHIP_OUTLINE),
             Cut(:CUTOUT, :METAL_NEG, :PORTS),
