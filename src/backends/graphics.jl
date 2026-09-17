@@ -27,6 +27,7 @@ import ..Align: LeftEdge, RightEdge, XCenter, TopEdge, BottomEdge, YCenter
 import FileIO: File, @format_str, stream
 
 using ColorSchemes
+import Colors: RGB, LCHab, colordiff
 using Preferences
 
 # Available color schemes -- Glasbey themes for categorical data
@@ -84,6 +85,64 @@ lcolor(l) = lcolor(l, get_color_scheme())
 # Initialize layercolors with the preferred scheme
 const layercolors = Dict([(i => lcolor(i)) for i = 0:255]...)
 
+# Datatypes on one layer cycle through this many colors: the layer's base color plus
+# `DATATYPE_CYCLE - 1` lightness levels spread over `DATATYPE_LIGHTNESS_RANGE` (CIELCh L*, for
+# the light theme; mirrored about 50 for the dark theme). The range stops short of the
+# background side so variants keep some contrast against it, and short of the far side so
+# sRGB still has chroma to carry the hue. Fills are drawn at 50% opacity, which roughly halves
+# perceived differences.
+const DATATYPE_CYCLE = 5
+const DATATYPE_LIGHTNESS_RANGE = (15.0, 75.0)
+
+# `convert(RGB, ::LCHab)` silently clamps out-of-gamut channels, which shifts the hue. Detect
+# clipping by round-tripping and, if needed, shrink chroma (bisection) until the color fits in
+# sRGB at the requested lightness and hue.
+function to_srgb(lch::LCHab)
+    fits(c) = colordiff(convert(LCHab, convert(RGB, c)), c) < 0.1
+    fits(lch) && return convert(RGB, lch)
+    lo, hi = 0.0, lch.c
+    for _ = 1:20
+        mid = (lo + hi) / 2
+        fits(LCHab(lch.l, mid, lch.h)) ? (lo = mid) : (hi = mid)
+    end
+    return convert(RGB, LCHab(lch.l, lo, lch.h))
+end
+
+"""
+    datatype_variant(base, d, prefer_darker)
+
+Derive the fill color for GDS datatype `d` from the `base` color of its layer (the color
+datatype `0` gets), keeping the same CIELCh hue so that datatypes on one layer read as
+variants of each other rather than unrelated categorical colors.
+
+Colors repeat with period `DATATYPE_CYCLE`. Within a cycle, the remaining datatypes are
+lightness levels spread as evenly as the base color's position in `DATATYPE_LIGHTNESS_RANGE`
+allows, taken first in the preferred direction (darker when `prefer_darker`, i.e. on the
+light theme) and then in the other. Chroma is kept where the sRGB gamut allows.
+"""
+function datatype_variant(base, d, prefer_darker)
+    slot = mod(d, DATATYPE_CYCLE)
+    slot == 0 && return base
+    lch = convert(LCHab, RGB(base[1], base[2], base[3]))
+    lmin, lmax =
+        prefer_darker ? DATATYPE_LIGHTNESS_RANGE : 100 .- reverse(DATATYPE_LIGHTNESS_RANGE)
+    lmin, lmax = min(lmin, lch.l), max(lmax, lch.l)
+    # Split the levels between the two sides of the base so the smallest gap is as large as
+    # possible.
+    nlevels = DATATYPE_CYCLE - 1
+    gap(n) = min(
+        n == 0 ? Inf : (lch.l - lmin) / n,
+        n == nlevels ? Inf : (lmax - lch.l) / (nlevels - n)
+    )
+    ndown = argmax(gap, 0:nlevels)
+    down = [lch.l - k * (lch.l - lmin) / ndown for k = 1:ndown]
+    up = [lch.l + k * (lmax - lch.l) / (nlevels - ndown) for k = 1:(nlevels - ndown)]
+    first, second = prefer_darker ? (down, up) : (up, down)
+    l = slot <= length(first) ? first[slot] : second[slot - length(first)]
+    rgb = to_srgb(LCHab(l, lch.c, lch.h))
+    return (rgb.r, rgb.g, rgb.b, base[4])
+end
+
 function fillcolor(options, meta)
     layer = gdslayer(meta)
     if haskey(options, :layercolors)
@@ -91,8 +150,9 @@ function fillcolor(options, meta)
         haskey(colors, meta) && return colors[meta]
         haskey(colors, layer) && return colors[layer]
     end
-    color_index = mod(layer + 31 * datatype(meta), length(layercolors))
-    return get(layercolors, color_index, (0.0, 0.0, 0.0, 0.5)) # Fallback in case `layercolors` was given non-consecutive keys
+    color_index = mod(layer, length(layercolors))
+    base = get(layercolors, color_index, (0.0, 0.0, 0.0, 0.5)) # Fallback in case `layercolors` was given non-consecutive keys
+    return datatype_variant(base, datatype(meta), get_color_scheme() == LIGHT_MODE_SCHEME)
 end
 
 lscale(x::Length, dpi)  = round(Int, NoUnits((x |> inch) * dpi / inch))

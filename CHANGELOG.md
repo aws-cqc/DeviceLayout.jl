@@ -34,6 +34,10 @@ The format of this changelog is based on
     band (so nearly-coincident endpoints don't flip on floating-point noise), and the result is
     reversed back to the caller's traversal direction, so GDS discretization, stock `render!`, and
     `render_conformal!` all agree on a shared curve.
+  - Graphics: datatypes other than `0` on a GDS layer now get a color derived from that
+    layer's base color (same hue, four evenly spread CIELCh lightness levels, repeating every
+    five datatypes) instead of an unrelated categorical color from a large index jump. Datatype
+    `0` colors are unchanged. (#306)
 
 ## 1.19.0 (2026-09-14)
 

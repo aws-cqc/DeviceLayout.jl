@@ -1262,6 +1262,71 @@ end
             Dict{Symbol, Any}(:layercolors => Dict(GDSMeta(300, 2) => (1, 0, 0, 1))),
             GDSMeta(300, 2)
         ) == (1, 0, 0, 1)
+
+        # Test current intended functionality, but note graphical output changes are not breaking
+        @testset "> datatype color variants (#306)" begin
+            G = DeviceLayout.Graphics
+            lch(c) = convert(G.LCHab, G.RGB(c[1], c[2], c[3]))
+            hue_dist(a, b) = abs(mod(a - b + 180, 360) - 180)
+            # Fill as seen over the theme background at the fill's own opacity
+            composite(c, bg) = G.RGB((c[4] .* c[1:3] .+ (1 - c[4]) * bg)...)
+            opts = Dict{Symbol, Any}()
+
+            function check_variants(bg, prefer_darker)
+                n = G.DATATYPE_CYCLE
+                bgc = G.RGB(bg, bg, bg)
+                for l = 0:255
+                    colors = [G.fillcolor(opts, GDSMeta(l, d)) for d = 0:(n - 1)]
+                    base = lch(colors[1])
+                    # One cycle of datatypes is pairwise distinguishable over the background,
+                    # and no variant fades into it
+                    over = [composite(c, bg) for c in colors]
+                    for i = 1:n, j = (i + 1):n
+                        @test G.colordiff(over[i], over[j]) > 3.5
+                    end
+                    for (c, o) in zip(colors, over)
+                        @test G.colordiff(o, bgc) > 6
+                        @test hue_dist(lch(c).h, base.h) < 1
+                        @test c[4] == colors[1][4] # alpha preserved
+                    end
+                    # Colors repeat with the cycle length
+                    @test G.fillcolor(opts, GDSMeta(l, 2n + 3)) == colors[4]
+                    # The first variant moves in the theme's preferred direction unless the
+                    # base is already near that edge of the lightness range
+                    lmin, lmax = G.DATATYPE_LIGHTNESS_RANGE
+                    room = prefer_darker ? base.l - lmin : (100 - lmin) - base.l
+                    if room > (lmax - lmin) / n
+                        @test (lch(colors[2]).l < base.l) == prefer_darker
+                    end
+                end
+            end
+
+            # Force a known theme/`layercolors` state
+            @test_logs (:info, r"Color scheme set") G.set_theme!("light")
+            try
+                # Datatype 0 uses base color
+                @test G.fillcolor(opts, GDSMeta(7, 0)) == G.lcolor(7)
+                check_variants(1.0, true)
+
+                # DemoQPU17's metal_negative = GDSMeta(1, 2): a purple variant of layer 1's
+                # color, rather than the pre-#306 collision with layer 63
+                # (mod(1 + 31*2, 256) == 63), an unrelated green.
+                variant_h = lch(G.fillcolor(opts, GDSMeta(1, 2))).h
+                @test hue_dist(variant_h, lch(G.lcolor(1)).h) < 1
+                @test hue_dist(variant_h, lch(G.lcolor(63)).h) > 30
+
+                @test_logs (:info, r"Color scheme set") G.set_theme!("dark")
+                check_variants(0.0, false)
+            finally
+                @test_logs (:info, r"Color scheme set") G.set_theme!("light")
+                Preferences.delete_preferences!(
+                    DeviceLayout,
+                    G.COLOR_THEME_PREF,
+                    force=true
+                )
+            end
+        end
+
         @test eltype(
             DeviceLayout.Graphics.canvas_size(Dict(:width => 4.6, :height => 4.6), 1, 1)
         ) <: Integer
