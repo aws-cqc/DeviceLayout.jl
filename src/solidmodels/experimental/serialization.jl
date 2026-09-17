@@ -74,10 +74,11 @@ function serialize_metadata(
             source_layer = stack.layers[layer_name]
             layer_entry["type"] = "source"
             layer_entry["level"] = first(source_layer.level)
-            layer_entry["height"] = _stp_float(first(source_layer.height))
+            layer_entry["offset"] = _stp_float(first(source_layer.offset))
             layer_entry["thickness"] = _stp_float(thickness(source_layer, stack))
         else
             layer_entry["type"] = "generated"
+            isnothing(state.dz) || (layer_entry["thickness"] = state.dz)
         end
         if haskey(interface_layer_parents, layer_name)
             layer_entry["parents"] = interface_layer_parents[layer_name]
