@@ -1224,7 +1224,18 @@ _entities_in_box(::SolidModel, dims, ::Nothing) = nothing   # all entities of `d
 function _entities_in_box(sm::SolidModel, dims, box)
     gmsh.model.set_current(name(sm))
     ents = vcat([gmsh.model.get_entities(dim) for dim in dims]...)
-    return filter(dt -> _boxes_touch(box, bounds3d([dt])), ents)
+    selected = filter(dt -> _boxes_touch(box, bounds3d([dt])), ents)
+    # A boolean that rebuilds an entity can retag its sub-entities, including those outside the
+    # box. `_fragment_and_map!` can only follow operands, so the full boundary of every selected
+    # top-dimension entity is submitted too, as the global pass does implicitly.
+    top = maximum(dims)
+    parents = filter(dt -> dt[1] == top, selected)
+    isempty(parents) && return selected
+    closure = filter(
+        dt -> dt[1] in dims,
+        [(d, abs(t)) for (d, t) in gmsh.model.get_boundary(parents, false, false, false)]
+    )
+    return unique(vcat(selected, closure))
 end
 
 # OCC boxes are loose by ~1e-7 (see `bounds3d`), so touching solids intersect without a tolerance.
@@ -1473,10 +1484,18 @@ function _fragment_and_map!(
             setdiff(groups, [(name(pg), dimtags(pg)) for pg ∈ excluded_physical_groups])
     end
 
+    # Operand bounding boxes for `_remap_orphans!`, taken while the entities still exist.
+    boxes_before = Dict(dt => gmsh.model.getBoundingBox(dt...) for dt in allents)
+    ents_before = Set{Tuple{Int32, Int32}}(
+        vcat([gmsh.model.get_entities(dim) for dim in frag_dims]...)
+    )
+
     # Fragment will preserve tags if possible
     # but otherwise will remove entities and create new ones
     if true
         frags, entmap = kernel(sm).fragment(allents, [])
+        _synchronize!(sm)
+        _remap_orphans!(entmap, allents, boxes_before, ents_before, frag_dims)
     else
         # Manual fragment map construction for debugging purposes.
         frags, _ = kernel(sm).fragment(allents, [], -1, false, false)
@@ -1531,6 +1550,48 @@ function _fragment_and_map!(
     end
     return _synchronize!(sm)
 end
+"""
+    _remap_orphans!(entmap, allents, boxes_before, ents_before, frag_dims)
+
+Fill in empty fragment-map entries by bounding box.
+
+OpenCASCADE's boolean history can report an operand as deleted with no successor while the
+result contains a geometrically identical entity under a new tag. Left alone, such entities
+drop out of their physical groups. Each operand with an empty map entry is matched, within its
+dimension, against entities that are new and referenced by no map entry. A unique match is
+recorded; an ambiguous one is left unmapped with a warning.
+"""
+function _remap_orphans!(entmap, allents, boxes_before, ents_before, frag_dims)
+    lost = [i for i in eachindex(entmap) if isempty(entmap[i])]
+    isempty(lost) && return entmap
+    mapped = Set{Tuple{Int32, Int32}}(vcat(entmap...))
+    unclaimed = [
+        dt for dim in frag_dims for
+        dt in gmsh.model.get_entities(dim) if !(dt in ents_before) && !(dt in mapped)
+    ]
+    isempty(unclaimed) && return entmap
+    boxes_after = Dict(dt => gmsh.model.getBoundingBox(dt...) for dt in unclaimed)
+    # OCC boxes are loose by ~1e-7 (see `bounds3d`), well inside this tolerance.
+    same_box(a, b) = all(isapprox(a[i], b[i]; atol=1e-5) for i = 1:6)
+    n_fixed = 0
+    for i in lost
+        dt = allents[i]
+        cands = [
+            c for c in unclaimed if
+            c[1] == dt[1] && same_box(boxes_before[dt], boxes_after[c])
+        ]
+        if length(cands) == 1
+            entmap[i] = cands
+            n_fixed += 1
+        elseif length(cands) > 1
+            @warn "fragment: $(dt) vanished and $(length(cands)) new entities share its bounding box; leaving it unmapped"
+        end
+    end
+    n_fixed > 0 &&
+        @debug "fragment: recovered $n_fixed of $(length(lost)) entities reported deleted"
+    return entmap
+end
+
 # GmshNative has no fragment
 function _fragment_and_map!(
     ::SolidModel{GmshNative},
