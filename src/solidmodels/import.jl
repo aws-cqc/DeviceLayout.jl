@@ -1,8 +1,8 @@
 ######## Importing external CAD geometry
 #
 # `import_solid!` brings an externally-authored solid (STEP/BREP/IGES — anything the
-# OpenCASCADE reader understands) *into the SolidModel's own OCC kernel*, positions it with an
-# affine placement, and registers it as a physical group. Because the shape lands in the same
+# OpenCASCADE reader understands — or a Gmsh `.xao` archive) *into the SolidModel's own OCC
+# kernel*, positions it with an affine placement, and registers it as a physical group. Because the shape lands in the same
 # model as the rest of the geometry, it can then be fused conformally with existing groups
 # using the boolean ops in `postrender.jl` (`fragment_geom!`, `union_geom!`, ...), which
 # require both operands to belong to the same model.
@@ -18,13 +18,15 @@
 """
     import_solid!(sm::SolidModel, filename;
                   transform=ScaledIsometry(), z=0.0 * STP_UNIT, scale=1.0,
-                  groupname="imported", highest_dim_only=true, format="")
+                  groupname="imported", highest_dim_only=true, format="",
+                  group_map=identity)
 
 Import an external CAD solid from `filename` into `sm` and position it with an affine
 placement.
 
-The file is read by the OpenCASCADE kernel (STEP `.stp`/`.step`, BREP `.brep`, or IGES
-`.iges`), so `sm` must use the `OpenCascade` kernel. The imported entities are positioned by:
+The file is read by the OpenCASCADE kernel (STEP `.stp`/`.step`, BREP `.brep`, IGES `.iges`,
+or a Gmsh `.xao` archive), so `sm` must use the `OpenCascade` kernel. The imported entities
+are positioned by:
 
  1. scaling the raw geometry uniformly by `scale`, for deliberate resizing or conversion of
     raw coordinates without usable unit metadata. Unit-aware files such as STEP are already
@@ -51,6 +53,15 @@ group rather than creating a second group inside `import_solid!`:
 `highest_dim_only` and `format` are forwarded to `occ.importShapes`; the default keeps only
 the highest-dimensional entities (the solid volume), discarding stray construction curves.
 
+A `.xao` file also carries physical groups. These are registered in `sm` under
+`group_map(name)`, so a mapping such as `n -> n * "_pkg"` keeps them apart from groups already
+in the model; with the default `identity`, an imported group with the same name and dimension
+as an existing one replaces it. Pass `group_map=nothing` to discard the file's groups. Existing
+groups are unaffected by the import regardless of any tag they share with the file. `.xao`
+coordinates carry no unit, so a file authored in mm needs `scale=1000`. `format` is ignored
+and `highest_dim_only` selects which of the imported entities are returned and registered as
+`groupname`; the file's own groups always cover all dimensions.
+
 Once imported, fuse it conformally to existing geometry, e.g.
 `fragment_geom!(sm, groupname, "pad_metal", 3, 3)`.
 """
@@ -62,7 +73,8 @@ function import_solid!(
     scale=1.0,
     groupname="imported",
     highest_dim_only=true,
-    format=""
+    format="",
+    group_map=identity
 )
     # OCC is required both to read the CAD file and to boolean-fuse it afterward.
     kernel(sm) isa OpenCascade || throw(
@@ -72,9 +84,14 @@ function import_solid!(
         throw(ArgumentError("import_solid!: file not found: $(repr(filename))"))
 
     gmsh.model.set_current(name(sm))
-    # Import into *this* model's OCC kernel. importShapes returns the (dim,tag) pairs it
-    # created, so there's no need to diff the entity list before/after.
-    new_dimtags = gmsh.model.occ.importShapes(filename, highest_dim_only, format)
+    is_xao = lowercase(splitext(filename)[2]) == ".xao"
+    if is_xao
+        new_dimtags, file_groups, own_groups = _merge_xao!(sm, filename)
+    else
+        # Import into *this* model's OCC kernel. importShapes returns the (dim,tag) pairs it
+        # created, so there's no need to diff the entity list before/after.
+        new_dimtags = gmsh.model.occ.importShapes(filename, highest_dim_only, format)
+    end
 
     # Reposition the freshly imported entities in place (an OCC-kernel operation, so no
     # synchronize is needed until we assign the physical group below).
@@ -82,6 +99,27 @@ function import_solid!(
         new_dimtags,
         _occ_affine_matrix(transform, z; scale=scale)
     )
+
+    if is_xao
+        _synchronize!(sm)
+        # Everything was stripped for the merge; re-register through `setindex!`, which
+        # allocates fresh tags. The dict's stale entries are removed first so `setindex!` does
+        # not try to delete a tag that no longer exists.
+        for (d, nm, tags) in own_groups
+            delete!(dimgroupdict(sm, d), nm)
+            sm[nm] = [(d, t) for t in tags]
+        end
+        if !isnothing(group_map)
+            for (d, nm, tags) in file_groups
+                isempty(nm) && continue   # unnamed groups carry nothing downstream
+                sm[group_map(nm)] = [(d, t) for t in tags]
+            end
+        end
+        if highest_dim_only && !isempty(new_dimtags)
+            top = maximum(first, new_dimtags)
+            new_dimtags = filter(dt -> dt[1] == top, new_dimtags)
+        end
+    end
 
     # Registering the group synchronizes the OCC kernel into the gmsh model; if the caller
     # opted out of group creation, synchronize explicitly so downstream ops see the entities.
@@ -91,6 +129,59 @@ function import_solid!(
         sm[groupname] = new_dimtags
     end
     return new_dimtags
+end
+
+"""
+    _merge_xao!(sm, filename) -> (new_dimtags, file_groups, own_groups)
+
+Read a `.xao` file into the current model with `gmsh.merge`, returning the entities it added
+and two lists of `(dim, name, entity_tags)` records: the file's physical groups and the groups
+`sm` had before the merge. On return the model has no physical groups at all; the caller
+re-registers both lists.
+
+`gmsh.merge` matches the file's physical groups to the model's by numeric tag, so a group in
+the file that shares a tag with an existing group would be merged into it. Emptying the group
+table before the merge removes anything to collide with, and stripping again afterwards leaves
+`setindex!` to allocate every tag fresh.
+"""
+function _merge_xao!(sm::SolidModel, filename)
+    _synchronize!(sm)
+    own_groups =
+        [(Int32(d), nm, entitytags(pg)) for d = 0:3 for (nm, pg) in dimgroupdict(sm, d)]
+    _strip_physical_groups!()
+    before = Set(gmsh.model.getEntities())
+    gmsh.merge(filename)
+    new_dimtags = [dt for dt in gmsh.model.getEntities() if !(dt in before)]
+    file_groups = _strip_physical_groups!()
+    return new_dimtags, file_groups, own_groups
+end
+
+"""
+    _strip_physical_groups!() -> Vector{Tuple{Int32, String, Vector{Int32}}}
+
+Remove every physical group from the current gmsh model, returning `(dim, name, entity_tags)`
+records of what was removed.
+
+Gmsh keeps the group table and the name registry separately; a name left registered would
+attach a later `setPhysicalName` for the same name to the old tag, so both are cleared.
+"""
+function _strip_physical_groups!()
+    records = Tuple{Int32, String, Vector{Int32}}[]
+    for (d, t) in gmsh.model.getPhysicalGroups()
+        push!(
+            records,
+            (
+                d,
+                gmsh.model.getPhysicalName(d, t),
+                gmsh.model.getEntitiesForPhysicalGroup(d, t)
+            )
+        )
+    end
+    gmsh.model.removePhysicalGroups()
+    for nm in unique(r[2] for r in records)
+        isempty(nm) || gmsh.model.removePhysicalName(nm)
+    end
+    return records
 end
 
 """

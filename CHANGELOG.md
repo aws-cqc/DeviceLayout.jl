@@ -8,10 +8,12 @@ The format of this changelog is based on
 
 ### Added
 
-  - `SolidModels.import_solid!` imports an external CAD solid (STEP, BREP, or IGES) into a
-    `SolidModel`, positioned by an in-plane `ScaledIsometry`, a `z` offset, and an optional
-    uniform `scale`, and registers it as a physical group. Requires the `OpenCascade` kernel.
-    Can also be used as a postrender operation.
+  - `SolidModels.import_solid!` imports an external CAD solid (STEP, BREP, IGES, or Gmsh
+    `.xao`) into a `SolidModel`, positioned by an in-plane `ScaledIsometry`, a `z` offset, and
+    an optional uniform `scale`, and registers it as a physical group. A `.xao` file's own
+    physical groups are registered too, renamed through `group_map`, and never collide with
+    groups already in the model. Requires the `OpenCascade` kernel. Can also be used as a
+    postrender operation.
   - `SolidModelComponent` (exported from `SchematicDrivenLayout`) places an imported CAD solid
     in a schematic. It emits no 2D geometry; during solid-model rendering it contributes an
     `import_solid!` operation at its solved transform and the z of its layer. `hooks` supplies

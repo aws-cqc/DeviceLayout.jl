@@ -123,6 +123,96 @@
     end
 end
 
+@testitem "SolidModel CAD import from .xao with physical groups" setup = [CommonTestSetup] begin
+    import DeviceLayout: ScaledIsometry, Point
+    using DeviceLayout.SolidModels
+    import DeviceLayout.SolidModels: import_solid!, dimtags, dimgroupdict, gmsh, hasgroup
+
+    # Author a two-solid part with physical groups in every dimension that matters, save it as
+    # .xao, and discard the source model. The groups get the lowest tags gmsh hands out, which
+    # is exactly what a fresh destination model's own first groups also get.
+    src = SolidModel("xao_author"; overwrite=true)
+    gmsh.model.set_current("xao_author")
+    a = gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
+    b = gmsh.model.occ.addBox(10, 0, 0, 10, 10, 10)     # shares the x = 10 face with `a`
+    gmsh.model.occ.fragment([(3, a)], [(3, b)])
+    gmsh.model.occ.synchronize()
+    src["left"] = [(3, a)]
+    src["right"] = [(3, b)]
+    tops =
+        [(2, t) for (_, t) in gmsh.model.getEntitiesInBoundingBox(-1, -1, 9, 21, 11, 11, 2)]
+    src["top"] = tops
+    xao = joinpath(tdir, "part.xao")
+    DeviceLayout.save(xao, src)
+    gmsh.model.remove()
+
+    vol(pg) = sum(gmsh.model.occ.getMass(d, t) for (d, t) in dimtags(pg))
+    com(pg) = gmsh.model.occ.getCenterOfMass(dimtags(pg)[1]...)
+
+    @testset "file groups survive a tag collision with existing groups" begin
+        sm = SolidModel("xao_dest"; overwrite=true)
+        gmsh.model.set_current("xao_dest")
+        c = gmsh.model.occ.addBox(100, 100, 100, 1, 1, 1)
+        gmsh.model.occ.synchronize()
+        sm["existing"] = [(3, c)]                # dim-3 tag 1, same as `left` in the file
+        new = import_solid!(sm, xao; groupname="part")
+        @test unique(first.(new)) == Int32[3]    # highest_dim_only keeps the two solids
+        @test length(new) == 2
+        @test length(dimtags(sm["existing", 3])) == 1
+        @test length(dimtags(sm["left", 3])) == 1
+        @test length(dimtags(sm["right", 3])) == 1
+        @test length(dimtags(sm["top", 2])) == 2
+        @test length(dimtags(sm["part", 3])) == 2
+        @test vol(sm["left", 3]) ≈ 1000.0 atol = 1e-6
+        # The shared face is still shared: the imported part stays conformal.
+        shared = intersect(
+            Set(
+                abs(t) for (_, t) in
+                gmsh.model.getBoundary(dimtags(sm["left", 3]), false, false, false)
+            ),
+            Set(
+                abs(t) for (_, t) in
+                gmsh.model.getBoundary(dimtags(sm["right", 3]), false, false, false)
+            )
+        )
+        @test length(shared) == 1
+    end
+
+    @testset "group_map renames, nothing discards, placement applies" begin
+        sm = SolidModel("xao_mapped"; overwrite=true)
+        place = ScaledIsometry(Point(100μm, 50μm), 90°, false, 1.0)
+        import_solid!(
+            sm,
+            xao;
+            transform=place,
+            z=20μm,
+            scale=2.0,
+            groupname=nothing,
+            group_map=n -> n * "_pkg"
+        )
+        @test hasgroup(sm, "left_pkg", 3) && hasgroup(sm, "top_pkg", 2)
+        @test !hasgroup(sm, "left", 3) && !hasgroup(sm, "imported", 3)
+        @test vol(sm["left_pkg", 3]) ≈ 8000.0 atol = 1e-6          # scale cubed
+        expected = place(Point(10μm, 10μm))                          # scaled centroid (5,5)·2
+        c = com(sm["left_pkg", 3])
+        @test c[1] ≈ ustrip(μm, getx(expected)) atol = 1e-6
+        @test c[2] ≈ ustrip(μm, gety(expected)) atol = 1e-6
+        @test c[3] ≈ 30.0 atol = 1e-6                                # 5·2 + 20 lift
+
+        sd = SolidModel("xao_discard"; overwrite=true)
+        import_solid!(sd, xao; group_map=nothing)
+        @test isempty(dimgroupdict(sd, 2))
+        @test collect(keys(dimgroupdict(sd, 3))) == ["imported"]
+    end
+
+    @testset "highest_dim_only=false returns and groups every dimension" begin
+        sm = SolidModel("xao_alldims"; overwrite=true)
+        new = import_solid!(sm, xao; highest_dim_only=false, groupname="all")
+        @test Set(first.(new)) == Set(Int32[0, 1, 2, 3])
+        @test hasgroup(sm, "all", 2) && hasgroup(sm, "all", 3)
+    end
+end
+
 @testitem "SolidModel CAD import conformal fusion" setup = [CommonTestSetup] begin
     using DeviceLayout.SolidModels
     import DeviceLayout.SolidModels: import_solid!, dimtags, gmsh, _fragment_and_map!
