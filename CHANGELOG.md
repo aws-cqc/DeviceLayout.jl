@@ -20,8 +20,7 @@ The format of this changelog is based on
     rendering) estimates candidate error at Gauss-Legendre nodes against the exact curve
     and fits the candidate endpoint tangent magnitudes by least squares before
     subdividing. Construction is several times faster and typically produces 2–5× fewer
-    subsegments at the same tolerance. Pass `errmetric=:dense` to
-    `Paths.bspline_approximation` for the previous behavior.
+    subsegments at the same tolerance.
 
 ### Fixed
 

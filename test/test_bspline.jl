@@ -306,7 +306,7 @@ end
     @test_logs (:warn, r"Maximum error") Paths.bspline_approximation(cps[1].curves[1])
 end
 
-@testitem "BSpline approximation error metrics" setup = [CommonTestSetup] begin
+@testitem "BSpline approximation of offset curves" setup = [CommonTestSetup] begin
     # S-curve with a 68μm minimum radius of curvature
     b = Paths.BSpline(
         [
@@ -338,21 +338,15 @@ end
         return abs(Polygons.area(poly) / perimeter(poly))
     end
     for f in segs
-        nsegs = Dict{Symbol, Int}()
-        for m in (:gaussfit, :gauss, :dense)
-            approx = Paths.bspline_approximation(f; errmetric=m)
-            @test deviation(f, approx, 1.0nm) < 2nm
-            @test Paths.arclength(approx) ≈ Paths.arclength(f) atol = 2nm
-            nsegs[m] = length(approx.segments)
-            # The approximation is G1: subsegments share endpoint tangent
-            # directions (magnitude fitting must not change directions)
-            for i = 1:(length(approx.segments) - 1)
-                Δα = Paths.α1(approx.segments[i]) - Paths.α0(approx.segments[i + 1])
-                @test abs(rem(Δα, 360°, RoundNearest)) < 1e-6°
-            end
+        approx = Paths.bspline_approximation(f)
+        @test deviation(f, approx, 1.0nm) < 2nm
+        @test Paths.arclength(approx) ≈ Paths.arclength(f) atol = 2nm
+        # The approximation is G1: subsegments share endpoint tangent
+        # directions (magnitude fitting must not change directions)
+        for i = 1:(length(approx.segments) - 1)
+            Δα = Paths.α1(approx.segments[i]) - Paths.α0(approx.segments[i + 1])
+            @test abs(rem(Δα, 360°, RoundNearest)) < 1e-6°
         end
-        # Tangent-magnitude fitting reduces the subdivision count
-        @test nsegs[:gaussfit] <= nsegs[:gauss]
     end
 end
 
