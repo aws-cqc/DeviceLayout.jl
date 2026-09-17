@@ -330,6 +330,20 @@ See [Shapes](./shapes.md).
     SolidModels.staple_bridge_postrendering
 ```
 
+### Conformal (curve-preserving) rendering
+
+```@docs
+    SolidModels.render_conformal!
+    render_conformal!(::SolidModel, ::DeviceLayout.SchematicDrivenLayout.Schematic, ::DeviceLayout.SchematicDrivenLayout.SolidModelTarget)
+    SolidModels.render_conformal_groups!
+    SolidModels.add_conformal_loop!
+    SolidModels.ConformalRenderContext
+    SolidModels.split_pinches
+    SolidModels.find_pinch_points
+    SchematicDrivenLayout.union2d_curved!
+    SchematicDrivenLayout.difference2d_curved!
+```
+
 ### Meshing
 
 ```@docs
