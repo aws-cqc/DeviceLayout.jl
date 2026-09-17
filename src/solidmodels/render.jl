@@ -477,6 +477,28 @@ function mesh_grading_default(α)
 end
 
 """
+    mesh_respect_lc()
+    mesh_respect_lc(b::Bool)
+
+Get or set whether the mesh-size callback combines its control-point size with the size gmsh
+proposes on its own (`lc`, the "characteristic length" gmsh passes to the callback).
+
+By default (`false`) the callback returns the control-point size alone, so control points are
+the only source of refinement. With `true` it returns the smaller of the two, so sizes gmsh
+derives from `Mesh.MeshSizeFromCurvature` or `Mesh.MeshSizeExtendFromBoundary` also apply.
+This is needed when curved geometry has no control points of its own, for example an imported
+CAD part meshed alongside a rendered layout: curvature sizing is the only thing that resolves
+its cylindrical faces, and the default switches it off.
+
+When enabled, set `Mesh.MeshSizeMin` to a positive floor. Curvature sizing is proportional to
+the radius, so a degenerate edge can otherwise drive the size toward zero.
+
+See [`DeviceLayout.MeshSized`](@ref) for the control-point sizing formula.
+"""
+mesh_respect_lc() = MESHSIZE_PARAMS[:respect_lc]::Bool
+mesh_respect_lc(b::Bool) = MESHSIZE_PARAMS[:respect_lc]::Bool = b
+
+"""
     add_mesh_size_point(; h, α=-1, p)
 
 Add a mesh size control point to the global mesh sizing parameters.
@@ -585,6 +607,64 @@ function clear_mesh_control_points!()
     empty!(MESHSIZE_PARAMS[:cp])
     return empty!(MESHSIZE_PARAMS[:ct])
 end
+
+"""
+    load_mesh_control_points!(doc::AbstractDict; scale=1.0, clear=true)
+
+Load mesh-size control points from a parsed control-point document and rebuild the size field.
+
+`doc` follows the schema written by the digital-twin geometry stage and read here as whatever a
+JSON parser returns: `doc["points"]` is a list of tiers, each a dictionary with `"h_um"` (target
+size in μm), `"alpha"` (grading exponent; negative means the global default) and
+`"coords_um"`, a list of `[x, y, z]` triples in μm. `scale` multiplies sizes and coordinates,
+for a model imported with a unit scale. With `clear=true` existing control points are dropped
+first; with `false` the tiers are appended, which is how points for a part built elsewhere are
+combined with those of a rendered layout.
+
+Returns one `(h, α, n)` named tuple per tier. Parsing the file is left to the caller, so this
+package does not depend on a JSON reader:
+
+    using JSON
+    load_mesh_control_points!(JSON.parsefile("mesh_control_points.json"))
+
+See [`add_mesh_size_point`](@ref) and [`DeviceLayout.MeshSized`](@ref).
+"""
+function load_mesh_control_points!(doc::AbstractDict; scale=1.0, clear=true)
+    haskey(doc, "points") ||
+        throw(ArgumentError("control-point document has no \"points\" entry"))
+    clear && clear_mesh_control_points!()
+    tiers = NamedTuple{(:h, :α, :n), Tuple{Float64, Float64, Int}}[]
+    for tier in doc["points"]
+        h = Float64(tier["h_um"]) * scale
+        α = Float64(tier["alpha"])
+        coords = tier["coords_um"]
+        # `add_mesh_size_point` takes one flat [x1, y1, z1, x2, y2, z2, ...] vector.
+        flat = Vector{Float64}(undef, 3 * length(coords))
+        for (i, p) in enumerate(coords)
+            length(p) == 3 ||
+                throw(ArgumentError("control point $i of tier h=$h is not 3D"))
+            flat[3i - 2] = p[1] * scale
+            flat[3i - 1] = p[2] * scale
+            flat[3i] = p[3] * scale
+        end
+        isempty(flat) || add_mesh_size_point(flat; h=h, α=α)
+        push!(tiers, (h=h, α=α, n=length(coords)))
+    end
+    finalize_size_fields!()
+    return tiers
+end
+
+"""
+    set_mesh_size_callback!()
+
+Install the control-point mesh-size callback (`gmsh_meshsize`) in gmsh.
+
+`render!` does this as its last step, so models it produces need nothing further. A model
+assembled from imported parts alone has to call this before meshing, after its control points
+are in place, or gmsh meshes it with its default sizing. The callback is global to gmsh and
+stays installed across models.
+"""
+set_mesh_size_callback!() = gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
 
 _stp_float(x::Length) = Float64(ustrip(STP_UNIT, x))
 _stp_float(x::Real) = Float64(x)
@@ -987,13 +1067,15 @@ end
 """
     reset_mesh_control!()
 
-Reset the mesh scaling and grading to the original defaults: `(s_g, α) ← (1.0, 0.75)`.
+Reset the mesh scaling and grading to the original defaults, `(s_g, α) ← (1.0, 0.75)`, and
+turn [`mesh_respect_lc`](@ref) off.
 
 See [`DeviceLayout.MeshSized`](@ref) for details and the explicit mesh sizing formula.
 """
 function reset_mesh_control!()
     set_gmsh_option("Mesh.ElementOrder", 1)
     mesh_scale(1.0)
+    mesh_respect_lc(false)
     return mesh_grading_default(0.75)
 end
 
@@ -1390,7 +1472,7 @@ function _render_orchestrator!(
     meshsize_composed && finalize_size_fields!()
 
     # Pass in call back function for meshing against the vertices found previously.
-    gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
+    set_mesh_size_callback!()
 
     # Remove all physical groups except those on the retained list.
     if !isempty(retained_physical_groups)
@@ -1428,11 +1510,12 @@ with parameters `(h, α)`, calculates size as `h * max(mesh_scale, (d/h)^α)` wh
   - `x::Cdouble`: X coordinate
   - `y::Cdouble`: Y coordinate
   - `z::Cdouble`: Z coordinate
-  - `lc::Cdouble`: Characteristic length (unused)
+  - `lc::Cdouble`: Characteristic length gmsh proposes on its own; combined with the result
+    when [`mesh_respect_lc`](@ref) is enabled, ignored otherwise
 
 # Returns
 
-  - `Float64`: Minimum computed mesh size across all control point sets
+  - `Float64`: Minimum computed mesh size across all control point sets, and `lc` if enabled
 
 # Notes
 
@@ -1452,7 +1535,7 @@ function gmsh_meshsize(
         _, d::Float64 = nn(tree, SVector{3}(x, y, z))
         l = min(l, h * max(mesh_scale(), (d / h)^α))::Float64
     end
-    return l
+    return mesh_respect_lc() ? min(l, Float64(lc)) : l
 end
 
 # Utility intended for very last step in rendering, to get rid of overlapping geometry

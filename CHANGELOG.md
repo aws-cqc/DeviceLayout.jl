@@ -22,6 +22,13 @@ The format of this changelog is based on
     and `render_conformal!` make the listed physical groups mutually exclusive by priority
     after fragmentation, so each entity belongs to exactly one material group.
     `render_conformal!` requires `fragment_backstop=true` when `material_precedence` is nonempty.
+  - `SolidModels.mesh_respect_lc` makes the mesh-size callback return the smaller of the
+    control-point size and the size gmsh proposes itself, so curvature or boundary sizing
+    applies to geometry without control points, such as imported CAD. Off by default.
+  - `SolidModels.load_mesh_control_points!` loads a parsed control-point document (tiers of
+    `h_um`, `alpha`, `coords_um`) into the mesh-size field, and
+    `SolidModels.set_mesh_size_callback!` installs the size callback for models assembled
+    without `render!`.
   - `SolidModels.targeted_fuse!` makes a dim-3 physical group (e.g. an imported CAD part)
     conformal with nearby geometry by fragmenting only the entities inside a bounding box,
     instead of the whole model.
