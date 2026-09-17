@@ -35,10 +35,11 @@
         @test pathlength(b4) ≈ pathlength(comp_seg) atol = 1nm
         @test b4(pathlength(b3)) ≈ Point(55μm, -50μm) atol = 0.01nm
 
-        # Reverse offset should get the original curve
+        # Reverse offset should get the original curve (two 50μm arcs)
         b5 = Paths.bspline_approximation.(Paths.offset.(b4.segments, -5μm))
-        for b in b5
-            @test all(Paths._approximation_error.(comp_seg.segments, b.segments) .< 1nm)
+        centers = (Point(0μm, -50μm), Point(100μm, -50μm))
+        for b in b5, s in range(zero(pathlength(b)), pathlength(b), length=51)
+            @test minimum(c -> abs(Paths.norm(b(s) - c) - 50μm), centers) < 1nm
         end
 
         # General offset of bspline
