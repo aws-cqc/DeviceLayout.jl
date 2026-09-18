@@ -65,8 +65,8 @@
         levels=(1 => 0.0,)
     )
     # Mixed length types (all unitful)
-    layer = SourceLayer(NULL; level=1 => 2, offset=(10μm, -5.4μm))
-    stack = SourceStack(:substrate => layer; levels=(1 => 0μm, 2 => 500000.3nm))
+    span_layer = SourceLayer(NULL; level=1 => 2, offset=(10μm, -5.4μm))
+    stack = SourceStack(:substrate => span_layer; levels=(1 => 0μm, 2 => 500000.3nm))
 
     mixed_types_stack = SourceStack(
         :integer => SourceLayer(NULL),
@@ -103,9 +103,9 @@ end
     place!(cs, Rectangle(Point(4μm, 0μm), Point(5μm, 1μm)), LayerRef(:mesh_only))
     place!(cs, Rectangle(Point(6μm, 0μm), Point(7μm, 1μm)), :legacy)
 
-    cell = Cell("art", μm)
-    render!(cell, cs, stack; levels=[1, 2], level_increment=GDSMeta(100, 10))
-    @test element_metadata(cell) == [GDSMeta(10, 5), GDSMeta(120, 17)]
+    art_cell = Cell("art", μm)
+    render!(art_cell, cs, stack; levels=[1, 2], level_increment=GDSMeta(100, 10))
+    @test element_metadata(art_cell) == [GDSMeta(10, 5), GDSMeta(120, 17)]
 
     missing_cs = CoordinateSystem("missing", μm)
     place!(missing_cs, Rectangle(1μm, 1μm), LayerRef(:unknown))
@@ -145,11 +145,10 @@ end
 
     # Debugging helpers
     function inspect_registry(registry::LayerRegistry; io::IO=stdout)
-        for (layer, state) in sort!(collect(registry); by=first)
-            println(io, layer, " (dim=", state.dim, ")")
-            for record in state.pgs
-                print(io, "  ", record.name, " [", record.layer, "]")
-                println(io)
+        for (layer_name, state) in sort!(collect(registry); by=first)
+            println(io, layer_name, " (dim=", state.dim, ", dz=", state.dz, ")")
+            for pg_name in state.pgs
+                println(io, "  ", pg_name)
             end
         end
         return nothing
@@ -899,10 +898,10 @@ end
         Translate
     import DeviceLayout: μm
 
-    function render_case(name, geometry, stack, ops)
-        graph = SchematicGraph(name)
-        add_node!(graph, BasicComponent(geometry); base_id="fixture")
-        schematic = plan(graph; log_dir=nothing) |> check!
+    function render_case(name, cs, stack, ops)
+        sg = SchematicGraph(name)
+        add_node!(sg, BasicComponent(cs); base_id="fixture")
+        schematic = plan(sg; log_dir=nothing) |> check!
         sm = SolidModel(name; overwrite=true)
         SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
         metadata = render!(sm, schematic, SolidModelTarget(stack, ops))
@@ -978,12 +977,11 @@ end
             )
         ]
         for (name, ops, expected_area, expected_bbox, expected_layers) in cases
-            geometry = CoordinateSystem(name, μm)
-            place!(geometry, _rectangle(0.0, 0.0, 2.0, 2.0), LayerRef(:a))
-            place!(geometry, _rectangle(1.0, 0.0, 3.0, 2.0), LayerRef(:b))
-            place!(geometry, _rectangle(10.0, 0.0, 11.0, 1.0), :legacy)
-            result =
-                render_case("compiler_geometry_$name", geometry, flat_stack(:a, :b), ops)
+            cs = CoordinateSystem(name, μm)
+            place!(cs, _rectangle(0.0, 0.0, 2.0, 2.0), LayerRef(:a))
+            place!(cs, _rectangle(1.0, 0.0, 3.0, 2.0), LayerRef(:b))
+            place!(cs, _rectangle(10.0, 0.0, 11.0, 1.0), :legacy)
+            result = render_case("compiler_geometry_$name", cs, flat_stack(:a, :b), ops)
             @test layer_measure(result, :result) ≈ expected_area atol = 1e-8
             @test collect(layer_bbox(result, :result)) ≈ expected_bbox atol = 1e-6
             @test Set(keys(result.metadata["layers"])) == expected_layers
@@ -997,22 +995,18 @@ end
     @testset "Sparse pairwise intersections prune empty results" begin
         # Note: using unitless coordinates for this test to also exercise rendering
         # of unitless coordinate systems / schematics
-        geometry = CoordinateSystem{Float64}("sparse_intersections")
+        cs = CoordinateSystem{Float64}("sparse_intersections")
         for (layer, name, x0) in (
             (:objects, "first", 0.0),
             (:objects, "second", 3.0),
             (:tools, "first", 0.5),
             (:tools, "second", 3.5)
         )
-            place!(
-                geometry,
-                Rectangle(Point(x0, 0.0), Point(x0 + 1.0, 1.0)),
-                LayerRef(layer)
-            )
+            place!(cs, Rectangle(Point(x0, 0.0), Point(x0 + 1.0, 1.0)), LayerRef(layer))
         end
         result = render_case(
             "compiler_geometry_sparse_intersections",
-            geometry,
+            cs,
             SourceStack(
                 :objects => SourceLayer(NULL; level=1, offset=0.0, thickness=0.0),
                 :tools => SourceLayer(NULL; level=1, offset=0.0, thickness=0.0);
@@ -1027,12 +1021,12 @@ end
     end
 
     @testset "Extrusion and deferred interfaces" begin
-        geometry = CoordinateSystem("adjacent_volumes", μm)
-        place!(geometry, _rectangle(0.0, 0.0, 1.0, 1.0), LayerRef(:left))
-        place!(geometry, _rectangle(1.0, 0.0, 2.0, 1.0), LayerRef(:right))
+        cs = CoordinateSystem("adjacent_volumes", μm)
+        place!(cs, _rectangle(0.0, 0.0, 1.0, 1.0), LayerRef(:left))
+        place!(cs, _rectangle(1.0, 0.0, 2.0, 1.0), LayerRef(:right))
         result = render_case(
             "compiler_geometry_interface",
-            geometry,
+            cs,
             flat_stack(:left, :right; thickness=1μm),
             [
                 Extrude(:left),
@@ -1088,11 +1082,11 @@ end
     end
 
     @testset "Translation, boundary extraction, and revolution" begin
-        geometry = CoordinateSystem("translated_boundary", μm)
-        place!(geometry, _rectangle(0.0, 0.0, 2.0, 1.0), LayerRef(:shape))
+        cs = CoordinateSystem("translated_boundary", μm)
+        place!(cs, _rectangle(0.0, 0.0, 2.0, 1.0), LayerRef(:shape))
         translated = render_case(
             "compiler_geometry_translated_boundary",
-            geometry,
+            cs,
             flat_stack(:shape),
             [Translate(:shifted, :shape, 3μm, 0μm, 0μm), GetBoundary(:edge, :shifted)]
         )
@@ -1117,11 +1111,11 @@ end
     end
 
     @testset "Explicit extrusion and hollowing" begin
-        geometry = CoordinateSystem("hollow", μm)
-        place!(geometry, _rectangle(0.0, 0.0, 4.0, 4.0), LayerRef(:box))
-        place!(geometry, _rectangle(1.0, 1.0, 2.0, 2.0), LayerRef(:bump))
-        place!(geometry, _rectangle(1.0, 2.5, 2.0, 3.5), LayerRef(:foot))
-        place!(geometry, _rectangle(3.0, 1.0, 3.5, 1.5), LayerRef(:outline))
+        cs = CoordinateSystem("hollow", μm)
+        place!(cs, _rectangle(0.0, 0.0, 4.0, 4.0), LayerRef(:box))
+        place!(cs, _rectangle(1.0, 1.0, 2.0, 2.0), LayerRef(:bump))
+        place!(cs, _rectangle(1.0, 2.5, 2.0, 3.5), LayerRef(:foot))
+        place!(cs, _rectangle(3.0, 1.0, 3.5, 1.5), LayerRef(:outline))
         stack = SourceStack(
             :box => SourceLayer(NULL; level=1, thickness=2μm),
             :bump => SourceLayer(NULL; level=1, offset=0.5μm, thickness=1μm),
@@ -1131,7 +1125,7 @@ end
         )
         result = render_case(
             "compiler_geometry_hollow",
-            geometry,
+            cs,
             stack,
             [
                 Extrude(:box),
@@ -1174,12 +1168,12 @@ end
     end
 
     @testset "Global restriction" begin
-        geometry = CoordinateSystem("restricted", μm)
-        place!(geometry, _rectangle(0.0, 0.0, 3.0, 1.0), LayerRef(:target))
-        place!(geometry, _rectangle(1.0, 0.0, 2.0, 1.0), LayerRef(:bounds))
+        cs = CoordinateSystem("restricted", μm)
+        place!(cs, _rectangle(0.0, 0.0, 3.0, 1.0), LayerRef(:target))
+        place!(cs, _rectangle(1.0, 0.0, 2.0, 1.0), LayerRef(:bounds))
         result = render_case(
             "compiler_geometry_restricted",
-            geometry,
+            cs,
             flat_stack(:target, :bounds; thickness=1μm),
             [Extrude(:target), Extrude(:bounds), RestrictTo(:bounds)]
         )
@@ -1189,9 +1183,9 @@ end
     end
 
     @testset "Periodic surfaces survive finalization" begin
-        geometry = CoordinateSystem("periodic", μm)
-        place!(geometry, _rectangle(0.0, 0.0, 1.0, 1.0), LayerRef(:child))
-        place!(geometry, _rectangle(0.0, 0.0, 1.0, 1.0), LayerRef(:parent))
+        cs = CoordinateSystem("periodic", μm)
+        place!(cs, _rectangle(0.0, 0.0, 1.0, 1.0), LayerRef(:child))
+        place!(cs, _rectangle(0.0, 0.0, 1.0, 1.0), LayerRef(:parent))
         stack = SourceStack(
             :child => SourceLayer(NULL; level=1, thickness=0μm),
             :parent => SourceLayer(NULL; level=2, thickness=0μm);
@@ -1199,7 +1193,7 @@ end
         )
         result = render_case(
             "compiler_geometry_periodic",
-            geometry,
+            cs,
             stack,
             [SetPeriodic(:child, :parent)]
         )
@@ -1237,20 +1231,20 @@ end
         LayerRef, Locator, LocatorMeta, Tag, Terminal
     import Unitful: μm
 
-    geometry = CoordinateSystem("shared", μm)
-    place!(geometry, Locator(0μm, 0μm), Terminal(:metal, "island"))
-    place!(geometry, Rectangle(Point(3μm, 0μm), Point(4μm, 1μm)), LayerRef(:metal))
+    cs = CoordinateSystem("shared", μm)
+    place!(cs, Locator(0μm, 0μm), Terminal(:metal, "island"))
+    place!(cs, Rectangle(Point(3μm, 0μm), Point(4μm, 1μm)), LayerRef(:metal))
     nested = CoordinateSystem("nested", μm)
     place!(nested, Locator(0μm, 0μm), Tag(:metal, "inner"))
-    addref!(geometry, nested)
-    component = BasicComponent(geometry)
-    graph = SchematicGraph("placement_copy")
-    add_node!(graph, component; base_id="q1")
-    add_node!(graph, component; base_id="q2")
-    sch = plan(graph; log_dir=nothing)
+    addref!(cs, nested)
+    comp = BasicComponent(cs)
+    sg = SchematicGraph("placement_copy")
+    add_node!(sg, comp; base_id="q1")
+    add_node!(sg, comp; base_id="q2")
+    sch = plan(sg; log_dir=nothing)
     check!(sch)
 
-    original_metadata = deepcopy(element_metadata(component.geometry))
+    original_metadata = deepcopy(element_metadata(comp.geometry))
     sch_copy = deepcopy(sch)
     SolidModelsExperimental._qualify_locator_names!(sch_copy)
 
@@ -1271,8 +1265,8 @@ end
         name -> !contains(name, "q1.q1") && !contains(name, "q2.q2"),
         vcat(values(names_by_node)...)
     )
-    @test element_metadata(component.geometry) == original_metadata
-    @test name(element_metadata(geometry)[1]) == "island"
+    @test element_metadata(comp.geometry) == original_metadata
+    @test name(element_metadata(cs)[1]) == "island"
 end
 
 @testitem "LumpedPort resolution" begin
@@ -1313,10 +1307,10 @@ end
     @test reflected_direction ≈ [0.5, cospi(1 / 6), 0.0]
 
     target = SolidModelTarget(stack)
-    function _port_schematic(name, geometry)
-        graph = SchematicGraph(name)
-        add_node!(graph, BasicComponent(geometry); base_id="q1")
-        return plan(graph; log_dir=nothing) |> check!
+    function _port_schematic(name, cs)
+        sg = SchematicGraph(name)
+        add_node!(sg, BasicComponent(cs); base_id="q1")
+        return plan(sg; log_dir=nothing) |> check!
     end
 
     missing_geometry = CoordinateSystem("missing_port_style", μm)
@@ -1481,11 +1475,11 @@ end
     using DeviceLayout.SolidModelsExperimental:
         LayerRef, METAL, SolidModelTarget, SourceLayer, SourceStack
 
-    geometry = CoordinateSystem{Float64}("warning_surface")
-    place!(geometry, Rectangle(10.0, 10.0), LayerRef(:metal))
-    graph = SchematicGraph("finalization_warning")
-    add_node!(graph, BasicComponent(geometry); base_id="q1")
-    schematic = plan(graph; log_dir=mktempdir()) |> check!
+    cs = CoordinateSystem{Float64}("warning_surface")
+    place!(cs, Rectangle(10.0, 10.0), LayerRef(:metal))
+    sg = SchematicGraph("finalization_warning")
+    add_node!(sg, BasicComponent(cs); base_id="q1")
+    schematic = plan(sg; log_dir=mktempdir()) |> check!
     target = SolidModelTarget(
         SourceStack(
             :metal => SourceLayer(METAL; level=1, offset=0.0, thickness=0.0);
@@ -1697,10 +1691,10 @@ end
         # Build schematic with two MockTransmons fused via coupler hooks.
         # The coupler arms meet at the fuse point, creating a galvanic connection
         # between the two coupler_east and coupler_west locators
-        graph = SchematicGraph("e2e_test")
-        q1 = add_node!(graph, MockTransmon(; name="q1"))
-        fuse!(graph, q1 => :right, MockTransmon(; name="q2") => :left)
-        schematic = plan(graph; log_dir=nothing) |> check!
+        sg = SchematicGraph("e2e_test")
+        q1 = add_node!(sg, MockTransmon(; name="q1"))
+        fuse!(sg, q1 => :right, MockTransmon(; name="q2") => :left)
+        schematic = plan(sg; log_dir=nothing) |> check!
         coordinate_system = schematic.coordinate_system
         planned_port_directions = Dict{String, Vector{Float64}}()
         for (node, ref) in schematic.ref_dict
@@ -1743,14 +1737,14 @@ end
         SolidModels.save(joinpath(output_dir, "e2e_test.msh2"), solid_model)
 
         # Render GDS using SourceStack for layer mapping
-        cell = Cell("e2e_test", nm)
-        render!(cell, coordinate_system, stack; levels=[1])
-        flatten!(cell)
-        @test !isempty(elements(cell))
-        artwork_metadata = Set(element_metadata(cell))
+        art_cell = Cell("e2e_test", nm)
+        render!(art_cell, coordinate_system, stack; levels=[1])
+        flatten!(art_cell)
+        @test !isempty(elements(art_cell))
+        artwork_metadata = Set(element_metadata(art_cell))
         @test GDSMeta(10, 0) in artwork_metadata
         @test !(GDSMeta(310, 0) in artwork_metadata)
-        save(joinpath(output_dir, "e2e_test.gds"), cell)
+        save(joinpath(output_dir, "e2e_test.gds"), art_cell)
 
         @testset "Output files exist" begin
             for filename in
