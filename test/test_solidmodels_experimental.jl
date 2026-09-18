@@ -211,8 +211,11 @@ end
 
         # Explicit distances and target levels must agree with the declaration.
         @test compile_ops([Extrude(:metal, 2μm)], stack, registry)[2][:metal].dim == 3
-        @test compile_ops([Extrude(:span; to_level=2, offset=1μm)], stack, registry)[2][:span].dim ==
-              3
+        @test compile_ops(
+            [Extrude(:span; to_level=2, offset=1μm)],
+            stack,
+            registry
+        )[2][:span].dim == 3
         @test_throws ArgumentError compile_ops([Extrude(:metal, 1μm)], stack, registry)
         @test_throws ArgumentError compile_ops(
             [Extrude(:metal; to_level=2)],
