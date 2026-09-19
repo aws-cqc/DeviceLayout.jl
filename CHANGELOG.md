@@ -19,6 +19,10 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - The `SingleTransmon` example's `single_transmon` now honors its `mesh_order` keyword: the
+    solid-model meshing order was hardcoded to `2`, so passing `mesh_order` had no effect. It
+    now calls `SolidModels.mesh_order(mesh_order)`, and the docstring lists the previously
+    omitted `mesh_order` and `total_length` keywords.
   - `polytext!` names glyph cells by Unicode codepoint (e.g. `PolyTextSansMono_U0041`) instead
     of by the character itself, so upper- and lowercase glyphs no longer produce cell names that
     collide under the GDS writer's case-insensitive duplicate check, and glyphs for characters
