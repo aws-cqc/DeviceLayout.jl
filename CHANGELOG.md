@@ -60,6 +60,11 @@ The format of this changelog is based on
     key a sorted collection. In particular the all-pairs `split_t_junctions!(groups::AbstractDict)`
     can be keyed directly by `SemanticMeta`, giving deterministic all-pairs ownership without a
     caller-supplied `Symbol` key.
+  - `save_render` writes a PNG, SVG, PDF, or EPS image together with a versioned JSON
+    manifest containing the exact viewport-to-canvas transform, selected output metadata,
+    resolved colors, rendering options, and image SHA-256. An overload for a
+    `CoordinateSystem` and `LayoutTarget` records per-call semantic-to-GDS mappings without
+    serializing the target's mutable mapping cache.
 
 ### Fixed
 
@@ -73,6 +78,9 @@ The format of this changelog is based on
     boolean-cut circular hole at the same location share cached arc entities.
     Non-circular ellipses (not exactly arc-representable) emit a native
     `add_ellipse`; a smooth closed curve has nothing to share with neighbours.
+  - Graphics export now clips viewport content to the top-left content rectangle when explicit
+    canvas dimensions have a different aspect ratio from the viewport, preventing geometry from
+    painting into the unused canvas area.
 
 ### Changed
 
