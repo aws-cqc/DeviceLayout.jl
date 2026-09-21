@@ -1112,6 +1112,68 @@ end
         @test isempty(target.postrenderer)
     end
 
+    @testset "prerender ops: union2d_curved! and _curvilinear_regions" begin
+        using DeviceLayout: CurvilinearRegion, coordinatetype
+        T = typeof(1.0μm)
+
+        # _curvilinear_regions: raw entities → one CurvilinearRegion each,
+        # curves preserved (used for groups emitted WITHOUT a boolean).
+        ents = Any[centered(Rectangle(10μm, 10μm)), Circle(Point(0.0μm, 0.0μm), 3μm)]
+        regs = SchematicDrivenLayout._curvilinear_regions(ents)
+        @test length(regs) == 2
+        @test all(r -> r isa CurvilinearRegion, regs)
+        # A region already in CurvilinearRegion form passes straight through.
+        passthrough = SchematicDrivenLayout._curvilinear_regions(regs)
+        @test length(passthrough) == 2
+
+        # union2d_curved!: self-union of one group, and union of two groups, over
+        # a name-keyed region Dict — returns a Vector{CurvilinearRegion}.
+        groups = Dict{String, Any}(
+            "a" => SchematicDrivenLayout._curvilinear_regions([
+                centered(Rectangle(20μm, 20μm))
+            ]),
+            "b" => SchematicDrivenLayout._curvilinear_regions([
+                centered(Rectangle(20μm, 20μm)) + Point(10μm, 0μm)
+            ])
+        )
+        self_u = SchematicDrivenLayout.union2d_curved!(groups, "a")   # tool defaults to object
+        @test self_u isa AbstractVector
+        @test !isempty(self_u)
+        two_u = SchematicDrivenLayout.union2d_curved!(groups, "a", "b")
+        @test two_u isa AbstractVector
+        @test !isempty(two_u)
+        # Empty group → empty result (no error).
+        @test isempty(SchematicDrivenLayout.union2d_curved!(groups, "missing"))
+    end
+
+    @testset "render_conformal! emits a retained raw (non-boolean) group" begin
+        # A target that retains `metal_negative` directly (no prerender op forms
+        # it) exercises the `_curvilinear_regions` branch of the emit loop — the
+        # group is raw resolved entities, not a boolean output.
+        cs = CoordinateSystem("test")
+        place!(cs, Circle(Point(0.0μm, 0.0μm), 30μm), :metal_negative)
+        tech = ProcessTechnology((;), (; thickness=(; chip_area=525μm)))
+        g = SchematicGraph("test")
+        add_node!(g, BasicComponent(cs))
+        sch = plan(g; log_dir=nothing)
+        check!(sch)
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            prerender_ops=[],  # no boolean → metal_negative stays raw
+            retained_physical_groups=[("metal_negative", 2)]
+        )
+        sm = SolidModel("conformal_raw"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm, sch, target)
+            @test hasgroup(sm, "metal_negative", 2)
+            @test length(entitytags(sm["metal_negative", 2])) == 1
+        finally
+            gmsh.finalize()
+        end
+    end
+
     @testset "_resolve_optional resolves nested OptionalStyle / styled chains" begin
         using DeviceLayout: StyledEntity, OptionalStyle, NoRender, Plain
         using DeviceLayout.Polygons: Rounded
