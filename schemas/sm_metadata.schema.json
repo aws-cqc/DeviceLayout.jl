@@ -1,0 +1,143 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/aws-cqc/DeviceLayout.jl/schemas/sm_metadata.schema.json",
+  "title": "DeviceLayout experimental solid-model metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["metadata", "physical_groups", "layers", "tagged", "ports", "terminals", "ground"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "length_units", "assembly"],
+      "properties": {
+        "schema_version": { "const": "1.0.0" },
+        "length_units": { "const": "um" },
+        "assembly": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["levels"],
+          "properties": {
+            "levels": {
+              "type": "object",
+              "propertyNames": { "pattern": "^-?(0|[1-9][0-9]*)$" },
+              "additionalProperties": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "physical_groups": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/physical_group" }
+    },
+    "layers": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/layer" }
+    },
+    "tagged": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/tagged" }
+    },
+    "ports": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/port" }
+    },
+    "terminals": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/terminal" }
+    },
+    "ground": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/group_membership" }
+    }
+  },
+  "definitions": {
+    "string_array": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "physical_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "dim"],
+      "properties": {
+        "tag": { "type": "integer", "minimum": 1 },
+        "dim": { "type": "integer", "minimum": 0, "maximum": 3 }
+      }
+    },
+    "layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pgs", "dim", "type"],
+      "properties": {
+        "pgs": { "$ref": "#/definitions/string_array" },
+        "dim": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "type": { "enum": ["source", "generated"] },
+        "level": { "type": "integer" },
+        "offset": { "type": "number" },
+        "thickness": { "type": "number" },
+        "parents": { "$ref": "#/definitions/string_array" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "source" } } },
+          "then": { "required": ["level", "offset", "thickness"] },
+          "else": {
+            "not": {
+              "anyOf": [
+                { "required": ["level"] },
+                { "required": ["offset"] }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "tagged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pgs", "layer"],
+      "properties": {
+        "pgs": { "$ref": "#/definitions/string_array" },
+        "layer": { "type": "string" }
+      }
+    },
+    "group_membership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pgs"],
+      "properties": {
+        "pgs": { "$ref": "#/definitions/string_array" }
+      }
+    },
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "index", "type", "layer", "direction", "pgs"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "index": { "type": "integer", "minimum": 1 },
+        "type": { "enum": ["LumpedPort", "WavePort"] },
+        "layer": { "type": "string" },
+        "direction": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "pgs": { "$ref": "#/definitions/string_array" }
+      }
+    },
+    "terminal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pgs", "locators"],
+      "properties": {
+        "pgs": { "$ref": "#/definitions/string_array" },
+        "locators": { "$ref": "#/definitions/string_array" }
+      }
+    }
+  }
+}
