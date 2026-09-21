@@ -94,18 +94,30 @@ end
         :art_only =>
             SourceLayer(NULL; level=1, gds_meta=GDSMeta(10, 5), solidmodel=false),
         :second => SourceLayer(METAL; level=2, gds_meta=GDSMeta(20, 7)),
-        :mesh_only => SourceLayer(METAL; level=1, gds_meta=nothing);
-        levels=(1 => 0μm, 2 => 500μm)
+        :mesh_only => SourceLayer(METAL; level=1, gds_meta=nothing),
+        # Spans starting at or below level 0 must not receive a (negative) increment.
+        :below => SourceLayer(NULL; level=0 => 2, gds_meta=GDSMeta(30, 1)),
+        :span_from_two => SourceLayer(NULL; level=2 => 3, gds_meta=GDSMeta(40, 2));
+        levels=(0 => -500μm, 1 => 0μm, 2 => 500μm, 3 => 1000μm)
     )
     cs = CoordinateSystem("art", μm)
     place!(cs, Rectangle(1μm, 1μm), LayerRef(:art_only))
     place!(cs, Rectangle(Point(2μm, 0μm), Point(3μm, 1μm)), LayerRef(:second))
     place!(cs, Rectangle(Point(4μm, 0μm), Point(5μm, 1μm)), LayerRef(:mesh_only))
     place!(cs, Rectangle(Point(6μm, 0μm), Point(7μm, 1μm)), :legacy)
+    place!(cs, Rectangle(Point(8μm, 0μm), Point(9μm, 1μm)), LayerRef(:below))
+    place!(cs, Rectangle(Point(10μm, 0μm), Point(11μm, 1μm)), LayerRef(:span_from_two))
 
     art_cell = Cell("art", μm)
     render!(art_cell, cs, stack; levels=[1, 2], level_increment=GDSMeta(100, 10))
-    @test element_metadata(art_cell) == [GDSMeta(10, 5), GDSMeta(120, 17)]
+    @test element_metadata(art_cell) ==
+          [GDSMeta(10, 5), GDSMeta(120, 17), GDSMeta(30, 1), GDSMeta(140, 12)]
+
+    # A single selected level applies no increment at all.
+    single_cell = Cell("single", μm)
+    render!(single_cell, cs, stack; levels=[1], level_increment=GDSMeta(100, 10))
+    @test element_metadata(single_cell) ==
+          [GDSMeta(10, 5), GDSMeta(20, 7), GDSMeta(30, 1), GDSMeta(40, 2)]
 
     missing_cs = CoordinateSystem("missing", μm)
     place!(missing_cs, Rectangle(1μm, 1μm), LayerRef(:unknown))
