@@ -172,7 +172,8 @@ render!(
 ```
 
 For multiple selected levels, both layer and datatype are offset by the selected-level
-position. `LayerRef` carries no datatype index.
+position, `(level - 1) * level_increment`; levels at or below `0` are not offset. `LayerRef`
+carries no datatype index.
 
 ## Migrating from the legacy pipeline
 
