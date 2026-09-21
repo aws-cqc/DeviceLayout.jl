@@ -1111,4 +1111,102 @@ end
         @test target.prerenderer[1][1] == "metal"
         @test isempty(target.postrenderer)
     end
+
+    @testset "_resolve_optional resolves nested OptionalStyle / styled chains" begin
+        using DeviceLayout: StyledEntity, OptionalStyle, NoRender, Plain
+        using DeviceLayout.Polygons: Rounded
+        rect = centered(Rectangle(10μm, 10μm))
+        _ro = SchematicDrivenLayout._resolve_optional
+
+        # Plain entity passes through unchanged.
+        @test _ro(rect) === rect
+
+        # OptionalStyle whose true branch is a non-Plain style (Rounded) →
+        # returns a StyledEntity wrapping the inner entity with that style.
+        opt_rounded = OptionalStyle(Rounded(1μm), NoRender(), :flag, true)(rect)
+        r1 = _ro(opt_rounded; flag=true)
+        @test r1 isa StyledEntity
+        @test r1.sty isa Rounded
+        # …and its false branch (NoRender) → dropped.
+        @test _ro(opt_rounded; flag=false) === nothing
+
+        # A plain StyledEntity (non-optional) recurses and re-wraps its inner.
+        styled = StyledEntity(rect, Rounded(2μm))
+        r2 = _ro(styled)
+        @test r2 isa StyledEntity
+        @test r2.sty isa Rounded
+
+        # Nested: OptionalStyle wrapping a StyledEntity, true branch Plain →
+        # unwraps to the inner styled entity.
+        nested = OptionalStyle(Plain(), NoRender(), :keep, true)(styled)
+        r3 = _ro(nested; keep=true)
+        @test r3 isa StyledEntity
+        @test _ro(nested; keep=false) === nothing
+    end
+
+    @testset "render_conformal! strict modes + MeshSized warning + indexed layers" begin
+        using DeviceLayout: MeshSized
+        # A schematic whose metal_negative carries a MeshSized style and whose
+        # target indexes a :port layer — exercises the MeshSized @warn, the
+        # index_layer! loop, and the strict-keyword branches.
+        function sized_schematic()
+            cs = CoordinateSystem("test")
+            place!(cs, centered(Rectangle(200μm, 200μm)), :writeable_area)
+            # MeshSized cut → triggers the "MeshSized hints not applied" @warn.
+            place!(cs, MeshSized(5μm)(Circle(Point(0.0μm, 0.0μm), 40μm)), :metal_negative)
+            # A port entity on an indexed layer → exercises the index_layer! loop.
+            place!(cs, centered(Rectangle(4μm, 4μm)) + Point(60μm, 60μm), :port)
+            tech = ProcessTechnology((;), (; thickness=(; chip_area=525μm)))
+            g = SchematicGraph("test")
+            add_node!(g, BasicComponent(cs))
+            sch = plan(g; log_dir=nothing)
+            check!(sch)
+            target = SolidModelTarget(
+                tech;
+                simulation=true,
+                indexed_layers=[:port],
+                prerender_ops=[(
+                    "metal",
+                    difference2d_curved!,
+                    ("writeable_area", "metal_negative")
+                )],
+                retained_physical_groups=[("metal", 2)]
+            )
+            return sch, target
+        end
+
+        # strict=:warn: the MeshSized @warn is logged, so render throws under
+        # strict=:warn; this also runs the index_layer! loop and the MeshSized
+        # detection @warn at the emit site.
+        sch, target = sized_schematic()
+        sm = SolidModel("conformal_sized_warn"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            @test_throws ErrorException render_conformal!(sm, sch, target; strict=:warn)
+        finally
+            gmsh.finalize()
+        end
+
+        # strict=:no: same schematic renders without throwing despite the warning.
+        sch2, target2 = sized_schematic()
+        sm2 = SolidModel("conformal_sized_no"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm2, sch2, target2; strict=:no)
+            @test hasgroup(sm2, "metal", 2)
+        finally
+            gmsh.finalize()
+        end
+
+        # An unrecognized `strict` value warns and proceeds as though :no.
+        sch3, target3 = sized_schematic()
+        sm3 = SolidModel("conformal_sized_bad"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm3, sch3, target3; strict=:bogus)
+            @test hasgroup(sm3, "metal", 2)
+        finally
+            gmsh.finalize()
+        end
+    end
 end
