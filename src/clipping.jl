@@ -675,6 +675,54 @@ mutable struct InteriorCutNode{T}
 end
 segment(n::InteriorCutNode) = LineSegment(n.point, n.next.point)
 
+# The node starting the segment of the contour from `node1` that is nearest to `p`, and the
+# distance to it.
+function nearest_segment(node1::InteriorCutNode, p::Point{Int})
+    best, dbest = node1, Inf
+    n = node1
+    while n.next != n
+        d = distance_to_segment(p, n.point, n.next.point)
+        d < dbest && ((best, dbest) = (n, d))
+        n = n.next
+    end
+    return best, dbest
+end
+
+function distance_to_segment(p::Point{Int}, a::Point{Int}, b::Point{Int})
+    abx, aby = Int128(b.x) - a.x, Int128(b.y) - a.y
+    apx, apy = Int128(p.x) - a.x, Int128(p.y) - a.y
+    len2 = abx^2 + aby^2
+    t = abx * apx + aby * apy
+    (len2 == 0 || t <= 0) && return hypot(Float64(apx), Float64(apy))
+    t >= len2 && return hypot(Float64(apx - abx), Float64(apy - aby))
+    return abs(Float64(abx * apy - aby * apx)) / sqrt(Float64(len2))
+end
+
+# Whether moving a point of the segment starting at `node` to `w` makes the segment cross
+# a live segment of the contour or of `hole`. Only proper crossings count: touching is
+# allowed in a keyhole polygon.
+function kink_crosses(itree, hole, node::InteriorCutNode, w::Point{Int})
+    a, b = node.point, node.next.point
+    ylo, yhi = extrema((a.y, b.y, w.y))
+    crosses(c, d) = proper_crossing(a, w, c, d) || proper_crossing(w, b, c, d)
+    for interval in IntervalTrees.intersect(itree, minmax(a.x, b.x))
+        n = IntervalTrees.value(interval)
+        (n === node || (n.prev == n && n.next == n)) && continue
+        c, d = n.point, n.next.point
+        (max(c.y, d.y) < ylo || min(c.y, d.y) > yhi) && continue
+        crosses(c, d) && return true
+    end
+    return any(i -> crosses(hole[i], hole[mod1(i + 1, end)]), eachindex(hole))
+end
+
+function proper_crossing(a::Point{Int}, b::Point{Int}, c::Point{Int}, d::Point{Int})
+    orient(p, q, r) = sign(
+        (Int128(q.x) - p.x) * (Int128(r.y) - p.y) -
+        (Int128(q.y) - p.y) * (Int128(r.x) - p.x)
+    )
+    return orient(a, b, c) * orient(a, b, d) < 0 && orient(c, d, a) * orient(c, d, b) < 0
+end
+
 InteriorCutNode(val::T) where {T} = InteriorCutNode{T}(val)
 
 """
@@ -762,64 +810,91 @@ function interiorcuts(nodeortree::Clipper.PolyNode, outpolys::Vector{Polygon{T}}
                 end
             end
 
-            # Since the polygon was enclosing, an intersection had to happen *somewhere*.
             if best_intersection_point != minpt
-                w = Point{Int64}(
-                    round(getx(best_intersection_point)),
-                    round(gety(best_intersection_point))
-                )
-
-                # We are going to replace `best_node`
-                # need to do all of the following...
-                last_node = best_node.next
-                n0 = best_node.prev
-
-                first_node = InteriorCutNode(best_node.point)
-                first_node.prev = n0
-                n0.next = first_node
-                n0, p0 = first_node, w
-
-                for r in (m:length(hole_contour), 1:m)
-                    for i in r
-                        n = InteriorCutNode(p0)
-                        n.prev = n0
-                        n0.next = n
-                        push!(itree, IntervalValue(xinterval(segment(n0))..., n0))
-                        n0, p0 = n, hole_contour[i]
-                    end
+                # The ray is vertical, so x is exact, but y must be rounded to the lattice,
+                # which puts a kink of up to a unit in the enclosing edge. Rounded inward,
+                # the kink can cross a hole vertex just inside the edge; rounded outward, it
+                # can cross the contour's next edge where that folds back just outside it at
+                # an acute vertex. Either leaves a self-intersecting polygon, so take the
+                # nearer lattice point unless its kink crosses something and the other's
+                # does not. A vertex exactly on the edge gets a zero-length cut, i.e. a
+                # pinch, once duplicate points are dropped below.
+                x, y = round(Int64, getx(best_intersection_point)),
+                gety(best_intersection_point)
+                near = round(Int64, y)
+                far = near <= y ? ceil(Int64, y) : floor(Int64, y)
+                w = Point{Int64}(x, near)
+                if far != near && kink_crosses(itree, hole_contour, best_node, w)
+                    w_far = Point{Int64}(x, far)
+                    kink_crosses(itree, hole_contour, best_node, w_far) || (w = w_far)
                 end
-
-                n = InteriorCutNode(p0)
-                n.prev = n0
-                n0.next = n
-                push!(itree, IntervalValue(xinterval(segment(n0))..., n0))
-                n0, p0 = n, w
-
-                n = InteriorCutNode(p0)
-                n.prev = n0
-                n0.next = n
-                push!(itree, IntervalValue(xinterval(segment(n0))..., n0))
-
-                n.next = last_node
-                last_node.prev = n
-                push!(itree, IntervalValue(xinterval(segment(n))..., n))
-
-                # serving the purpose of delete!(itree, best_node)
-                best_node.prev = best_node
-                best_node.next = best_node
-
-                # in case we deleted node1...
-                if best_node === node1
-                    node1 = first_node
+            else
+                # Nothing is below the hole's lowest vertex, so Clipper rounded that vertex to
+                # just outside the enclosing contour (#317). Pinch the hole onto the nearest
+                # edge at the vertex itself: the vertex is outside, so the kink bulges
+                # outward, as above.
+                h = hole_contour[m]
+                best_node, d = nearest_segment(node1, h)
+                if !(d < 1)
+                    @warn "Dropping a hole that lies $d units outside its enclosing contour, \
+                           which has $(length(enclosing_contour)) vertices."
+                    continue
                 end
+                w = h
+            end
+
+            # We are going to replace `best_node`
+            # need to do all of the following...
+            last_node = best_node.next
+            n0 = best_node.prev
+
+            first_node = InteriorCutNode(best_node.point)
+            first_node.prev = n0
+            n0.next = first_node
+            n0, p0 = first_node, w
+
+            for r in (m:length(hole_contour), 1:m)
+                for i in r
+                    n = InteriorCutNode(p0)
+                    n.prev = n0
+                    n0.next = n
+                    push!(itree, IntervalValue(xinterval(segment(n0))..., n0))
+                    n0, p0 = n, hole_contour[i]
+                end
+            end
+
+            n = InteriorCutNode(p0)
+            n.prev = n0
+            n0.next = n
+            push!(itree, IntervalValue(xinterval(segment(n0))..., n0))
+            n0, p0 = n, w
+
+            n = InteriorCutNode(p0)
+            n.prev = n0
+            n0.next = n
+            push!(itree, IntervalValue(xinterval(segment(n0))..., n0))
+
+            n.next = last_node
+            last_node.prev = n
+            push!(itree, IntervalValue(xinterval(segment(n))..., n))
+
+            # serving the purpose of delete!(itree, best_node)
+            best_node.prev = best_node
+            best_node.next = best_node
+
+            # in case we deleted node1...
+            if best_node === node1
+                node1 = first_node
             end
         end
         n = node1
         p = Point{Int}[]
+        # Cuts that attach at an existing vertex, or have zero length, repeat a point.
         while n.next != n
-            push!(p, n.point)
+            (isempty(p) || n.point != last(p)) && push!(p, n.point)
             n = n.next
         end
+        length(p) > 1 && last(p) == first(p) && pop!(p)
         push!(outpolys, Polygon(reinterpret(Point{T}, p)))
     end
     return outpolys
