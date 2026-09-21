@@ -10,7 +10,10 @@ function _map_artwork_meta(
         source_layer = sourcelayer(m, stack)
         isnothing(source_layer.gds_meta) && return nothing
         apply_increment || return source_layer.gds_meta
-        delta = first(source_layer.level) - 1
+        # Levels at or below the base level (<= 0) render like level 1: they never
+        # participate in the increment, so a layer declared e.g. `level=0 => 3` keeps its
+        # declared GDS layer instead of receiving a negative offset.
+        delta = max(first(source_layer.level) - 1, 0)
         return GDSMeta(
             gdslayer(source_layer.gds_meta) + delta * gdslayer(level_increment),
             datatype(source_layer.gds_meta) + delta * datatype(level_increment)
@@ -31,6 +34,10 @@ end
 Render `LayerRef` artwork using the GDS mapping stored in `stack`. Layers with
 `gds_meta=nothing` are omitted independently of `solidmodel` visibility. Metadata indices
 do not alter datatypes.
+
+When more than one level is selected, a layer's GDS layer and datatype are offset by
+`(level - 1) * level_increment`, where `level` is the first level of the layer's declaration.
+Levels at or below `0` do not participate in the increment and render like level `1`.
 """
 function render!(
     cell::DeviceLayout.Cell,
