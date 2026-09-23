@@ -14,7 +14,9 @@
         LineSegment,
         straight!,
         turn!,
-        bspline!
+        bspline!,
+        union2d,
+        to_polygons
     using DeviceLayout.Polygons: Rounded
     using DeviceLayout.Curvilinear: CurvilinearPolygon, CurvilinearRegion
     using DeviceLayout.SolidModels:
@@ -659,5 +661,614 @@
         @test count(adj -> length(adj) == 1, adj_2d) == 6
         @test count(adj -> length(adj) == 2, adj_2d) == length(tags_1d) - 6
         gmsh.finalize()
+    end
+
+    # ─── Preprocessing (split_pinches) ────────────────────────────────────
+
+    @testset "find_pinch_points detects self-touching contours" begin
+        # A rectangular polygon with a duplicate vertex at (5, 0) — a
+        # zero-width neck. The pinch is between indices 3 and 6.
+        pts = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(5.0μm, 0.0μm),
+            Point(5.0μm, 5.0μm),
+            Point(0.0μm, 5.0μm),
+            Point(0.0μm, 0.0μm),
+            Point(5.0μm, 0.0μm)  # same coord as index 2 → pinch (2, 6)
+        ]
+        pinches = SolidModels.ConformalRender.find_pinch_points(pts)
+        @test !isempty(pinches)
+        @test any(p -> p == (1, 5) || p == (2, 6), pinches)
+    end
+
+    @testset "find_pinch_points returns empty for a clean polygon" begin
+        pts = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(10.0μm, 0.0μm),
+            Point(10.0μm, 10.0μm),
+            Point(0.0μm, 10.0μm)
+        ]
+        @test isempty(SolidModels.ConformalRender.find_pinch_points(pts))
+    end
+
+    @testset "Clipper does not produce pinches on simple touching shapes" begin
+        # Simple pinch-shaped inputs (diagonal-touching rects, hourglass
+        # apex-to-apex triangles) don't produce self-touching outlines from
+        # `union2d` — Clipper separates them into distinct polygons. This
+        # documents the class of inputs where `find_pinch_points` /
+        # `split_pinches` are unnecessary.
+        #
+        # Coordinates are chosen large enough (~100 µm) that no two
+        # distinct vertices fall within `find_pinch_points`'s 2 nm
+        # atol (the fn ustrips whatever unit the point carries).
+
+        # Diagonal-touching rectangles at (0, 0)
+        r1 = Polygon([
+            Point(-100.0μm, 0.0μm),
+            Point(0.0μm, 0.0μm),
+            Point(0.0μm, 100.0μm),
+            Point(-100.0μm, 100.0μm)
+        ])
+        r2 = Polygon([
+            Point(0.0μm, -100.0μm),
+            Point(100.0μm, -100.0μm),
+            Point(100.0μm, 0.0μm),
+            Point(0.0μm, 0.0μm)
+        ])
+        polys1 = to_polygons(union2d([r1, r2]))
+        @test length(polys1) == 2  # separated, not one figure-8 poly
+        for p in polys1
+            @test isempty(SolidModels.ConformalRender.find_pinch_points(collect(points(p))))
+        end
+
+        # Hourglass triangles sharing apex at (0, 0)
+        tri1 = Polygon([
+            Point(0.0μm, 0.0μm),
+            Point(100.0μm, 100.0μm),
+            Point(-100.0μm, 100.0μm)
+        ])
+        tri2 = Polygon([
+            Point(0.0μm, 0.0μm),
+            Point(-100.0μm, -100.0μm),
+            Point(100.0μm, -100.0μm)
+        ])
+        polys2 = to_polygons(union2d([tri1, tri2]))
+        @test length(polys2) == 2  # separated, not one bow-tie poly
+        for p in polys2
+            @test isempty(SolidModels.ConformalRender.find_pinch_points(collect(points(p))))
+        end
+    end
+
+    @testset "find_pinch_points catches noding-induced pinches" begin
+        # The pinch case `find_pinch_points`/`split_pinches` actually needs
+        # to handle in a downstream pipeline: shared-boundary vertex
+        # injection (used to make adjacent physical groups share bit-
+        # identical vertex sequences on their common boundary) turns a
+        # Clipper-clean pair of outlines into a self-touching outline.
+        #
+        # Region A visits (150 µm, 0) once as an interior corner of a
+        # satellite feature. A also has a long shared-edge segment
+        # (-300, 0) → (300, 0) with no interior vertex at x=150. When
+        # a noding pass injects region B's on-edge port anchor at
+        # (150, 0) into that segment, A's outline visits (150 µm, 0)
+        # twice at non-adjacent positions — the exact failure OCC
+        # rejects with "Curve loop is not closed".
+        A = Point{typeof(1.0μm)}[
+            Point(-300.0μm, 0.0μm),
+            Point(300.0μm, 0.0μm),
+            Point(300.0μm, 200.0μm),
+            Point(200.0μm, 200.0μm),
+            Point(200.0μm, 100.0μm),
+            Point(100.0μm, 100.0μm),
+            Point(150.0μm, 0.0μm),    # A already has this vertex
+            Point(100.0μm, 50.0μm),
+            Point(0.0μm, 50.0μm),
+            Point(-300.0μm, 200.0μm)
+        ]
+        @test isempty(SolidModels.ConformalRender.find_pinch_points(A))
+
+        # Simulate the injection: B's on-edge port anchor at (150, 0)
+        # gets injected into A's long shared-edge segment.
+        A_after_noding = vcat(A[1:1], [Point(150.0μm, 0.0μm)], A[2:end])
+
+        pinches = SolidModels.ConformalRender.find_pinch_points(A_after_noding)
+        @test length(pinches) == 1
+        i, j = pinches[1]
+        @test A_after_noding[i] ≈ A_after_noding[j]
+        # split_pinches then cleaves A into two simple faces at the pinch.
+        cp = CurvilinearPolygon(A_after_noding)
+        r = CurvilinearRegion(cp, CurvilinearPolygon{typeof(1.0μm)}[])
+        @test length(SolidModels.split_pinches([r])) >= 2
+    end
+
+    @testset "render_conformal! fails on pinched outline, split_pinches fixes it" begin
+        # End-to-end: build a CoordinateSystem containing a
+        # `CurvilinearRegion` whose outline was produced by symmetric
+        # shared-boundary noding (see previous testset for construction).
+        # Rendering it directly through `render_conformal!` must raise
+        # OCC's "Curve loop is not closed" error. Preprocessing the region
+        # with `split_pinches` first must let the render complete.
+        A_pinched = Point{typeof(1.0μm)}[
+            Point(-300.0μm, 0.0μm),
+            Point(150.0μm, 0.0μm),   # injected copy
+            Point(300.0μm, 0.0μm),
+            Point(300.0μm, 200.0μm),
+            Point(200.0μm, 200.0μm),
+            Point(200.0μm, 60.0μm),
+            Point(150.0μm, 0.0μm),   # A's original notch tip — pinch
+            Point(100.0μm, 60.0μm),
+            Point(100.0μm, 200.0μm),
+            Point(-300.0μm, 200.0μm)
+        ]
+        cp = CurvilinearPolygon(A_pinched)
+        region = CurvilinearRegion(cp, CurvilinearPolygon{typeof(1.0μm)}[])
+
+        # Attempt 1: render_conformal! on the pinched outline throws.
+        cs_pinched = CoordinateSystem("pinched_direct", nm)
+        place!(cs_pinched, region, :layer_A)
+        sm_pinched = SolidModel("pinched_direct"; overwrite=true)
+        @test_throws ErrorException render_conformal!(sm_pinched, cs_pinched)
+        gmsh.finalize()
+
+        # Attempt 2: split_pinches first, then render_conformal! succeeds.
+        split_regions = SolidModels.split_pinches([region])
+        @test length(split_regions) >= 2
+
+        cs_split = CoordinateSystem("pinched_split", nm)
+        for r in split_regions
+            place!(cs_split, r, :layer_A)
+        end
+        sm_split = SolidModel("pinched_split"; overwrite=true)
+        render_conformal!(sm_split, cs_split)
+        @test hasgroup(sm_split, "layer_A", 2)
+        gmsh.finalize()
+    end
+
+    @testset "split_pinches splits a figure-8 into two simple loops" begin
+        # Figure-8: two lobes touching at (5, 0). One CurvilinearRegion
+        # in, two out.
+        pts = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(5.0μm, 0.0μm),  # pinch
+            Point(2.0μm, 5.0μm),
+            Point(0.0μm, 0.0μm),  # loop 1 closes here
+            Point(5.0μm, 0.0μm),  # pinch again — starts loop 2
+            Point(8.0μm, 5.0μm),
+            Point(10.0μm, 0.0μm)
+        ]
+        cp = CurvilinearPolygon(pts)
+        r = CurvilinearRegion(cp, CurvilinearPolygon{typeof(1.0μm)}[])
+        out = SolidModels.split_pinches([r])
+        @test length(out) >= 2  # at least two lobes after split
+    end
+
+    @testset "split_pinches leaves clean regions untouched" begin
+        pts = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(10.0μm, 0.0μm),
+            Point(10.0μm, 10.0μm),
+            Point(0.0μm, 10.0μm)
+        ]
+        cp = CurvilinearPolygon(pts)
+        r = CurvilinearRegion(cp, CurvilinearPolygon{typeof(1.0μm)}[])
+        out = SolidModels.split_pinches([r])
+        @test length(out) == 1
+        # Same points, in the same order.
+        @test points(out[1].exterior) == pts
+    end
+
+    @testset "split_pinches handles multi-lobe exterior + hole assignment" begin
+        # A region whose exterior has TWO pinches, splitting it into three
+        # simple lobes. Also has a hole that should get assigned to the
+        # containing lobe by the point-in-polygon test.
+        # Layout (drawn upside-down for clarity):
+        #   Three squares strung side-by-side, each touching the next at one
+        #   vertex — chain of pinch points at x=10 and x=20, y=0.
+        pts = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(10.0μm, 0.0μm),  # pinch 1 (also index below)
+            Point(10.0μm, 10.0μm),
+            Point(0.0μm, 10.0μm),
+            Point(0.0μm, 0.0μm),   # closes lobe 1, duplicate of index 1
+            Point(10.0μm, 0.0μm),  # pinch 1 continued
+            Point(20.0μm, 0.0μm),  # pinch 2
+            Point(20.0μm, 10.0μm),
+            Point(10.0μm, 10.0μm)  # duplicate of index 3
+        ]
+        cp = CurvilinearPolygon(pts)
+        # Add a hole inside what will become the first lobe.
+        hole_pts = Point{typeof(1.0μm)}[
+            Point(2.0μm, 2.0μm),
+            Point(4.0μm, 2.0μm),
+            Point(4.0μm, 4.0μm),
+            Point(2.0μm, 4.0μm)
+        ]
+        hole = CurvilinearPolygon(hole_pts)
+        r = CurvilinearRegion(cp, [hole])
+        out = SolidModels.split_pinches([r])
+        # Should split into multiple simple regions.
+        @test length(out) >= 2
+        # Total holes across all output regions should be 1 (the original hole).
+        @test sum(length(rr.holes) for rr in out) == 1
+    end
+
+    @testset "split_pinches drops zero-area sliver sub-loops" begin
+        # A polygon where a run of collinear duplicated vertices causes a
+        # 2-point sub-loop to be carved off. Such slivers should be dropped.
+        pts = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(5.0μm, 0.0μm),  # will pinch with index 4
+            Point(10.0μm, 0.0μm),
+            Point(5.0μm, 0.0μm),  # pinch 1
+            Point(5.0μm, 5.0μm),
+            Point(0.0μm, 5.0μm)
+        ]
+        cp = CurvilinearPolygon(pts)
+        r = CurvilinearRegion(cp, CurvilinearPolygon{typeof(1.0μm)}[])
+        # Splitting should not throw and should produce at least one region
+        # (the 2-point sliver, if any, is dropped internally).
+        out = SolidModels.split_pinches([r])
+        @test length(out) >= 1
+        # No output region should be degenerate (< 3 vertices).
+        @test all(length(points(rr.exterior)) >= 3 for rr in out)
+    end
+
+    @testset "find_pinch_points detection is unit-invariant (nm vs µm)" begin
+        # `find_pinch_points` detects at a 2 nm tolerance, so it must strip
+        # coordinates to nm regardless of the Point's storage unit. The SAME
+        # physical geometry expressed in µm and in nm must give the identical
+        # result — otherwise µm-scale vertices (0.5–1 µm apart) would ustrip to
+        # magnitudes ≤ the 2 nm cell and be mis-flagged as coincident.
+        fp = SolidModels.ConformalRender.find_pinch_points
+
+        # A clean 5-vertex outline with vertices 0.5–1 µm apart — NO pinch.
+        clean_um = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(1.0μm, 0.0μm),
+            Point(1.0μm, 1.0μm),
+            Point(0.5μm, 1.0μm),
+            Point(0.0μm, 1.0μm)
+        ]
+        clean_nm = [convert(Point{typeof(1.0nm)}, p) for p in clean_um]
+        @test isempty(fp(clean_um))          # µm-based: no false positives
+        @test isempty(fp(clean_nm))          # nm-based: also none
+        @test fp(clean_um) == fp(clean_nm)   # unit-invariant
+
+        # A genuine figure-8: non-adjacent vertices 2 and 5 coincide exactly.
+        # Detected in BOTH units, identically.
+        fig8_um = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),
+            Point(5.0μm, 0.0μm),
+            Point(10.0μm, 5.0μm),
+            Point(5.0μm, 10.0μm),
+            Point(5.0μm, 0.0μm),  # coincides with index 2
+            Point(0.0μm, 10.0μm)
+        ]
+        fig8_nm = [convert(Point{typeof(1.0nm)}, p) for p in fig8_um]
+        @test fp(fig8_um) == [(2, 5)]
+        @test fp(fig8_nm) == [(2, 5)]
+    end
+
+    @testset "split_pinches preserves Turn curves through a split (both lobes)" begin
+        # A pinched contour carrying a native `Paths.Turn` arc in EACH lobe.
+        # The pinch at indices (3, 6) partitions vertices into lobe1 = {3,4,5}
+        # and lobe2 = {6,1,2}; an arc starts at index 4 (→ lobe1) and another at
+        # index 1 (→ lobe2), exercising both curve-remap branches of
+        # `_split_at_pinch`. Both arcs must survive as native Turns, not be
+        # discretized.
+        R = 5.0μm
+        pp = Point{typeof(1.0μm)}[
+            Point(0.0μm, 0.0μm),        # 1: arc B start
+            Point(0.0μm + R, R),        # 2: arc B end
+            Point(20.0μm, 20.0μm),      # 3: pinch (coincides with 6)
+            Point(30.0μm, 20.0μm),      # 4: arc A start
+            Point(30.0μm + R, 20.0μm + R), # 5: arc A end
+            Point(20.0μm, 20.0μm)       # 6: coincides with index 3 → pinch
+        ]
+        turnB = Paths.Turn(90°, R, α0=90°, p0=pp[1])
+        turnA = Paths.Turn(90°, R, α0=90°, p0=pp[4])
+        cp = CurvilinearPolygon(pp, [turnB, turnA], [1, 4])
+        r = CurvilinearRegion(cp, CurvilinearPolygon{typeof(1.0μm)}[])
+        out = SolidModels.split_pinches([r])
+        @test length(out) >= 2
+        # A Turn must survive in each of the two lobes (both remap branches ran).
+        @test all(any(c -> c isa Paths.Turn, rr.exterior.curves) for rr in out)
+        # Two native Turns total across the output — none discretized away.
+        all_curves = reduce(vcat, [rr.exterior.curves for rr in out]; init=[])
+        @test count(c -> c isa Paths.Turn, all_curves) == 2
+    end
+
+    @testset "split_pinches splits a pinch inside a hole" begin
+        # The exterior is clean; a HOLE is self-touching. split_pinches must
+        # walk holes too (find_pinch_points on each hole, split, reassign).
+        ext = CurvilinearPolygon(
+            Point{typeof(1.0μm)}[
+                Point(-50.0μm, -50.0μm),
+                Point(50.0μm, -50.0μm),
+                Point(50.0μm, 50.0μm),
+                Point(-50.0μm, 50.0μm)
+            ]
+        )
+        # Figure-8 hole: non-adjacent vertices 1 and 4 coincide.
+        hole = CurvilinearPolygon(
+            Point{typeof(1.0μm)}[
+                Point(0.0μm, 0.0μm),
+                Point(10.0μm, 0.0μm),
+                Point(5.0μm, 10.0μm),
+                Point(0.0μm, 0.0μm),   # coincides with index 1
+                Point(-10.0μm, 0.0μm),
+                Point(-5.0μm, 10.0μm)
+            ]
+        )
+        r = CurvilinearRegion(ext, [hole])
+        @test !isempty(SolidModels.ConformalRender.find_pinch_points(points(hole)))
+        out = SolidModels.split_pinches([r])
+        # Exterior stays one region; the pinched hole is cleaved into simple
+        # sub-loops (so total hole count across the output grew).
+        total_holes = sum(length(rr.holes) for rr in out)
+        @test total_holes >= 2
+        @test all(length(points(h)) >= 3 for rr in out for h in rr.holes)
+    end
+end
+
+@testitem "render_conformal!(sm, sch, target)" setup = [CommonTestSetup, QuietGmshSetup] begin
+    using .SchematicDrivenLayout
+    using DeviceLayout: Point, Rectangle, centered, coordinatetype
+    using DeviceLayout.Polygons: Circle
+    using DeviceLayout.SolidModels: gmsh, hasgroup, entitytags
+
+    # A minimal single-chip schematic exercising the orchestrator: a writeable
+    # ground area, a `metal_negative` circle cut from it (curved feature), and a
+    # fabrication-only `not_simulated` fill square that must be dropped from the
+    # simulation model. `prerender_ops` form `metal = writeable_area − metal_negative`
+    # with curve-preserving booleans.
+    function conformal_target_schematic()
+        cs = CoordinateSystem("test")
+        place!(cs, centered(Rectangle(200μm, 200μm)), :writeable_area)
+        # Curved cutout — a circle — so `metal` gets a native arc boundary.
+        place!(cs, Circle(Point(0.0μm, 0.0μm), 40μm), :metal_negative)
+        # Fabrication-only fill: must NOT appear in the simulation metal.
+        place!(
+            cs,
+            not_simulated(centered(Rectangle(20μm, 20μm)) + Point(70μm, 70μm)),
+            :metal_negative
+        )
+
+        tech = ProcessTechnology((;), (; thickness=(; chip_area=525μm)))
+        g = SchematicGraph("test")
+        add_node!(g, BasicComponent(cs))
+        sch = plan(g; log_dir=nothing)
+        check!(sch)
+
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            prerender_ops=[(
+                "metal",
+                difference2d_curved!,
+                ("writeable_area", "metal_negative")
+            )],
+            retained_physical_groups=[("metal", 2)]
+        )
+        return sch, target
+    end
+
+    @testset "forms metal group with curve-preserving prerender_ops" begin
+        sch, target = conformal_target_schematic()
+        sm = SolidModel("conformal_target"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            @test_nowarn render_conformal!(sm, sch, target)
+            # `metal` group emitted, exactly one surface (ground with one hole).
+            @test hasgroup(sm, "metal", 2)
+            @test length(entitytags(sm["metal", 2])) == 1
+            # 2D scope: no 3D volumes built here.
+            gmsh.model.set_current(sm.name)
+            @test isempty(gmsh.model.getEntities(3))
+            # The circular cut is preserved as native arcs — a chord render of a
+            # circle would have zero curved 1D entities.
+            ncurved = count(gmsh.model.getEntities(1)) do (d, t)
+                ty = gmsh.model.getType(d, t)
+                return occursin("Circle", ty) ||
+                       occursin("Ellipse", ty) ||
+                       occursin("BSpline", ty)
+            end
+            @test ncurved > 0
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "drops fabrication-only (not_simulated) fill" begin
+        sch, target = conformal_target_schematic()
+        sm = SolidModel("conformal_nosim"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm, sch, target)
+            # metal = writeable_area − metal_negative. The `not_simulated` fill
+            # square, had it been kept, would cut an additional hole into the
+            # ground plane. With the fill dropped, the single metal surface has
+            # exactly two curve loops: the outer square and the one circular hole.
+            # (Counting loops is robust to OCC's signed-area hole convention.)
+            gmsh.model.set_current(sm.name)
+            SolidModels._synchronize!(sm)
+            tags = entitytags(sm["metal", 2])
+            @test length(tags) == 1
+            nloops = sum(length(gmsh.model.occ.getCurveLoops(t)[1]) for t in tags)
+            @test nloops == 2
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "SolidModelTarget carries prerender_ops through the constructor" begin
+        tech = ProcessTechnology((;), (; thickness=(; chip_area=525μm)))
+        target = SolidModelTarget(
+            tech;
+            prerender_ops=[("metal", union2d_curved!, ("metal_negative",))]
+        )
+        @test length(target.prerenderer) == 1
+        @test target.prerenderer[1][1] == "metal"
+        @test isempty(target.postrenderer)
+    end
+
+    @testset "prerender ops: union2d_curved! and _curvilinear_regions" begin
+        using DeviceLayout: CurvilinearRegion, coordinatetype
+        T = typeof(1.0μm)
+
+        # _curvilinear_regions: raw entities → one CurvilinearRegion each,
+        # curves preserved (used for groups emitted WITHOUT a boolean).
+        ents = Any[centered(Rectangle(10μm, 10μm)), Circle(Point(0.0μm, 0.0μm), 3μm)]
+        regs = SchematicDrivenLayout._curvilinear_regions(ents)
+        @test length(regs) == 2
+        @test all(r -> r isa CurvilinearRegion, regs)
+        # A region already in CurvilinearRegion form passes straight through.
+        passthrough = SchematicDrivenLayout._curvilinear_regions(regs)
+        @test length(passthrough) == 2
+
+        # union2d_curved!: self-union of one group, and union of two groups, over
+        # a name-keyed region Dict — returns a Vector{CurvilinearRegion}.
+        groups = Dict{String, Any}(
+            "a" => SchematicDrivenLayout._curvilinear_regions([
+                centered(Rectangle(20μm, 20μm))
+            ]),
+            "b" => SchematicDrivenLayout._curvilinear_regions([
+                centered(Rectangle(20μm, 20μm)) + Point(10μm, 0μm)
+            ])
+        )
+        self_u = SchematicDrivenLayout.union2d_curved!(groups, "a")   # tool defaults to object
+        @test self_u isa AbstractVector
+        @test !isempty(self_u)
+        two_u = SchematicDrivenLayout.union2d_curved!(groups, "a", "b")
+        @test two_u isa AbstractVector
+        @test !isempty(two_u)
+        # Empty group → empty result (no error).
+        @test isempty(SchematicDrivenLayout.union2d_curved!(groups, "missing"))
+    end
+
+    @testset "render_conformal! emits a retained raw (non-boolean) group" begin
+        # A target that retains `metal_negative` directly (no prerender op forms
+        # it) exercises the `_curvilinear_regions` branch of the emit loop — the
+        # group is raw resolved entities, not a boolean output.
+        cs = CoordinateSystem("test")
+        place!(cs, Circle(Point(0.0μm, 0.0μm), 30μm), :metal_negative)
+        tech = ProcessTechnology((;), (; thickness=(; chip_area=525μm)))
+        g = SchematicGraph("test")
+        add_node!(g, BasicComponent(cs))
+        sch = plan(g; log_dir=nothing)
+        check!(sch)
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            prerender_ops=[],  # no boolean → metal_negative stays raw
+            retained_physical_groups=[("metal_negative", 2)]
+        )
+        sm = SolidModel("conformal_raw"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm, sch, target)
+            @test hasgroup(sm, "metal_negative", 2)
+            @test length(entitytags(sm["metal_negative", 2])) == 1
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "_resolve_optional resolves nested OptionalStyle / styled chains" begin
+        using DeviceLayout: StyledEntity, OptionalStyle, NoRender, Plain
+        using DeviceLayout.Polygons: Rounded
+        rect = centered(Rectangle(10μm, 10μm))
+        _ro = SchematicDrivenLayout._resolve_optional
+
+        # Plain entity passes through unchanged.
+        @test _ro(rect) === rect
+
+        # OptionalStyle whose true branch is a non-Plain style (Rounded) →
+        # returns a StyledEntity wrapping the inner entity with that style.
+        opt_rounded = OptionalStyle(Rounded(1μm), NoRender(), :flag, true)(rect)
+        r1 = _ro(opt_rounded; flag=true)
+        @test r1 isa StyledEntity
+        @test r1.sty isa Rounded
+        # …and its false branch (NoRender) → dropped.
+        @test _ro(opt_rounded; flag=false) === nothing
+
+        # A plain StyledEntity (non-optional) recurses and re-wraps its inner.
+        styled = StyledEntity(rect, Rounded(2μm))
+        r2 = _ro(styled)
+        @test r2 isa StyledEntity
+        @test r2.sty isa Rounded
+
+        # Nested: OptionalStyle wrapping a StyledEntity, true branch Plain →
+        # unwraps to the inner styled entity.
+        nested = OptionalStyle(Plain(), NoRender(), :keep, true)(styled)
+        r3 = _ro(nested; keep=true)
+        @test r3 isa StyledEntity
+        @test _ro(nested; keep=false) === nothing
+    end
+
+    @testset "render_conformal! strict modes + MeshSized warning + indexed layers" begin
+        using DeviceLayout: MeshSized
+        # A schematic whose metal_negative carries a MeshSized style and whose
+        # target indexes a :port layer — exercises the MeshSized @warn, the
+        # index_layer! loop, and the strict-keyword branches.
+        function sized_schematic()
+            cs = CoordinateSystem("test")
+            place!(cs, centered(Rectangle(200μm, 200μm)), :writeable_area)
+            # MeshSized cut → triggers the "MeshSized hints not applied" @warn.
+            place!(cs, MeshSized(5μm)(Circle(Point(0.0μm, 0.0μm), 40μm)), :metal_negative)
+            # A port entity on an indexed layer → exercises the index_layer! loop.
+            place!(cs, centered(Rectangle(4μm, 4μm)) + Point(60μm, 60μm), :port)
+            tech = ProcessTechnology((;), (; thickness=(; chip_area=525μm)))
+            g = SchematicGraph("test")
+            add_node!(g, BasicComponent(cs))
+            sch = plan(g; log_dir=nothing)
+            check!(sch)
+            target = SolidModelTarget(
+                tech;
+                simulation=true,
+                indexed_layers=[:port],
+                prerender_ops=[(
+                    "metal",
+                    difference2d_curved!,
+                    ("writeable_area", "metal_negative")
+                )],
+                retained_physical_groups=[("metal", 2)]
+            )
+            return sch, target
+        end
+
+        # strict=:warn: the MeshSized @warn is logged, so render throws under
+        # strict=:warn; this also runs the index_layer! loop and the MeshSized
+        # detection @warn at the emit site.
+        sch, target = sized_schematic()
+        sm = SolidModel("conformal_sized_warn"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            @test_throws ErrorException render_conformal!(sm, sch, target; strict=:warn)
+        finally
+            gmsh.finalize()
+        end
+
+        # strict=:no: same schematic renders without throwing despite the warning.
+        sch2, target2 = sized_schematic()
+        sm2 = SolidModel("conformal_sized_no"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm2, sch2, target2; strict=:no)
+            @test hasgroup(sm2, "metal", 2)
+        finally
+            gmsh.finalize()
+        end
+
+        # An unrecognized `strict` value warns and proceeds as though :no.
+        sch3, target3 = sized_schematic()
+        sm3 = SolidModel("conformal_sized_bad"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm3, sch3, target3; strict=:bogus)
+            @test hasgroup(sm3, "metal", 2)
+        finally
+            gmsh.finalize()
+        end
     end
 end

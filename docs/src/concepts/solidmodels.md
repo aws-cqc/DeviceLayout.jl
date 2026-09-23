@@ -99,6 +99,33 @@ level attribute will default to level 1.
 
 The "substrate surface" z-height for a given `SemanticMeta` is calculated based on its level together with technology `chip_thicknesses` and `flipchip_gaps`. For non-levelwise layers, height and thickness are always measured along the global positive z axis, as explained above. For layers in `levelwise_layers`, positive height or extrusion thickness is always away from the substrate.
 
+## Curve-preserving (conformal) rendering
+
+The standard pipeline discretizes every curved boundary (CPW turns, rounded corners, circular cutouts) into a chain of straight chords before it reaches the geometry kernel, then reconciles coincident edges with a global fragment pass ([step 5](#5.-Fragment-and-cleanup)). At chip scale (~10⁵ faces) that fragment pass is the dominant cost, and the chorded boundaries lose the native arc information.
+
+[`render_conformal!`](@ref SolidModels.render_conformal!) is an alternative render strategy that keeps native curves as exact kernel arcs and skips the global fragment pass, instead deduplicating shared edges through a per-render cache so adjacent faces resolve a shared boundary to a single kernel curve "by construction". It has a geometry-level method, `render_conformal!(sm, cs::AbstractCoordinateSystem; ...)`, and a schematic-level method that mirrors `render!(sm, sch, target)`:
+
+```julia
+render_conformal!(sm, schematic, target) # curve-preserving; drop-in for render!(sm, schematic, target)
+```
+
+The schematic-level method uses the same [`SolidModelTarget`](@ref SchematicDrivenLayout.SolidModelTarget), layers, ports, and `simulation` option as the stock flow. The only difference in authoring the target is that the 2D metal geometry is formed by **`prerender_ops`** rather than the metal-forming `postrender_ops`:
+
+```julia
+prerender_ops = [
+    ("metal_negative", union2d_curved!,      ("metal_negative",)),          # self-union
+    ("metal",          difference2d_curved!, ("writeable_area", "metal_negative")),
+    ("metal",          union2d_curved!,      ("metal", "metal_positive")),
+]
+```
+
+These are curve-preserving analogs of the OCC `union_geom!` / `difference_geom!` postrender operations — authored the same way (`(dest, op_fn, args, op_kwargs...)`), but run on region groups *before* emission, using Clipper booleans that carry native arcs through ([`union2d_curved!`](@ref SchematicDrivenLayout.union2d_curved!) / [`difference2d_curved!`](@ref SchematicDrivenLayout.difference2d_curved!)). After the booleans, each group's self-touching contours are cleaved into simple sub-regions with [`split_pinches`](@ref SolidModels.split_pinches), shared boundaries are nodded with [`split_t_junctions!`](@ref), and the groups are emitted through the conformal edge cache with [`render_conformal_groups!`](@ref SolidModels.render_conformal_groups!).
+
+!!! note "Scope"
+    `render_conformal!(sm, sch, target)` currently produces the **2D** geometry — the metal plus device groups (ports, lumped elements) named in the target's `retained_physical_groups` at dimension 2. The target's 3D operations (substrate/vacuum extrusion, bridges, volume booleans in `postrender_ops`) are not applied on the conformal path; for a full 3D simulation domain, extrude and mesh the result with the same machinery as the stock flow (see `examples/DemoQPU17/solidmodel_conformal.jl` alongside `solidmodel.jl`). `MeshSized` mesh-size hints are also not applied on this path — the curve-preserving booleans strip them, and a warning is issued if any are detected.
+
+See the [conformal rendering API](@ref api-solidmodels) for the full set of functions and preconditions.
+
 ## Meshing
 
 Entities can carry mesh sizing information with them when rendered to a `SolidModel`. Many

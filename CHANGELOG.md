@@ -6,6 +6,19 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - Curve-preserving schematic render: `render_conformal!(sm, sch, target::SolidModelTarget)`
+    is a drop-in counterpart to `render!(sm, sch, target)` that keeps native curves (CPW
+    turns, rounded corners, circular cutouts) as exact kernel arcs instead of discretizing
+    them to chords. The 2D metal geometry is formed by a target's new `prerender_ops` —
+    curve-preserving `union2d_curved!` / `difference2d_curved!` operations authored exactly
+    like `postrender_ops` — after which self-touching contours are split
+    (`SolidModels.split_pinches`), shared boundaries are noded (`split_t_junctions!`), and
+    groups are emitted through the conformal edge cache (`SolidModels.render_conformal_groups!`).
+    `SolidModelTarget` gains a `prerender_ops` keyword and `prerenderer` field. Scope is
+    currently 2D (metal + device groups); see `examples/DemoQPU17/solidmodel_conformal.jl`.
+
 ### Changed
 
   - Deprecation warnings follow a consistent policy (#300): `Base.depwarn` (visible under
