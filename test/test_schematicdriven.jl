@@ -263,6 +263,17 @@
             @test getproperty(g3, Symbol(keep.id)) === keep
         end
 
+        # `add_node!` uses `base_id` literally: a name ending in `_<n>` is not read as a counter
+        # (`uniquename("x_3_1", '_')` would give `"x3_1"`), and only a re-used id gets a suffix.
+        @testset "Node ids" begin
+            g4 = SchematicGraph("test_node_ids")
+            @test add_node!(g4, Spacer(; name="x_3_1")).id == "x_3_1"
+            @test add_node!(g4, Spacer(; name="x_3_1")).id == "x_3_1_2"
+            @test add_node!(g4, Spacer(; name="x_3_2")).id == "x_3_2"
+            @test add_node!(g4, Spacer(; name="x_3")).id == "x_3"
+            @test add_node!(g4, Spacer(; name="x"); base_id="y_1").id == "y_1"
+        end
+
         @testset "Replace" begin
             append_x(tc, p) =
                 TestComponent(name=(tc.name * "$(ustrip(mm, p.x))"), hooks=tc.hooks)
