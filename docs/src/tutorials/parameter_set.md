@@ -27,7 +27,7 @@ using DeviceLayout.SchematicDrivenLayout
 
 Every `ParameterSet` contains two required top-level namespaces:
 
-- **`global`** — parameters shared across the design (e.g., version, process node)
+- **`globals`** — parameters shared across the design (e.g., version, process node)
 - **`components`** — per-component parameter trees
 
 ## Creating a ParameterSet
@@ -38,8 +38,8 @@ The simplest way is to build one programmatically:
 ps = ParameterSet()
 
 # Set global metadata
-ps.global.version = 1
-ps.global.process_node = "fab_v3"
+ps.globals.version = 1
+ps.globals.process_node = "fab_v3"
 
 # Define component parameters with units
 ps.components.capacitor.finger_length = 150μm
@@ -55,7 +55,7 @@ If you have the `YAML` package installed, you can load directly from a file:
 
 ```yaml
 # design_params.yaml
-global:
+globals:
   version: 1
   process_node: fab_v3
 
@@ -153,7 +153,7 @@ without mutating `a` and returns a detached `ParameterSet`.
 Use dot syntax to navigate the hierarchy:
 
 ```julia
-ps.global.version              # => 1
+ps.globals.version              # => 1
 ps.components.capacitor        # => ParameterSet scoped to capacitor subtree
 ps.components.capacitor.finger_length  # => 150μm
 ```
@@ -262,7 +262,7 @@ nested namespaces, and composite subcomponents are nested below their parent:
 resolved.components.module.q1.island.cap_width
 ```
 
-The graph's attached `global` and other top-level metadata are copied into the
+The graph's attached `globals` and other top-level metadata are copied into the
 result, while its source `components` namespace is replaced by the final graph
 contents. Composite extraction realizes lazy subgraphs. The result has no
 source path or access history and shares no mutable parameter data with the
