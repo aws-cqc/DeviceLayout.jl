@@ -80,7 +80,9 @@ function uniquename(
     _with_lock(counter) do d
         # if format is already str0 * dlm * n, count it like the (>=n)th occurrence of str0
         substrings = split(str, dlm)
-        if parse_suffix && length(substrings) > 1 && !isnothing(tryparse(Int, last(substrings)))
+        if parse_suffix &&
+           length(substrings) > 1 &&
+           !isnothing(tryparse(Int, last(substrings)))
             n0 = parse(Int, last(substrings))
             str0 = join(substrings[1:(end - 1)], dlm)
             n1 = 1 + get(d, key(str0), 0)
