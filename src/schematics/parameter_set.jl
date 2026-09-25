@@ -1,4 +1,4 @@
-const REQUIRED_NAMESPACES = ("global", "components")
+const REQUIRED_NAMESPACES = ("globals", "components")
 
 """
     ParameterSet
@@ -17,7 +17,7 @@ ps.components.qubit.cap_width = 350  # write
 
 Every `ParameterSet` contains two required top-level namespaces:
 
-  - `global` - parameters shared across the design
+  - `globals` - parameters shared across the design
   - `components` - per-component parameter trees
 
 # Fields
@@ -42,7 +42,7 @@ struct ParameterSet
 
     # A non-empty `prefix` marks a scoped view over an interior subtree of a
     # larger ParameterSet (e.g. `ps.components.qubit`); those subtrees must not
-    # be polluted with the top-level "global"/"components" keys. A root
+    # be polluted with the top-level "globals"/"components" keys. A root
     # ParameterSet has `prefix == ""` and gets the required namespaces ensured
     # so every caller can rely on them existing.
     function ParameterSet(
@@ -424,7 +424,7 @@ or a leaf value.
 ```julia
 ps = ParameterSet(
     Dict{String, Any}(
-        "global" => Dict{String, Any}(),
+        "globals" => Dict{String, Any}(),
         "components" =>
             Dict{String, Any}("qubit" => Dict{String, Any}("cap_width" => 300))
     )
@@ -455,7 +455,7 @@ Extract non-`Dict` entries as a `NamedTuple` (the "leaf" parameters at this leve
 ```julia
 ps = ParameterSet(
     Dict{String, Any}(
-        "global" => Dict{String, Any}(),
+        "globals" => Dict{String, Any}(),
         "components" => Dict{String, Any}("cap_width" => 300, "cap_gap" => 20)
     )
 )
