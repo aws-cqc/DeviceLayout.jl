@@ -35,6 +35,7 @@
 SchematicDrivenLayout.ArrowAnnotation
 SchematicDrivenLayout.BasicComponent
 SchematicDrivenLayout.GDSComponent
+SchematicDrivenLayout.SolidModelComponent
 SchematicDrivenLayout.Spacer
 SchematicDrivenLayout.WeatherVane
 ```

@@ -477,6 +477,28 @@ function mesh_grading_default(α)
 end
 
 """
+    mesh_respect_lc()
+    mesh_respect_lc(b::Bool)
+
+Get or set whether the mesh-size callback combines its control-point size with the size gmsh
+proposes on its own (`lc`, the "characteristic length" gmsh passes to the callback).
+
+By default (`false`) the callback returns the control-point size alone, so control points are
+the only source of refinement. With `true` it returns the smaller of the two, so sizes gmsh
+derives from `Mesh.MeshSizeFromCurvature` or `Mesh.MeshSizeExtendFromBoundary` also apply.
+This is needed when curved geometry has no control points of its own, for example an imported
+CAD part meshed alongside a rendered layout: curvature sizing is the only thing that resolves
+its cylindrical faces, and the default switches it off.
+
+When enabled, set `Mesh.MeshSizeMin` to a positive floor. Curvature sizing is proportional to
+the radius, so a degenerate edge can otherwise drive the size toward zero.
+
+See [`DeviceLayout.MeshSized`](@ref) for the control-point sizing formula.
+"""
+mesh_respect_lc() = MESHSIZE_PARAMS[:respect_lc]::Bool
+mesh_respect_lc(b::Bool) = MESHSIZE_PARAMS[:respect_lc]::Bool = b
+
+"""
     add_mesh_size_point(; h, α=-1, p)
 
 Add a mesh size control point to the global mesh sizing parameters.
@@ -585,6 +607,64 @@ function clear_mesh_control_points!()
     empty!(MESHSIZE_PARAMS[:cp])
     return empty!(MESHSIZE_PARAMS[:ct])
 end
+
+"""
+    load_mesh_control_points!(doc::AbstractDict; scale=1.0, clear=true)
+
+Load mesh-size control points from a parsed control-point document and rebuild the size field.
+
+`doc` follows the schema written by an external geometry pipeline and is read here as
+whatever a JSON parser returns: `doc["points"]` is a list of tiers, each a dictionary with
+`"h_um"` (target size in μm), `"alpha"` (grading exponent; negative means the global
+default) and `"coords_um"`, a list of `[x, y, z]` triples in μm. `scale` multiplies sizes
+and coordinates, for a model imported with a unit scale. With `clear=true` existing control
+points are dropped first; with `false` the tiers are appended, which is how points for a
+part built elsewhere are combined with those of a rendered layout.
+
+Returns one `(h, α, n)` named tuple per tier. Parsing the file is left to the caller, so this
+package does not depend on a JSON reader:
+
+    using JSON
+    load_mesh_control_points!(JSON.parsefile("mesh_control_points.json"))
+
+See [`add_mesh_size_point`](@ref) and [`DeviceLayout.MeshSized`](@ref).
+"""
+function load_mesh_control_points!(doc::AbstractDict; scale=1.0, clear=true)
+    haskey(doc, "points") ||
+        throw(ArgumentError("control-point document has no \"points\" entry"))
+    clear && clear_mesh_control_points!()
+    tiers = NamedTuple{(:h, :α, :n), Tuple{Float64, Float64, Int}}[]
+    for tier in doc["points"]
+        h = Float64(tier["h_um"]) * scale
+        α = Float64(tier["alpha"])
+        coords = tier["coords_um"]
+        # `add_mesh_size_point` takes one flat [x1, y1, z1, x2, y2, z2, ...] vector.
+        flat = Vector{Float64}(undef, 3 * length(coords))
+        for (i, p) in enumerate(coords)
+            length(p) == 3 ||
+                throw(ArgumentError("control point $i of tier h=$h is not 3D"))
+            flat[3i - 2] = p[1] * scale
+            flat[3i - 1] = p[2] * scale
+            flat[3i] = p[3] * scale
+        end
+        isempty(flat) || add_mesh_size_point(flat; h=h, α=α)
+        push!(tiers, (h=h, α=α, n=length(coords)))
+    end
+    finalize_size_fields!()
+    return tiers
+end
+
+"""
+    set_mesh_size_callback!()
+
+Install the control-point mesh-size callback (`gmsh_meshsize`) in gmsh.
+
+`render!` does this as its last step, so models it produces need nothing further. A model
+assembled from imported parts alone has to call this before meshing, after its control points
+are in place, or gmsh meshes it with its default sizing. The callback is global to gmsh and
+stays installed across models.
+"""
+set_mesh_size_callback!() = gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
 
 _stp_float(x::Length) = Float64(ustrip(STP_UNIT, x))
 _stp_float(x::Real) = Float64(x)
@@ -987,13 +1067,15 @@ end
 """
     reset_mesh_control!()
 
-Reset the mesh scaling and grading to the original defaults: `(s_g, α) ← (1.0, 0.75)`.
+Reset the mesh scaling and grading to the original defaults, `(s_g, α) ← (1.0, 0.75)`, and
+turn [`mesh_respect_lc`](@ref) off.
 
 See [`DeviceLayout.MeshSized`](@ref) for details and the explicit mesh sizing formula.
 """
 function reset_mesh_control!()
     set_gmsh_option("Mesh.ElementOrder", 1)
     mesh_scale(1.0)
+    mesh_respect_lc(false)
     return mesh_grading_default(0.75)
 end
 
@@ -1109,8 +1191,9 @@ end
 
 """
     render!(sm::SolidModel, cs::AbstractCoordinateSystem{T}; map_meta=layer,
-    postrender_ops=[], zmap=(_) -> zero(T), gmsh_options = Dict(), skip_postrender = false,
-    auto_union=false, skip_unused_layers=false, curvature_sizing=true, kwargs...) where {T}
+    postrender_ops=[], retained_physical_groups=[], material_precedence=[],
+    zmap=(_) -> zero(T), gmsh_options=Dict(), skip_postrender=false, auto_union=false,
+    skip_unused_layers=false, curvature_sizing=true, kwargs...) where {T}
 
 Render `cs` to `sm`.
 
@@ -1130,7 +1213,15 @@ Render `cs` to `sm`.
     `"base"`. The keyword pairs `:remove_object=>true` and `:remove_tool=>true` mean
     that the "object" (first argument) group `"writeable_area"` and the "tool" (second argument)
     group `"base_negative"` are both removed when `"base"` is created.
+  - `post_fragment_ops`: Vector of Tuples in the same form as `postrender_ops`, executed after
+    the global fragmentation pass and before `material_precedence` is applied. Use this for
+    operations that need the rendered geometry to be conformal already and that handle their
+    own fusion, such as importing an external part with [`import_solid!`](@ref) and fusing it
+    locally with [`targeted_fuse!`](@ref). Entities these operations add are not fragmented
+    against the rest of the model unless an operation does so itself.
   - `retained_physical_groups`: Vector of `(name, dimension)` tuples specifying which physical groups to keep after rendering. All other groups are removed.
+  - `material_precedence`: Vector of `(name, dimension)` tuples ordered from highest to lowest
+    priority. After fragmentation, listed groups are made mutually exclusive.
   - `zmap`: Function (m::SemanticMeta) -> `z` coordinate of corresponding elements. Default:
     Map all metadata to zero.
   - `gmsh_options`: Dictionary of gmsh option name-value pairs to set before meshing.
@@ -1144,11 +1235,9 @@ Render `cs` to `sm`.
     as the first postrender step, before extrusions and user-defined `postrender_ops`. This
     consolidates overlapping entities within each group, reducing the cost of subsequent
     pairwise fragmentation. Default is `false`.
-  - `skip_unused_layers`: If `true`, skip rendering layers whose names are not referenced by
-    `postrender_ops` or `retained_physical_groups`. A layer is considered referenced if either
-    its mapped name or its base layer name (from `layer(meta)`) appears in the referenced set.
-    This keeps indexed and levelwise variants (e.g. `"port_1"`) when the base layer (`"port"`)
-    is referenced. Default is `false`.
+  - `skip_unused_layers`: If `true`, skip layers not referenced by `postrender_ops`,
+    `post_fragment_ops`, `retained_physical_groups`, or `material_precedence`. Indexed and
+    levelwise variants are kept when their base layer is referenced. Default is `false`.
   - `curvature_sizing`: If `true`, add radius-sized mesh control points at the centers of exact
     circular primitives preserved by the rendering backend. For `extrude_z!` postrender
     operations, generated perimeter and curvature controls are repeated at requested extrusion
@@ -1168,7 +1257,9 @@ function render!(
     cs::AbstractCoordinateSystem{T};
     map_meta=layer,
     postrender_ops=[],
+    post_fragment_ops=[],
     retained_physical_groups=[],
+    material_precedence=[],
     zmap=(_) -> zero(T),
     gmsh_options=Dict{String, Union{String, Int, Float64}}(),
     meshing_parameters::Union{Nothing, MeshingParameters}=nothing,
@@ -1193,7 +1284,9 @@ function render!(
         (fragment!)=_fragment_three_pass!,
         map_meta=map_meta,
         postrender_ops=postrender_ops,
+        post_fragment_ops=post_fragment_ops,
         retained_physical_groups=retained_physical_groups,
+        material_precedence=material_precedence,
         zmap=zmap,
         gmsh_options=gmsh_options,
         meshing_parameters=meshing_parameters,
@@ -1207,12 +1300,37 @@ end
 
 # Adjacent-dimension pairs avoid both exterior boundary loss ([3,2,1], PR #145)
 # and stale OCC bindings when combined ([1,2,3], Gmsh #3446 / issue #172).
-function _fragment_three_pass!(sm::SolidModel)
-    _fragment_and_map!(sm, [0, 1])
-    _fragment_and_map!(sm, [1, 2])
-    _fragment_and_map!(sm, [2, 3])
+# With `box`, each pass uses only entities whose bbox intersects it, rescanned per pass: OCC
+# binds split pieces as new entities while the parent may still reference the original, so
+# walking down from seed volumes would miss them and leave orphans.
+function _fragment_three_pass!(sm::SolidModel; box=nothing)
+    for dims in ([0, 1], [1, 2], [2, 3])
+        _fragment_and_map!(sm, dims; included_entities=_entities_in_box(sm, dims, box))
+    end
     return sm
 end
+
+_entities_in_box(::SolidModel, dims, ::Nothing) = nothing   # all entities of `dims`
+function _entities_in_box(sm::SolidModel, dims, box)
+    gmsh.model.set_current(name(sm))
+    ents = vcat([gmsh.model.get_entities(dim) for dim in dims]...)
+    selected = filter(dt -> _boxes_touch(box, bounds3d([dt])), ents)
+    # A boolean that rebuilds an entity can retag its sub-entities, including those outside the
+    # box. `_fragment_and_map!` can only follow operands, so the full boundary of every selected
+    # top-dimension entity is submitted too, as the global pass does implicitly.
+    top = maximum(dims)
+    parents = filter(dt -> dt[1] == top, selected)
+    isempty(parents) && return selected
+    closure = filter(
+        dt -> dt[1] in dims,
+        [(d, abs(t)) for (d, t) in gmsh.model.get_boundary(parents, false, false, false)]
+    )
+    return unique(vcat(selected, closure))
+end
+
+# OCC boxes are loose by ~1e-7 (see `bounds3d`), so touching solids intersect without a tolerance.
+_rect(b) = SpatialIndexing.Rect((b[1], b[2], b[3]), (b[4], b[5], b[6]))
+_boxes_touch(a, b) = SpatialIndexing.intersects(_rect(a), _rect(b))
 
 # Shared orchestrator body called by both `render!` and `render_conformal!`.
 # The two entry points differ only in:
@@ -1231,7 +1349,9 @@ function _render_orchestrator!(
     fragment!,
     map_meta=layer,
     postrender_ops=[],
+    post_fragment_ops=[],
     retained_physical_groups=[],
+    material_precedence=[],
     zmap=(_) -> zero(T),
     gmsh_options=Dict{String, Union{String, Int, Float64}}(),
     meshing_parameters::Union{Nothing, MeshingParameters}=nothing,
@@ -1271,7 +1391,12 @@ function _render_orchestrator!(
 
     # Build set of used layer names for skip_unused_layers optimization
     used_names = if skip_unused_layers
-        _used_group_names(postrender_ops, retained_physical_groups)
+        # Post-fragment operations reference layers the same way postrender operations do.
+        _used_group_names(
+            vcat(postrender_ops, post_fragment_ops),
+            retained_physical_groups,
+            material_precedence
+        )
     else
         nothing
     end
@@ -1354,11 +1479,22 @@ function _render_orchestrator!(
     # Get rid of redundant entities and update groups accordingly.
     fragment!(sm)
 
+    # Operations that need the rendered geometry to be conformal already, and take care of
+    # their own fusion: typically importing an external part and then `targeted_fuse!`, which
+    # fragments only around the part instead of repeating the global pass over everything.
+    if !isempty(post_fragment_ops)
+        _postrender!(sm, post_fragment_ops)
+        _synchronize!(sm)
+    end
+
+    # Resolve overlapping material memberships created by fragmentation.
+    isempty(material_precedence) || partition_material_groups!(sm, material_precedence)
+
     # Rebuild KDTrees to include mesh-size controls composed with extrusions.
     meshsize_composed && finalize_size_fields!()
 
     # Pass in call back function for meshing against the vertices found previously.
-    gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
+    set_mesh_size_callback!()
 
     # Remove all physical groups except those on the retained list.
     if !isempty(retained_physical_groups)
@@ -1396,11 +1532,12 @@ with parameters `(h, α)`, calculates size as `h * max(mesh_scale, (d/h)^α)` wh
   - `x::Cdouble`: X coordinate
   - `y::Cdouble`: Y coordinate
   - `z::Cdouble`: Z coordinate
-  - `lc::Cdouble`: Characteristic length (unused)
+  - `lc::Cdouble`: Characteristic length gmsh proposes on its own; combined with the result
+    when [`mesh_respect_lc`](@ref) is enabled, ignored otherwise
 
 # Returns
 
-  - `Float64`: Minimum computed mesh size across all control point sets
+  - `Float64`: Minimum computed mesh size across all control point sets, and `lc` if enabled
 
 # Notes
 
@@ -1420,7 +1557,7 @@ function gmsh_meshsize(
         _, d::Float64 = nn(tree, SVector{3}(x, y, z))
         l = min(l, h * max(mesh_scale(), (d / h)^α))::Float64
     end
-    return l
+    return mesh_respect_lc() ? min(l, Float64(lc)) : l
 end
 
 # Utility intended for very last step in rendering, to get rid of overlapping geometry
@@ -1430,7 +1567,8 @@ end
 function _fragment_and_map!(
     sm::SolidModel,
     frag_dims;
-    excluded_physical_groups=PhysicalGroup[]
+    excluded_physical_groups=PhysicalGroup[],
+    included_entities=nothing
 )
     gmsh.model.set_current(name(sm))
     # Get the tags of entities in existing groups
@@ -1438,7 +1576,11 @@ function _fragment_and_map!(
         (name, dimtags(pg)) for dim in frag_dims for
         (name, pg) in pairs(dimgroupdict(sm, dim))
     ]
-    allents = vcat([gmsh.model.get_entities(dim) for dim in frag_dims]...)
+    # Restrict fragmentation to a supplied subset when requested.
+    allents =
+        isnothing(included_entities) ?
+        vcat([gmsh.model.get_entities(dim) for dim in frag_dims]...) :
+        collect(included_entities)
 
     # Remove any excluded groups from the fragment.
     if !isempty(excluded_physical_groups)
@@ -1447,10 +1589,18 @@ function _fragment_and_map!(
             setdiff(groups, [(name(pg), dimtags(pg)) for pg ∈ excluded_physical_groups])
     end
 
+    # Operand bounding boxes for `_remap_orphans!`, taken while the entities still exist.
+    boxes_before = Dict(dt => gmsh.model.getBoundingBox(dt...) for dt in allents)
+    ents_before = Set{Tuple{Int32, Int32}}(
+        vcat([gmsh.model.get_entities(dim) for dim in frag_dims]...)
+    )
+
     # Fragment will preserve tags if possible
     # but otherwise will remove entities and create new ones
     if true
         frags, entmap = kernel(sm).fragment(allents, [])
+        _synchronize!(sm)
+        _remap_orphans!(entmap, allents, boxes_before, ents_before, frag_dims)
     else
         # Manual fragment map construction for debugging purposes.
         frags, _ = kernel(sm).fragment(allents, [], -1, false, false)
@@ -1491,19 +1641,68 @@ function _fragment_and_map!(
         kernel(sm).remove(setdiff(allents, frags))
     end
     isempty(entmap) && return _synchronize!(sm)
-    # For each original group,
-    # reassign the group to the fragments its elements were mapped to
+    # Members outside the fragment keep their tags. Groups with members inside are re-added even
+    # when tags were preserved: gmsh drops physical membership on rebuilt entities.
     for (name, dim_tags) in groups
         isempty(dim_tags) && continue
-        sm[name] = vcat((entmap[indexin(dim_tags, allents)])...)
+        idx = indexin(dim_tags, allents)
+        all(isnothing, idx) && continue
+        newtags = Tuple{Int32, Int32}[]
+        for (dt, i) in zip(dim_tags, idx)
+            isnothing(i) ? push!(newtags, dt) : append!(newtags, entmap[i])
+        end
+        sm[name] = newtags
     end
     return _synchronize!(sm)
 end
+"""
+    _remap_orphans!(entmap, allents, boxes_before, ents_before, frag_dims)
+
+Fill in empty fragment-map entries by bounding box.
+
+OpenCASCADE's boolean history can report an operand as deleted with no successor while the
+result contains a geometrically identical entity under a new tag. Left alone, such entities
+drop out of their physical groups. Each operand with an empty map entry is matched, within its
+dimension, against entities that are new and referenced by no map entry. A unique match is
+recorded; an ambiguous one is left unmapped with a warning.
+"""
+function _remap_orphans!(entmap, allents, boxes_before, ents_before, frag_dims)
+    lost = [i for i in eachindex(entmap) if isempty(entmap[i])]
+    isempty(lost) && return entmap
+    mapped = Set{Tuple{Int32, Int32}}(vcat(entmap...))
+    unclaimed = [
+        dt for dim in frag_dims for
+        dt in gmsh.model.get_entities(dim) if !(dt in ents_before) && !(dt in mapped)
+    ]
+    isempty(unclaimed) && return entmap
+    boxes_after = Dict(dt => gmsh.model.getBoundingBox(dt...) for dt in unclaimed)
+    # OCC boxes are loose by ~1e-7 (see `bounds3d`), well inside this tolerance.
+    same_box(a, b) = all(isapprox(a[i], b[i]; atol=1e-5) for i = 1:6)
+    n_fixed = 0
+    for i in lost
+        dt = allents[i]
+        cands = [
+            c for c in unclaimed if
+            c[1] == dt[1] && same_box(boxes_before[dt], boxes_after[c])
+        ]
+        if length(cands) == 1
+            entmap[i] = cands
+            n_fixed += 1
+        elseif length(cands) > 1
+            @warn "fragment: $(dt) vanished and $(length(cands)) new entities share its bounding box; leaving it unmapped"
+        end
+    end
+    n_fixed > 0 &&
+        @debug "fragment: recovered $n_fixed of $(length(lost)) entities reported deleted"
+    return entmap
+end
+
 # GmshNative has no fragment
 function _fragment_and_map!(
     ::SolidModel{GmshNative},
     frag_dims;
-    excluded_physical_groups=PhysicalGroup[]
+    excluded_physical_groups=PhysicalGroup[],
+    included_entities=nothing
 ) end
 
 # Assumes `gmsh` has been initialized and the current model has been set beforehand, and that
@@ -1871,29 +2070,26 @@ function _add_offset_curve!(
 end
 
 """
-    _used_group_names(postrender_ops, retained_physical_groups)
+    _used_group_names(postrender_ops, retained_physical_groups, material_precedence=[])
 
-Build a `Set{String}` of physical group names referenced by `postrender_ops` or
-`retained_physical_groups`. Used by `skip_unused_layers` to avoid rendering
-entities for unreferenced layers.
+Return physical group names needed by rendering or later processing.
 """
-function _used_group_names(postrender_ops, retained_physical_groups)
+function _used_group_names(postrender_ops, retained_physical_groups, material_precedence=[])
     names = Set{String}()
-    for (name, _) in retained_physical_groups
-        push!(names, string(name))
+    for groups in (retained_physical_groups, material_precedence)
+        for (name, _) in groups
+            push!(names, string(name))
+        end
     end
     for op in postrender_ops
-        # op = (destination, func, args, kwargs...)
-        push!(names, string(op[1]))  # destination name
+        push!(names, string(op[1]))
         if length(op) >= 3
-            _extract_op_names!(names, op[3])  # args tuple (kwargs are never layer names)
+            _extract_op_names!(names, op[3])
         end
     end
     return names
 end
 
-# Recursively extract String and Symbol values from nested args structures.
-# Numeric parameters (dimensions, thicknesses) are Int or length-unit types, never strings.
 _extract_op_names!(names::Set{String}, x::Union{String, Symbol}) = push!(names, string(x))
 _extract_op_names!(names::Set{String}, x::Union{Tuple, AbstractVector}) =
     foreach(a -> _extract_op_names!(names, a), x)

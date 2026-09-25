@@ -298,6 +298,7 @@ See [Shapes](./shapes.md).
     SolidModels.attributes
     SolidModels.to_primitives
     render!(::SolidModel, ::CoordinateSystem; kwargs...)
+    SolidModels.import_solid!
     SolidModels.save(::File, ::SolidModel)
 ```
 
@@ -321,10 +322,12 @@ See [Shapes](./shapes.md).
     SolidModels.fragment_geom!
     SolidModels.get_boundary
     SolidModels.intersect_geom!
+    SolidModels.partition_material_groups!
     SolidModels.remove_group!
     SolidModels.restrict_to_volume!
     SolidModels.revolve!
     SolidModels.set_periodic!
+    SolidModels.targeted_fuse!
     SolidModels.translate!
     SolidModels.union_geom!
     SolidModels.staple_bridge_postrendering
@@ -337,12 +340,15 @@ See [Shapes](./shapes.md).
     SolidModels.mesh_order
     SolidModels.mesh_scale
     SolidModels.mesh_grading_default
+    SolidModels.mesh_respect_lc
     SolidModels.set_gmsh_option
     SolidModels.get_gmsh_number
     SolidModels.get_gmsh_string
     SolidModels.mesh_control_points
     SolidModels.mesh_control_trees
     SolidModels.add_mesh_size_point
+    SolidModels.load_mesh_control_points!
+    SolidModels.set_mesh_size_callback!
     SolidModels.finalize_size_fields!
     SolidModels.clear_mesh_control_points!
     SolidModels.reset_mesh_control!
