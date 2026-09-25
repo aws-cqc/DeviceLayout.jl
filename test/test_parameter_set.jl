@@ -5,30 +5,30 @@
     @testset "Construction" begin
         # Empty ParameterSet has required namespaces
         ps = ParameterSet()
-        @test haskey(ps.data, "global")
+        @test haskey(ps.data, "globals")
         @test haskey(ps.data, "components")
-        @test ps.data["global"] isa Dict
+        @test ps.data["globals"] isa Dict
         @test ps.data["components"] isa Dict
         @test ps.path == ""
 
         # From Dict - required namespaces are added if missing
         ps = ParameterSet(Dict{String, Any}("custom" => 42))
-        @test haskey(ps.data, "global")
+        @test haskey(ps.data, "globals")
         @test haskey(ps.data, "components")
         @test ps.data["custom"] == 42
 
         # From Dict - existing namespaces are preserved
         ps = ParameterSet()
-        ps.global.version = 1
+        ps.globals.version = 1
         ps.components.qubit = ("cap_width" => 300)
-        @test ps.global.version == 1
+        @test ps.globals.version == 1
         @test ps.components.qubit.cap_width == 300
 
         # Constructing a ParameterSet from a caller-held dict must not mutate
         # that dict (the REQUIRED_NAMESPACES injection is done on a copy).
         user_dict = Dict{String, Any}("custom" => 42)
         _ = ParameterSet(user_dict)
-        @test !haskey(user_dict, "global")
+        @test !haskey(user_dict, "globals")
         @test !haskey(user_dict, "components")
         @test collect(keys(user_dict)) == ["custom"]
 
@@ -36,7 +36,7 @@
         # is needed and we may keep using the same storage (either behavior is
         # fine - just check no new keys get sneaked in).
         user_dict2 = Dict{String, Any}(
-            "global" => Dict{String, Any}(),
+            "globals" => Dict{String, Any}(),
             "components" => Dict{String, Any}(),
             "extra" => "hello"
         )
@@ -47,7 +47,7 @@
 
     @testset "Dot access" begin
         ps = ParameterSet()
-        ps.global.version = 1
+        ps.globals.version = 1
         ps.components.qubit = ("cap_width" => 300)
         ps.components.qubit.cap_gap = 20
 
@@ -58,7 +58,7 @@
         # Leaf access returns value
         @test ps.components.qubit.cap_width == 300
         @test ps.components.qubit.cap_gap == 20
-        @test ps.global.version == 1
+        @test ps.globals.version == 1
 
         # Reading a missing key shows error (no exception from show)
         @test contains(string(ps.nonexistent), "ParameterKeyError")
@@ -122,7 +122,7 @@
         @test lp.cap_gap == 20
 
         # Empty dict returns empty NamedTuple
-        lp_empty = leaf_params(ps.global)
+        lp_empty = leaf_params(ps.globals)
         @test lp_empty == (;)
     end
 
@@ -173,8 +173,8 @@
         ps = ParameterSet()
 
         # Set a leaf value
-        ps.global.version = 1
-        @test ps.global.version == 1
+        ps.globals.version = 1
+        @test ps.globals.version == 1
 
         # Set a new namespace
         ps.components.qubit = ("cap_width" => 300)
@@ -283,7 +283,7 @@
         root_template.routing.offsets = [4, 5]
         design.components.q2 = root_template
         @test design.components.q2.width == 500
-        @test !haskey(design.components.q2.data, "global")
+        @test !haskey(design.components.q2.data, "globals")
         @test !haskey(design.components.q2.data, "components")
 
         raw_template = Dict{String, Any}(
@@ -361,14 +361,14 @@
         shared = Dict{String, Any}("offsets" => [1, 2])
         aliased_destination = ParameterSet(
             Dict{String, Any}(
-                "global" => Dict{String, Any}(),
+                "globals" => Dict{String, Any}(),
                 "components" =>
                     Dict{String, Any}("q1" => Dict{String, Any}("routing" => shared))
             )
         )
         aliased_source = ParameterSet(
             Dict{String, Any}(
-                "global" => Dict{String, Any}(),
+                "globals" => Dict{String, Any}(),
                 "components" =>
                     Dict{String, Any}("q1" => Dict{String, Any}("routing" => shared))
             )
@@ -414,14 +414,14 @@
         ps = ParameterSet()
         ps.extra = 42
         pnames = propertynames(ps)
-        @test :global in pnames
+        @test :globals in pnames
         @test :components in pnames
         @test :extra in pnames
     end
 
     @testset "Scoped views skip namespace injection" begin
         # Scoped ParameterSets (from `ps.components.qubit` etc.) must NOT have
-        # "global"/"components" keys injected into the interior subtree. Only
+        # "globals"/"components" keys injected into the interior subtree. Only
         # the top-level ParameterSet carries the required-namespace invariant.
         ps = ParameterSet()
         ps.components.qubit.cap_width = 300
@@ -430,11 +430,11 @@
         @test sub isa ParameterSet
         # Scoped view exposes only the qubit subtree's own keys
         @test Set(propertynames(sub)) == Set([:cap_width])
-        @test !haskey(sub.data, "global")
+        @test !haskey(sub.data, "globals")
         @test !haskey(sub.data, "components")
 
         # And the top-level data wasn't polluted by the scoped lookup
-        @test !haskey(ps.data["components"]["qubit"], "global")
+        @test !haskey(ps.data["components"]["qubit"], "globals")
         @test !haskey(ps.data["components"]["qubit"], "components")
     end
 
@@ -447,7 +447,7 @@
         show(io, ps)
         s = String(take!(io))
         @test contains(s, "ParameterSet")
-        @test contains(s, "global")
+        @test contains(s, "globals")
         @test contains(s, "components")
 
         # Key order in compact show is sorted (not Dict iteration order) so
@@ -521,7 +521,7 @@ end
 
     @testset "Constructor with ParameterSet" begin
         ps = ParameterSet()
-        ps.global.version = 1
+        ps.globals.version = 1
         ps.components.qubit = ("cap_width" => 300)
 
         g = SchematicGraph("test", ps)
@@ -777,7 +777,7 @@ end
 
     @testset "Complete detached extraction" begin
         source = ParameterSet()
-        source.global.process = "fab-v3"
+        source.globals.process = "fab-v3"
         source.templates.qubit.cap_width = 24μm
         source.custom.revision = 7
         source.components.stale.width = 999μm
@@ -793,7 +793,7 @@ end
 
         @test extracted.path == ""
         @test isempty(extracted.accessed)
-        @test extracted.global.process == "fab-v3"
+        @test extracted.globals.process == "fab-v3"
         @test extracted.templates.qubit.cap_width == 24μm
         @test extracted.custom.revision == 7
         @test !haskey(extracted.data["components"], "stale")
@@ -815,10 +815,10 @@ end
         @test extracted.components.q2.cap_width == 40μm
         @test extracted.components.q3.cap_width == 40μm
 
-        extracted.global.process = "changed"
+        extracted.globals.process = "changed"
         extracted.templates.qubit.cap_width = 100μm
         extracted.components.q2.cap_width = 10μm
-        @test source.global.process == "fab-v3"
+        @test source.globals.process == "fab-v3"
         @test source.templates.qubit.cap_width == 24μm
         @test parameters(shared).cap_width == 40μm
         @test parameter_set(g) === source
@@ -885,7 +885,7 @@ end
         )
 
         extracted = extract_parameter_set(g)
-        @test isempty(extracted.global.data)
+        @test isempty(extracted.globals.data)
         @test extracted.components.island.cap_width == 41μm
         @test extracted.components.island.cap_length ==
               parameters(ExampleRectangleIsland()).cap_length
@@ -941,9 +941,9 @@ end
 
     @testset "save_parameter_set to IO" begin
         ps = ParameterSet()
-        ps.global.version = 1
-        ps.global.process_node = "fab_v3"
-        ps.global.junction_pos = :bottom
+        ps.globals.version = 1
+        ps.globals.process_node = "fab_v3"
+        ps.globals.junction_pos = :bottom
         ps.components.cap.finger_length = 150μm
         ps.components.cap.finger_count = 6
 
@@ -962,13 +962,13 @@ end
         @test contains(yaml_str, "version: 1")
 
         reloaded = ParameterSet(IOBuffer(yaml_str))
-        @test reloaded.global.process_node == "fab_v3"
-        @test reloaded.global.junction_pos == :bottom
+        @test reloaded.globals.process_node == "fab_v3"
+        @test reloaded.globals.junction_pos == :bottom
     end
 
     @testset "ParameterSet from IO" begin
         yaml_str = """
-        global:
+        globals:
           version: 2
         components:
           qubit:
@@ -979,7 +979,7 @@ end
         io = IOBuffer(yaml_str)
         ps = ParameterSet(io)
 
-        @test ps.global.version == 2
+        @test ps.globals.version == 2
         @test ps.components.qubit.cap_width == 300μm
         @test ps.components.qubit.cap_gap == 20μm
         @test ps.components.qubit.finger_count == 4
@@ -987,7 +987,7 @@ end
 
     @testset "YAML anchors and merge keys" begin
         yaml_str = """
-        global:
+        globals:
           version: 1
         templates:
           qubit: &qubit
@@ -1066,7 +1066,7 @@ end
         # must NOT be coerced - `process_node: "s"` should stay the string "s",
         # not become the seconds unit.
         yaml_str = """
-        global:
+        globals:
           process_node: "s"
           lithography: "m"
           label: "cm"
@@ -1079,10 +1079,10 @@ end
         io = IOBuffer(yaml_str)
         ps = ParameterSet(io)
 
-        @test ps.global.process_node == "s"
-        @test ps.global.lithography == "m"
-        @test ps.global.label == "cm"
-        @test ps.global.comment == "not a unit at all"
+        @test ps.globals.process_node == "s"
+        @test ps.globals.lithography == "m"
+        @test ps.globals.label == "cm"
+        @test ps.globals.comment == "not a unit at all"
         @test ps.components.cap.notes == "μm"
         # But a genuine quantity with magnitude + unit is still converted
         @test ps.components.cap.finger_length == 150μm
@@ -1090,7 +1090,7 @@ end
 
     @testset "IO round-trip with Unitful" begin
         ps = ParameterSet()
-        ps.global.process_node = "fab_v3"
+        ps.globals.process_node = "fab_v3"
         ps.components.jj.junction_width = 1μm
         ps.components.jj.junction_lead_gap = 0.5μm
         ps.components.jj.count = 2
@@ -1103,7 +1103,7 @@ end
         # Read back
         ps2 = ParameterSet(IOBuffer(yaml_bytes))
 
-        @test ps2.global.process_node == "fab_v3"
+        @test ps2.globals.process_node == "fab_v3"
         @test ps2.components.jj.junction_width == 1μm
         @test ps2.components.jj.junction_lead_gap == 0.5μm
         @test ps2.components.jj.count == 2
@@ -1130,7 +1130,7 @@ end
 
     @testset "ParameterSet from IO with path" begin
         yaml_str = """
-        global:
+        globals:
           version: 1
         components:
           res:
@@ -1145,7 +1145,7 @@ end
 
     @testset "File round-trip" begin
         ps = ParameterSet()
-        ps.global.version = 1
+        ps.globals.version = 1
         ps.components.cap.width = 150μm
         ps.components.cap.gap = 3μm
         ps.components.cap.count = 6
@@ -1155,7 +1155,7 @@ end
 
         ps2 = ParameterSet(path)
         @test ps2.path == path
-        @test ps2.global.version == 1
+        @test ps2.globals.version == 1
         @test ps2.components.cap.width == 150μm
         @test ps2.components.cap.gap == 3μm
         @test ps2.components.cap.count == 6
@@ -1163,7 +1163,7 @@ end
 
     @testset "load_parameter_set from file path" begin
         ps = ParameterSet()
-        ps.global.version = 7
+        ps.globals.version = 7
         ps.components.cap.width = 150μm
         path = joinpath(tdir, "loader_ps.yaml")
         save_parameter_set(path, ps)
@@ -1171,7 +1171,7 @@ end
         # The named counterpart to save_parameter_set: loads the YAML file at `path`.
         loaded = load_parameter_set(path)
         @test loaded.path == path
-        @test loaded.global.version == 7
+        @test loaded.globals.version == 7
         @test loaded.components.cap.width == 150μm
     end
 
