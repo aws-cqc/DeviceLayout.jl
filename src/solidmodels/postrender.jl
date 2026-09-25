@@ -114,9 +114,10 @@ fragmentation used by `render!`. Entities outside the region are left untouched 
 to already be conformal with one another. Like the global pass, fragmentation can retag or drop
 dim-0/1 groups on modified boundaries.
 
-With `warn=true`, a warning is emitted when no other volume lies in the region, and when two
-volumes in the region have overlapping bounding boxes but share no boundary entity (a possible
-pre-existing non-conformal seam that this call will not repair).
+With `warn=true`, a warning is emitted when nothing but `object_group` and its own boundary
+lies in the region, and when two volumes in the region have overlapping bounding boxes but
+share no boundary entity (a possible pre-existing non-conformal seam that this call will not
+repair).
 
 Returns the updated dimtags of `object_group`.
 
@@ -156,22 +157,38 @@ function targeted_fuse!(
     end
 
     box = _fusion_box(bbox, obj, d)
-    # Diagnostic only; the fragment selects its own entities.
-    neighbors = setdiff(
-        filter(dt -> _boxes_touch(box, bounds3d([dt])), gmsh.model.getEntities(3)),
-        obj
+    # Anything in the region that is not the object or one of its own sub-entities. Any
+    # dimension counts: a free-standing sheet is a valid fusing partner. The fragment selects
+    # its own entities; this only decides whether there is work to do.
+    others = setdiff(
+        filter(dt -> _boxes_touch(box, bounds3d([dt])), gmsh.model.getEntities()),
+        _boundary_closure(obj)
     )
-    if isempty(neighbors)
+    if isempty(others)
         warn && @warn(
-            "targeted_fuse!: no volume other than \"$object_group\" intersects the fusing " *
+            "targeted_fuse!: nothing other than \"$object_group\" intersects the fusing " *
             "region; nothing to fuse. Check `bbox`/`delta` if a neighbour was expected."
         )
         return obj
     end
-    warn && _warn_bbox_overlap_no_boundary(neighbors, d)
+    warn && _warn_bbox_overlap_no_boundary(filter(dt -> dt[1] == 3, others), d)
 
     _fragment_three_pass!(sm; box=box)
     return dimtags(sm[object_group, 3])
+end
+
+# `dimtags` plus every entity on their boundaries, down to points. `getBoundary` with
+# `recursive=true` returns points only, so the dimensions are walked one at a time.
+function _boundary_closure(dimtags)
+    closure = Set{Tuple{Int32, Int32}}(dimtags)
+    layer = collect(dimtags)
+    while !isempty(layer) && first(layer)[1] > 0
+        layer = unique([
+            (d, abs(t)) for (d, t) in gmsh.model.getBoundary(layer, false, false, false)
+        ])
+        union!(closure, layer)
+    end
+    return closure
 end
 
 targeted_fuse!(::SolidModel, ::Union{String, Symbol}; kwargs...) =

@@ -1065,6 +1065,24 @@ end
         @test isempty(orphan_faces(smt))
     end
 
+    @testset "a sheet is a fusing partner even with no other volume nearby" begin
+        # One box and a sheet lying on its bottom face, nothing else. The sheet is the only
+        # neighbour, so a check that looks for volumes alone would skip the fuse.
+        sm = SolidModel("tf_sheet_only"; overwrite=true)
+        gmsh.model.set_current("tf_sheet_only")
+        box = gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
+        sheet = gmsh.model.occ.addRectangle(2, 2, 0, 4, 4)
+        gmsh.model.occ.synchronize()
+        sm["chip"] = [(Int32(3), Int32(box))]
+        sm["sheet"] = [(Int32(2), Int32(sheet))]
+        @test sheet ∉ faceset(sm, "chip")         # detached before the fuse
+        @test_logs targeted_fuse!(sm, "chip")     # no "nothing to fuse" warning
+        sheet_faces = Set(t for (_, t) in dimtags(sm["sheet", 2]))
+        @test length(sheet_faces) == 1
+        @test sheet_faces ⊆ faceset(sm, "chip")   # imprinted onto the box's bottom face
+        @test isempty(orphan_faces(sm))
+    end
+
     @testset "seam warning" begin
         sm = SolidModel("tf_warn"; overwrite=true)
         gmsh.model.set_current("tf_warn")
@@ -1165,7 +1183,7 @@ end
         @test_throws ArgumentError targeted_fuse!(sm, "chip")
     end
 
-    @testset "no neighboring volumes warns and is a no-op" begin
+    @testset "nothing else in the region warns and is a no-op" begin
         sm = SolidModel("tf_isolated"; overwrite=true)
         gmsh.model.set_current("tf_isolated")
         vol = gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
