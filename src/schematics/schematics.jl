@@ -222,7 +222,8 @@ function add_node!(
     kwargs...
 )
     props = Dict{Symbol, Any}(kwargs...)
-    id = uniquename(base_id, '_', counter=g.namecounter)
+    # `base_id` is taken literally: names ending in `_<n>` (e.g. `x_3_1`) are not read as counters
+    id = uniquename(base_id, '_'; parse_suffix=false, counter=g.namecounter)
     node = ComponentNode(id, comp)
     g.node_dict[Symbol(id)] = node
     push!(g.nodes, node)

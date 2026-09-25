@@ -19,6 +19,12 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - `uniquename(str, dlm)` dropped the delimiter when reconstructing the base name of a
+    `str0 * dlm * n` input containing several delimiters (`uniquename("x_3_1", '_')` returned
+    `"x3_1"`), and a bare number was treated as a suffix. `uniquename` also takes a new keyword
+    `parse_suffix=false` to count a name literally, which `add_node!` now uses so that schematic
+    node ids honor their documented behavior: a `base_id` ending in `_<n>` (e.g. `x_3_1`) is used
+    as-is and only gets a `_n` suffix if that id is already in use.
   - The `SingleTransmon` example's `single_transmon` now honors its `mesh_order` keyword: the
     solid-model meshing order was hardcoded to `2`, so passing `mesh_order` had no effect. It
     now calls `SolidModels.mesh_order(mesh_order)`, and the docstring lists the previously
