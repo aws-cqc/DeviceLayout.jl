@@ -775,6 +775,16 @@ end
         child = 1
     end
 
+    @compdef struct ExtractionNamedTupleComponent <: Component
+        name = "line"
+        style = (; trace=10μm, gap=6μm)
+    end
+    SchematicDrivenLayout._geometry!(
+        cs::CoordinateSystem,
+        ::ExtractionNamedTupleComponent
+    ) = cs
+    SchematicDrivenLayout.hooks(::ExtractionNamedTupleComponent) = (;)
+
     @testset "Complete detached extraction" begin
         source = ParameterSet()
         source.global.process = "fab-v3"
@@ -930,6 +940,40 @@ end
         @test merge_err isa ArgumentError
         @test occursin("components.parent.child", merge_err.msg)
         @test occursin("parameter leaf", merge_err.msg)
+    end
+
+    @testset "NamedTuple parameter round-trips through create_component" begin
+        g = SchematicGraph("g")
+        add_node!(g, ExtractionNamedTupleComponent(; style=(; trace=1μm, gap=2μm)))
+        ps = extract_parameter_set(g)
+        @test ps.components.line.style.trace == 1μm
+
+        c = create_component(ExtractionNamedTupleComponent, ps, "components.line")
+        @test c.style.trace == 1μm
+        @test c.style.gap == 2μm
+        @test "components.line.style.trace" in ps.accessed
+        @test "components.line.style.gap" in ps.accessed
+    end
+
+    @testset "Partial NamedTuple namespace merges with defaults" begin
+        ps = ParameterSet()
+        ps.components.line.style.trace = 3μm
+        c = create_component(ExtractionNamedTupleComponent, ps, "components.line")
+        @test c.style.trace == 3μm
+        @test c.style.gap == 6μm
+
+        c2 = create_component(ExtractionNamedTupleComponent, ps.components.line)
+        @test c2.style == c.style
+    end
+
+    @testset "set_parameters reads NamedTuple namespaces" begin
+        ps = ParameterSet()
+        ps.components.line.style.gap = 4μm
+        template = ExtractionNamedTupleComponent(; style=(; trace=7μm, gap=6μm))
+        c = set_parameters(template, ps, "components.line")
+        @test c.style.trace == 7μm
+        @test c.style.gap == 4μm
+        @test "components.line.style.gap" in ps.accessed
     end
 end
 

@@ -24,6 +24,11 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - `create_component(T, ps, address)` and `set_parameters(c, ps, address)` now read a
+    nested namespace below `address` as a `NamedTuple` parameter when its key names a
+    parameter whose default (or template) value is a `NamedTuple`, merging it recursively
+    into that value. Previously such namespaces were skipped, so the `NamedTuple` parameters
+    that `extract_parameter_set` writes as namespaces were not read back. (#335)
   - `uniquename(str, dlm)` dropped the delimiter when reconstructing the base name of a
     `str0 * dlm * n` input containing several delimiters (`uniquename("x_3_1", '_')` returned
     `"x3_1"`), and a bare number was treated as a suffix. `uniquename` also takes a new keyword
