@@ -78,9 +78,12 @@ Create an instance of type `T` using parameters from a `ParameterSet` at the giv
 The address is resolved to a scoped `ParameterSet`, and the call is delegated to
 [`create_component(T, sub::ParameterSet)`](@ref). That overload splats the
 leaves at `sub` as keyword arguments into the keyword-only `create_component(T; kwargs...)`,
-which merges them recursively with `default_parameters(T)`. Nested namespaces
-below `address` are not merged - scope at the level whose leaves match `T`'s
-parameters.
+which merges them recursively with `default_parameters(T)`. A nested namespace
+below `address` is read as a `NamedTuple` parameter when its key names a parameter
+of `T` whose default is a `NamedTuple` (the shape written by
+[`extract_parameter_set`](@ref)); it is merged recursively into the default, so it
+need not specify every field. Other nested namespaces (e.g. those of composite
+subcomponents) are ignored - scope at the level whose leaves match `T`'s parameters.
 
 Consumed leaves (those matching `parameter_names(T)`) are recorded in `ps.accessed`
 as qualified paths rooted at the original PS.
@@ -100,7 +103,10 @@ Create an instance of type `T` from a scoped `ParameterSet`, typically obtained 
 chained-dot access like `ps.components.transmon.junction`.
 
 Leaf parameters (non-`Dict` values) at `sub` are extracted via `leaf_params` and
-passed as keyword arguments. Consumed leaves are recorded in the shared `accessed`
+passed as keyword arguments. Nested namespaces whose key names a `NamedTuple`-valued
+parameter of `T` (per `default_parameters(T)`) are converted to `NamedTuple`s and
+passed as well, to be merged recursively into the default. Consumed leaves
+(including those inside such nested namespaces) are recorded in the shared `accessed`
 set as qualified paths (e.g. `"components.transmon.junction.w_jj"`), matching the
 behavior of the address-string form.
 
@@ -128,6 +134,7 @@ function create_component(
         )
     )
     kw = leaf_params(sub)
+    nested_kw, nested_paths = _namedtuple_namespaces(sub, default_parameters(T))
     # Track accessed parameter leaves with the scoped ParameterSet's qualified prefix
     accessed = getfield(sub, :accessed)
     for k in keys(kw)
@@ -135,9 +142,43 @@ function create_component(
             push!(accessed, prefix * "." * String(k))
         end
     end
+    union!(accessed, nested_paths)
+    kw = merge(kw, nested_kw)
     # `kwargs` lets callers inject fields like `_graph=...` - e.g. the composite
     # address-form needs to thread the root PS into the composite's private graph.
     return create_component(T; kwargs..., pairs(kw)...)
+end
+
+# Nested namespaces in the scoped `ParameterSet` `sub` that correspond to
+# `NamedTuple`-valued parameters in `base` (the shape `extract_parameter_set`
+# writes for `NamedTuple` parameters), converted back to `NamedTuple`s. Returns
+# the keyword arguments together with the qualified paths of every leaf they
+# contain, for access tracking. Namespaces whose key is not a `NamedTuple`
+# parameter in `base` (e.g. composite subcomponent namespaces) are skipped.
+function _namedtuple_namespaces(sub::ParameterSet, base::NamedTuple)
+    prefix = getfield(sub, :prefix)
+    kw = Pair{Symbol, Any}[]
+    paths = String[]
+    for (k, v) in getfield(sub, :data)
+        s = Symbol(k)
+        (v isa Dict && haskey(base, s) && base[s] isa NamedTuple) || continue
+        push!(kw, s => _namespace_to_namedtuple!(paths, v, prefix * "." * k))
+    end
+    return (isempty(kw) ? (;) : NamedTuple(kw)), paths
+end
+
+function _namespace_to_namedtuple!(paths::Vector{String}, d::Dict, path::String)
+    fields = Pair{Symbol, Any}[]
+    for (k, v) in d
+        subpath = path * "." * k
+        if v isa Dict
+            push!(fields, Symbol(k) => _namespace_to_namedtuple!(paths, v, subpath))
+        else
+            push!(paths, subpath)
+            push!(fields, Symbol(k) => v)
+        end
+    end
+    return isempty(fields) ? (;) : NamedTuple(fields)
 end
 
 # Reached when `create_component(T, ps, address)` or `create_component(T, ps.x.y)`
@@ -209,7 +250,9 @@ Apply `ParameterSet` leaves at `address` on top of the template instance `c`,
 optionally followed by composite-level keyword overrides.
 
 Starting from `c`'s parameters as the base, each leaf under `resolve(ps, address)`
-overrides the corresponding field. Nested namespaces below `address` are ignored —
+overrides the corresponding field. A nested namespace below `address` whose key
+names a `NamedTuple`-valued parameter of `c` is read as a `NamedTuple` and merged
+recursively into that parameter; other nested namespaces are ignored —
 scope at the level whose leaves match `c`'s parameters. Any `kwargs` are then
 applied on top of the `ParameterSet` overlay, so precedence is:
 template defaults < `ParameterSet` overlay < `kwargs`.
@@ -291,6 +334,10 @@ address-string form instead.
 Throws `ArgumentError` if any leaf in `sub` is not a parameter of `typeof(c)`,
 surfacing typos in the `ParameterSet` source early.
 
+A nested namespace in `sub` whose key names a `NamedTuple`-valued parameter of `c`
+is converted to a `NamedTuple` and merged recursively into that parameter. Other
+nested namespaces are ignored.
+
 Every leaf in `sub` is pushed into `ps.accessed` with its qualified path, even
 when the leaf's value happens to equal the field's existing value on `c`. The
 recorded fact is "the loader read this PS leaf", not "the value differed from
@@ -317,11 +364,13 @@ function set_parameters(c::AbstractComponent, sub::ParameterSet)
             )
         )
     end
+    nested_kw, nested_paths = _namedtuple_namespaces(sub, parameters(c))
     accessed = getfield(sub, :accessed)
     for k in keys(kw)
         push!(accessed, prefix * "." * String(k))
     end
-    return set_parameters(c; pairs(kw)...)
+    union!(accessed, nested_paths)
+    return set_parameters(c; pairs(kw)..., pairs(nested_kw)...)
 end
 
 # Reached when a caller passes a chained-dot lookup that fizzled, e.g.
