@@ -24,6 +24,11 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - Constructors of `@variant` and `@composite_variant` types now throw a `MethodError` for
+    keyword arguments that are not parameters of the variant, as the base `@compdef`
+    constructor does. Previously an unknown keyword (e.g. a typo, including one in a
+    `ParameterSet` namespace passed to `create_component`) was silently stored as a new
+    parameter. (#336)
   - `create_component(T, ps, address)` and `set_parameters(c, ps, address)` now read a
     nested namespace below `address` as a `NamedTuple` parameter when its key names a
     parameter whose default (or template) value is a `NamedTuple`, merging it recursively

@@ -15,6 +15,17 @@ If `comptype` is a [`@variant`](@ref) of some other component type `T <: Abstrac
 """
 base_variant(::Type{T}) where {T <: AbstractComponent} = T
 
+# A `@compdef` constructor rejects unknown keyword arguments with a `MethodError`, but a
+# variant stores its parameters in a `NamedTuple`, so an unknown keyword (e.g. a typo)
+# would be silently added as a new parameter. Throw the same `MethodError` for keywords
+# that are not parameters of the variant type `T`; `ignore` lists non-parameter keywords
+# handled elsewhere.
+function _check_variant_kwargs(::Type{T}, kwargs; ignore=()) where {T}
+    names = parameter_names(T)
+    all(k -> k in names || k in ignore, keys(kwargs)) && return nothing
+    throw(MethodError(Core.kwcall, ((; kwargs...), T), Base.get_world_counter()))
+end
+
 function variant_expr(T::Expr, name::Symbol; new_defaults::Expr=:((;)), map_meta=nothing)
     escname = esc(name)
     esctype = esc(:(Type{$name}))
@@ -40,6 +51,7 @@ function variant_expr(T::Expr, name::Symbol; new_defaults::Expr=:((;)), map_meta
         Base.propertynames(comp::$escname) =
             union([:parameters, :_geometry], parameter_names(comp))
         function ($escname)(; kwargs...)
+            _check_variant_kwargs($escname, kwargs)
             params = merge_recursive(default_parameters($escname), (; pairs(kwargs)...))
             return ($escname)(
                 params,
@@ -101,6 +113,8 @@ function composite_variant_expr(
         Base.propertynames(comp::$escname) =
             union(parameter_names(comp), [:parameters, :_graph, :_schematic, :_hooks])
         function ($escname)(; kwargs...)
+            # Composite-internal fields are accepted by the base `@compdef` constructor
+            _check_variant_kwargs($escname, kwargs; ignore=(:_graph, :_schematic, :_hooks))
             params = merge_recursive(default_parameters($escname), (; pairs(kwargs)...))
             uname = uniquename(params.name)
             g = SchematicGraph(uname)
@@ -152,6 +166,9 @@ Create `NewType <: AbstractComponent` based on `BaseType`, with optional `new_de
 
 Default parameters for the new type will be `new_defaults` merged into `default_parameters(T)`.
 You can override the original defaults or add entirely new parameters this way.
+As with the base type's keyword constructor, passing a keyword that is not a parameter
+of the new type (i.e., neither a parameter of `BaseType` nor a key of `new_defaults`)
+throws a `MethodError`.
 
 If provided, `map_meta` should be a function of `DeviceLayout.Meta` that returns another `DeviceLayout.Meta`.
 It will be applied recursively to the geometry of the base component using `map_metadata!`.
@@ -175,6 +192,7 @@ end
 Create `NewType <: AbstractCompositeComponent` based on `BaseType`, with optional `new_defaults` and `map_meta`.
 
 Default parameters for the new type will be `new_defaults` merged into `default_parameters(T)`.
+Passing a keyword that is not a parameter of the new type throws a `MethodError`.
 
 If provided, `map_meta` should be a function of `DeviceLayout.Meta` that returns another `DeviceLayout.Meta`.
 It will be applied recursively to the geometry of the base component using [`map_metadata!`](@ref).
