@@ -18,11 +18,10 @@ base_variant(::Type{T}) where {T <: AbstractComponent} = T
 # A `@compdef` constructor rejects unknown keyword arguments with a `MethodError`, but a
 # variant stores its parameters in a `NamedTuple`, so an unknown keyword (e.g. a typo)
 # would be silently added as a new parameter. Throw the same `MethodError` for keywords
-# that are not parameters of the variant type `T`; `ignore` lists non-parameter keywords
-# handled elsewhere.
-function _check_variant_kwargs(::Type{T}, kwargs; ignore=()) where {T}
+# that are not parameters of the variant type `T`.
+function _check_variant_kwargs(::Type{T}, kwargs) where {T}
     names = parameter_names(T)
-    all(k -> k in names || k in ignore, keys(kwargs)) && return nothing
+    all(in(names), keys(kwargs)) && return nothing
     throw(MethodError(Core.kwcall, ((; kwargs...), T), Base.get_world_counter()))
 end
 
@@ -112,23 +111,35 @@ function composite_variant_expr(
         end
         Base.propertynames(comp::$escname) =
             union(parameter_names(comp), [:parameters, :_graph, :_schematic, :_hooks])
-        function ($escname)(; kwargs...)
-            # Composite-internal fields are accepted by the base `@compdef` constructor
-            _check_variant_kwargs($escname, kwargs; ignore=(:_graph, :_schematic, :_hooks))
+        # Like the `@compdef` constructor, accept the composite-internal fields as
+        # keywords (e.g. `create_component(T, ps, address)` passes a `_graph` with
+        # the `ParameterSet` attached) rather than storing them as parameters
+        function ($escname)(;
+            _graph::Union{Nothing, SchematicGraph}=nothing,
+            _schematic::Union{Nothing, Schematic}=nothing,
+            _hooks::Union{Nothing, AbstractDict}=nothing,
+            kwargs...
+        )
+            _check_variant_kwargs($escname, kwargs)
             params = merge_recursive(default_parameters($escname), (; pairs(kwargs)...))
-            uname = uniquename(params.name)
-            g = SchematicGraph(uname)
-            return ($escname)(
-                params,
-                g,
-                Schematic{coordinatetype($T)}(g; log_dir=nothing),
-                Dict{Symbol, Union{Hook, <:Vector{Hook}}}()
-            )
+            g = isnothing(_graph) ? SchematicGraph(uniquename(params.name)) : _graph
+            sch = something(_schematic, Schematic{coordinatetype($T)}(g; log_dir=nothing))
+            h = something(_hooks, Dict{Symbol, Union{Hook, <:Vector{Hook}}}())
+            return ($escname)(params, g, sch, h)
         end
 
-        # Base variant has the same name and parameters (for shared parameters)
-        SchematicDrivenLayout.base_variant(comp::$escname) =
-            create_component($T, comp.name; select(comp.parameters, parameter_names($T))...)
+        # Base variant has the same name and parameters (for shared parameters),
+        # and its graph carries the same `ParameterSet` so that the base
+        # `_build_subcomponents` can read it
+        SchematicDrivenLayout.base_variant(comp::$escname) = create_component(
+            $T,
+            comp.name;
+            _graph=SchematicGraph(
+                uniquename(comp.name),
+                parameter_set(getfield(comp, :_graph))
+            ),
+            select(comp.parameters, parameter_names($T))...
+        )
         SchematicDrivenLayout.base_variant(::$esctype) = $T
         # Hook map is the same
         SchematicDrivenLayout.map_hooks(::$esctype) = map_hooks($T)
@@ -193,6 +204,11 @@ Create `NewType <: AbstractCompositeComponent` based on `BaseType`, with optiona
 
 Default parameters for the new type will be `new_defaults` merged into `default_parameters(T)`.
 Passing a keyword that is not a parameter of the new type throws a `MethodError`.
+
+As with a `@compdef` composite, the constructor accepts the internal fields `_graph`,
+`_schematic`, and `_hooks` as keywords. In particular, `create_component(NewType, ps, address)`
+attaches the `ParameterSet` `ps` to the variant's graph, and the base type's
+`_build_subcomponents` sees it via `parameter_set(cc._graph)`.
 
 If provided, `map_meta` should be a function of `DeviceLayout.Meta` that returns another `DeviceLayout.Meta`.
 It will be applied recursively to the geometry of the base component using [`map_metadata!`](@ref).

@@ -24,6 +24,11 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - A `@composite_variant` built with `create_component(T, ps, address)` now carries the
+    `ParameterSet` in its graph, and the base composite's `_build_subcomponents` sees it via
+    `parameter_set(cc._graph)`, as for the base composite. The variant constructor accepts
+    `_graph`, `_schematic`, and `_hooks` keywords like a `@compdef` constructor; previously
+    `_graph` was stored as a parameter and the `ParameterSet` was dropped. (#337)
   - Constructors of `@variant` and `@composite_variant` types now throw a `MethodError` for
     keyword arguments that are not parameters of the variant, as the base `@compdef`
     constructor does. Previously an unknown keyword (e.g. a typo, including one in a

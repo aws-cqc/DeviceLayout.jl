@@ -1317,6 +1317,9 @@ end
     SchematicDrivenLayout.map_hooks(::Type{PSFlowTestTransmon}) =
         Dict{Pair{Int, Symbol}, Symbol}()
 
+    @composite_variant PSFlowTestTransmonVariant PSFlowTestTransmon new_defaults =
+        (; junction_gap=20μm)
+
     @testset "PS propagates into composite _graph" begin
         ps = ParameterSet()
         ps.components.ps_flow_transmon.junction_gap = 15μm
@@ -1354,6 +1357,32 @@ end
         @test "components.ps_flow_transmon.junction_gap" in ps.accessed
         @test "components.ps_flow_transmon.island.cap_width" in ps.accessed
         @test "components.ps_flow_transmon.junction.junction_width" in ps.accessed
+    end
+
+    @testset "PS propagates into composite variant _graph" begin
+        ps = ParameterSet()
+        ps.components.ps_flow_transmon.junction_gap = 15μm
+        ps.components.ps_flow_transmon.island.cap_width = 42μm
+        ps.components.ps_flow_transmon.junction.junction_width = 2μm
+
+        base = create_component(PSFlowTestTransmon, ps, "components.ps_flow_transmon")
+        @test parameter_set(base._graph) === ps
+
+        tr = create_component(PSFlowTestTransmonVariant, ps, "components.ps_flow_transmon")
+        @test parameter_set(tr._graph) === ps
+        @test !haskey(parameters(tr), :_graph)
+        # PS leaf overrides the variant default.
+        @test tr.junction_gap == 15μm
+
+        # The base `_build_subcomponents` sees the PS (it asserts on `nothing`).
+        island, junction = components(tr)
+        @test parameters(island).cap_width == 42μm
+        @test parameters(junction).junction_width == 2μm
+        @test parameters(island).junction_gap == 15μm
+        @test "components.ps_flow_transmon.island.cap_width" in ps.accessed
+
+        # Without a PS, the variant's graph has none.
+        @test isnothing(parameter_set(PSFlowTestTransmonVariant()._graph))
     end
 
     @testset "Top-level plan runs end-to-end" begin
