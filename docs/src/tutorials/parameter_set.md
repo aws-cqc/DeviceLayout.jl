@@ -1,4 +1,4 @@
-# Data-Driven Design with ParameterSet
+# Parameterizing Designs with ParameterSet
 
 In [Building a Component](building_a_component.md) and [Composite Components](composite_components.md), component parameters were written directly into Julia code. For larger designs — or designs that need to vary between fabrication runs, simulation sweeps, or process nodes — it's useful to move parameters out of the source and into external configuration. `ParameterSet` is a mutable parameter source that holds a nested dictionary (typically loaded from YAML) and feeds values into your components by address.
 
