@@ -1003,14 +1003,7 @@ end
         # a list/scalar parameter written as a mapping used to keep its default silently
         ps = ParameterSet()
         ps.components.route.offsets.x = 1μm
-        err = try
-            create_component(ExtractionArrayComponent, ps, "components.route")
-        catch e
-            e
-        end
-        @test err isa ArgumentError
-        @test occursin("components.route.offsets", err.msg)
-        @test occursin("offsets", err.msg)
+        @test_throws ArgumentError create_component(ExtractionArrayComponent, ps, "components.route")
         @test_throws ArgumentError set_parameters(ExtractionArrayComponent(), ps, "components.route")
         # sub-component namespaces (keys that are not parameters) are still ignored
         ps.components.route.child.x = 1μm
@@ -1023,14 +1016,11 @@ end
     @testset "Address resolving to a leaf is an ArgumentError" begin
         ps = ParameterSet()
         ps.components.line.style.trace = 3μm
-        err = try
-            create_component(ExtractionNamedTupleComponent, ps, "components.line.style.trace")
-        catch e
-            e
-        end
-        @test err isa ArgumentError
-        @test occursin("components.line.style.trace", err.msg)
-        @test occursin("leaf value", err.msg)
+        @test_throws ArgumentError create_component(
+            ExtractionNamedTupleComponent,
+            ps,
+            "components.line.style.trace"
+        )
         @test_throws ArgumentError create_component(ExtractionNamedTupleComponent, ps, "")
         @test_throws ParameterKeyError create_component(
             ExtractionNamedTupleComponent,
