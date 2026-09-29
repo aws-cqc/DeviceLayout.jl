@@ -983,12 +983,16 @@ end
             g,
             ExtractionArrayComponent(;
                 name="route",
-                settings=Dict{String, Any}("gain" => 5, "nested" => Dict{String, Any}("k" => 1))
+                settings=Dict{String, Any}(
+                    "gain" => 5,
+                    "nested" => Dict{String, Any}("k" => 1)
+                )
             )
         )
         ps = extract_parameter_set(g)
         c = create_component(ExtractionArrayComponent, ps, "components.route")
-        @test c.settings == Dict{String, Any}("gain" => 5, "nested" => Dict{String, Any}("k" => 1))
+        @test c.settings ==
+              Dict{String, Any}("gain" => 5, "nested" => Dict{String, Any}("k" => 1))
         @test "components.route.settings.gain" in ps.accessed
         @test "components.route.settings.nested.k" in ps.accessed
         # the namespace replaces the Dict (no merge), with the parameter's key type
@@ -996,15 +1000,24 @@ end
         @test create_component(ExtractionArrayComponent, ps, "components.route").settings ==
               Dict{String, Any}("other" => 1)
         template = ExtractionArrayComponent(; settings=Dict{Symbol, Any}(:gain => 2))
-        @test set_parameters(template, ps, "components.route").settings == Dict{Symbol, Any}(:other => 1)
+        @test set_parameters(template, ps, "components.route").settings ==
+              Dict{Symbol, Any}(:other => 1)
     end
 
     @testset "Namespace naming a non-NamedTuple parameter is an error" begin
         # a list/scalar parameter written as a mapping used to keep its default silently
         ps = ParameterSet()
         ps.components.route.offsets.x = 1μm
-        @test_throws ArgumentError create_component(ExtractionArrayComponent, ps, "components.route")
-        @test_throws ArgumentError set_parameters(ExtractionArrayComponent(), ps, "components.route")
+        @test_throws ArgumentError create_component(
+            ExtractionArrayComponent,
+            ps,
+            "components.route"
+        )
+        @test_throws ArgumentError set_parameters(
+            ExtractionArrayComponent(),
+            ps,
+            "components.route"
+        )
         # sub-component namespaces (keys that are not parameters) are still ignored
         ps.components.route.child.x = 1μm
         ps2 = ParameterSet()
@@ -1472,7 +1485,11 @@ end
             "components.ps_flow_transmon.junction_gap"
         )
         @test_throws ArgumentError create_component(PSFlowTestTransmon, ps, "")
-        @test_throws ParameterKeyError create_component(PSFlowTestTransmon, ps, "components.nope")
+        @test_throws ParameterKeyError create_component(
+            PSFlowTestTransmon,
+            ps,
+            "components.nope"
+        )
     end
 
     @testset "Top-level plan runs end-to-end" begin
