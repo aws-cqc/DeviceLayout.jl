@@ -224,7 +224,12 @@ function _namespace_to_namedtuple!(paths::Vector{String}, d::Dict, path::String)
     return isempty(fields) ? (;) : NamedTuple(fields)
 end
 
-function _namespace_to_dict!(paths::Vector{String}, d::Dict, path::String, ::Type{K}) where {K}
+function _namespace_to_dict!(
+    paths::Vector{String},
+    d::Dict,
+    path::String,
+    ::Type{K}
+) where {K}
     K <: Union{String, Symbol} || throw(
         ArgumentError(
             "namespace \"$path\" names a Dict parameter with keys of type $K; only " *
