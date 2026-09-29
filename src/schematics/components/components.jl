@@ -79,11 +79,17 @@ The address is resolved to a scoped `ParameterSet`, and the call is delegated to
 [`create_component(T, sub::ParameterSet)`](@ref). That overload splats the
 leaves at `sub` as keyword arguments into the keyword-only `create_component(T; kwargs...)`,
 which merges them recursively with `default_parameters(T)`. A nested namespace
-below `address` is read as a `NamedTuple` parameter when its key names a parameter
-of `T` whose default is a `NamedTuple` (the shape written by
-[`extract_parameter_set`](@ref)); it is merged recursively into the default, so it
-need not specify every field. Other nested namespaces (e.g. those of composite
-subcomponents) are ignored - scope at the level whose leaves match `T`'s parameters.
+below `address` whose key names a parameter of `T` is read back as that parameter's
+value (the shape written by [`extract_parameter_set`](@ref)): a `NamedTuple` parameter
+is merged recursively into the default, so the namespace need not specify every
+field; a `Dict` parameter is replaced by the namespace's entries (keys converted to
+the parameter's key type). A namespace whose key names a parameter of any other type
+is an `ArgumentError` (the parameter must be written as a leaf). Other nested
+namespaces (e.g. those of composite subcomponents) are ignored - scope at the level
+whose leaves match `T`'s parameters.
+
+Throws `ParameterKeyError` if `address` does not resolve to anything, and
+`ArgumentError` if it is empty or resolves to a leaf value rather than a namespace.
 
 Consumed leaves (those matching `parameter_names(T)`) are recorded in `ps.accessed`
 as qualified paths rooted at the original PS.
@@ -93,7 +99,38 @@ function create_component(
     ps::ParameterSet,
     address::String
 ) where {T <: AbstractComponent}
-    return create_component(T, resolve(ps, address))
+    return create_component(T, _resolve_namespace(ps, address, "create_component(T, ps, address)"))
+end
+
+# Resolve `address` in `ps` to a namespace for the address-string forms of `create_component`
+# and `set_parameters`: an empty address or one that resolves to a leaf value is an
+# `ArgumentError` with an actionable message (rather than the generic `MethodError` the
+# scoped forms would raise), a missing one a `ParameterKeyError`.
+function _resolve_namespace(ps::ParameterSet, address::String, caller::String)
+    # An empty address would hand the root `ps` to the scoped form, which rejects roots
+    # with a message telling the caller to use the address-form — confusing when they
+    # just did.
+    isempty(address) && throw(
+        ArgumentError(
+            "$caller: `address` must be non-empty. Pass the dot-separated path to the " *
+            "namespace whose leaves match the component's parameters " *
+            "(e.g. \"components.transmon.island\")."
+        )
+    )
+    sub = resolve(ps, address)
+    sub isa MissingNamespace &&
+        throw(ParameterKeyError(getfield(sub, :key), _namespace_path(sub)))
+    # `resolve` returns a leaf value when the address terminates at a scalar
+    # (e.g. "components.x.junction_gap"); that is never a valid namespace.
+    sub isa ParameterSet || throw(
+        ArgumentError(
+            "address \"$address\" resolves to a leaf value ($(typeof(sub))), " *
+            "not a ParameterSet namespace. `$caller` expects `address` to point at " *
+            "the namespace whose leaves match the component's parameters; pass a leaf " *
+            "as a kwarg instead, e.g. `<param>=resolve(ps, \"$address\")`."
+        )
+    )
+    return sub
 end
 
 """
@@ -149,20 +186,38 @@ function create_component(
     return create_component(T; kwargs..., pairs(kw)...)
 end
 
-# Nested namespaces in the scoped `ParameterSet` `sub` that correspond to
-# `NamedTuple`-valued parameters in `base` (the shape `extract_parameter_set`
-# writes for `NamedTuple` parameters), converted back to `NamedTuple`s. Returns
-# the keyword arguments together with the qualified paths of every leaf they
-# contain, for access tracking. Namespaces whose key is not a `NamedTuple`
-# parameter in `base` (e.g. composite subcomponent namespaces) are skipped.
+# Nested namespaces in the scoped `ParameterSet` `sub` that correspond to parameters in
+# `base` (the shape `extract_parameter_set` writes for `NamedTuple`- and `Dict`-valued
+# parameters), converted back to the parameter's type: a `NamedTuple` (merged recursively
+# into the default by the caller) or a `Dict` with the default's key type (replacing the
+# default). A namespace naming a parameter of any other type is a mistake in the source
+# (e.g. a list written as a mapping) and throws rather than silently keeping the default.
+# Returns the keyword arguments together with the qualified paths of every leaf they
+# contain, for access tracking. Namespaces whose key is not a parameter in `base` (e.g.
+# composite subcomponent namespaces) are skipped.
 function _namedtuple_namespaces(sub::ParameterSet, base::NamedTuple)
     prefix = getfield(sub, :prefix)
     kw = Pair{Symbol, Any}[]
     paths = String[]
     for (k, v) in getfield(sub, :data)
         s = Symbol(k)
-        (v isa Dict && haskey(base, s) && base[s] isa NamedTuple) || continue
-        push!(kw, s => _namespace_to_namedtuple!(paths, v, prefix * "." * k))
+        (v isa Dict && haskey(base, s)) || continue
+        path = prefix * "." * k
+        default = base[s]
+        if default isa NamedTuple
+            push!(kw, s => _namespace_to_namedtuple!(paths, v, path))
+        elseif default isa AbstractDict
+            push!(kw, s => _namespace_to_dict!(paths, v, path, keytype(default)))
+        else
+            throw(
+                ArgumentError(
+                    "namespace \"$path\" names the parameter `$s`, whose value is a " *
+                    "$(typeof(default)), not a NamedTuple or Dict. Only NamedTuple- and " *
+                    "Dict-valued parameters can be written as a namespace; write `$s` " *
+                    "as a leaf value."
+                )
+            )
+        end
     end
     return (isempty(kw) ? (;) : NamedTuple(kw)), paths
 end
@@ -179,6 +234,26 @@ function _namespace_to_namedtuple!(paths::Vector{String}, d::Dict, path::String)
         end
     end
     return isempty(fields) ? (;) : NamedTuple(fields)
+end
+
+function _namespace_to_dict!(paths::Vector{String}, d::Dict, path::String, ::Type{K}) where {K}
+    K <: Union{String, Symbol} || throw(
+        ArgumentError(
+            "namespace \"$path\" names a Dict parameter with keys of type $K; only " *
+            "Dict parameters with String or Symbol keys can be read from a namespace."
+        )
+    )
+    result = Dict{K, Any}()
+    for (k, v) in d
+        subpath = path * "." * k
+        if v isa Dict
+            result[K(k)] = _namespace_to_dict!(paths, v, subpath, K)
+        else
+            push!(paths, subpath)
+            result[K(k)] = v
+        end
+    end
+    return result
 end
 
 # Reached when `create_component(T, ps, address)` or `create_component(T, ps.x.y)`
@@ -233,6 +308,10 @@ This is in contrast to the default component keyword constructor, which does not
 
 This can also be written by calling the component instance `c` like a function:
 `c(name, params; kwargs...)`.
+
+A composite component keeps the `ParameterSet` attached to its graph (by
+`create_component(T, ps, address)`), so that `_build_subcomponents` of the new
+instance still sees it.
 """
 function set_parameters(
     c::AbstractComponent,
@@ -252,8 +331,9 @@ optionally followed by composite-level keyword overrides.
 Starting from `c`'s parameters as the base, each leaf under `resolve(ps, address)`
 overrides the corresponding field. A nested namespace below `address` whose key
 names a `NamedTuple`-valued parameter of `c` is read as a `NamedTuple` and merged
-recursively into that parameter; other nested namespaces are ignored —
-scope at the level whose leaves match `c`'s parameters. Any `kwargs` are then
+recursively into that parameter, one naming a `Dict`-valued parameter replaces it
+(an `ArgumentError` for a parameter of any other type); other nested namespaces are
+ignored — scope at the level whose leaves match `c`'s parameters. Any `kwargs` are then
 applied on top of the `ParameterSet` overlay, so precedence is:
 template defaults < `ParameterSet` overlay < `kwargs`.
 
@@ -291,32 +371,7 @@ end
 ```
 """
 function set_parameters(c::AbstractComponent, ps::ParameterSet, address::String; kwargs...)
-    # An empty address would hand the root `ps` to the scoped form, which
-    # rejects roots with a message telling the caller to use the address-form
-    # — confusing when they just did. Reject empty addresses up front.
-    isempty(address) && throw(
-        ArgumentError(
-            "set_parameters(c, ps, address): `address` must be non-empty. " *
-            "Pass the dot-separated path to the namespace whose leaves " *
-            "match `c`'s parameters (e.g. \"components.transmon.island\")."
-        )
-    )
-    sub = resolve(ps, address)
-    sub isa MissingNamespace &&
-        throw(ParameterKeyError(getfield(sub, :key), _namespace_path(sub)))
-    # `resolve` returns a leaf value when the address terminates at a scalar
-    # (e.g. "components.x.junction_gap"). That's never a valid argument to the
-    # scoped form below — surface it directly with an actionable message rather
-    # than letting dispatch fall through to a generic MethodError.
-    sub isa ParameterSet || throw(
-        ArgumentError(
-            "address \"$address\" resolves to a leaf value ($(typeof(sub))), " *
-            "not a ParameterSet namespace. `set_parameters(c, ps, address)` " *
-            "expects `address` to point at the namespace whose leaves match " *
-            "`c`'s parameters; pass a leaf as a kwarg instead, e.g. " *
-            "`set_parameters(c; <param>=resolve(ps, \"$address\"))`."
-        )
-    )
+    sub = _resolve_namespace(ps, address, "set_parameters(c, ps, address)")
     overlaid = set_parameters(c, sub)
     isempty(kwargs) && return overlaid
     return set_parameters(overlaid; kwargs...)
@@ -335,8 +390,9 @@ Throws `ArgumentError` if any leaf in `sub` is not a parameter of `typeof(c)`,
 surfacing typos in the `ParameterSet` source early.
 
 A nested namespace in `sub` whose key names a `NamedTuple`-valued parameter of `c`
-is converted to a `NamedTuple` and merged recursively into that parameter. Other
-nested namespaces are ignored.
+is converted to a `NamedTuple` and merged recursively into that parameter, one naming
+a `Dict`-valued parameter replaces it (an `ArgumentError` for a parameter of any other
+type). Other nested namespaces are ignored.
 
 Every leaf in `sub` is pushed into `ps.accessed` with its qualified path, even
 when the leaf's value happens to equal the field's existing value on `c`. The

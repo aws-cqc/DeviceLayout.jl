@@ -429,9 +429,7 @@ function create_component(
     ps::ParameterSet,
     address::String
 ) where {T <: AbstractCompositeComponent}
-    sub = resolve(ps, address)
-    sub isa ParameterSet ||
-        throw(ParameterKeyError(getfield(sub, :key), _namespace_path(sub)))
+    sub = _resolve_namespace(ps, address, "create_component(T, ps, address)")
     # Build the private `_graph` with the ROOT `ps` attached so that, inside
     # `_build_subcomponents`, `parameter_set(cc._graph) === ps`. The non-
     # composite scoped form handles leaf extraction + access tracking; we
@@ -444,6 +442,27 @@ function create_component(
         T,
         sub;
         _graph=_graph
+    )
+end
+
+# A composite rebuilt with new parameters keeps the `ParameterSet` attached to its graph
+# (by `create_component(T, ps, address)`), so that its `_build_subcomponents` still sees it.
+# Without one, the constructor's own fresh graph is used as before.
+function set_parameters(
+    c::AbstractCompositeComponent,
+    name::String=name(c),
+    params::NamedTuple=parameters(c);
+    kwargs...
+)
+    ps = parameter_set(c._graph)
+    isnothing(ps) && return create_component(typeof(c), name, params; kwargs...)
+    nm = get(kwargs, :name, name) # `kwargs` win over `name`, as in `create_component`
+    return create_component(
+        typeof(c),
+        name,
+        params;
+        _graph=SchematicGraph(uniquename(nm), ps),
+        kwargs...
     )
 end
 

@@ -24,6 +24,15 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - `create_component(T, ps, address)` and `set_parameters(c, ps, address)` no longer silently
+    keep the default of a parameter whose nested namespace they cannot read: a namespace naming a
+    `Dict`-valued parameter is now read back as a `Dict` with the parameter's key type (the shape
+    `extract_parameter_set` writes), and one naming a parameter of any other type (e.g. a list
+    written as a mapping) is an `ArgumentError`. An `address` that is empty or resolves to a leaf
+    value is an `ArgumentError` with an actionable message for `create_component` as well (it was
+    a generic `MethodError`, or a failed `ParameterKeyError` for composites). `set_parameters` on
+    a composite keeps the `ParameterSet` attached to its graph, so `_build_subcomponents` of the
+    new instance still sees it (it used to rebuild the graph without the `ParameterSet`).
   - A `@composite_variant` built with `create_component(T, ps, address)` now carries the
     `ParameterSet` in its graph, and the base composite's `_build_subcomponents` sees it via
     `parameter_set(cc._graph)`, as for the base composite. The variant constructor accepts
