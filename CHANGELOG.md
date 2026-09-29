@@ -24,30 +24,13 @@ The format of this changelog is based on
 
 ### Fixed
 
-  - `create_component(T, ps, address)` and `set_parameters(c, ps, address)` no longer silently
-    keep the default of a parameter whose nested namespace they cannot read: a namespace naming a
-    `Dict`-valued parameter is now read back as a `Dict` with the parameter's key type (the shape
-    `extract_parameter_set` writes), and one naming a parameter of any other type (e.g. a list
-    written as a mapping) is an `ArgumentError`. An `address` that is empty or resolves to a leaf
-    value is an `ArgumentError` with an actionable message for `create_component` as well (it was
-    a generic `MethodError`, or a failed `ParameterKeyError` for composites). `set_parameters` on
-    a composite keeps the `ParameterSet` attached to its graph, so `_build_subcomponents` of the
-    new instance still sees it (it used to rebuild the graph without the `ParameterSet`).
-  - A `@composite_variant` built with `create_component(T, ps, address)` now carries the
-    `ParameterSet` in its graph, and the base composite's `_build_subcomponents` sees it via
-    `parameter_set(cc._graph)`, as for the base composite. The variant constructor accepts
-    `_graph`, `_schematic`, and `_hooks` keywords like a `@compdef` constructor; previously
-    `_graph` was stored as a parameter and the `ParameterSet` was dropped. (#337)
-  - Constructors of `@variant` and `@composite_variant` types now throw a `MethodError` for
-    keyword arguments that are not parameters of the variant, as the base `@compdef`
-    constructor does. Previously an unknown keyword (e.g. a typo, including one in a
-    `ParameterSet` namespace passed to `create_component`) was silently stored as a new
-    parameter. (#336)
-  - `create_component(T, ps, address)` and `set_parameters(c, ps, address)` now read a
-    nested namespace below `address` as a `NamedTuple` parameter when its key names a
-    parameter whose default (or template) value is a `NamedTuple`, merging it recursively
-    into that value. Previously such namespaces were skipped, so the `NamedTuple` parameters
-    that `extract_parameter_set` writes as namespaces were not read back. (#335)
+  - `create_component(T, ps, address)` and `set_parameters(c, ps, address)` read `NamedTuple`
+    and `Dict` parameters from nested namespaces, as written by `extract_parameter_set`. (#335)
+  - `@variant` and `@composite_variant` constructors reject unknown keyword arguments. (#336)
+  - A `@composite_variant` created from a `ParameterSet` passes it on to
+    `_build_subcomponents`. (#337)
+  - `create_component` and `set_parameters` give clearer errors for invalid `ParameterSet`
+    addresses and namespaces, and `set_parameters` on a composite keeps its `ParameterSet`.
   - `uniquename(str, dlm)` dropped the delimiter when reconstructing the base name of a
     `str0 * dlm * n` input containing several delimiters (`uniquename("x_3_1", '_')` returned
     `"x3_1"`), and a bare number was treated as a suffix. `uniquename` also takes a new keyword
