@@ -177,9 +177,7 @@ Create `NewType <: AbstractComponent` based on `BaseType`, with optional `new_de
 
 Default parameters for the new type will be `new_defaults` merged into `default_parameters(T)`.
 You can override the original defaults or add entirely new parameters this way.
-As with the base type's keyword constructor, passing a keyword that is not a parameter
-of the new type (i.e., neither a parameter of `BaseType` nor a key of `new_defaults`)
-throws a `MethodError`.
+Passing a keyword that is not a parameter of the new type throws a `MethodError`.
 
 If provided, `map_meta` should be a function of `DeviceLayout.Meta` that returns another `DeviceLayout.Meta`.
 It will be applied recursively to the geometry of the base component using `map_metadata!`.
