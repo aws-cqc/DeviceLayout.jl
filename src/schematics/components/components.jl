@@ -99,22 +99,14 @@ function create_component(
     ps::ParameterSet,
     address::String
 ) where {T <: AbstractComponent}
-    return create_component(T, _resolve_namespace(ps, address, "create_component(T, ps, address)"))
+    return create_component(T, _resolve_namespace(ps, address))
 end
 
-# Resolve `address` in `ps` to a namespace for the address-string forms of `create_component`
-# and `set_parameters`: an empty address or one that resolves to a leaf value is an
-# `ArgumentError` with an actionable message (rather than the generic `MethodError` the
-# scoped forms would raise), a missing one a `ParameterKeyError`.
-function _resolve_namespace(ps::ParameterSet, address::String, caller::String)
-    # An empty address would hand the root `ps` to the scoped form, which rejects roots
-    # with a message telling the caller to use the address-form — confusing when they
-    # just did.
+function _resolve_namespace(ps::ParameterSet, address::String)
     isempty(address) && throw(
         ArgumentError(
-            "$caller: `address` must be non-empty. Pass the dot-separated path to the " *
-            "namespace whose leaves match the component's parameters " *
-            "(e.g. \"components.transmon.island\")."
+            "`address` must be non-empty. Pass the dot-separated path to the namespace " *
+            "whose leaves match the component's parameters (e.g. \"components.transmon.island\")."
         )
     )
     sub = resolve(ps, address)
@@ -124,10 +116,10 @@ function _resolve_namespace(ps::ParameterSet, address::String, caller::String)
     # (e.g. "components.x.junction_gap"); that is never a valid namespace.
     sub isa ParameterSet || throw(
         ArgumentError(
-            "address \"$address\" resolves to a leaf value ($(typeof(sub))), " *
-            "not a ParameterSet namespace. `$caller` expects `address` to point at " *
-            "the namespace whose leaves match the component's parameters; pass a leaf " *
-            "as a kwarg instead, e.g. `<param>=resolve(ps, \"$address\")`."
+            "address \"$address\" resolves to a leaf value ($(typeof(sub))), not a " *
+            "ParameterSet namespace. `address` must point at the namespace whose leaves " *
+            "match the component's parameters; pass a leaf as a kwarg instead, e.g. " *
+            "`<param>=resolve(ps, \"$address\")`."
         )
     )
     return sub
@@ -188,13 +180,9 @@ end
 
 # Nested namespaces in the scoped `ParameterSet` `sub` that correspond to parameters in
 # `base` (the shape `extract_parameter_set` writes for `NamedTuple`- and `Dict`-valued
-# parameters), converted back to the parameter's type: a `NamedTuple` (merged recursively
-# into the default by the caller) or a `Dict` with the default's key type (replacing the
-# default). A namespace naming a parameter of any other type is a mistake in the source
-# (e.g. a list written as a mapping) and throws rather than silently keeping the default.
+# parameters), converted back to the parameter's type.
 # Returns the keyword arguments together with the qualified paths of every leaf they
-# contain, for access tracking. Namespaces whose key is not a parameter in `base` (e.g.
-# composite subcomponent namespaces) are skipped.
+# contain, for access tracking.
 function _namedtuple_namespaces(sub::ParameterSet, base::NamedTuple)
     prefix = getfield(sub, :prefix)
     kw = Pair{Symbol, Any}[]
@@ -371,7 +359,7 @@ end
 ```
 """
 function set_parameters(c::AbstractComponent, ps::ParameterSet, address::String; kwargs...)
-    sub = _resolve_namespace(ps, address, "set_parameters(c, ps, address)")
+    sub = _resolve_namespace(ps, address)
     overlaid = set_parameters(c, sub)
     isempty(kwargs) && return overlaid
     return set_parameters(overlaid; kwargs...)

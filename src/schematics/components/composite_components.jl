@@ -429,7 +429,7 @@ function create_component(
     ps::ParameterSet,
     address::String
 ) where {T <: AbstractCompositeComponent}
-    sub = _resolve_namespace(ps, address, "create_component(T, ps, address)")
+    sub = _resolve_namespace(ps, address)
     # Build the private `_graph` with the ROOT `ps` attached so that, inside
     # `_build_subcomponents`, `parameter_set(cc._graph) === ps`. The non-
     # composite scoped form handles leaf extraction + access tracking; we
