@@ -413,17 +413,6 @@ function _filter_parameters(subcomp, comp, prefix, except)
     return filter(kv -> first(kv) in parameter_names(subcomp), Dict(unprefixed_params))
 end
 
-"""
-    create_component(::Type{T}, ps::ParameterSet, address::String) where {T <: AbstractCompositeComponent}
-
-Composite-component specialization that threads the root `ParameterSet` into the
-composite's private `_graph`, so that `parameter_set(cc._graph)` inside
-`_build_subcomponents` returns the same `ps` the caller holds.
-
-Without this specialization, `@compdef`'s default `_graph = SchematicGraph(uniquename(name))`
-has no PS attached and composite subcomponents can't find the parameter set during
-lazy graph construction.
-"""
 function create_component(
     ::Type{T},
     ps::ParameterSet,
