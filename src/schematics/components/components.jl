@@ -34,12 +34,18 @@ parameter_names(::T) where {T <: AbstractComponent} = parameter_names(T)
         kwargs...
     ) where {T <: AbstractComponent}
 
-Create an instance of type `T` with name `name` and parameters derived by merging `kwargs` into `base_parameters`.
+Create a component of type `T` named `name`, with parameters `base_parameters` updated by `kwargs`.
 
-The parameter merge is recursive, meaning that a `NamedTuple` keyword argument
-will be merged into the corresponding `NamedTuple` base parameter. This can be convenient
-because not every "subparameter" within that `NamedTuple` needs to be specified.
-This is in contrast to the default component keyword constructor, which does not merge recursively.
+`NamedTuple`-valued parameters are merged recursively, so a keyword argument only needs the
+fields that change.
+
+# Examples
+
+```julia
+# `Line` has parameters `length = 100μm` and `style = (; trace=10μm, gap=6μm)`
+line = create_component(Line, "feedline"; length=200μm, style=(; gap=4μm))
+line.style # (trace = 10μm, gap = 4μm)
+```
 """
 function create_component(
     ::Type{T},
@@ -73,26 +79,31 @@ end
 """
     create_component(::Type{T}, ps::ParameterSet, address::String) where {T <: AbstractComponent}
 
-Create an instance of type `T` using parameters from a `ParameterSet` at the given `address`.
+Create a component of type `T` from the parameters in `ps` at `address`.
 
-The address is resolved to a scoped `ParameterSet`, and the call is delegated to
-[`create_component(T, sub::ParameterSet)`](@ref). That overload splats the
-leaves at `sub` as keyword arguments into the keyword-only `create_component(T; kwargs...)`,
-which merges them recursively with `default_parameters(T)`. A nested namespace
-below `address` whose key names a parameter of `T` is read back as that parameter's
-value (the shape written by [`extract_parameter_set`](@ref)): a `NamedTuple` parameter
-is merged recursively into the default, so the namespace need not specify every
-field; a `Dict` parameter is replaced by the namespace's entries (keys converted to
-the parameter's key type). A namespace whose key names a parameter of any other type
-is an `ArgumentError` (the parameter must be written as a leaf). Other nested
-namespaces (e.g. those of composite subcomponents) are ignored - scope at the level
-whose leaves match `T`'s parameters.
+Parameters missing from `ps` keep their defaults. Parameters read from `ps` are recorded in
+`ps.accessed`. If `T` is a composite component, `ps` is attached to its graph, so that
+`_build_subcomponents` can read it with `parameter_set(cc._graph)`.
 
-Throws `ParameterKeyError` if `address` does not resolve to anything, and
-`ArgumentError` if it is empty or resolves to a leaf value rather than a namespace.
+# Examples
 
-Consumed leaves (those matching `parameter_names(T)`) are recorded in `ps.accessed`
-as qualified paths rooted at the original PS.
+```julia
+# `Line` has parameters `length = 100μm`, `style = (; trace=10μm, gap=6μm)`,
+# and `labels = Dict("in" => "A")`
+ps = ParameterSet()
+ps.components.line.length = 200μm
+ps.components.line.style.gap = 4μm   # merged into the default `style`
+ps.components.line.labels.out = "B"  # replaces the default `labels`
+ps.components.line.pad.width = 20μm  # not a parameter of `Line`: ignored
+
+line = create_component(Line, ps, "components.line")
+line.style  # (trace = 10μm, gap = 4μm)
+line.labels # Dict("out" => "B")
+
+bad = ParameterSet()
+bad.components.line.length.value = 1μm # `length` is neither a `NamedTuple` nor a `Dict`
+create_component(Line, bad, "components.line") # ArgumentError
+```
 """
 function create_component(
     ::Type{T},
@@ -128,22 +139,14 @@ end
 """
     create_component(::Type{T}, sub::ParameterSet) where {T <: AbstractComponent}
 
-Create an instance of type `T` from a scoped `ParameterSet`, typically obtained by
-chained-dot access like `ps.components.transmon.junction`.
+Create a component of type `T` from the parameters in `sub`, a namespace of a `ParameterSet`
+such as `ps.components.line`.
 
-Leaf parameters (non-`Dict` values) at `sub` are extracted via `leaf_params` and
-passed as keyword arguments. Nested namespaces whose key names a `NamedTuple`-valued
-parameter of `T` (per `default_parameters(T)`) are converted to `NamedTuple`s and
-passed as well, to be merged recursively into the default. Consumed leaves
-(including those inside such nested namespaces) are recorded in the shared `accessed`
-set as qualified paths (e.g. `"components.transmon.junction.w_jj"`), matching the
-behavior of the address-string form.
+Parameters read from `sub` are recorded in its `ParameterSet`'s `accessed` field. Not
+supported for composite components, which need the address form
+`create_component(T, ps, address)`.
 
-`sub` must be a scoped view (non-empty prefix); passing a root `ParameterSet`
-raises an `ArgumentError` because bare leaf names at the root have no meaningful
-qualified path and the use case is ambiguous - use the address-string form.
-
-# Example
+# Examples
 
 ```julia
 junction = create_component(ExampleSimpleJunction, ps.components.transmon.junction)
@@ -267,14 +270,13 @@ end
         kwargs...
     )
 
-Create an instance of type `typeof(c)` with name `name` and parameters derived by merging `kwargs` into `params.
+Equivalent to `set_parameters(c, name, params; kwargs...)`.
 
-The parameter merge is recursive, meaning that a `NamedTuple` keyword argument
-will be merged into the corresponding `NamedTuple` base parameter. This can be convenient
-because not every "subparameter" within that `NamedTuple` needs to be specified.
-This is in contrast to the default component keyword constructor, which does not merge recursively.
+# Examples
 
-This is equivalent to `set_parameters(c, name, params; kwargs...)`.
+```julia
+wide = Line("wide_line"; style=(; trace=20μm))
+```
 """
 function (c::AbstractComponent)(
     name::String=name(c),
@@ -292,19 +294,18 @@ end
         kwargs...
     )
 
-Create an instance of type `typeof(c)` with name `name` and parameters derived by merging `kwargs` into `params.
+Create a copy of `c` named `name`, with parameters `params` updated by `kwargs`.
 
-The parameter merge is recursive, meaning that a `NamedTuple` keyword argument
-will be merged into the corresponding `NamedTuple` base parameter. This can be convenient
-because not every "subparameter" within that `NamedTuple` needs to be specified.
-This is in contrast to the default component keyword constructor, which does not merge recursively.
+`NamedTuple`-valued parameters are merged recursively, so a keyword argument only needs the
+fields that change. The same can be written as `c(name, params; kwargs...)`.
 
-This can also be written by calling the component instance `c` like a function:
-`c(name, params; kwargs...)`.
+# Examples
 
-A composite component keeps the `ParameterSet` attached to its graph (by
-`create_component(T, ps, address)`), so that `_build_subcomponents` of the new
-instance still sees it.
+```julia
+# `line` has parameters `length = 100μm` and `style = (; trace=10μm, gap=6μm)`
+longer = set_parameters(line; length=200μm, style=(; gap=4μm))
+longer.style # (trace = 10μm, gap = 4μm)
+```
 """
 function set_parameters(
     c::AbstractComponent,
@@ -318,40 +319,18 @@ end
 """
     set_parameters(c::AbstractComponent, ps::ParameterSet, address::String; kwargs...)
 
-Apply `ParameterSet` leaves at `address` on top of the template instance `c`,
-optionally followed by composite-level keyword overrides.
+Create a copy of `c` with its parameters updated from `ps` at `address`, then by `kwargs`.
 
-Starting from `c`'s parameters as the base, each leaf under `resolve(ps, address)`
-overrides the corresponding field. A nested namespace below `address` whose key
-names a `NamedTuple`-valued parameter of `c` is read as a `NamedTuple` and merged
-recursively into that parameter, one naming a `Dict`-valued parameter replaces it
-(an `ArgumentError` for a parameter of any other type); other nested namespaces are
-ignored — scope at the level whose leaves match `c`'s parameters. Any `kwargs` are then
-applied on top of the `ParameterSet` overlay, so precedence is:
-template defaults < `ParameterSet` overlay < `kwargs`.
+Parameters read from `ps` are recorded in `ps.accessed`. Values at `address` that aren't
+parameters of `c` throw an `ArgumentError`.
 
-Throws `ParameterKeyError` if `address` doesn't resolve to anything (no such
-namespace), or if a `kwarg` value is a `MissingNamespace` (failed PS lookup).
-Throws `ArgumentError` if `address` resolves to a leaf scalar rather than a
-namespace, if any leaf under `address` is not a parameter of `typeof(c)`
-(surfaces typos at aliasing time rather than as a `MethodError` inside the
-constructor), or if a `kwarg` value is itself a `ParameterSet` (a subtree is
-never a valid component-field value and almost always indicates a missing
-leaf access).
+# Examples
 
-Every PS leaf under `address` is recorded in `ps.accessed` as a fully qualified
-path — including leaves whose value happens to equal the template's default and
-leaves that are subsequently shadowed by a trailing `kwarg`. The audit semantics
-is "the loader read this PS leaf during build", not "this value reached the
-final component". A trailing `kwarg` that overrides a PS leaf does not unmark it.
-
-This is the "templates-aliasing" entry point: a composite declares subcomponent
-defaults in a `templates` field, then `_build_subcomponents` overlays `ParameterSet`
-values on top of each template via this overload, optionally with trailing
-composite-level kwargs to enforce composite invariants.
+In `_build_subcomponents`, apply the `ParameterSet` to a template subcomponent, while the
+composite keeps control of a shared parameter:
 
 ```julia
-function _build_subcomponents(tr::MyTransmon)
+function SchematicDrivenLayout._build_subcomponents(tr::MyTransmon)
     ps = parameter_set(tr._graph)
     island = set_parameters(
         tr.templates.island,
@@ -361,6 +340,19 @@ function _build_subcomponents(tr::MyTransmon)
     )
     return (island,)
 end
+```
+
+Nested namespaces:
+
+```julia
+# `line` has parameters `style = (; trace=10μm, gap=6μm)` and `labels = Dict("in" => "A")`
+ps.components.line.style.gap = 4μm   # merged into `line.style`
+ps.components.line.labels.out = "B"  # replaces `line.labels`
+ps.components.line.pad.width = 20μm  # not a parameter of `line`: ignored
+
+new_line = set_parameters(line, ps, "components.line")
+new_line.style  # (trace = 10μm, gap = 4μm)
+new_line.labels # Dict("out" => "B")
 ```
 """
 function set_parameters(c::AbstractComponent, ps::ParameterSet, address::String; kwargs...)
@@ -373,24 +365,17 @@ end
 """
     set_parameters(c::AbstractComponent, sub::ParameterSet)
 
-Apply leaves from a scoped `ParameterSet` on top of `c`.
+Create a copy of `c` with its parameters updated from `sub`, a namespace of a `ParameterSet`
+such as `ps.components.transmon.island`.
 
-`sub` must be a scoped view (non-empty prefix, typically reached via chained-dot
-access like `ps.components.transmon.island`). For a root `ParameterSet` use the
-address-string form instead.
+Parameters read from `sub` are recorded in its `ParameterSet`'s `accessed` field. Values in
+`sub` that aren't parameters of `c` throw an `ArgumentError`.
 
-Throws `ArgumentError` if any leaf in `sub` is not a parameter of `typeof(c)`,
-surfacing typos in the `ParameterSet` source early.
+# Examples
 
-A nested namespace in `sub` whose key names a `NamedTuple`-valued parameter of `c`
-is converted to a `NamedTuple` and merged recursively into that parameter, one naming
-a `Dict`-valued parameter replaces it (an `ArgumentError` for a parameter of any other
-type). Other nested namespaces are ignored.
-
-Every leaf in `sub` is pushed into `ps.accessed` with its qualified path, even
-when the leaf's value happens to equal the field's existing value on `c`. The
-recorded fact is "the loader read this PS leaf", not "the value differed from
-the template default".
+```julia
+island = set_parameters(tr.templates.island, ps.components.transmon.island)
+```
 """
 function set_parameters(c::AbstractComponent, sub::ParameterSet)
     prefix = getfield(sub, :prefix)
