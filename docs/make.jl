@@ -82,7 +82,14 @@ makedocs(
             "ParameterSet API Reference" => "reference/parameter_set_api.md",
             "Shape Reference" => "reference/shapes.md"
         ],
-        "FAQ/Troubleshooting" => "how_to/faq.md"
+        "FAQ/Troubleshooting" => "how_to/faq.md",
+        "Developer Guide" => [
+            "Overview" => "developers/index.md",
+            "Architecture" => "developers/architecture.md",
+            "Development Workflow" => "developers/workflow.md",
+            "Release and Maintenance" => "developers/release.md",
+            "Dependencies" => "developers/dependencies.md"
+        ]
     ]
 )
 
