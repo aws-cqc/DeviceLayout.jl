@@ -196,7 +196,7 @@ function _namedtuple_namespaces(sub::ParameterSet, base::NamedTuple)
         path = prefix * "." * k
         default = base[s]
         if default isa NamedTuple
-            push!(kw, s => _namespace_to_namedtuple!(paths, v, path))
+            push!(kw, s => _namespace_to_namedtuple!(paths, v, path, default))
         elseif default isa AbstractDict
             push!(kw, s => _namespace_to_dict!(paths, v, path, keytype(default)))
         else
@@ -213,15 +213,43 @@ function _namedtuple_namespaces(sub::ParameterSet, base::NamedTuple)
     return (isempty(kw) ? (;) : NamedTuple(kw)), paths
 end
 
-function _namespace_to_namedtuple!(paths::Vector{String}, d::Dict, path::String)
+# Keys of `d` must be fields of `template`, except that an empty `template` accepts any keys.
+function _namespace_to_namedtuple!(
+    paths::Vector{String},
+    d::Dict,
+    path::String,
+    template::NamedTuple
+)
+    open = isempty(template)
     fields = Pair{Symbol, Any}[]
     for (k, v) in d
         subpath = path * "." * k
+        s = Symbol(k)
+        if !open && !haskey(template, s)
+            throw(
+                ArgumentError(
+                    "namespace key \"$subpath\" is not a field of the NamedTuple at " *
+                    "\"$path\"; valid fields are: $(join(keys(template), ", "))."
+                )
+            )
+        end
+        field_template = open ? (;) : template[s]
         if v isa Dict
-            push!(fields, Symbol(k) => _namespace_to_namedtuple!(paths, v, subpath))
+            if field_template isa AbstractDict
+                field_template = (;)
+            elseif !(field_template isa NamedTuple)
+                throw(
+                    ArgumentError(
+                        "namespace \"$subpath\" names the field `$k`, whose value is a " *
+                        "$(typeof(field_template)), not a NamedTuple or Dict; write " *
+                        "`$k` as a leaf value."
+                    )
+                )
+            end
+            push!(fields, s => _namespace_to_namedtuple!(paths, v, subpath, field_template))
         else
             push!(paths, subpath)
-            push!(fields, Symbol(k) => v)
+            push!(fields, s => v)
         end
     end
     return isempty(fields) ? (;) : NamedTuple(fields)

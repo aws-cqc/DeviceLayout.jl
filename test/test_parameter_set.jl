@@ -785,6 +785,16 @@ end
     ) = cs
     SchematicDrivenLayout.hooks(::ExtractionNamedTupleComponent) = (;)
 
+    @compdef struct ExtractionNestedNamedTupleComponent <: Component
+        name = "line"
+        style = (; trace=10μm, gap=6μm, inner=(; a=1, b=2), extra=(;))
+        meta = (;)
+    end
+    SchematicDrivenLayout._geometry!(
+        cs::CoordinateSystem,
+        ::ExtractionNestedNamedTupleComponent
+    ) = cs
+
     @testset "Complete detached extraction" begin
         source = ParameterSet()
         source.global.process = "fab-v3"
@@ -974,6 +984,38 @@ end
         @test c.style.trace == 7μm
         @test c.style.gap == 4μm
         @test "components.line.style.gap" in ps.accessed
+    end
+
+    @testset "Unknown key in a NamedTuple namespace is an ArgumentError" begin
+        T = ExtractionNestedNamedTupleComponent
+        for (set!, typo) in (
+            (ps -> (ps.components.line.style.trce = 3μm), "components.line.style.trce"),
+            (ps -> (ps.components.line.style.inner.c = 5), "components.line.style.inner.c")
+        )
+            ps = ParameterSet()
+            set!(ps)
+            @test_throws ArgumentError create_component(T, ps, "components.line")
+            @test_throws ArgumentError create_component(T, ps.components.line)
+            @test_throws ArgumentError set_parameters(T(), ps, "components.line")
+            @test !(typo in ps.accessed)
+        end
+        # a sub-namespace under a scalar field is rejected too
+        ps = ParameterSet()
+        ps.components.line.style.trace.x = 1μm
+        @test_throws ArgumentError create_component(T, ps, "components.line")
+    end
+
+    @testset "Empty NamedTuple defaults accept any namespace keys" begin
+        ps = ParameterSet()
+        ps.components.line.meta.anything = 1
+        ps.components.line.meta.deeper.k = 2
+        ps.components.line.style.extra.x = 3
+        c = create_component(ExtractionNestedNamedTupleComponent, ps, "components.line")
+        @test c.meta.anything == 1
+        @test c.meta.deeper.k == 2
+        @test c.style.extra.x == 3
+        @test c.style.trace == 10μm
+        @test "components.line.meta.deeper.k" in ps.accessed
     end
 
     @testset "Dict parameter round-trips through create_component" begin

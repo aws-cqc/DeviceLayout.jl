@@ -25,7 +25,8 @@ The format of this changelog is based on
 ### Fixed
 
   - `create_component(T, ps, address)` and `set_parameters(c, ps, address)` read `NamedTuple`
-    and `Dict` parameters from nested namespaces, as written by `extract_parameter_set`. (#335)
+    and `Dict` parameters from nested namespaces, as written by `extract_parameter_set`, and
+    reject namespace keys that are not fields of a non-empty `NamedTuple` parameter. (#335)
   - `@variant` and `@composite_variant` constructors reject unknown keyword arguments. (#336)
   - A `@composite_variant` created from a `ParameterSet` passes it on to
     `_build_subcomponents`. (#337)
