@@ -21,6 +21,6 @@ else
     patterns = ARGS
     TestItemRunner.run_tests(
         pkgdir(DeviceLayout);
-        filter=ti -> any(pattern -> occursin(pattern, ti.name), patterns),
+        filter=ti -> any(pattern -> occursin(pattern, ti.name), patterns)
     )
 end

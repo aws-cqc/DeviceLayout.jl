@@ -85,10 +85,10 @@ makedocs(
         "FAQ/Troubleshooting" => "how_to/faq.md",
         "Developer Guide" => [
             "Overview" => "developers/index.md",
+            "Design Principles" => "developers/principles.md",
             "Architecture" => "developers/architecture.md",
-            "Development Workflow" => "developers/workflow.md",
-            "Release and Maintenance" => "developers/release.md",
-            "Dependencies" => "developers/dependencies.md"
+            "Contributing" => "developers/contributing.md",
+            "Maintainer Runbook" => "developers/maintenance.md"
         ]
     ]
 )
