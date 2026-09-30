@@ -43,6 +43,24 @@
         original_keys = sort(collect(keys(user_dict2)))
         _ = ParameterSet(user_dict2)
         @test sort(collect(keys(user_dict2))) == original_keys
+
+        # Legacy "global" namespace is read as "globals" (with a warning), and
+        # the caller's dict is left alone.
+        legacy = Dict{String, Any}("global" => Dict{String, Any}("version" => 1))
+        ps = @test_logs (:warn, r"`global`") ParameterSet(legacy)
+        @test ps.globals.version == 1
+        @test !haskey(ps.data, "global")
+        @test haskey(legacy, "global")
+
+        # An explicit "globals" wins; "global" is then just an ordinary namespace.
+        both = ParameterSet(
+            Dict{String, Any}(
+                "global" => Dict{String, Any}("version" => 1),
+                "globals" => Dict{String, Any}("version" => 2)
+            )
+        )
+        @test both.globals.version == 2
+        @test getproperty(both, :global).version == 1  # `global` is a Julia keyword
     end
 
     @testset "Dot access" begin

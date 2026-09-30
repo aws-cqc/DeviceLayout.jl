@@ -56,6 +56,14 @@ struct ParameterSet
             # mutate the caller's dict. Nested dicts stay shared - we only add
             # new top-level keys here.
             data = copy(data)
+            if haskey(data, "global") && !haskey(data, "globals")
+                @warn """
+                      ParameterSet: the top-level namespace `global` is now `globals`. \
+                      Rename the `global:` key in your YAML file or Dict; it is being \
+                      read as `globals` for now.
+                      """ maxlog = 1
+                data["globals"] = pop!(data, "global")
+            end
             for ns in REQUIRED_NAMESPACES
                 haskey(data, ns) || (data[ns] = Dict{String, Any}())
             end

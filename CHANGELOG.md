@@ -10,8 +10,8 @@ The format of this changelog is based on
 
   - The required top-level `ParameterSet` namespace `global` is renamed to
     `globals`, so shared parameters are now accessed as `ps.globals.version` (and written as
-    `globals:` in YAML). Existing YAML files and dicts must rename their `global` key; a file
-    that still uses `global:` loads without error but leaves `globals` empty.
+    `globals:` in YAML). A YAML file or `Dict` that still uses `global:` is read as `globals`
+    with a warning (once per session), so existing parameter files keep working.
   - Deprecation warnings follow a consistent policy (#300): `Base.depwarn` (visible under
     `--depwarn=yes`, once per call site) where a spelling is simply going away, and a
     default-visible `@warn` with `maxlog=1` where there is a new behavior to opt into. The
