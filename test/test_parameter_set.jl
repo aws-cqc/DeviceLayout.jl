@@ -1476,6 +1476,31 @@ end
         @test isnothing(parameter_set(plain._graph))
     end
 
+    @testset "set_parameters(c, ps, address) attaches ps to the composite" begin
+        ps1 = ParameterSet()
+        ps1.components.ps_flow_transmon.island.cap_width = 42μm
+        ps1.components.ps_flow_transmon.junction.junction_width = 1μm
+        ps2 = ParameterSet()
+        ps2.components.ps_flow_transmon.junction_gap = 15μm
+        ps2.components.ps_flow_transmon.island.cap_width = 99μm
+        ps2.components.ps_flow_transmon.junction.junction_width = 2μm
+
+        for T in (PSFlowTestTransmon, PSFlowTestTransmonVariant)
+            # replaces a ParameterSet already attached
+            tr = create_component(T, ps1, "components.ps_flow_transmon")
+            tr2 = set_parameters(tr, ps2, "components.ps_flow_transmon")
+            @test parameter_set(tr2._graph) === ps2
+            @test tr2.junction_gap == 15μm
+            @test parameters(components(tr2)[1]).cap_width == 99μm
+
+            # attaches one where there was none; kwargs still win
+            tr3 = set_parameters(T(), ps2, "components.ps_flow_transmon"; junction_gap=5μm)
+            @test parameter_set(tr3._graph) === ps2
+            @test tr3.junction_gap == 5μm
+            @test parameters(components(tr3)[1]).cap_width == 99μm
+        end
+    end
+
     @testset "Composite address resolving to a leaf is an ArgumentError" begin
         ps = ParameterSet()
         ps.components.ps_flow_transmon.junction_gap = 15μm

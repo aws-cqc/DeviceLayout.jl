@@ -455,6 +455,31 @@ function set_parameters(
     )
 end
 
+# Attach `ps` itself (replacing any `ParameterSet` `c` carries) before applying it, so that
+# `_build_subcomponents` of the result reads the set its parameters came from. The rebuilds
+# in the generic method keep it attached.
+function set_parameters(
+    c::AbstractCompositeComponent,
+    ps::ParameterSet,
+    address::String;
+    kwargs...
+)
+    c = create_component(
+        typeof(c),
+        name(c),
+        parameters(c);
+        _graph=SchematicGraph(uniquename(name(c)), ps)
+    )
+    return invoke(
+        set_parameters,
+        Tuple{AbstractComponent, ParameterSet, String},
+        c,
+        ps,
+        address;
+        kwargs...
+    )
+end
+
 # Chained-dot form `create_component(T, ps.components.x)` on a composite has
 # no reference to the root PS, so it can't produce a PS-ready `_graph`.
 # Redirect the user to the address-string form with a clear error.
