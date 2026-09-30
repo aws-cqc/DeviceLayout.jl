@@ -322,7 +322,9 @@ end
 Create a copy of `c` with its parameters updated from `ps` at `address`, then by `kwargs`.
 
 Parameters read from `ps` are recorded in `ps.accessed`. Values at `address` that aren't
-parameters of `c` throw an `ArgumentError`.
+parameters of `c` throw an `ArgumentError`. If `c` is a composite component, `ps` is attached
+to the result's graph, so that `_build_subcomponents` can read it with
+`parameter_set(cc._graph)`.
 
 # Examples
 
