@@ -1,64 +1,22 @@
-# [Release and Maintenance](@id dev-release)
+# [Maintainer Runbook](@id dev-maintenance)
 
-## Versioning
-
-DeviceLayout.jl follows [Semantic Versioning](https://semver.org/). The package has been at
-v1 since its public release; the rules below decide whether a change requires a minor
-or a major version bump. Since a major bump is a large event, fixes that would technically
-be breaking are usually made opt-in in v1 and queued for v2 (see below).
-
-### [What counts as breaking?](@id dev-breaking)
-
-We aim to be clear and consistent about what counts as a breaking change.
-
-- Changes to the public API are breaking. The public API is what is exported or documented.
-- Changing the return type of a public function (e.g. scalar → vector) is breaking even when
-  the geometry is unchanged.
-- Changes to `ExamplePDK` are never breaking.
-- Changes to curve discretization within the default or a specified tolerance are not
-  breaking. Such changes can lead to out-of-tolerance changes further downstream (for
-  example, in autofill, if a grid point crosses from just inside to just outside a contour),
-  so they should still be called out prominently in the changelog.
-- Changing default mesh sizing is not breaking.
-- Changing silently incorrect behavior to match documented behavior is not breaking.
-- Changing underspecified behavior to something more "correct" is breaking. For example,
-  [#8](https://github.com/aws-cqc/DeviceLayout.jl/issues/8) describes undesirable `halo`
-  outputs, but there's no well-specified contract under which some are clearly "wrong". Other
-  boundaries between bugfixes and breaking changes may be fuzzy; lean towards opt-in fixes in
-  v1 (e.g., a keyword that selects the new behavior) and call out the fixed behavior as
-  breaking in the v2 changelog.
-- Changes to graphical output (color schemes, text display) are not breaking.
-- Changes to auto-generated names are not breaking. For example, `flatten(c)` defaults to
-  `name=uniquename("flatten_"*name(c))`, but this default or the `uniquename` mechanism itself
-  may change. If the user depends on an exact name downstream, they should set it explicitly,
-  both for this reason and because these names are already not stable for the same code run
-  multiple times in a Julia session (unless `reset_uniquename!()` is called before each run).
-
-For component packages (PDKs) rather than DeviceLayout itself, see
-[Component and package creation and versioning](@ref style-package) in the Style Guide.
-
-### Changelog
-
-`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/). Every user-visible
-change lands with an entry under `## Unreleased` in one of `### Added`, `### Changed`,
-`### Deprecated`, `### Removed`, `### Fixed`. Entries are written for users: name the public
-symbols, say what changed and why it matters, and link the issue or PR when there is one.
-Breaking changes (in a v2 changelog) and tolerance-level geometry changes (any version) are
-called out explicitly.
+Procedures for people with write access: releasing, the CI and automation behind it, and
+recurring chores. The versioning policy these procedures apply is in
+[Contributing](@ref dev-versioning).
 
 ## Release process
 
 1. Confirm `main` is green and that downstream test pipelines that track `main` (for example,
    internal PDKs) are passing.
-2. Choose the new version `X.Y.Z` from the changes since the last release, using the rules
-   above.
+2. Choose the new version `X.Y.Z` from the changes since the last release, using
+   [What counts as breaking?](@ref dev-breaking).
 3. Open a PR from a branch `vX.Y.Z` with a single commit titled `DeviceLayout vX.Y.Z` that
    changes only:
    - `Project.toml`: `version`.
    - `CHANGELOG.md`: rename `## Unreleased` to `## X.Y.Z (YYYY-MM-DD)`, add a fresh empty
      `## Unreleased` above it, and fill in anything missing.
-   - `CITATION.cff`: add anyone who made a significant contribution since the last release,
-     if not already listed.
+   - `CITATION.cff` (the source of truth for the author list): add anyone who made a
+     significant contribution since the last release, if not already listed.
 4. Merge once checks pass.
 5. On the GitHub page for the resulting commit on `main` (click the commit message on the repo
    front page), comment `@JuliaRegistrator register`
@@ -67,11 +25,13 @@ called out explicitly.
    - JuliaRegistrator opens a PR against the [General registry](https://github.com/JuliaRegistries/General),
      which auto-merges after checks (~30 minutes). If it doesn't, the PR comments
      explain why.
-   - Once registered, TagBot creates the `vX.Y.Z` tag and GitHub release, with release notes
-     taken from the changelog.
+   - Once registered, TagBot creates the `vX.Y.Z` tag and GitHub release. The release notes
+     are TagBot's generated list of PRs and issues closed since the last release; the
+     human-written summary stays in `CHANGELOG.md`.
    - The tag push triggers the `Documentation` workflow, which deploys the versioned docs and
      updates `stable`.
-6. If there are new authors, create a new version of the Zenodo record:
+6. If there are new authors, create a new version of the Zenodo record, which mints a DOI per
+   version:
    - Download the tagged source as a `.zip` (green "Code" button on the release).
    - At [the Zenodo record](https://zenodo.org/records/20430150), choose "New version" (you
      need to be granted access to the record by an existing owner).
@@ -80,6 +40,41 @@ called out explicitly.
 7. Announce in the appropriate channels. On the Julia Discourse forum, reply to the
    [existing 1.x release thread](https://discourse.julialang.org/t/ann-devicelayout-jl-cad-for-quantum-integrated-circuits-and-more/126502/3)
    rather than starting a new one.
+
+### The 2.0 branch and release
+
+Breaking changes accumulate on the long-running `v2.0.0-dev` branch (see
+[Opt-in first](@ref dev-versioning) and the
+[2.0 tracking issue](https://github.com/aws-cqc/DeviceLayout.jl/issues/300)).
+
+- Integrate `main` into `v2.0.0-dev` by **merge**, on a regular cadence, rather than rebasing.
+  Rebase only while the branch still has a single author.
+- **Check `CHANGELOG.md` after every integration merge.** Three-way merges follow context
+  lines, not position, so entries can silently land under the wrong version heading with no
+  conflict.
+- Release sequence: 1.x minors add APIs, opt-in flags, and quiet deprecations; the last 1.x
+  release is the upgrade-assist release described under [Deprecations](@ref dev-deprecations)
+  and ships an "Upgrading to 2.0" docs page; 2.0.0 flips defaults, removes deprecated API, and
+  lands the changes with no opt-in path. Decide up front how long fixes will be backported to
+  1.x, and say so in the 2.0.0 release notes.
+
+## Continuous integration
+
+Workflows live in `.github/workflows/`.
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `CI.yml` | push to `main`, tags, PRs, manual | `julia-format` job runs `scripts/format.jl check`; then a `test` matrix over Julia versions runs `Pkg.test()` with coverage uploaded to Codecov. Installs Python + `requirements.txt` for the DXF test. `pre` entries in the matrix are `continue-on-error`. |
+| `Documentation.yml` | push to `main`, tags, PRs | Builds docs with Julia 1.10 and deploys via `deploydocs` (`push_preview=true` for PR previews). Uploads `docs/build/` as an artifact for 7 days. |
+| `Docs-Cleanup.yml` | PR closed | Removes `previews/PR<n>` from the `gh-pages` branch and squashes its history. |
+| `TagBot.yml` | comment by `JuliaTagBot`, manual | Creates the GitHub release after a version is registered in General. |
+| `CompatHelper.yaml` | daily, manual | Checks for new dependency versions outside `[compat]` (see [Dependency compatibility](@ref dev-compathelper)). |
+| `Benchmark.yml` | manual | Runs the benchmark suite and uploads `benchmark.md`. |
+
+All jobs run on `ubuntu-latest` x64 only; macOS, Windows, and ARM are not covered.
+
+Secrets: `DOCUMENTER_KEY` (SSH deploy key with write access, used by TagBot and CompatHelper)
+and `CODECOV_TOKEN`. `GITHUB_TOKEN` is provided automatically.
 
 ### How the automation is wired
 
@@ -116,11 +111,11 @@ explicitly, plus `'pre'` whenever a new minor is in pre-release.
 - When the next minor enters pre-release (usually some weeks after a release), add `'pre'`
   back. It runs with `continue-on-error`, so it can't block merges, but failures should be
   looked at: they are early warning of upstream changes.
-- `julia = "1.10"` in `[compat]` is the lower bound. Raising it is a breaking change for
-  users on older Julia; do it at a minor release at the earliest and note it in the
-  changelog.
+- `julia = "1.10"` in `[compat]` is the lower bound. Raising it isn't breaking under SemVer
+  (the resolver won't offer the new version to older Julia), but it needs at least a minor
+  release rather than a patch, and a changelog note.
 
-### Dependency compatibility
+### [Dependency compatibility](@id dev-compathelper)
 
 `CompatHelper` runs daily and detects dependencies with new releases outside our `[compat]`
 bounds. It was added after an incident where a substantial B-spline slowdown moving from
@@ -135,18 +130,17 @@ fail:
 2. If tests pass, merge it. If they don't, decide whether to fix our code or pin the
    dependency.
 
-To stop CompatHelper from repeatedly proposing a bump for a dependency that must stay pinned,
-use an equality specifier in `[compat]` (e.g. `Foo = "=1.2.3"`) and pass
-`bump_compat_containing_equality_specifier=false` to `CompatHelper.main()` in the workflow.
+Upgrades that need more than a green test run:
+
+- **`gmsh_jll`** can change fragmentation behavior and mesh output. The "Single Transmon" test
+  item and `test_solidmodel.jl` are the main guards; they check physical groups, not meshes.
+- **`PkgTemplates`** has had breaking minor releases. `test_pdktools.jl` covers
+  `generate_pdk` and friends.
+- **`Unitful`** occasionally changes promotion rules for mixed-unit arithmetic, which shows up
+  in the mixed-preference tests.
 
 `Aqua.test_deps_compat` in the test suite ensures every non-stdlib dependency has a compat
 entry, so adding a dependency without one fails CI.
-
-### Authors and citation
-
-`CITATION.cff` is the source of truth for the author list, and Zenodo mints a DOI per version.
-When a new author makes a major contribution, add them to `CITATION.cff` in the next release
-PR and create a new Zenodo version as part of that release.
 
 ### Documentation previews
 
