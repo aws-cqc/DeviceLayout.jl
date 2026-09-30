@@ -87,7 +87,7 @@ The `Schematic` object contains the `SchematicGraph` as well as the component po
 
 It is often necessary to check that a planned `Schematic` obeys a set of constraints. For instance, you may want to verify that all the junctions
 in a floorplan are oriented in the right direction for your fabrication process. Instead of doing this by eye, users should call `check!(sch::Schematic)`. This method can
-run any number of checks provided by the user, but by default it only checks the global orientation of components that implement the [SchematicDrivenLayout.check_rotation](@ref) method.
+run any number of checks provided by the user, but by default it only checks the global orientation of components that implement the [`SchematicDrivenLayout.check_rotation`](@ref) method.
 
 To be able to `build!` or `render!` a floorplan (i.e. turn components into their geometries), users _must_ run `check!` first. Otherwise, these functions will throw an error.
 

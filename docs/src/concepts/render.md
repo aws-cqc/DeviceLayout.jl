@@ -65,7 +65,7 @@ These also have in-place versions that can be applied to `CoordinateSystem`s (as
 ## Rendering Arbitrary Paths
 
 A `Segment` and `Style` together define one or more closed curves in the plane.
-The job of rendering to a `Cell` is to approximate these curves by closed polygons. In many cases, including circular arcs and simple styles along B-spline segments, [DeviceLayout.discretize_curve](@ref) is used. This discretization uses curvature information to render the curve to a tolerance provided to `render!` using the `atol` keyword (default `1.0nm`). For these curves, assuming slowly varying curvature, no point on the true curve is more than approximately `atol` from the discretization. To enable rendering
+The job of rendering to a `Cell` is to approximate these curves by closed polygons. In many cases, including circular arcs and simple styles along B-spline segments, [`DeviceLayout.discretize_curve`](@ref) is used. This discretization uses curvature information to render the curve to a tolerance provided to `render!` using the `atol` keyword (default `1.0nm`). For these curves, assuming slowly varying curvature, no point on the true curve is more than approximately `atol` from the discretization. To enable rendering
 of styles along generic paths in the plane, segment/style rendering falls back to this same
 curvature-based discretization when no specialized polygon method is available.
 
