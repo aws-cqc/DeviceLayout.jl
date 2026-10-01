@@ -787,12 +787,38 @@ end
 
     @compdef struct ExtractionNestedNamedTupleComponent <: Component
         name = "line"
-        style = (; trace=10μm, gap=6μm, inner=(; a=1, b=2), extra=(;))
+        style = (;
+            trace=10μm,
+            gap=6μm,
+            inner=(; a=1, b=2),
+            extra=(;),
+            labels=Dict{Symbol, Any}(:k => 1)
+        )
         meta = (;)
     end
     SchematicDrivenLayout._geometry!(
         cs::CoordinateSystem,
         ::ExtractionNestedNamedTupleComponent
+    ) = cs
+
+    @compdef struct ExtractionRequiredComponent <: Component
+        name = "req"
+        style::NamedTuple
+        labels::Dict{Symbol, Any}
+        tags::Dict
+    end
+    SchematicDrivenLayout._geometry!(cs::CoordinateSystem, ::ExtractionRequiredComponent) =
+        cs
+
+    @compdef struct ExtractionNonContainerComponent <: Component
+        name = "req"
+        style
+        width::Float64
+        eltype = Float64
+    end
+    SchematicDrivenLayout._geometry!(
+        cs::CoordinateSystem,
+        ::ExtractionNonContainerComponent
     ) = cs
 
     @testset "Complete detached extraction" begin
@@ -1018,6 +1044,55 @@ end
         @test "components.line.meta.deeper.k" in ps.accessed
     end
 
+    @testset "Required NamedTuple and Dict parameters read from namespaces" begin
+        T = ExtractionRequiredComponent
+        ps = ParameterSet()
+        ps.components.req.style.trace = 5μm
+        ps.components.req.labels.a = 1
+        ps.components.req.tags.b = 2
+        for c in (
+            create_component(T, ps, "components.req"),
+            create_component(T, ps.components.req)
+        )
+            @test c.style == (; trace=5μm)
+            @test c.labels == Dict{Symbol, Any}(:a => 1)
+            @test c.tags == Dict{String, Any}("b" => 2)
+        end
+        @test "components.req.style.trace" in ps.accessed
+        @test "components.req.labels.a" in ps.accessed
+        @test "components.req.tags.b" in ps.accessed
+
+        g = SchematicGraph("g")
+        add_node!(
+            g,
+            T(;
+                style=(; trace=5μm, gap=(; x=1)),
+                labels=Dict{Symbol, Any}(:a => 1),
+                tags=Dict{String, Any}("b" => 2)
+            )
+        )
+        extracted = extract_parameter_set(g)
+        c = create_component(T, extracted, "components.req")
+        @test c.style.trace == 5μm
+        @test c.style.gap == (; x=1)
+        @test c.labels == Dict{Symbol, Any}(:a => 1)
+        @test c.tags == Dict{String, Any}("b" => 2)
+    end
+
+    @testset "Namespace for a non-container parameter is an ArgumentError" begin
+        T = ExtractionNonContainerComponent
+        for set! in (
+            ps -> (ps.components.req.style.trace = 5μm),  # required, untyped
+            ps -> (ps.components.req.width.x = 1.0),      # required, ::Float64
+            ps -> (ps.components.req.eltype.x = 1)        # Type-valued default
+        )
+            ps = ParameterSet()
+            set!(ps)
+            @test_throws ArgumentError create_component(T, ps, "components.req")
+            @test_throws ArgumentError create_component(T, ps.components.req)
+        end
+    end
+
     @testset "Dict parameter round-trips through create_component" begin
         # `extract_parameter_set` writes Dict parameters as namespaces too
         g = SchematicGraph("g")
@@ -1044,6 +1119,22 @@ end
         template = ExtractionArrayComponent(; settings=Dict{Symbol, Any}(:gain => 2))
         @test set_parameters(template, ps, "components.route").settings ==
               Dict{Symbol, Any}(:other => 1)
+    end
+
+    @testset "Dict nested in a NamedTuple parameter round-trips" begin
+        T = ExtractionNestedNamedTupleComponent
+        g = SchematicGraph("g")
+        add_node!(g, T())
+        ps = extract_parameter_set(g)
+        c = create_component(T, ps, "components.line")
+        @test c.style.labels isa Dict{Symbol}
+        @test c.style.labels == T().style.labels
+        @test c.style.inner.a == 1
+
+        ps.components.line.style.labels.other = 2
+        c = set_parameters(T(), ps, "components.line")
+        @test c.style.labels isa Dict{Symbol}
+        @test c.style.labels[:other] == 2
     end
 
     @testset "Namespace naming a non-NamedTuple parameter is an error" begin
