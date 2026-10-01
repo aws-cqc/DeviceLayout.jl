@@ -1074,6 +1074,25 @@
         @test component(graph(TestWrapperVariant())[1]).jj_width == 200nm
         @test hooks(TestWrapperVariant()).xy1.p == hooks(c).xy1.p # Uses base variant map_hooks
 
+        # Variants reject unknown keyword arguments, as the base `@compdef` constructor does
+        @test_throws MethodError TestComponent(; widht=1μm)
+        @test_throws ArgumentError TestCompVariant(; widht=1μm)
+        @test_throws ArgumentError create_component(TestCompVariant; widht=1μm)
+        @test_throws MethodError TestWrapper(; jj_widht=200nm)
+        @test_throws ArgumentError TestWrapperVariant(; jj_widht=200nm)
+        @test_throws ArgumentError create_component(TestWrapperVariant; jj_widht=200nm)
+        typo_ps = SchematicDrivenLayout.ParameterSet()
+        typo_ps.components.variant.widht = 1μm
+        @test_throws ArgumentError create_component(
+            TestCompVariant,
+            typo_ps,
+            "components.variant"
+        )
+        # Variant-only parameters are still accepted
+        @test parameters(TestCompVariant(; width=1μm)).width == 1μm
+        @test parameters(create_component(TestWrapperVariant; jj_width=300nm)).jj_width ==
+              300nm
+
         ### No reordering of nodes or changing root of rendering tree
         g = SchematicGraph("spacers")
         n1 = add_node!(g, Spacer(name="first", p1=Point(10μm, 0μm)))

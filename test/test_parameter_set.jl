@@ -775,6 +775,52 @@ end
         child = 1
     end
 
+    @compdef struct ExtractionNamedTupleComponent <: Component
+        name = "line"
+        style = (; trace=10μm, gap=6μm)
+    end
+    SchematicDrivenLayout._geometry!(
+        cs::CoordinateSystem,
+        ::ExtractionNamedTupleComponent
+    ) = cs
+    SchematicDrivenLayout.hooks(::ExtractionNamedTupleComponent) = (;)
+
+    @compdef struct ExtractionNestedNamedTupleComponent <: Component
+        name = "line"
+        style = (;
+            trace=10μm,
+            gap=6μm,
+            inner=(; a=1, b=2),
+            extra=(;),
+            labels=Dict{Symbol, Any}(:k => 1)
+        )
+        meta = (;)
+    end
+    SchematicDrivenLayout._geometry!(
+        cs::CoordinateSystem,
+        ::ExtractionNestedNamedTupleComponent
+    ) = cs
+
+    @compdef struct ExtractionRequiredComponent <: Component
+        name = "req"
+        style::NamedTuple
+        labels::Dict{Symbol, Any}
+        tags::Dict
+    end
+    SchematicDrivenLayout._geometry!(cs::CoordinateSystem, ::ExtractionRequiredComponent) =
+        cs
+
+    @compdef struct ExtractionNonContainerComponent <: Component
+        name = "req"
+        style
+        width::Float64
+        eltype = Float64
+    end
+    SchematicDrivenLayout._geometry!(
+        cs::CoordinateSystem,
+        ::ExtractionNonContainerComponent
+    ) = cs
+
     @testset "Complete detached extraction" begin
         source = ParameterSet()
         source.global.process = "fab-v3"
@@ -930,6 +976,203 @@ end
         @test merge_err isa ArgumentError
         @test occursin("components.parent.child", merge_err.msg)
         @test occursin("parameter leaf", merge_err.msg)
+    end
+
+    @testset "NamedTuple parameter round-trips through create_component" begin
+        g = SchematicGraph("g")
+        add_node!(g, ExtractionNamedTupleComponent(; style=(; trace=1μm, gap=2μm)))
+        ps = extract_parameter_set(g)
+        @test ps.components.line.style.trace == 1μm
+
+        c = create_component(ExtractionNamedTupleComponent, ps, "components.line")
+        @test c.style.trace == 1μm
+        @test c.style.gap == 2μm
+        @test "components.line.style.trace" in ps.accessed
+        @test "components.line.style.gap" in ps.accessed
+    end
+
+    @testset "Partial NamedTuple namespace merges with defaults" begin
+        ps = ParameterSet()
+        ps.components.line.style.trace = 3μm
+        c = create_component(ExtractionNamedTupleComponent, ps, "components.line")
+        @test c.style.trace == 3μm
+        @test c.style.gap == 6μm
+
+        c2 = create_component(ExtractionNamedTupleComponent, ps.components.line)
+        @test c2.style == c.style
+    end
+
+    @testset "set_parameters reads NamedTuple namespaces" begin
+        ps = ParameterSet()
+        ps.components.line.style.gap = 4μm
+        template = ExtractionNamedTupleComponent(; style=(; trace=7μm, gap=6μm))
+        c = set_parameters(template, ps, "components.line")
+        @test c.style.trace == 7μm
+        @test c.style.gap == 4μm
+        @test "components.line.style.gap" in ps.accessed
+    end
+
+    @testset "Unknown key in a NamedTuple namespace is an ArgumentError" begin
+        T = ExtractionNestedNamedTupleComponent
+        for (set!, typo) in (
+            (ps -> (ps.components.line.style.trce = 3μm), "components.line.style.trce"),
+            (ps -> (ps.components.line.style.inner.c = 5), "components.line.style.inner.c")
+        )
+            ps = ParameterSet()
+            set!(ps)
+            @test_throws ArgumentError create_component(T, ps, "components.line")
+            @test_throws ArgumentError create_component(T, ps.components.line)
+            @test_throws ArgumentError set_parameters(T(), ps, "components.line")
+            @test !(typo in ps.accessed)
+        end
+        # a sub-namespace under a scalar field is rejected too
+        ps = ParameterSet()
+        ps.components.line.style.trace.x = 1μm
+        @test_throws ArgumentError create_component(T, ps, "components.line")
+    end
+
+    @testset "Empty NamedTuple defaults accept any namespace keys" begin
+        ps = ParameterSet()
+        ps.components.line.meta.anything = 1
+        ps.components.line.meta.deeper.k = 2
+        ps.components.line.style.extra.x = 3
+        c = create_component(ExtractionNestedNamedTupleComponent, ps, "components.line")
+        @test c.meta.anything == 1
+        @test c.meta.deeper.k == 2
+        @test c.style.extra.x == 3
+        @test c.style.trace == 10μm
+        @test "components.line.meta.deeper.k" in ps.accessed
+    end
+
+    @testset "Required NamedTuple and Dict parameters read from namespaces" begin
+        T = ExtractionRequiredComponent
+        ps = ParameterSet()
+        ps.components.req.style.trace = 5μm
+        ps.components.req.labels.a = 1
+        ps.components.req.tags.b = 2
+        for c in (
+            create_component(T, ps, "components.req"),
+            create_component(T, ps.components.req)
+        )
+            @test c.style == (; trace=5μm)
+            @test c.labels == Dict{Symbol, Any}(:a => 1)
+            @test c.tags == Dict{String, Any}("b" => 2)
+        end
+        @test "components.req.style.trace" in ps.accessed
+        @test "components.req.labels.a" in ps.accessed
+        @test "components.req.tags.b" in ps.accessed
+
+        g = SchematicGraph("g")
+        add_node!(
+            g,
+            T(;
+                style=(; trace=5μm, gap=(; x=1)),
+                labels=Dict{Symbol, Any}(:a => 1),
+                tags=Dict{String, Any}("b" => 2)
+            )
+        )
+        extracted = extract_parameter_set(g)
+        c = create_component(T, extracted, "components.req")
+        @test c.style.trace == 5μm
+        @test c.style.gap == (; x=1)
+        @test c.labels == Dict{Symbol, Any}(:a => 1)
+        @test c.tags == Dict{String, Any}("b" => 2)
+    end
+
+    @testset "Namespace for a non-container parameter is an ArgumentError" begin
+        T = ExtractionNonContainerComponent
+        for set! in (
+            ps -> (ps.components.req.style.trace = 5μm),  # required, untyped
+            ps -> (ps.components.req.width.x = 1.0),      # required, ::Float64
+            ps -> (ps.components.req.eltype.x = 1)        # Type-valued default
+        )
+            ps = ParameterSet()
+            set!(ps)
+            @test_throws ArgumentError create_component(T, ps, "components.req")
+            @test_throws ArgumentError create_component(T, ps.components.req)
+        end
+    end
+
+    @testset "Dict parameter round-trips through create_component" begin
+        # `extract_parameter_set` writes Dict parameters as namespaces too
+        g = SchematicGraph("g")
+        add_node!(
+            g,
+            ExtractionArrayComponent(;
+                name="route",
+                settings=Dict{String, Any}(
+                    "gain" => 5,
+                    "nested" => Dict{String, Any}("k" => 1)
+                )
+            )
+        )
+        ps = extract_parameter_set(g)
+        c = create_component(ExtractionArrayComponent, ps, "components.route")
+        @test c.settings ==
+              Dict{String, Any}("gain" => 5, "nested" => Dict{String, Any}("k" => 1))
+        @test "components.route.settings.gain" in ps.accessed
+        @test "components.route.settings.nested.k" in ps.accessed
+        # the namespace replaces the Dict (no merge), with the parameter's key type
+        ps.components.route.settings = Dict{String, Any}("other" => 1)
+        @test create_component(ExtractionArrayComponent, ps, "components.route").settings ==
+              Dict{String, Any}("other" => 1)
+        template = ExtractionArrayComponent(; settings=Dict{Symbol, Any}(:gain => 2))
+        @test set_parameters(template, ps, "components.route").settings ==
+              Dict{Symbol, Any}(:other => 1)
+    end
+
+    @testset "Dict nested in a NamedTuple parameter round-trips" begin
+        T = ExtractionNestedNamedTupleComponent
+        g = SchematicGraph("g")
+        add_node!(g, T())
+        ps = extract_parameter_set(g)
+        c = create_component(T, ps, "components.line")
+        @test c.style.labels isa Dict{Symbol}
+        @test c.style.labels == T().style.labels
+        @test c.style.inner.a == 1
+
+        ps.components.line.style.labels.other = 2
+        c = set_parameters(T(), ps, "components.line")
+        @test c.style.labels isa Dict{Symbol}
+        @test c.style.labels[:other] == 2
+    end
+
+    @testset "Namespace naming a non-NamedTuple parameter is an error" begin
+        # a list/scalar parameter written as a mapping used to keep its default silently
+        ps = ParameterSet()
+        ps.components.route.offsets.x = 1μm
+        @test_throws ArgumentError create_component(
+            ExtractionArrayComponent,
+            ps,
+            "components.route"
+        )
+        @test_throws ArgumentError set_parameters(
+            ExtractionArrayComponent(),
+            ps,
+            "components.route"
+        )
+        # sub-component namespaces (keys that are not parameters) are still ignored
+        ps.components.route.child.x = 1μm
+        ps2 = ParameterSet()
+        ps2.components.route.child.x = 1μm
+        @test create_component(ExtractionArrayComponent, ps2, "components.route") isa
+              ExtractionArrayComponent
+    end
+
+    @testset "Address resolving to a leaf is an ArgumentError" begin
+        ps = ParameterSet()
+        ps.components.line.style.trace = 3μm
+        @test_throws ArgumentError create_component(
+            ExtractionNamedTupleComponent,
+            ps,
+            "components.line.style.trace"
+        )
+        @test_throws ArgumentError create_component(ExtractionNamedTupleComponent, ps, "")
+        @test_throws ParameterKeyError create_component(
+            ExtractionNamedTupleComponent,
+            ps,
+            "components.missing"
+        )
     end
 end
 
@@ -1243,6 +1486,16 @@ end
         junction_gap = 12μm
     end
 
+    # A composite that stores no private `_graph`, like `BasicCompositeComponent`
+    struct PSFlowGraphlessComposite <: CompositeComponent
+        name::String
+        gap::typeof(1.0μm)
+    end
+    PSFlowGraphlessComposite(; name="graphless", gap=1.0μm) =
+        PSFlowGraphlessComposite(name, gap)
+    SchematicDrivenLayout.default_parameters(::Type{PSFlowGraphlessComposite}) =
+        (; name="graphless", gap=1.0μm)
+
     function SchematicDrivenLayout._build_subcomponents(tr::PSFlowTestTransmon)
         ps = parameter_set(tr._graph)
         @assert ps !== nothing "regression for MR issue #1: composite _graph missing PS"
@@ -1272,6 +1525,9 @@ end
     end
     SchematicDrivenLayout.map_hooks(::Type{PSFlowTestTransmon}) =
         Dict{Pair{Int, Symbol}, Symbol}()
+
+    @composite_variant PSFlowTestTransmonVariant PSFlowTestTransmon new_defaults =
+        (; junction_gap=20μm)
 
     @testset "PS propagates into composite _graph" begin
         ps = ParameterSet()
@@ -1310,6 +1566,108 @@ end
         @test "components.ps_flow_transmon.junction_gap" in ps.accessed
         @test "components.ps_flow_transmon.island.cap_width" in ps.accessed
         @test "components.ps_flow_transmon.junction.junction_width" in ps.accessed
+    end
+
+    @testset "PS propagates into composite variant _graph" begin
+        ps = ParameterSet()
+        ps.components.ps_flow_transmon.junction_gap = 15μm
+        ps.components.ps_flow_transmon.island.cap_width = 42μm
+        ps.components.ps_flow_transmon.junction.junction_width = 2μm
+
+        base = create_component(PSFlowTestTransmon, ps, "components.ps_flow_transmon")
+        @test parameter_set(base._graph) === ps
+
+        tr = create_component(PSFlowTestTransmonVariant, ps, "components.ps_flow_transmon")
+        @test parameter_set(tr._graph) === ps
+        @test !haskey(parameters(tr), :_graph)
+        # PS leaf overrides the variant default.
+        @test tr.junction_gap == 15μm
+
+        # The base `_build_subcomponents` sees the PS (it asserts on `nothing`).
+        island, junction = components(tr)
+        @test parameters(island).cap_width == 42μm
+        @test parameters(junction).junction_width == 2μm
+        @test parameters(island).junction_gap == 15μm
+        @test "components.ps_flow_transmon.island.cap_width" in ps.accessed
+
+        # Without a PS, the variant's graph has none.
+        @test isnothing(parameter_set(PSFlowTestTransmonVariant()._graph))
+    end
+
+    @testset "set_parameters keeps the composite's ParameterSet" begin
+        ps = ParameterSet()
+        ps.components.ps_flow_transmon.junction_gap = 15μm
+        ps.components.ps_flow_transmon.island.cap_width = 42μm
+        ps.components.ps_flow_transmon.junction.junction_width = 2μm
+
+        for T in (PSFlowTestTransmon, PSFlowTestTransmonVariant)
+            tr = create_component(T, ps, "components.ps_flow_transmon")
+            tr2 = set_parameters(tr; junction_gap=20μm)
+            @test tr2.junction_gap == 20μm
+            @test parameter_set(tr2._graph) === ps
+            island, junction = components(tr2)
+            @test parameters(island).cap_width == 42μm
+            @test parameters(island).junction_gap == 20μm
+            # a renamed composite gets a graph named after the new name
+            tr3 = set_parameters(tr; name="renamed")
+            @test name(tr3) == "renamed"
+            @test startswith(name(tr3._graph), "renamed")
+            @test parameter_set(tr3._graph) === ps
+        end
+        # without a ParameterSet nothing changes
+        plain = set_parameters(PSFlowTestTransmon(); junction_gap=20μm)
+        @test isnothing(parameter_set(plain._graph))
+    end
+
+    @testset "set_parameters(c, ps, address) attaches ps to the composite" begin
+        ps1 = ParameterSet()
+        ps1.components.ps_flow_transmon.island.cap_width = 42μm
+        ps1.components.ps_flow_transmon.junction.junction_width = 1μm
+        ps2 = ParameterSet()
+        ps2.components.ps_flow_transmon.junction_gap = 15μm
+        ps2.components.ps_flow_transmon.island.cap_width = 99μm
+        ps2.components.ps_flow_transmon.junction.junction_width = 2μm
+
+        for T in (PSFlowTestTransmon, PSFlowTestTransmonVariant)
+            # replaces a ParameterSet already attached
+            tr = create_component(T, ps1, "components.ps_flow_transmon")
+            tr2 = set_parameters(tr, ps2, "components.ps_flow_transmon")
+            @test parameter_set(tr2._graph) === ps2
+            @test tr2.junction_gap == 15μm
+            @test parameters(components(tr2)[1]).cap_width == 99μm
+
+            # attaches one where there was none; kwargs still win
+            tr3 = set_parameters(T(), ps2, "components.ps_flow_transmon"; junction_gap=5μm)
+            @test parameter_set(tr3._graph) === ps2
+            @test tr3.junction_gap == 5μm
+            @test parameters(components(tr3)[1]).cap_width == 99μm
+        end
+    end
+
+    @testset "set_parameters on a composite without a `_graph` field" begin
+        c = PSFlowGraphlessComposite()
+        @test set_parameters(c; gap=2.0μm).gap == 2.0μm
+        @test name(set_parameters(c, "renamed")) == "renamed"
+        ps = ParameterSet()
+        ps.components.graphless.gap = 3.0μm
+        @test set_parameters(c, ps, "components.graphless").gap == 3.0μm
+        @test "components.graphless.gap" in ps.accessed
+    end
+
+    @testset "Composite address resolving to a leaf is an ArgumentError" begin
+        ps = ParameterSet()
+        ps.components.ps_flow_transmon.junction_gap = 15μm
+        @test_throws ArgumentError create_component(
+            PSFlowTestTransmon,
+            ps,
+            "components.ps_flow_transmon.junction_gap"
+        )
+        @test_throws ArgumentError create_component(PSFlowTestTransmon, ps, "")
+        @test_throws ParameterKeyError create_component(
+            PSFlowTestTransmon,
+            ps,
+            "components.nope"
+        )
     end
 
     @testset "Top-level plan runs end-to-end" begin
