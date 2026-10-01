@@ -1486,6 +1486,16 @@ end
         junction_gap = 12μm
     end
 
+    # A composite that stores no private `_graph`, like `BasicCompositeComponent`
+    struct PSFlowGraphlessComposite <: CompositeComponent
+        name::String
+        gap::typeof(1.0μm)
+    end
+    PSFlowGraphlessComposite(; name="graphless", gap=1.0μm) =
+        PSFlowGraphlessComposite(name, gap)
+    SchematicDrivenLayout.default_parameters(::Type{PSFlowGraphlessComposite}) =
+        (; name="graphless", gap=1.0μm)
+
     function SchematicDrivenLayout._build_subcomponents(tr::PSFlowTestTransmon)
         ps = parameter_set(tr._graph)
         @assert ps !== nothing "regression for MR issue #1: composite _graph missing PS"
@@ -1632,6 +1642,16 @@ end
             @test tr3.junction_gap == 5μm
             @test parameters(components(tr3)[1]).cap_width == 99μm
         end
+    end
+
+    @testset "set_parameters on a composite without a `_graph` field" begin
+        c = PSFlowGraphlessComposite()
+        @test set_parameters(c; gap=2.0μm).gap == 2.0μm
+        @test name(set_parameters(c, "renamed")) == "renamed"
+        ps = ParameterSet()
+        ps.components.graphless.gap = 3.0μm
+        @test set_parameters(c, ps, "components.graphless").gap == 3.0μm
+        @test "components.graphless.gap" in ps.accessed
     end
 
     @testset "Composite address resolving to a leaf is an ArgumentError" begin
