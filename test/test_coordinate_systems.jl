@@ -411,4 +411,25 @@
         @test element_metadata(cs_top)[1] == GDSMeta(21)  # top-level: 20 -> 21
         @test element_metadata(cs_shared)[1] == GDSMeta(11)  # shared: 10 -> 11 (not 12)
     end
+
+    @testset "uniquename" begin
+        d = Dict{String, Int}()
+        u(s; kw...) = uniquename(s, '_'; counter=d, kw...)
+        # documented `str0 * dlm * n` heuristic
+        @test u("name") == "name"
+        @test u("name") == "name_2"
+        @test u("name_5") == "name_5"
+        @test u("name") == "name_6"
+        # str0 keeps the delimiter when the name contains several
+        @test u("x_3_1") == "x_3_1"
+        @test u("x_3_4") == "x_3_4"
+        @test u("x_3_2") == "x_3_5"
+        # a bare number is not a suffix
+        @test u("42") == "42"
+        # parse_suffix=false: literal counting, names ending in `_<n>` are not renumbered
+        @test u("y_2_3"; parse_suffix=false) == "y_2_3"
+        @test u("y_2_1"; parse_suffix=false) == "y_2_1"
+        @test u("y_2_1"; parse_suffix=false) == "y_2_1_2"
+        @test u("y_2_9"; parse_suffix=false, modify_first=true) == "y_2_9_1"
+    end
 end
