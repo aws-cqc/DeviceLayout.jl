@@ -1074,16 +1074,16 @@
         @test component(graph(TestWrapperVariant())[1]).jj_width == 200nm
         @test hooks(TestWrapperVariant()).xy1.p == hooks(c).xy1.p # Uses base variant map_hooks
 
-        # Variants reject unknown keyword arguments like the base `@compdef` constructor
+        # Variants reject unknown keyword arguments, as the base `@compdef` constructor does
         @test_throws MethodError TestComponent(; widht=1μm)
-        @test_throws MethodError TestCompVariant(; widht=1μm)
-        @test_throws MethodError create_component(TestCompVariant; widht=1μm)
+        @test_throws ArgumentError TestCompVariant(; widht=1μm)
+        @test_throws ArgumentError create_component(TestCompVariant; widht=1μm)
         @test_throws MethodError TestWrapper(; jj_widht=200nm)
-        @test_throws MethodError TestWrapperVariant(; jj_widht=200nm)
-        @test_throws MethodError create_component(TestWrapperVariant; jj_widht=200nm)
+        @test_throws ArgumentError TestWrapperVariant(; jj_widht=200nm)
+        @test_throws ArgumentError create_component(TestWrapperVariant; jj_widht=200nm)
         typo_ps = SchematicDrivenLayout.ParameterSet()
         typo_ps.components.variant.widht = 1μm
-        @test_throws MethodError create_component(
+        @test_throws ArgumentError create_component(
             TestCompVariant,
             typo_ps,
             "components.variant"

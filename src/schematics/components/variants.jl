@@ -15,14 +15,18 @@ If `comptype` is a [`@variant`](@ref) of some other component type `T <: Abstrac
 """
 base_variant(::Type{T}) where {T <: AbstractComponent} = T
 
-# A `@compdef` constructor rejects unknown keyword arguments with a `MethodError`, but a
-# variant stores its parameters in a `NamedTuple`, so an unknown keyword (e.g. a typo)
-# would be silently added as a new parameter. Throw the same `MethodError` for keywords
-# that are not parameters of the variant type `T`.
+# A variant stores its parameters in a `NamedTuple`, so an unknown keyword (e.g. a typo)
+# would otherwise be silently added as a new parameter.
 function _check_variant_kwargs(::Type{T}, kwargs) where {T}
     names = parameter_names(T)
-    all(in(names), keys(kwargs)) && return nothing
-    throw(MethodError(Core.kwcall, ((; kwargs...), T), Base.get_world_counter()))
+    unknown = filter(!in(names), collect(keys(kwargs)))
+    isempty(unknown) && return nothing
+    throw(
+        ArgumentError(
+            "unknown keyword(s) for $T: $(join(unknown, ", ")); valid parameters are: " *
+            "$(join(names, ", "))."
+        )
+    )
 end
 
 function variant_expr(T::Expr, name::Symbol; new_defaults::Expr=:((;)), map_meta=nothing)
@@ -177,7 +181,7 @@ Create `NewType <: AbstractComponent` based on `BaseType`, with optional `new_de
 
 Default parameters for the new type will be `new_defaults` merged into `default_parameters(T)`.
 You can override the original defaults or add entirely new parameters this way.
-Passing a keyword that is not a parameter of the new type throws a `MethodError`.
+Passing a keyword that is not a parameter of the new type throws an `ArgumentError`.
 
 If provided, `map_meta` should be a function of `DeviceLayout.Meta` that returns another `DeviceLayout.Meta`.
 It will be applied recursively to the geometry of the base component using `map_metadata!`.
@@ -201,7 +205,7 @@ end
 Create `NewType <: AbstractCompositeComponent` based on `BaseType`, with optional `new_defaults` and `map_meta`.
 
 Default parameters for the new type will be `new_defaults` merged into `default_parameters(T)`.
-Passing a keyword that is not a parameter of the new type throws a `MethodError`.
+Passing a keyword that is not a parameter of the new type throws an `ArgumentError`.
 
 As with a `@compdef` composite, the constructor accepts the internal fields `_graph`,
 `_schematic`, and `_hooks` as keywords. In particular, `create_component(NewType, ps, address)`
