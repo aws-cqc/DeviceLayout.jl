@@ -443,7 +443,8 @@ function set_parameters(
     params::NamedTuple=parameters(c);
     kwargs...
 )
-    ps = parameter_set(c._graph)
+    # Not every composite has a private `_graph` (`BasicCompositeComponent` has `graph`)
+    ps = hasfield(typeof(c), :_graph) ? parameter_set(c._graph) : nothing
     isnothing(ps) && return create_component(typeof(c), name, params; kwargs...)
     nm = get(kwargs, :name, name) # `kwargs` win over `name`, as in `create_component`
     return create_component(
@@ -464,12 +465,15 @@ function set_parameters(
     address::String;
     kwargs...
 )
-    c = create_component(
-        typeof(c),
-        name(c),
-        parameters(c);
-        _graph=SchematicGraph(uniquename(name(c)), ps)
-    )
+    # Composites without a private `_graph` have nowhere to attach `ps`
+    if hasfield(typeof(c), :_graph)
+        c = create_component(
+            typeof(c),
+            name(c),
+            parameters(c);
+            _graph=SchematicGraph(uniquename(name(c)), ps)
+        )
+    end
     return invoke(
         set_parameters,
         Tuple{AbstractComponent, ParameterSet, String},
