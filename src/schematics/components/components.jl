@@ -166,7 +166,7 @@ function create_component(
         )
     )
     kw = leaf_params(sub)
-    nested_kw, nested_paths = _namedtuple_namespaces(sub, default_parameters(T))
+    nested_kw, nested_paths = _namedtuple_namespaces(sub, default_parameters(T), T)
     # Track accessed parameter leaves with the scoped ParameterSet's qualified prefix
     accessed = getfield(sub, :accessed)
     for k in keys(kw)
@@ -181,37 +181,72 @@ function create_component(
     return create_component(T; kwargs..., pairs(kw)...)
 end
 
-# Nested namespaces in the scoped `ParameterSet` `sub` that correspond to parameters in
-# `base` (the shape `extract_parameter_set` writes for `NamedTuple`- and `Dict`-valued
-# parameters), converted back to the parameter's type.
+# Nested namespaces in the scoped `ParameterSet` `sub` that correspond to parameters of `T`
+# (the shape `extract_parameter_set` writes for `NamedTuple`- and `Dict`-valued parameters),
+# converted back to the parameter's type. `base` holds the parameters' default or current
+# values; a parameter of `T` missing from `base` is required, and is read by its field type.
 # Returns the keyword arguments together with the qualified paths of every leaf they
 # contain, for access tracking.
-function _namedtuple_namespaces(sub::ParameterSet, base::NamedTuple)
+function _namedtuple_namespaces(
+    sub::ParameterSet,
+    base::NamedTuple,
+    ::Type{T}
+) where {T <: AbstractComponent}
     prefix = getfield(sub, :prefix)
     kw = Pair{Symbol, Any}[]
     paths = String[]
     for (k, v) in getfield(sub, :data)
+        v isa Dict || continue
         s = Symbol(k)
-        (v isa Dict && haskey(base, s)) || continue
         path = prefix * "." * k
-        default = base[s]
-        if default isa NamedTuple
-            push!(kw, s => _namespace_to_namedtuple!(paths, v, path, default))
-        elseif default isa AbstractDict
-            push!(kw, s => _namespace_to_dict!(paths, v, path, keytype(default)))
-        else
-            throw(
-                ArgumentError(
-                    "namespace \"$path\" names the parameter `$s`, whose value is a " *
-                    "$(typeof(default)), not a NamedTuple or Dict. Only NamedTuple- and " *
-                    "Dict-valued parameters can be written as a namespace; write `$s` " *
-                    "as a leaf value."
-                )
-            )
+        if haskey(base, s)
+            push!(kw, s => _namespace_from_value!(paths, v, path, s, base[s]))
+        elseif s in parameter_names(T)
+            push!(kw, s => _namespace_from_fieldtype!(paths, v, path, s, fieldtype(T, s)))
         end
+        # Otherwise not a parameter (e.g. a sub-component namespace), so not ours to read
     end
     return (isempty(kw) ? (;) : NamedTuple(kw)), paths
 end
+
+# Namespace for a parameter or NamedTuple field with value `value`, converted to the
+# value's type.
+_namespace_from_value!(paths, d, path, s, value::NamedTuple) =
+    _namespace_to_namedtuple!(paths, d, path, value)
+_namespace_from_value!(paths, d, path, s, value::AbstractDict) =
+    _namespace_to_dict!(paths, d, path, keytype(value))
+function _namespace_from_value!(paths, d, path, s, value)
+    throw(
+        ArgumentError(
+            "namespace \"$path\" names `$s`, whose value is a $(typeof(value)), not " *
+            "a NamedTuple or Dict. Only NamedTuple- and Dict-valued parameters and " *
+            "fields can be written as a namespace; write `$s` as a leaf value."
+        )
+    )
+end
+
+# Namespace for a required parameter declared as `F`, converted to that type.
+# A NamedTuple has no default to list its valid fields, so any keys are accepted.
+_namespace_from_fieldtype!(paths, d, path, s, ::Type{<:NamedTuple}) =
+    _namespace_to_namedtuple!(paths, d, path, (;))
+function _namespace_from_fieldtype!(paths, d, path, s, F::Type{<:AbstractDict})
+    K = _dict_keytype(F)
+    # Namespace keys are strings, so an unconstrained key type reads them as `String`
+    return _namespace_to_dict!(paths, d, path, K === Any ? String : K)
+end
+function _namespace_from_fieldtype!(paths, d, path, s, F::Type)
+    throw(
+        ArgumentError(
+            "namespace \"$path\" names the required parameter `$s`, which is " *
+            "declared as `$F`, not a NamedTuple or Dict, so it cannot be read from a " *
+            "namespace. Declare `$s` as a NamedTuple or Dict, or pass it as a keyword " *
+            "argument."
+        )
+    )
+end
+
+_dict_keytype(::Type{<:AbstractDict{K}}) where {K} = K
+_dict_keytype(::Type{<:AbstractDict}) = Any
 
 # Keys of `d` must be fields of `template`, except that an empty `template` accepts any keys.
 function _namespace_to_namedtuple!(
@@ -233,20 +268,10 @@ function _namespace_to_namedtuple!(
                 )
             )
         end
-        field_template = open ? (;) : template[s]
         if v isa Dict
-            if field_template isa AbstractDict
-                field_template = (;)
-            elseif !(field_template isa NamedTuple)
-                throw(
-                    ArgumentError(
-                        "namespace \"$subpath\" names the field `$k`, whose value is a " *
-                        "$(typeof(field_template)), not a NamedTuple or Dict; write " *
-                        "`$k` as a leaf value."
-                    )
-                )
-            end
-            push!(fields, s => _namespace_to_namedtuple!(paths, v, subpath, field_template))
+            # An open template has no field values, so sub-namespaces are read as open too
+            value = open ? (;) : template[s]
+            push!(fields, s => _namespace_from_value!(paths, v, subpath, s, value))
         else
             push!(paths, subpath)
             push!(fields, s => v)
@@ -263,8 +288,8 @@ function _namespace_to_dict!(
 ) where {K}
     K <: Union{String, Symbol} || throw(
         ArgumentError(
-            "namespace \"$path\" names a Dict parameter with keys of type $K; only " *
-            "Dict parameters with String or Symbol keys can be read from a namespace."
+            "namespace \"$path\" names a Dict with keys of type $K; only Dicts with " *
+            "String or Symbol keys can be read from a namespace."
         )
     )
     result = Dict{K, Any}()
@@ -428,7 +453,7 @@ function set_parameters(c::AbstractComponent, sub::ParameterSet)
             )
         )
     end
-    nested_kw, nested_paths = _namedtuple_namespaces(sub, parameters(c))
+    nested_kw, nested_paths = _namedtuple_namespaces(sub, parameters(c), typeof(c))
     accessed = getfield(sub, :accessed)
     for k in keys(kw)
         push!(accessed, prefix * "." * String(k))
