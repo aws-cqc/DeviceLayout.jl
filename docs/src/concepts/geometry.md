@@ -334,7 +334,7 @@ Let's zoom in on the CPW bend:
 
 One notable thing about this solid model is that the arcs in the bent CPW are exact circular arcs. When we render to a `Cell`, all shapes get discretized into `Polygon`s. But since we were working with our "native" `CoordinateSystem`, curved shapes like the CPW bend can be rendered as native curves in the solid geometry kernel. This not only keeps model size down but also allows Gmsh to make better meshes.
 
-Moreover, when DeviceLayout.jl renders path segments and certain other entities, it automatically sets mesh sizing information to help Gmsh make better meshes. (You can also annotate entities with the [MeshSized](@ref) style to provide such information manually.)
+Moreover, when DeviceLayout.jl renders path segments and certain other entities, it automatically sets mesh sizing information to help Gmsh make better meshes. (You can also annotate entities with the [`MeshSized`](@ref) style to provide such information manually.)
 
 ```julia
 SolidModels.gmsh.model.mesh.generate(3)

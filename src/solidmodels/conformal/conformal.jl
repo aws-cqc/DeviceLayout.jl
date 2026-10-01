@@ -813,7 +813,8 @@ _add_conformal_curve!(
         fragment_backstop=false, kwargs...)
 
 Render `cs` into `sm` using the ConformalRender strategy. Delegates to the
-same shared orchestrator as [`render!`](@ref); the only differences are:
+same shared orchestrator as
+[`render!`](@ref DeviceLayout.render!(::SolidModel, ::DeviceLayout.CoordinateSystem)); the only differences are:
 
   - OCC entities are emitted via the cached `_add_conformal!` path, so shared
     boundaries between adjacent faces resolve to a single OCC edge.

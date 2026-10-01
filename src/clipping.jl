@@ -47,7 +47,7 @@ These determine how Clipper treats overlapping polygons based on the sum of thei
 See the [`Clipper` docs](https://www.angusj.com/clipper2/Docs/Units/Clipper/Types/FillRule.htm)
 for further information.
 
-See also [union2d](@ref), [difference2d](@ref), [intersect2d](@ref), and [xor2d](@ref).
+See also [`union2d`](@ref), [`difference2d`](@ref), [`intersect2d`](@ref), and [`xor2d`](@ref).
 """
 function clip(op::Clipper.ClipType, s, c; kwargs...)
     return clip(op, _normalize_clip_arg(s), _normalize_clip_arg(c); kwargs...)

@@ -301,6 +301,15 @@ See [Shapes](./shapes.md).
     SolidModels.save(::File, ::SolidModel)
 ```
 
+### Conformal rendering
+
+```@docs
+    SolidModels.ConformalRender
+    SolidModels.render_conformal!
+    SolidModels.ConformalRenderContext
+    SolidModels.add_conformal_loop!
+```
+
 ### Physical Groups
 
 ```@docs
