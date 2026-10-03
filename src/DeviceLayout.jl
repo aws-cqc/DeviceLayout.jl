@@ -646,6 +646,10 @@ export PolyText,
 include("schematics/SchematicDrivenLayout.jl")
 export SchematicDrivenLayout
 
+# Load the opt-in simulation-agnostic solid-model pipeline after both of its dependencies.
+include("solidmodels/solidmodels_experimental.jl")
+export SolidModelsExperimental
+
 include("precompile.jl")
 
 end
