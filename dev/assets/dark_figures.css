@@ -1,0 +1,7 @@
+/* Generated figures composite against the page: fills are drawn at 50 % alpha over a
+   transparent canvas, so a dark page bleeds through and dark layer colors vanish. Figures
+   are saved with an opaque light background; this backstops any that are not. */
+html.theme--documenter-dark #documenter-page img,
+html.theme--catppuccin-frappe #documenter-page img,
+html.theme--catppuccin-macchiato #documenter-page img,
+html.theme--catppuccin-mocha #documenter-page img { background-color: #fff; }
