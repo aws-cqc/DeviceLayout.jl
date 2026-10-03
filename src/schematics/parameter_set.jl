@@ -1,4 +1,4 @@
-const REQUIRED_NAMESPACES = ("global", "components")
+const REQUIRED_NAMESPACES = ("globals", "components")
 
 """
     ParameterSet
@@ -17,7 +17,7 @@ ps.components.qubit.cap_width = 350  # write
 
 Every `ParameterSet` contains two required top-level namespaces:
 
-  - `global` - parameters shared across the design
+  - `globals` - parameters shared across the design
   - `components` - per-component parameter trees
 
 # Fields
@@ -42,7 +42,7 @@ struct ParameterSet
 
     # A non-empty `prefix` marks a scoped view over an interior subtree of a
     # larger ParameterSet (e.g. `ps.components.qubit`); those subtrees must not
-    # be polluted with the top-level "global"/"components" keys. A root
+    # be polluted with the top-level "globals"/"components" keys. A root
     # ParameterSet has `prefix == ""` and gets the required namespaces ensured
     # so every caller can rely on them existing.
     function ParameterSet(
@@ -56,6 +56,14 @@ struct ParameterSet
             # mutate the caller's dict. Nested dicts stay shared - we only add
             # new top-level keys here.
             data = copy(data)
+            if haskey(data, "global") && !haskey(data, "globals")
+                @warn """
+                      ParameterSet: the top-level namespace `global` is now `globals`. \
+                      Rename the `global:` key in your YAML file or Dict; it is being \
+                      read as `globals` for now.
+                      """ maxlog = 1
+                data["globals"] = pop!(data, "global")
+            end
             for ns in REQUIRED_NAMESPACES
                 haskey(data, ns) || (data[ns] = Dict{String, Any}())
             end
@@ -424,7 +432,7 @@ or a leaf value.
 ```julia
 ps = ParameterSet(
     Dict{String, Any}(
-        "global" => Dict{String, Any}(),
+        "globals" => Dict{String, Any}(),
         "components" =>
             Dict{String, Any}("qubit" => Dict{String, Any}("cap_width" => 300))
     )
@@ -455,7 +463,7 @@ Extract non-`Dict` entries as a `NamedTuple` (the "leaf" parameters at this leve
 ```julia
 ps = ParameterSet(
     Dict{String, Any}(
-        "global" => Dict{String, Any}(),
+        "globals" => Dict{String, Any}(),
         "components" => Dict{String, Any}("cap_width" => 300, "cap_gap" => 20)
     )
 )
