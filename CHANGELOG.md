@@ -6,6 +6,13 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Fixed
+
+  - When OpenCASCADE's fragment history reports an entity as deleted with no successor while
+    the result holds a geometrically identical entity under a new tag, `SolidModel`
+    fragmentation now matches the two by bounding box, so the entity keeps its physical groups
+    instead of silently dropping out of them.
+
 ## 1.20.0 (2026-10-06)
 
 ### Changed
