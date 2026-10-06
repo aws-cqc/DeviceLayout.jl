@@ -86,8 +86,7 @@ else
                 Paths.CPW(10μm, 6μm),
                 METAL_NEGATIVE;
                 name="r1",
-                waypoints=[Point(2mm, -0.3mm)],
-                global_waypoints=true
+                waypoints=[Point(2mm, -0.3mm)]
             )
             route!(
                 g,

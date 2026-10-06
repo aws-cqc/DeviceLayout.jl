@@ -168,11 +168,11 @@ To avoid overconstraining the layout, the remaining connections are instead defi
 
 ### Differences between schematic and geometry-level routing
 
-In geometry-level layout, we can extend a `Path` using `route!(path, p1, α1, rule, style; waypoints=[], waydirs=[])`. The schematic-level call looks a bit different: `route_node = route!(graph, rule, node1=>hook1, node2=>hook2, style, metadata; waypoints=[], waydirs=[], global_waypoints=false, kwargs...)`. In this case, the start and end points and directions are not known until after `plan`, and no path is actually calculated until until we either `build!`/`render!` the schematic or call `SchematicDrivenLayout.path(route_node.component)`.
+In geometry-level layout, we can extend a `Path` using `route!(path, p1, α1, rule, style; waypoints=[], waydirs=[])`. The schematic-level call looks a bit different: `route_node = route!(graph, rule, node1=>hook1, node2=>hook2, style, metadata; waypoints=[], waydirs=[], global_waypoints=true, kwargs...)`. In this case, the start and end points and directions are not known until after `plan`, and no path is actually calculated until until we either `build!`/`render!` the schematic or call `SchematicDrivenLayout.path(route_node.component)`.
 
-By default, `global_waypoints=false`, meaning that waypoints and directions are viewed as relative the the route start, with the positive x axis oriented along the route's initial start direction. Often `global_waypoints=true` is more useful, especially for a simple interactive routing workflow: When you view your final layout
-built from the schematic, you may find that a route bends too sharply or goes too close to a
-component. You can write down the points it needs to go to in the schematic's global coordinate system,
+By default, `global_waypoints=true`, meaning that waypoints and directions are viewed in the global
+coordinate system of the parent schematic. (To use waypoints relative the the route start, with the initial "forward" direction as the positive x axis, set `global_waypoints=false`.) When you view your final layout built from the schematic, you may find that a route bends too sharply or goes too close to a
+component. You can write down the points it needs to pass through in the schematic's global coordinate system,
 and add them as waypoints to the route. That is, if you go back to your layout script,
 you can modify the `route!` call:
 
@@ -185,8 +185,8 @@ route_node = route!(
     sty,
     meta; # Original route command
     # Add waypoint information to to `route!` call
-    global_waypoints=true, # Waypoints are relative to global schematic coordsys
-    # If global_waypoints=false (default), waypoints are relative to the route start
+    global_waypoints=true, # Default: Waypoints are relative to global schematic coordsys
+    # If global_waypoints=false, waypoints are relative to the route start
     # with the initial route direction as the +x axis
     waypoints=[Point(600.0μm, -3000.0μm)],
     waydirs=[90°]

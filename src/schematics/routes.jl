@@ -163,7 +163,7 @@ route!(
     route!(g::SchematicGraph, rule::RouteRule,
         nodehook1::Pair{ComponentNode,Symbol}, nodehook2::Pair{ComponentNode,Symbol},
         sty, meta;
-        waypoints=[], waydirs=[], global_waypoints=false,
+        waypoints=[], waydirs=[], global_waypoints=true,
         name=uniquename("r_\$(component(nodehook1.first).name)_\$(component(nodehook2.first).name)"),
         kwargs...)
     route!(g::SchematicGraph, rule::RouteRule, node1::ComponentNode, nodehook2::Pair{ComponentNode,Symbol}, sty, meta; kwargs...)
@@ -180,9 +180,10 @@ If one or both hook symbols are not specified, then `matching_hook` or `matching
 will be used to attempt to automatically find the correct hook or hooks.
 
 The route will have start and endpoints at the origin until a method like `plan!` is called.
-`waypoints` and `waydirs` are in route-local coordinates where the origin is the route start
-and the x-axis is the route's initial direction (unless `global_waypoints` is `true`, in which
-case they are in global coordinates of the parent `Schematic`), and `rule` determines how they will be used.
+`waypoints` and `waydirs` are in global coordinates of the parent `Schematic` (unless
+`global_waypoints` is `false`, in which case they are in route-local coordinates where the
+origin is the route start and the x-axis is the route's initial direction),
+and `rule` determines how they will be used.
 
 Additional keyword arguments will become vertex properties for the `RouteComponent`'s node.
 
@@ -197,7 +198,7 @@ function route!(
     meta;
     waypoints=[],
     waydirs=[],
-    global_waypoints=false,
+    global_waypoints=true,
     name=uniquename(
         "r_$(component(nodehook1.first).name)_$(component(nodehook2.first).name)"
     ),
