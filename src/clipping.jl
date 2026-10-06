@@ -100,21 +100,6 @@ function clip(
 end
 
 """
-    cliptree(op, s, c; kwargs...)
-
-!!! warning "Deprecated"
-
-    `cliptree` is deprecated. Use `clip(op, s, c; kwargs...).tree` instead.
-"""
-function cliptree(op, s, c; kwargs...)
-    Base.depwarn(
-        "`cliptree` is deprecated, use `clip(op, s, c; kwargs...).tree` instead",
-        :cliptree
-    )
-    return clip(op, s, c; kwargs...).tree
-end
-
-"""
     union2d(p1, p2)
 
 Return the geometric union of p1 and p2 as a `ClippedPolygon`.
