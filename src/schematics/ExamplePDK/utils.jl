@@ -233,9 +233,6 @@ function path_intersections(path::Path, trans, bounding_box::Rectangle)
     return out
 end
 
-@deprecate filter_params filter_parameters # For backward compatibility
-# (No one should be using methods from ExamplePDK but just in case)
-
 """
     port_directions(sch::Schematic, ly::Symbol) -> Dict{Int, Union{String, Vector{Float64}}}
 

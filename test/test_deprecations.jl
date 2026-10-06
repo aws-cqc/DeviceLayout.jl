@@ -18,10 +18,4 @@
         @test !isfinite(sty.selection_tolerance)
         @test_nowarn Rounded(1μm, p0=[Point(1μm, 1μm)], selection_tolerance=1nm)
     end
-
-    @testset "ExamplePDK filter_params" begin
-        tr = ExampleRectangleTransmon()
-        @test (@test_deprecated ExamplePDK.filter_params(ExampleRectangleIsland, tr)) ==
-              filter_parameters(ExampleRectangleIsland, tr)
-    end
 end
