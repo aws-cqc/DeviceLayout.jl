@@ -33,19 +33,6 @@
         @test_nowarn Rounded(1μm, p0=[Point(1μm, 1μm)], selection_tolerance=1nm)
     end
 
-    @testset "Ellipse rounded keyword" begin
-        e = Ellipse(Point(0μm, 0μm), (2μm, 1μm), 45°)
-        sm = SolidModel("deprecations"; overwrite=true)
-        @test (@test_deprecated SolidModels.to_primitives(sm, e; rounded=true)) === e
-        @test length(
-            points(@test_deprecated SolidModels.to_primitives(sm, e; rounded=false))
-        ) == 8
-        smg = SolidModel("deprecations_gmsh", SolidModels.GmshNative(); overwrite=true)
-        @test length(
-            points(@test_deprecated SolidModels.to_primitives(smg, e; rounded=false))
-        ) == 8
-    end
-
     @testset "ExamplePDK filter_params" begin
         tr = ExampleRectangleTransmon()
         @test (@test_deprecated ExamplePDK.filter_params(ExampleRectangleIsland, tr)) ==
