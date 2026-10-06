@@ -6,6 +6,8 @@ The format of this changelog is based on
 
 ## Unreleased
 
+## 1.20.0 (2026-10-06)
+
 ### Changed
 
   - The required top-level `ParameterSet` namespace `global` is renamed to
