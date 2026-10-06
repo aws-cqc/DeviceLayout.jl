@@ -21,12 +21,6 @@
         @test_nowarn Rounded(1μm, p0=[Point(1μm, 1μm)], selection_tolerance=1nm)
     end
 
-    @testset "ExamplePDK filter_params" begin
-        tr = ExampleRectangleTransmon()
-        @test (@test_deprecated ExamplePDK.filter_params(ExampleRectangleIsland, tr)) ==
-              filter_parameters(ExampleRectangleIsland, tr)
-    end
-
     @testset "DXF export" begin
         main = Cell("main", nm)
         render!(main, Rectangle(10μm, 10μm), GDSMeta(0, 0))

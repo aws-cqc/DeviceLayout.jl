@@ -13,6 +13,7 @@ The format of this changelog is based on
   - `cliptree` (deprecated in 1.13.0 in favor of `clip(...).tree`)
   - `circle` (deprecated in 1.6.0 in favor of `Circle` or `circle_polygon`)
   - `layers` (deprecated in favor of `gdslayers`)
+  - `ExamplePDK.filter_params` (use `SchematicDrivenLayout.filter_parameters`)
 
 ## Unreleased
 
