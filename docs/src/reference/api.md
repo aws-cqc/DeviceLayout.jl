@@ -342,7 +342,6 @@ See [Shapes](./shapes.md).
 ### Meshing
 
 ```@docs
-    SolidModels.MeshingParameters
     SolidModels.mesh_order
     SolidModels.mesh_scale
     SolidModels.mesh_grading_default

@@ -1049,65 +1049,6 @@ function populate_size_fields!(
 end
 
 """
-    Base.@kwdef struct MeshingParameters
-        mesh_scale::Float64 = 1.0
-        mesh_order::Int = 1
-        α_default::Float64 = 0.75
-        apply_size_to_surfaces::Bool = false
-        high_order_optimize::Int = 1
-        surface_mesh_algorithm::Int = 6
-        volume_mesh_algorithm::Int = 1
-        options::Dict{String, Union{String, Float64}} = Dict{String, Union{String, Float64}}()
-    end
-
-!!! warning "Deprecated"
-
-    This struct is deprecated. See [`render!`](@ref)
-
-MeshingParameters contains high level parameters to specify mesh sizing
-fields throughout the domain.
-
-  - `mesh_scale` applies multiplicatively to the smallest size specified by any size field
-    function, comparing to the formula in the `MeshSized` style, this results in all mesh size
-    fields being rescaled where `h` ← `mesh_scale` * `h`.
-  - `mesh_order` specifies the order of polynomials to use in representing the geometry, this
-    is important if curved geometric features are present, `mesh_order == 1` will represent
-    the geometry with linear polynomials, whilst `mesh_order == 2` will represent it with
-    quadratic polynomials, and `mesh_order == 3` with cubic polynomials. Increasing the value
-    of `mesh_order` results in greater geometric fidelity, whilst making meshing more
-    difficult (and prone to errors).
-  - `α_default` specifies the default value of `α` to use for `MeshSized` entities where `α`
-    is set to less than 0, `α_default ∈ (0, 1]` is particularly used for the default grading
-    of `Path` entities. A value closer to 1 can result in an unstable meshing algorithm in gmsh,
-    particularly for complex geometries.
-  - `apply_size_to_surfaces=true` will cause the mesh sizing field to specify the size within
-    any sized entities, as opposed to only along the perimeter of the entity if
-    `apply_size_to_surfaces=false`. Setting `apply_size_to_surfaces=true` will result in a
-    larger number of elements.
-  - `high_order_optimize=1` flag to pass to gmsh if optimization of a higher order mesh is
-    to be performed. (0: none, 1: optimization, 2: elastic+optimization, 3: elastic, 4: fast
-    curving). Refer to the gmsh documentation for more details.
-  - `surface_mesh_algorithm` specifies the algorithm gmsh should use when performing the
-    surface mesh generation. Refer to the gmsh documentation for more details.
-  - `volume_mesh_algorithm` specifies the algorithm gmsh should use when performing the
-    volume mesh generation. Refer to the gmsh documentation for more details.
-  - `options` used to specify any additional options provided to gmsh, which will be set with
-    `gmsh.options.set_number(key, value)` for each `key => value` pair. Refer to the gmsh
-    documentation for a list of available options. Will override any other options as is
-    called last.
-"""
-Base.@kwdef struct MeshingParameters
-    mesh_scale::Float64 = 1.0
-    mesh_order::Int = 1
-    α_default::Float64 = 0.75
-    apply_size_to_surfaces::Bool = false
-    high_order_optimize::Int = 1
-    surface_mesh_algorithm::Int = 6
-    volume_mesh_algorithm::Int = 1
-    options::Dict{String, Union{String, Float64}} = Dict{String, Union{String, Float64}}()
-end
-
-"""
     render!(sm::SolidModel, cs::AbstractCoordinateSystem{T}; map_meta=layer,
     postrender_ops=[], zmap=(_) -> zero(T), gmsh_options = Dict(), skip_postrender = false,
     auto_union=false, skip_unused_layers=false, curvature_sizing=true, kwargs...) where {T}
@@ -1134,9 +1075,6 @@ Render `cs` to `sm`.
   - `zmap`: Function (m::SemanticMeta) -> `z` coordinate of corresponding elements. Default:
     Map all metadata to zero.
   - `gmsh_options`: Dictionary of gmsh option name-value pairs to set before meshing.
-  - `meshing_parameters`: **Deprecated.** Use individual mesh control functions
-    [`DeviceLayout.SolidModels.mesh_scale`](@ref), [`DeviceLayout.SolidModels.mesh_order`](@ref) and [`DeviceLayout.SolidModels.mesh_grading_default`](@ref), along with
-    `gmsh_options` instead.
   - `skip_postrender`: Whether or not to return early without performing any postrendering
     operations. This can be particularly helpful during debugging, as all two dimensional
     entities will be placed appropriately but will not have been combined.
@@ -1171,7 +1109,6 @@ function render!(
     retained_physical_groups=[],
     zmap=(_) -> zero(T),
     gmsh_options=Dict{String, Union{String, Int, Float64}}(),
-    meshing_parameters::Union{Nothing, MeshingParameters}=nothing,
     skip_postrender=false,
     auto_union=false,
     skip_unused_layers=false,
@@ -1196,7 +1133,6 @@ function render!(
         retained_physical_groups=retained_physical_groups,
         zmap=zmap,
         gmsh_options=gmsh_options,
-        meshing_parameters=meshing_parameters,
         skip_postrender=skip_postrender,
         auto_union=auto_union,
         skip_unused_layers=skip_unused_layers,
@@ -1234,7 +1170,6 @@ function _render_orchestrator!(
     retained_physical_groups=[],
     zmap=(_) -> zero(T),
     gmsh_options=Dict{String, Union{String, Int, Float64}}(),
-    meshing_parameters::Union{Nothing, MeshingParameters}=nothing,
     skip_postrender=false,
     auto_union=false,
     skip_unused_layers=false,
@@ -1242,20 +1177,6 @@ function _render_orchestrator!(
     kwargs...
 ) where {T}
     gmsh.model.set_current(name(sm))
-
-    if !isnothing(meshing_parameters)
-        msg = "The `meshing_parameters` keyword is deprecated. Use the individual mesh control functions `SolidModels.mesh_scale`, `SolidModels.mesh_order`, and `SolidModels.mesh_grading_default`, along with `gmsh_options`, instead"
-        if meshing_parameters.apply_size_to_surfaces
-            msg *= "; `apply_size_to_surfaces` has no effect and should be removed"
-        end
-        Base.depwarn(msg, :render!)
-        mesh_scale(meshing_parameters.mesh_scale)
-        mesh_order(meshing_parameters.mesh_order, meshing_parameters.high_order_optimize)
-        mesh_grading_default(meshing_parameters.α_default)
-        gmsh_options["Mesh.Algorithm"] = meshing_parameters.surface_mesh_algorithm
-        gmsh_options["Mesh.Algorithm3D"] = meshing_parameters.volume_mesh_algorithm
-        merge!(gmsh_options, meshing_parameters.options)
-    end
 
     set_gmsh_option(gmsh_options)
 

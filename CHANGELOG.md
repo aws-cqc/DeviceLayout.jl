@@ -4,6 +4,12 @@ The format of this changelog is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## 2.0.0 (upcoming)
+
+### Removed
+
+  - `MeshingParameters` and the `meshing_parameters` keyword argument for `SolidModel` rendering (deprecated in 1.8.0 in favor of `mesh_scale`, `mesh_order`, `mesh_grading_default` accessed from `SolidModels`)
+
 ## Unreleased
 
 ## 1.20.0 (2026-10-06)
