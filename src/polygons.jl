@@ -66,8 +66,7 @@ import IntervalSets.(..)
 import IntervalSets.endpoints
 
 export Polygon, ClippedPolygon, Ellipse, Circle, LineSegment
-export circle,
-    circle_polygon,
+export circle_polygon,
     clip,
     circularapprox,
     circularequality,
@@ -674,15 +673,6 @@ Return a circular `Polygon` centered about the origin with radius `r` and angula
 """
 circle_polygon(r, Δθ=10°) =
     Polygon([Point(r * cos(a), r * sin(a)) for a in ((0°):Δθ:(360° - Δθ))])
-function circle(r, α=10°)
-    @warn """
-        `circle(r, α)` is deprecated. Use `Circle(r)` or `Circle(center, r)` to create an \
-        exact circle that will be discretized at render time according to rendering keywords \
-        `atol` and `rtol` (default absolute-only 1nm) or `Δθ` (if provided). To construct the \
-        polygon directly, use `circle_polygon(r, α)`.
-    """ maxlog = 1
-    return circle_polygon(r, α)
-end
 
 """
     struct Rounded{T <: Coordinate} <: GeometryEntityStyle
