@@ -1920,6 +1920,17 @@
         )
         @test !SolidModels.hasgroup(sm2, "unused", 2)
 
+        sm3 = SolidModel("test_skip_materials", overwrite=true)
+        render!(
+            sm3,
+            cs;
+            skip_unused_layers=true,
+            material_precedence=[("used", 2), ("intermediate", 2)]
+        )
+        @test SolidModels.hasgroup(sm3, "used", 2)
+        @test SolidModels.hasgroup(sm3, "intermediate", 2)
+        @test !SolidModels.hasgroup(sm3, "unused", 2)
+
         # Indexed layers: "port_1" kept when base layer "port" is referenced
         cs3 = CoordinateSystem("test_skip_indexed", nm)
         place!(cs3, Rectangle(Point(0μm, 0μm), Point(1μm, 1μm)), SemanticMeta(:metal))
@@ -1972,7 +1983,7 @@
             ("base", SolidModels.difference_geom!, ("writeable_area", "base_negative"))
         ]
         retained = [("vacuum", 3), ("substrate", 3)]
-        names = DeviceLayout.SolidModels._used_group_names(ops, retained)
+        names = DeviceLayout.SolidModels._used_group_names(ops, retained, [("chip", 3)])
         @test "metal" ∈ names
         @test "metal_negative" ∈ names
         @test "base" ∈ names
@@ -1980,6 +1991,7 @@
         @test "base_negative" ∈ names
         @test "vacuum" ∈ names
         @test "substrate" ∈ names
+        @test "chip" ∈ names
 
         # Verify transitive deps: intermediate names referenced by ops are included
         ops2 =
@@ -2268,4 +2280,45 @@ end
         @test pgname(sm["mixed", 3]) == "mixed"
         @test pgname(sm["mixed", 2]) == "mixed" # dim-2 name restored after the clear
     end
+end
+
+@testitem "partition_material_groups! enforces material precedence" setup =
+    [CommonTestSetup] begin
+    using DeviceLayout.SolidModels
+    import DeviceLayout.SolidModels: gmsh, dimtags, partition_material_groups!
+
+    # Model the overlapping memberships left by fragmentation.
+    sm = SolidModel("matpart"; overwrite=true)
+    v = [gmsh.model.occ.addBox(20i, 0, 0, 10, 10, 10) for i = 0:3]
+    gmsh.model.occ.synchronize()
+    sm["chip"] = [(3, v[1]), (3, v[2])]
+    sm["vacuum"] = [(3, v[2]), (3, v[3]), (3, v[4])]
+    sm["annotation"] = [(3, v[4])]
+
+    tagset(g) = Set(Int(t) for (d, t) in dimtags(sm[g, 3]))
+    chip_before = tagset("chip")
+    vacuum_before = tagset("vacuum")
+    @test_throws ArgumentError partition_material_groups!(
+        sm,
+        [("chip", 3), ("missing", 3), ("vacuum", 3)]
+    )
+    @test_throws ArgumentError partition_material_groups!(
+        sm,
+        [("chip", 3), ("chip", 3), ("vacuum", 3)]
+    )
+    @test tagset("chip") == chip_before
+    @test tagset("vacuum") == vacuum_before
+
+    partition_material_groups!(sm, [("chip", 3), ("vacuum", 3)])
+    @test tagset("chip") == Set(Int.(v[1:2]))
+    @test tagset("vacuum") == Set(Int.(v[3:4]))
+    @test isempty(intersect(tagset("chip"), tagset("vacuum"))) # mutually exclusive
+    @test tagset("annotation") == Set([Int(v[4])])
+
+    # A group whose every entity is claimed by a higher-priority group is removed, but its
+    # entities stay in the model.
+    partition_material_groups!(sm, [("vacuum", 3), ("annotation", 3)])
+    @test tagset("vacuum") == Set(Int.(v[3:4]))
+    @test !SolidModels.hasgroup(sm, "annotation", 3)
+    @test (3, v[4]) in gmsh.model.getEntities(3)
 end
