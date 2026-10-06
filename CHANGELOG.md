@@ -6,6 +6,16 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - `SolidModels.mesh_respect_lc` makes the mesh-size callback return the smaller of the
+    control-point size and the size gmsh proposes itself, so curvature or boundary sizing
+    applies to geometry without control points, such as imported CAD. Off by default.
+  - `SolidModels.load_mesh_control_points!` loads a parsed control-point document (tiers of
+    `h_um`, `alpha`, `coords_um`) into the mesh-size field, and
+    `SolidModels.set_mesh_size_callback!` installs the size callback for models assembled
+    without `render!`.
+
 ## 1.20.0 (2026-10-06)
 
 ### Changed
