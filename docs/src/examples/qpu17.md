@@ -437,8 +437,7 @@ function add_control!(g, port_nodes, q_nodes, p)
                 p.device.FEEDLINE_STYLE,
                 METAL_NEGATIVE;
                 name=uniquename("r_xy_$idx"),
-                waypoints=wp,
-                global_waypoints=true
+                waypoints=wp
             )
             push!(xy_nodes, node)
         elseif role == "Z"
@@ -450,8 +449,7 @@ function add_control!(g, port_nodes, q_nodes, p)
                 p.device.FEEDLINE_STYLE,
                 METAL_NEGATIVE;
                 name=uniquename("r_z_$idx"),
-                waypoints=wp,
-                global_waypoints=true
+                waypoints=wp
             )
             push!(z_nodes, node)
         end
@@ -563,8 +561,7 @@ function add_readout!(g, port_nodes, readout_nodes, p)
                 waypoints=meander_waypoints(
                     RO_WAYPOINTS[group][idx_in_group],
                     RO_MEANDER_PARAMS[group][idx_in_group]
-                ),
-                global_waypoints=true
+                )
             )
             push!(readout_route_nodes[group], node)
             prev = next
@@ -580,8 +577,7 @@ function add_readout!(g, port_nodes, readout_nodes, p)
             p.device.FEEDLINE_STYLE,
             METAL_NEGATIVE;
             name=uniquename("r_ro_$group"),
-            waypoints=RO_WAYPOINTS[group][end],
-            global_waypoints=true
+            waypoints=RO_WAYPOINTS[group][end]
         )
         push!(readout_route_nodes[group], node)
     end
