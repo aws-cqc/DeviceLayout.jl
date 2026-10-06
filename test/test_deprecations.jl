@@ -33,10 +33,6 @@
               filter_parameters(ExampleRectangleIsland, tr)
     end
 
-    @testset "circle" begin
-        @test_logs (:warn, r"deprecated") match_mode = :any circle(1μm)
-    end
-
     @testset "DXF export" begin
         main = Cell("main", nm)
         render!(main, Rectangle(10μm, 10μm), GDSMeta(0, 0))
