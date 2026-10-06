@@ -69,7 +69,6 @@ export Polygon, ClippedPolygon, Ellipse, Circle, LineSegment
 export circle,
     circle_polygon,
     clip,
-    cliptree,
     circularapprox,
     circularequality,
     difference2d,

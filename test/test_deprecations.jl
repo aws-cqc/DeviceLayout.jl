@@ -14,14 +14,6 @@
         @test (@test_deprecated layers(c)) == gdslayers(c) == [3]
     end
 
-    @testset "cliptree -> clip(...).tree" begin
-        r1 = centered(Rectangle(2μm, 2μm))
-        r2 = centered(Rectangle(1μm, 1μm))
-        tree = @test_deprecated cliptree(Clipper.ClipTypeDifference, r1, r2)
-        @test to_polygons(ClippedPolygon(tree)) ==
-              to_polygons(clip(Clipper.ClipTypeDifference, r1, r2))
-    end
-
     @testset "non-finite selection_tolerance" begin
         # Default-visible warning: the replacement is a behavior change, not a rename.
         sty =
