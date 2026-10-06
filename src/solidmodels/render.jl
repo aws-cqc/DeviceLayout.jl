@@ -1130,6 +1130,11 @@ Render `cs` to `sm`.
     `"base"`. The keyword pairs `:remove_object=>true` and `:remove_tool=>true` mean
     that the "object" (first argument) group `"writeable_area"` and the "tool" (second argument)
     group `"base_negative"` are both removed when `"base"` is created.
+  - `post_fragment_ops`: Vector of Tuples in the same form as `postrender_ops`, executed after
+    the global fragmentation pass. Use this for operations that need the rendered geometry to
+    be conformal already and that handle their own fusion, such as adding a part and fusing it
+    locally with [`targeted_fuse!`](@ref). Entities these operations add are not fragmented
+    against the rest of the model unless an operation does so itself.
   - `retained_physical_groups`: Vector of `(name, dimension)` tuples specifying which physical groups to keep after rendering. All other groups are removed.
   - `zmap`: Function (m::SemanticMeta) -> `z` coordinate of corresponding elements. Default:
     Map all metadata to zero.
@@ -1144,11 +1149,9 @@ Render `cs` to `sm`.
     as the first postrender step, before extrusions and user-defined `postrender_ops`. This
     consolidates overlapping entities within each group, reducing the cost of subsequent
     pairwise fragmentation. Default is `false`.
-  - `skip_unused_layers`: If `true`, skip rendering layers whose names are not referenced by
-    `postrender_ops` or `retained_physical_groups`. A layer is considered referenced if either
-    its mapped name or its base layer name (from `layer(meta)`) appears in the referenced set.
-    This keeps indexed and levelwise variants (e.g. `"port_1"`) when the base layer (`"port"`)
-    is referenced. Default is `false`.
+  - `skip_unused_layers`: If `true`, skip layers not referenced by `postrender_ops`,
+    `post_fragment_ops`, or `retained_physical_groups`. Indexed and levelwise variants are kept
+    when their base layer is referenced. Default is `false`.
   - `curvature_sizing`: If `true`, add radius-sized mesh control points at the centers of exact
     circular primitives preserved by the rendering backend. For `extrude_z!` postrender
     operations, generated perimeter and curvature controls are repeated at requested extrusion
@@ -1168,6 +1171,7 @@ function render!(
     cs::AbstractCoordinateSystem{T};
     map_meta=layer,
     postrender_ops=[],
+    post_fragment_ops=[],
     retained_physical_groups=[],
     zmap=(_) -> zero(T),
     gmsh_options=Dict{String, Union{String, Int, Float64}}(),
@@ -1193,6 +1197,7 @@ function render!(
         (fragment!)=_fragment_three_pass!,
         map_meta=map_meta,
         postrender_ops=postrender_ops,
+        post_fragment_ops=post_fragment_ops,
         retained_physical_groups=retained_physical_groups,
         zmap=zmap,
         gmsh_options=gmsh_options,
@@ -1207,12 +1212,38 @@ end
 
 # Adjacent-dimension pairs avoid both exterior boundary loss ([3,2,1], PR #145)
 # and stale OCC bindings when combined ([1,2,3], Gmsh #3446 / issue #172).
-function _fragment_three_pass!(sm::SolidModel)
-    _fragment_and_map!(sm, [0, 1])
-    _fragment_and_map!(sm, [1, 2])
-    _fragment_and_map!(sm, [2, 3])
+# With `box`, each pass uses only entities whose bbox intersects it, rescanned per pass: OCC
+# binds split pieces as new entities while the parent may still reference the original, so
+# walking down from seed volumes would miss them and leave orphans.
+function _fragment_three_pass!(sm::SolidModel; box=nothing)
+    for dims in ([0, 1], [1, 2], [2, 3])
+        _fragment_and_map!(sm, dims; included_entities=_entities_in_box(sm, dims, box))
+    end
     return sm
 end
+
+_entities_in_box(::SolidModel, dims, ::Nothing) = nothing   # all entities of `dims`
+function _entities_in_box(sm::SolidModel, dims, box)
+    gmsh.model.set_current(name(sm))
+    ents = vcat([gmsh.model.get_entities(dim) for dim in dims]...)
+    selected = filter(dt -> _boxes_touch(box, bounds3d([dt])), ents)
+    # A boolean that rebuilds an entity can retag its sub-entities, including those outside the
+    # box. `_fragment_and_map!` can only follow operands, so the full boundary of every selected
+    # top-dimension entity is submitted too, as the global pass does implicitly.
+    top = maximum(dims)
+    parents = filter(dt -> dt[1] == top, selected)
+    isempty(parents) && return selected
+    closure = filter(
+        dt -> dt[1] in dims,
+        [(d, abs(t)) for (d, t) in gmsh.model.get_boundary(parents, false, false, false)]
+    )
+    return unique(vcat(selected, closure))
+end
+
+# OCC pads bounding boxes by about 1e-7 (see `bounds3d`), so the boxes of solids that touch
+# always overlap and the test needs no tolerance.
+_rect(b) = SpatialIndexing.Rect((b[1], b[2], b[3]), (b[4], b[5], b[6]))
+_boxes_touch(a, b) = SpatialIndexing.intersects(_rect(a), _rect(b))
 
 # Shared orchestrator body called by both `render!` and `render_conformal!`.
 # The two entry points differ only in:
@@ -1231,6 +1262,7 @@ function _render_orchestrator!(
     fragment!,
     map_meta=layer,
     postrender_ops=[],
+    post_fragment_ops=[],
     retained_physical_groups=[],
     zmap=(_) -> zero(T),
     gmsh_options=Dict{String, Union{String, Int, Float64}}(),
@@ -1271,7 +1303,8 @@ function _render_orchestrator!(
 
     # Build set of used layer names for skip_unused_layers optimization
     used_names = if skip_unused_layers
-        _used_group_names(postrender_ops, retained_physical_groups)
+        # Post-fragment operations reference layers the same way postrender operations do.
+        _used_group_names(vcat(postrender_ops, post_fragment_ops), retained_physical_groups)
     else
         nothing
     end
@@ -1354,6 +1387,14 @@ function _render_orchestrator!(
     # Get rid of redundant entities and update groups accordingly.
     fragment!(sm)
 
+    # Operations that need the rendered geometry to be conformal already, and take care of
+    # their own fusion: typically importing an external part and then `targeted_fuse!`, which
+    # fragments only around the part instead of repeating the global pass over everything.
+    if !isempty(post_fragment_ops)
+        _postrender!(sm, post_fragment_ops)
+        _synchronize!(sm)
+    end
+
     # Rebuild KDTrees to include mesh-size controls composed with extrusions.
     meshsize_composed && finalize_size_fields!()
 
@@ -1430,7 +1471,8 @@ end
 function _fragment_and_map!(
     sm::SolidModel,
     frag_dims;
-    excluded_physical_groups=PhysicalGroup[]
+    excluded_physical_groups=PhysicalGroup[],
+    included_entities=nothing
 )
     gmsh.model.set_current(name(sm))
     # Get the tags of entities in existing groups
@@ -1438,7 +1480,11 @@ function _fragment_and_map!(
         (name, dimtags(pg)) for dim in frag_dims for
         (name, pg) in pairs(dimgroupdict(sm, dim))
     ]
-    allents = vcat([gmsh.model.get_entities(dim) for dim in frag_dims]...)
+    # Restrict fragmentation to a supplied subset when requested.
+    allents =
+        isnothing(included_entities) ?
+        vcat([gmsh.model.get_entities(dim) for dim in frag_dims]...) :
+        collect(included_entities)
 
     # Remove any excluded groups from the fragment.
     if !isempty(excluded_physical_groups)
@@ -1499,11 +1545,17 @@ function _fragment_and_map!(
         kernel(sm).remove(setdiff(allents, frags))
     end
     isempty(entmap) && return _synchronize!(sm)
-    # For each original group,
-    # reassign the group to the fragments its elements were mapped to
+    # Members outside the fragment keep their tags. Groups with members inside are re-added even
+    # when tags were preserved: gmsh drops physical membership on rebuilt entities.
     for (name, dim_tags) in groups
         isempty(dim_tags) && continue
-        sm[name] = vcat((entmap[indexin(dim_tags, allents)])...)
+        idx = indexin(dim_tags, allents)
+        all(isnothing, idx) && continue
+        newtags = Tuple{Int32, Int32}[]
+        for (dt, i) in zip(dim_tags, idx)
+            isnothing(i) ? push!(newtags, dt) : append!(newtags, entmap[i])
+        end
+        sm[name] = newtags
     end
     return _synchronize!(sm)
 end
@@ -1554,7 +1606,8 @@ end
 function _fragment_and_map!(
     ::SolidModel{GmshNative},
     frag_dims;
-    excluded_physical_groups=PhysicalGroup[]
+    excluded_physical_groups=PhysicalGroup[],
+    included_entities=nothing
 ) end
 
 # Assumes `gmsh` has been initialized and the current model has been set beforehand, and that

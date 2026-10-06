@@ -334,6 +334,7 @@ See [Shapes](./shapes.md).
     SolidModels.restrict_to_volume!
     SolidModels.revolve!
     SolidModels.set_periodic!
+    SolidModels.targeted_fuse!
     SolidModels.translate!
     SolidModels.union_geom!
     SolidModels.staple_bridge_postrendering
