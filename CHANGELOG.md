@@ -18,6 +18,10 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - When OpenCASCADE's fragment history reports an entity as deleted with no successor while
+    the result holds a geometrically identical entity under a new tag, `SolidModel`
+    fragmentation now matches the two by bounding box, so the entity keeps its physical groups
+    instead of silently dropping out of them.
   - `offset` with `Clipper.JoinTypeRound` or `Clipper.EndTypeOpenRound` discretizes arcs to a
     tolerance of 1 nm for floating-point coordinates instead of a quarter femtometer, which
     gave on the order of 10⁵ vertices per rounded corner. The new `atol` keyword sets the
