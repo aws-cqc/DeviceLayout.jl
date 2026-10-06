@@ -8,12 +8,6 @@
     using DeviceLayout.SchematicDrivenLayout.ExamplePDK.Transmons:
         ExampleRectangleTransmon, ExampleRectangleIsland
 
-    @testset "layers -> gdslayers" begin
-        c = Cell("deprecations", nm)
-        render!(c, centered(Rectangle(2μm, 2μm)), GDSMeta(3, 1))
-        @test (@test_deprecated layers(c)) == gdslayers(c) == [3]
-    end
-
     @testset "non-finite selection_tolerance" begin
         # Default-visible warning: the replacement is a behavior change, not a rename.
         sty =

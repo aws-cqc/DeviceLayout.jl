@@ -550,8 +550,8 @@ export Paths,
     undecorated
 
 include("cells.jl")
-import .Cells: Cell, CellReference, CellArray, cell, gdslayers, layers, text!
-export Cells, Cell, CellReference, CellArray, cell, gdslayers, layers, text!
+import .Cells: Cell, CellReference, CellArray, cell, gdslayers, text!
+export Cells, Cell, CellReference, CellArray, cell, gdslayers, text!
 
 include("render/discretization.jl")
 

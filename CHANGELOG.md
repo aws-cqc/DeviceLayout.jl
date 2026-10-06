@@ -12,6 +12,7 @@ The format of this changelog is based on
   - `rounded` keyword for rendering `Ellipse` to `SolidModel` (deprecated in 1.6.0 in favor of `Δθ`)
   - `cliptree` (deprecated in 1.13.0 in favor of `clip(...).tree`)
   - `circle` (deprecated in 1.6.0 in favor of `Circle` or `circle_polygon`)
+  - `layers` (deprecated in favor of `gdslayers`)
 
 ## Unreleased
 

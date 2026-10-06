@@ -28,7 +28,6 @@ import DeviceLayout: flatten, flatten!, order!, traverse!, uniquename # to re-ex
 export Cell, CellArray, CellReference
 export cell,
     dbscale,
-    layers,
     gdslayers,
     geometry_fingerprint,
     flatten,
@@ -273,8 +272,6 @@ in referenced structures.
 """
 gdslayers(x::GeometryStructure) =
     unique(map(gdslayer ∘ DeviceLayout.default_meta_map, element_metadata(x)))
-
-@deprecate layers(x) gdslayers(x)
 
 """
     text!(c::Cell{S}, str::String, origin::Point=zero(Point{S}), meta::Meta=GDSMeta(); kwargs...) where {S}
