@@ -81,37 +81,12 @@ to_primitives(
     kwargs...
 ) where {T} = to_polygons(ent.ent, ent.sty; kwargs...)
 
-function to_primitives(::SolidModel, ent::Ellipse; rounded=nothing, Δθ=nothing, kwargs...)
-    if !isnothing(rounded)
-        Base.depwarn(
-            "The `rounded` keyword for Ellipse is deprecated. Use `Δθ=nothing` (default) to keep as ellipse primitive, or `Δθ=some_angle` to discretize to polygon. For the same discretization as `rounded=false` with `Δθ` not specified, use `Δθ=360°/8`",
-            :to_primitives
-        )
-        rounded && return ent  # Keep as ellipse primitive
-        # Otherwise, use the old default Δθ for backward compatibility
-        return to_polygons(ent; Δθ=(isnothing(Δθ) ? 360° / 8 : Δθ), kwargs...)
-    else
-        isnothing(Δθ) && return ent  # Keep as ellipse primitive (default code path)
-        # Otherwise, use specified Δθ
-        return to_polygons(ent; Δθ, kwargs...)  # Discretize to polygon
-    end
+function to_primitives(::SolidModel, ent::Ellipse; Δθ=nothing, kwargs...)
+    isnothing(Δθ) && return ent  # Keep as ellipse primitive (default code path)
+    # Otherwise, use specified Δθ
+    return to_polygons(ent; Δθ, kwargs...)  # Discretize to polygon
 end
-function to_primitives(
-    ::SolidModel{GmshNative},
-    ent::Ellipse;
-    rounded=nothing,
-    Δθ=nothing,
-    kwargs...
-)
-    if !isnothing(rounded)
-        Base.depwarn(
-            "The `rounded` keyword for Ellipse is deprecated. Use `Δθ=some_angle` to discretize to a polygon; for the same discretization as `rounded=false` with `Δθ` not specified, use `Δθ=360°/8`",
-            :to_primitives
-        )
-        if !rounded && isnothing(Δθ)
-            return to_polygons(ent; Δθ=360° / 8, kwargs...)
-        end
-    end
+function to_primitives(::SolidModel{GmshNative}, ent::Ellipse; Δθ=nothing, kwargs...)
     return to_polygons(ent; Δθ, kwargs...)
 end
 
