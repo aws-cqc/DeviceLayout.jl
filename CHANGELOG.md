@@ -8,6 +8,10 @@ The format of this changelog is based on
 
 ### Added
 
+  - `SolidModels.partition_material_groups!` and the `material_precedence` keyword of `render!`
+    and `render_conformal!` make the listed physical groups mutually exclusive by priority
+    after fragmentation, so each entity belongs to exactly one material group.
+    `render_conformal!` requires `fragment_backstop=true` when `material_precedence` is nonempty.
   - `SolidModels.mesh_respect_lc` makes the mesh-size callback return the smaller of the
     control-point size and the size gmsh proposes itself, so curvature or boundary sizing
     applies to geometry without control points, such as imported CAD. Off by default.
