@@ -2177,6 +2177,9 @@ end
     @test !any(record -> record.level >= Logging.Error, logs)
     @test any(contains.(msgs, "fragmented dimensions [2, 3]"))
     @test any(contains.(msgs, "render!: done"))
+    # Elapsed time comes first, in a fixed-width label, so slow steps can be skimmed for
+    @test any(startswith.(msgs, r"\[ +\d+\.\d{3} s\]   l1: "))
+    @test any(occursin.(r"^\[ +\d+\.\d{3} s\] render!: done$", msgs))
     # Verbose logging doesn't change the geometry
     @test length(SolidModels.entitytags(sm["ext1", 3])) == 1
 

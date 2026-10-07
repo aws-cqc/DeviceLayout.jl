@@ -75,14 +75,18 @@ end
     operation_timings(records) -> Vector{Dict}
 
 Extract `(phase, name, seconds)` entries from verbose `render!` log records. Phases follow the
-`render!:` marker messages; entries are the indented `  name: ... [x s]` result lines and the
-`  fragmented dimensions [d1, d2] [x s]` lines.
+`render!:` marker messages; entries are the `[x s]   name: ...` result lines and the
+`[x s]   fragmented dimensions [d1, d2]` lines.
 """
 function operation_timings(records)
     ops = Dict{String, Any}[]
     phase = "unknown"
     for r in records
-        msg = r["message"]
+        full_msg = r["message"]
+        # Timed messages start with an `[x s]` label
+        t = match(r"^\[\s*([\d.]+) s\]\s+(.*)$", full_msg)
+        seconds = isnothing(t) ? nothing : parse(Float64, t[1])
+        msg = isnothing(t) ? full_msg : t[2]
         if startswith(msg, "render!:")
             phase = if contains(msg, "rendering entities")
                 "groups"
@@ -93,35 +97,24 @@ function operation_timings(records)
             else
                 "render"
             end
-            m = match(r"\[([\d.]+) s\]$", msg)
-            isnothing(m) || push!(
+            isnothing(seconds) || push!(
                 ops,
-                Dict(
-                    "phase" => phase,
-                    "name" => "total",
-                    "seconds" => parse(Float64, m[1])
-                )
+                Dict("phase" => phase, "name" => "total", "seconds" => seconds)
             )
             continue
         end
-        m = match(r"^  fragmented dimensions (\[[\d, ]+\]) \[([\d.]+) s\]$", msg)
+        isnothing(seconds) && continue
+        m = match(r"^fragmented dimensions (\[[\d, ]+\])$", msg)
         if !isnothing(m)
             push!(
                 ops,
-                Dict(
-                    "phase" => "fragment",
-                    "name" => m[1],
-                    "seconds" => parse(Float64, m[2])
-                )
+                Dict("phase" => "fragment", "name" => m[1], "seconds" => seconds)
             )
             continue
         end
-        m = match(r"^  ([^:]+): .*\[([\d.]+) s\]$", msg)
+        m = match(r"^([^:]+): ", msg)
         if !isnothing(m)
-            push!(
-                ops,
-                Dict("phase" => phase, "name" => m[1], "seconds" => parse(Float64, m[2]))
-            )
+            push!(ops, Dict("phase" => phase, "name" => m[1], "seconds" => seconds))
         end
     end
     return ops
