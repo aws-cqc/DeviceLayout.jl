@@ -15,7 +15,8 @@ function _postrender!(
         t_op = time_ns()
         result = op(sm, args...; kwargs...)
         sm[destination] = result
-        verbose && @info "  $destination: $(_result_summary(result, t_op))"
+        verbose &&
+            @info "$(_elapsed_label(t_op))   $destination: $(_result_summary(result))"
         if !isempty(result) && !isnothing(mesh_points_by_group) && !isnothing(mesh_seen)
             changed_meshsize |=
                 _compose_meshsize!(mesh_points_by_group, op, args, kwargs, mesh_seen)
@@ -39,25 +40,36 @@ function _op_call_string(destination, op, args, kwargs)
 end
 
 """
-    _result_summary(dimtags, t0)
+    _result_summary(dimtags)
 
 Summarize the result of a rendering operation for verbose logging: entity count, dimensions,
-bounding box, and seconds elapsed since `t0` (as returned by `time_ns`).
+and bounding box.
 
 Bounds are queried per entity, so this is only computed when verbose logging is requested.
 """
-function _result_summary(dimtags, t0)
-    elapsed = _elapsed_s(t0)
-    isempty(dimtags) && return "0 entities [$elapsed s]"
+function _result_summary(dimtags)
+    isempty(dimtags) && return "0 entities"
     dims = join(sort(unique(first.(dimtags))), ", ")
     # Oriented results like `get_boundary`'s carry the boundary orientation in the sign of the
     # tag, and the kernel only knows the entity by its unsigned tag.
     b = round.(bounds3d((dim, abs(tag)) for (dim, tag) in dimtags), sigdigits=8)
     n = length(dimtags)
-    return "$n entities (dim $dims) in bounds (x1, y1, z1, x2, y2, z2) = $b [$elapsed s]"
+    return "$n entities (dim $dims) in bounds (x1, y1, z1, x2, y2, z2) = $b"
 end
 
-_elapsed_s(t0) = round((time_ns() - t0) / 1e9, digits=3)
+"""
+    _elapsed_label(t0)
+
+Seconds elapsed since `t0` (as returned by `time_ns`) as a fixed-width `[   1.234 s]` label.
+
+Verbose log lines start with this label so that the slowest steps can be found by skimming
+down the left-hand side of the log; the fixed width keeps the decimal points aligned.
+"""
+function _elapsed_label(t0)
+    s = string(round((time_ns() - t0) / 1e9, digits=3))
+    ndecimals = length(s) - something(findfirst('.', s), length(s))
+    return "[" * lpad(s * "0"^(3 - ndecimals), 9) * " s]"
+end
 
 function _fuse!(k, object, tool; tag=-1, remove_object=true, remove_tool=true)
     return _boolean_op!(
