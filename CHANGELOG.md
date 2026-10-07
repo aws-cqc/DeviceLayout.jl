@@ -16,6 +16,13 @@ The format of this changelog is based on
     `SolidModels.set_mesh_size_callback!` installs the size callback for models assembled
     without `render!`.
 
+### Fixed
+
+  - Assigning a physical group to a `SolidModel` by name now clears any stale entry for that
+    name in gmsh's name registry first. Booleans and synchronization drop group-table entries
+    but keep names registered, and a stale name silently left the re-created group unnamed, so
+    it was written to `.xao` as `G_<dim>_<tag>`.
+
 ## 1.20.0 (2026-10-06)
 
 ### Changed
