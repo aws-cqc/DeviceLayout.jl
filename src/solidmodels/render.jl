@@ -1312,7 +1312,7 @@ function _fragment_three_pass!(sm::SolidModel; region=nothing)
             dims;
             included_entities=_entities_in_region(sm, dims, region)
         )
-        verbose && @info "  fragmented dimensions $dims [$(_elapsed_s(t_fragment)) s]"
+        verbose && @info "$(_elapsed_label(t_fragment))   fragmented dimensions $dims"
     end
     return sm
 end
@@ -1438,7 +1438,8 @@ function _render_orchestrator!(
 
         # Make physical group for each dimension
         sm[mapped_name] = group_dimtags
-        verbose && @info "  $mapped_name: $(_result_summary(group_dimtags, t_group))"
+        verbose &&
+            @info "$(_elapsed_label(t_group))   $mapped_name: $(_result_summary(group_dimtags))"
 
         # Sample mesh size control points from the same primitive form added to the model.
         z_of_meta = _stp_float(zmap(meta))
@@ -1475,7 +1476,7 @@ function _render_orchestrator!(
     # Extrusions, Booleans, etc
     _synchronize!(sm)
     if skip_postrender
-        verbose && @info "render!: skipping postrendering [$(_elapsed_s(t_render)) s]"
+        verbose && @info "$(_elapsed_label(t_render)) render!: skipping postrendering"
         return nothing
     end
     # Union each physical group to consolidate overlapping entities before postrender.
@@ -1524,7 +1525,7 @@ function _render_orchestrator!(
         reindex_physical_groups!(sm)
     end
 
-    verbose && @info "render!: done [$(_elapsed_s(t_render)) s]"
+    verbose && @info "$(_elapsed_label(t_render)) render!: done"
     return _synchronize!(sm)
 end
 
