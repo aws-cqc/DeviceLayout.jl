@@ -4,19 +4,19 @@ function _postrender!(
     operations;
     mesh_points_by_group=nothing,
     mesh_seen=nothing,
-    verbose=false
+    reporter=nothing,
+    phase=:postrender
 )
     changed_meshsize = false
     # Operations
     for (destination, op, args, kwargs...) in operations
-        # Log the call before running it, so that an operation that errors or hangs is the
-        # last one logged and can be identified without stepping through by hand.
-        verbose && @info "Executing `$(_op_call_string(destination, op, args, kwargs))`"
+        # Report the call before running it, so that an operation that errors or hangs is the
+        # last one reported and can be identified without stepping through by hand.
+        _note(reporter, "Executing `$(_op_call_string(destination, op, args, kwargs))`")
         t_op = time_ns()
         result = op(sm, args...; kwargs...)
         sm[destination] = result
-        verbose &&
-            @info "$(_elapsed_label(t_op))   $destination: $(_result_summary(result))"
+        _step(reporter, phase, string(destination), _seconds_since(t_op), result)
         if !isempty(result) && !isnothing(mesh_points_by_group) && !isnothing(mesh_seen)
             changed_meshsize |=
                 _compose_meshsize!(mesh_points_by_group, op, args, kwargs, mesh_seen)
@@ -24,6 +24,33 @@ function _postrender!(
     end
     return changed_meshsize
 end
+
+# Verbose rendering reports progress to a "step reporter" through two functions:
+#
+#   _note(reporter, text)                          progress text, e.g. the call about to run
+#   _step(reporter, phase, name, seconds, result)  a finished, timed step and its `(dim, tag)`
+#                                                  result (`nothing` when there is none)
+#
+# `phase` is `:groups`, `:auto_union`, `:postrender`, `:fragment`, or `:render` for the call as
+# a whole. `render!(...; verbose=true)` uses `LogStepReporter`, which writes `@info` messages.
+# Tooling can pass an object implementing these two methods as `verbose` instead, to receive
+# the same information as data rather than by parsing the log (the benchmarks in
+# `benchmark/solidmodel/` do this).
+struct LogStepReporter end
+_step_reporter(verbose::Bool) = verbose ? LogStepReporter() : nothing
+_step_reporter(reporter) = reporter
+
+_note(::Nothing, text) = nothing
+_step(::Nothing, phase, name, seconds, result) = nothing
+_note(::LogStepReporter, text) = @info text
+function _step(::LogStepReporter, phase, name, seconds, result)
+    # Steps within a phase are indented under the phase's `render!:` messages.
+    indent = phase == :render ? " " : "   "
+    summary = isnothing(result) ? "" : ": " * _result_summary(result)
+    @info "$(_elapsed_label(seconds))$indent$name$summary"
+end
+
+_seconds_since(t0) = (time_ns() - t0) / 1e9
 
 """
     _op_call_string(destination, op, args, kwargs)
@@ -57,19 +84,9 @@ function _result_summary(dimtags)
     return "$n entities (dim $dims) in bounds (x1, y1, z1, x2, y2, z2) = $b"
 end
 
-"""
-    _elapsed_label(t0)
-
-Seconds elapsed since `t0` (as returned by `time_ns`) as a fixed-width `[   1.234 s]` label.
-
-Verbose log lines start with this label so that the slowest steps can be found by skimming
-down the left-hand side of the log; the fixed width keeps the decimal points aligned.
-"""
-function _elapsed_label(t0)
-    s = string(round((time_ns() - t0) / 1e9, digits=3))
-    ndecimals = length(s) - something(findfirst('.', s), length(s))
-    return "[" * lpad(s * "0"^(3 - ndecimals), 9) * " s]"
-end
+# Verbose log lines start with the elapsed time in a fixed-width label so that the slowest
+# steps can be found by skimming down the left-hand side of the log.
+_elapsed_label(seconds) = @sprintf("[%9.3f s]", seconds)
 
 function _fuse!(k, object, tool; tag=-1, remove_object=true, remove_tool=true)
     return _boolean_op!(
