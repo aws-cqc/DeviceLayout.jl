@@ -1191,9 +1191,8 @@ end
 
 """
     render!(sm::SolidModel, cs::AbstractCoordinateSystem{T}; map_meta=layer,
-    postrender_ops=[], retained_physical_groups=[], material_precedence=[],
-    zmap=(_) -> zero(T), gmsh_options=Dict(), skip_postrender=false, auto_union=false,
-    skip_unused_layers=false, curvature_sizing=true, kwargs...) where {T}
+    postrender_ops=[], zmap=(_) -> zero(T), gmsh_options = Dict(), skip_postrender = false,
+    auto_union=false, skip_unused_layers=false, curvature_sizing=true, kwargs...) where {T}
 
 Render `cs` to `sm`.
 
@@ -1214,8 +1213,6 @@ Render `cs` to `sm`.
     that the "object" (first argument) group `"writeable_area"` and the "tool" (second argument)
     group `"base_negative"` are both removed when `"base"` is created.
   - `retained_physical_groups`: Vector of `(name, dimension)` tuples specifying which physical groups to keep after rendering. All other groups are removed.
-  - `material_precedence`: Vector of `(name, dimension)` tuples ordered from highest to lowest
-    priority. After fragmentation, listed groups are made mutually exclusive.
   - `zmap`: Function (m::SemanticMeta) -> `z` coordinate of corresponding elements. Default:
     Map all metadata to zero.
   - `gmsh_options`: Dictionary of gmsh option name-value pairs to set before meshing.
@@ -1229,9 +1226,11 @@ Render `cs` to `sm`.
     as the first postrender step, before extrusions and user-defined `postrender_ops`. This
     consolidates overlapping entities within each group, reducing the cost of subsequent
     pairwise fragmentation. Default is `false`.
-  - `skip_unused_layers`: If `true`, skip layers not referenced by `postrender_ops`,
-    `retained_physical_groups`, or `material_precedence`. Indexed and levelwise variants are
-    kept when their base layer is referenced. Default is `false`.
+  - `skip_unused_layers`: If `true`, skip rendering layers whose names are not referenced by
+    `postrender_ops` or `retained_physical_groups`. A layer is considered referenced if either
+    its mapped name or its base layer name (from `layer(meta)`) appears in the referenced set.
+    This keeps indexed and levelwise variants (e.g. `"port_1"`) when the base layer (`"port"`)
+    is referenced. Default is `false`.
   - `curvature_sizing`: If `true`, add radius-sized mesh control points at the centers of exact
     circular primitives preserved by the rendering backend. For `extrude_z!` postrender
     operations, generated perimeter and curvature controls are repeated at requested extrusion
@@ -1252,7 +1251,6 @@ function render!(
     map_meta=layer,
     postrender_ops=[],
     retained_physical_groups=[],
-    material_precedence=[],
     zmap=(_) -> zero(T),
     gmsh_options=Dict{String, Union{String, Int, Float64}}(),
     meshing_parameters::Union{Nothing, MeshingParameters}=nothing,
@@ -1278,7 +1276,6 @@ function render!(
         map_meta=map_meta,
         postrender_ops=postrender_ops,
         retained_physical_groups=retained_physical_groups,
-        material_precedence=material_precedence,
         zmap=zmap,
         gmsh_options=gmsh_options,
         meshing_parameters=meshing_parameters,
@@ -1317,7 +1314,6 @@ function _render_orchestrator!(
     map_meta=layer,
     postrender_ops=[],
     retained_physical_groups=[],
-    material_precedence=[],
     zmap=(_) -> zero(T),
     gmsh_options=Dict{String, Union{String, Int, Float64}}(),
     meshing_parameters::Union{Nothing, MeshingParameters}=nothing,
@@ -1357,7 +1353,7 @@ function _render_orchestrator!(
 
     # Build set of used layer names for skip_unused_layers optimization
     used_names = if skip_unused_layers
-        _used_group_names(postrender_ops, retained_physical_groups, material_precedence)
+        _used_group_names(postrender_ops, retained_physical_groups)
     else
         nothing
     end
@@ -1439,9 +1435,6 @@ function _render_orchestrator!(
     _synchronize!(sm)
     # Get rid of redundant entities and update groups accordingly.
     fragment!(sm)
-
-    # Resolve overlapping material memberships created by fragmentation.
-    isempty(material_precedence) || partition_material_groups!(sm, material_precedence)
 
     # Rebuild KDTrees to include mesh-size controls composed with extrusions.
     meshsize_composed && finalize_size_fields!()
@@ -1961,26 +1954,29 @@ function _add_offset_curve!(
 end
 
 """
-    _used_group_names(postrender_ops, retained_physical_groups, material_precedence=[])
+    _used_group_names(postrender_ops, retained_physical_groups)
 
-Return physical group names needed by rendering or later processing.
+Build a `Set{String}` of physical group names referenced by `postrender_ops` or
+`retained_physical_groups`. Used by `skip_unused_layers` to avoid rendering
+entities for unreferenced layers.
 """
-function _used_group_names(postrender_ops, retained_physical_groups, material_precedence=[])
+function _used_group_names(postrender_ops, retained_physical_groups)
     names = Set{String}()
-    for groups in (retained_physical_groups, material_precedence)
-        for (name, _) in groups
-            push!(names, string(name))
-        end
+    for (name, _) in retained_physical_groups
+        push!(names, string(name))
     end
     for op in postrender_ops
-        push!(names, string(op[1]))
+        # op = (destination, func, args, kwargs...)
+        push!(names, string(op[1]))  # destination name
         if length(op) >= 3
-            _extract_op_names!(names, op[3])
+            _extract_op_names!(names, op[3])  # args tuple (kwargs are never layer names)
         end
     end
     return names
 end
 
+# Recursively extract String and Symbol values from nested args structures.
+# Numeric parameters (dimensions, thicknesses) are Int or length-unit types, never strings.
 _extract_op_names!(names::Set{String}, x::Union{String, Symbol}) = push!(names, string(x))
 _extract_op_names!(names::Set{String}, x::Union{Tuple, AbstractVector}) =
     foreach(a -> _extract_op_names!(names, a), x)

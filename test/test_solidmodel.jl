@@ -1920,17 +1920,6 @@
         )
         @test !SolidModels.hasgroup(sm2, "unused", 2)
 
-        sm3 = SolidModel("test_skip_materials", overwrite=true)
-        render!(
-            sm3,
-            cs;
-            skip_unused_layers=true,
-            material_precedence=[("used", 2), ("intermediate", 2)]
-        )
-        @test SolidModels.hasgroup(sm3, "used", 2)
-        @test SolidModels.hasgroup(sm3, "intermediate", 2)
-        @test !SolidModels.hasgroup(sm3, "unused", 2)
-
         # Indexed layers: "port_1" kept when base layer "port" is referenced
         cs3 = CoordinateSystem("test_skip_indexed", nm)
         place!(cs3, Rectangle(Point(0μm, 0μm), Point(1μm, 1μm)), SemanticMeta(:metal))
@@ -1983,7 +1972,7 @@
             ("base", SolidModels.difference_geom!, ("writeable_area", "base_negative"))
         ]
         retained = [("vacuum", 3), ("substrate", 3)]
-        names = DeviceLayout.SolidModels._used_group_names(ops, retained, [("chip", 3)])
+        names = DeviceLayout.SolidModels._used_group_names(ops, retained)
         @test "metal" ∈ names
         @test "metal_negative" ∈ names
         @test "base" ∈ names
@@ -1991,7 +1980,6 @@
         @test "base_negative" ∈ names
         @test "vacuum" ∈ names
         @test "substrate" ∈ names
-        @test "chip" ∈ names
 
         # Verify transitive deps: intermediate names referenced by ops are included
         ops2 =
@@ -2282,10 +2270,10 @@ end
     end
 end
 
-@testitem "partition_material_groups! enforces material precedence" setup =
-    [CommonTestSetup] begin
+@testitem "exclude_groups and apply_precedence" setup = [CommonTestSetup] begin
     using DeviceLayout.SolidModels
-    import DeviceLayout.SolidModels: gmsh, dimtags, partition_material_groups!
+    import DeviceLayout.SolidModels:
+        gmsh, dimtags, exclude_groups, apply_precedence, _postrender!
 
     # Model the overlapping memberships left by fragmentation.
     sm = SolidModel("matpart"; overwrite=true)
@@ -2294,31 +2282,56 @@ end
     sm["chip"] = [(3, v[1]), (3, v[2])]
     sm["vacuum"] = [(3, v[2]), (3, v[3]), (3, v[4])]
     sm["annotation"] = [(3, v[4])]
-
     tagset(g) = Set(Int(t) for (d, t) in dimtags(sm[g, 3]))
-    chip_before = tagset("chip")
-    vacuum_before = tagset("vacuum")
-    @test_throws ArgumentError partition_material_groups!(
-        sm,
-        [("chip", 3), ("missing", 3), ("vacuum", 3)]
-    )
-    @test_throws ArgumentError partition_material_groups!(
-        sm,
-        [("chip", 3), ("chip", 3), ("vacuum", 3)]
-    )
-    @test tagset("chip") == chip_before
-    @test tagset("vacuum") == vacuum_before
 
-    partition_material_groups!(sm, [("chip", 3), ("vacuum", 3)])
-    @test tagset("chip") == Set(Int.(v[1:2]))
-    @test tagset("vacuum") == Set(Int.(v[3:4]))
-    @test isempty(intersect(tagset("chip"), tagset("vacuum"))) # mutually exclusive
-    @test tagset("annotation") == Set([Int(v[4])])
+    @testset "exclude_groups is a membership difference" begin
+        @test Set(Int(t) for (_, t) in exclude_groups(sm, "vacuum", "chip", 3)) ==
+              Set(Int.(v[3:4]))
+        # Absent excluded groups are skipped, with an info message so typos are visible.
+        res = @test_logs (:info, r"\(missing, 3\) is not a physical group") exclude_groups(
+            sm,
+            "vacuum",
+            ["chip", "missing"],
+            3
+        )
+        @test Set(Int(t) for (_, t) in res) == Set(Int.(v[3:4]))
+        @test tagset("vacuum") == Set(Int.(v[2:4]))      # read-only: no group changed
+        @test (@test_logs (:error, r"not a physical group") exclude_groups(
+            sm,
+            "missing",
+            ["chip"],
+            3
+        )) == Tuple{Int32, Int32}[]
+    end
 
-    # A group whose every entity is claimed by a higher-priority group is removed, but its
-    # entities stay in the model.
-    partition_material_groups!(sm, [("vacuum", 3), ("annotation", 3)])
-    @test tagset("vacuum") == Set(Int.(v[3:4]))
-    @test !SolidModels.hasgroup(sm, "annotation", 3)
-    @test (3, v[4]) in gmsh.model.getEntities(3)
+    @testset "apply_precedence generates exclusion operations" begin
+        prec = [("chip", 3), ("vacuum", 3), ("annotation", 3), ("ports", 2)]
+        ops = apply_precedence(prec)
+        # One op per group below the top of its dimension; "ports" is alone in dimension 2.
+        @test [op[1] for op in ops] == ["vacuum", "annotation"]
+        @test ops[2][3] == ("annotation", ["chip", "vacuum"], 3)
+        @test all(op[4] == (:remove_object => true) for op in ops)
+        @test_throws ArgumentError apply_precedence([("chip", 3), ("chip", 3)])
+        @test_throws ArgumentError apply_precedence([("chip", 4)])
+        @test isempty(apply_precedence([("chip", 3)]))
+    end
+
+    @testset "operations make the groups mutually exclusive" begin
+        _postrender!(sm, apply_precedence([("chip", 3), ("vacuum", 3)]))
+        @test tagset("chip") == Set(Int.(v[1:2]))
+        @test tagset("vacuum") == Set(Int.(v[3:4]))
+        @test isempty(intersect(tagset("chip"), tagset("vacuum")))
+        @test tagset("annotation") == Set([Int(v[4])])  # unlisted groups are unchanged
+        @test gmsh.model.getPhysicalName(3, sm["vacuum", 3].grouptag) == "vacuum"
+    end
+
+    @testset "a group left with no entities is removed, its entities kept" begin
+        # Without `remove_object`, the empty result leaves the old group in place.
+        _postrender!(sm, [("annotation", exclude_groups, ("annotation", ["vacuum"], 3))])
+        @test tagset("annotation") == Set([Int(v[4])])
+        _postrender!(sm, apply_precedence([("vacuum", 3), ("annotation", 3)]))
+        @test !SolidModels.hasgroup(sm, "annotation", 3)
+        @test (3, v[4]) in gmsh.model.getEntities(3)
+        @test tagset("vacuum") == Set(Int.(v[3:4]))
+    end
 end
