@@ -468,13 +468,16 @@ end
 """
     offset(s::AbstractPolygon{T}, delta::Coordinate;
         j::Clipper.JoinType=Clipper.JoinTypeMiter,
-        e::Clipper.EndType=Clipper.EndTypeClosedPolygon) where {T <: Coordinate}
+        e::Clipper.EndType=Clipper.EndTypeClosedPolygon,
+        atol=nothing) where {T <: Coordinate}
     offset(s::AbstractVector{A}, delta::Coordinate;
         j::Clipper.JoinType=Clipper.JoinTypeMiter,
-        e::Clipper.EndType=Clipper.EndTypeClosedPolygon) where {T, A <: AbstractPolygon{T}}
+        e::Clipper.EndType=Clipper.EndTypeClosedPolygon,
+        atol=nothing) where {T, A <: AbstractPolygon{T}}
     offset(s::AbstractVector{Polygon{T}}, delta::T;
         j::Clipper.JoinType=Clipper.JoinTypeMiter,
-        e::Clipper.EndType=Clipper.EndTypeClosedPolygon) where {T <: Coordinate}
+        e::Clipper.EndType=Clipper.EndTypeClosedPolygon,
+        atol=nothing) where {T <: Coordinate}
 
 Using the [`Clipper`](http://www.angusj.com/delphi/clipper.php) library and
 the [`Clipper.jl`](https://github.com/Voxel8/Clipper.jl) wrapper, perform
@@ -501,6 +504,15 @@ and also an
   - `Clipper.EndTypeOpenSquare`
   - `Clipper.EndTypeOpenRound`
   - `Clipper.EndTypeOpenButt`
+
+Round joins and round ends are discretized so that the result deviates from the true arc by
+at most `atol`, which has the same dimensions as the coordinates. For floating-point
+coordinates, the default is 1 nm (`0.001` for unitless coordinates, which are taken to be
+in μm), matching the default tolerance for discretizing curves. Integer coordinates are
+not rescaled before offsetting, so they are treated as a grid: there the default is a
+quarter of one grid unit (Clipper's own default), and an explicit `atol` is converted to
+grid units. Clipper caps the effective tolerance at `abs(delta) / 4`. `atol` has no effect
+on miter or square joins.
 """
 function offset end
 
@@ -508,18 +520,20 @@ function offset(
     s::AbstractPolygon{T},
     delta::Coordinate;
     j::Clipper.JoinType=Clipper.JoinTypeMiter,
-    e::Clipper.EndType=Clipper.EndTypeClosedPolygon
+    e::Clipper.EndType=Clipper.EndTypeClosedPolygon,
+    atol=nothing
 ) where {T <: Coordinate}
     dimension(T) != dimension(delta) && throw(Unitful.DimensionError(oneunit(T), delta))
     S = promote_type(T, typeof(delta))
-    return offset(Polygon{S}[s], convert(S, delta); j=j, e=e)
+    return offset(Polygon{S}[s], convert(S, delta); j=j, e=e, atol=atol)
 end
 
 function offset(
     s::AbstractVector{A},
     delta::Coordinate;
     j::Clipper.JoinType=Clipper.JoinTypeMiter,
-    e::Clipper.EndType=Clipper.EndTypeClosedPolygon
+    e::Clipper.EndType=Clipper.EndTypeClosedPolygon,
+    atol=nothing
 ) where {T, A <: AbstractPolygon{T}}
     dimension(T) != dimension(delta) && throw(Unitful.DimensionError(oneunit(T), delta))
     S = promote_type(T, typeof(delta))
@@ -532,7 +546,8 @@ function offset(
         ),
         convert(S, delta);
         j=j,
-        e=e
+        e=e,
+        atol=atol
     )
 end
 
@@ -541,15 +556,31 @@ prescaledelta(x::Integer) = x
 prescaledelta(x::Length{<:Real}) = convert(typeof(USCALE), x)
 prescaledelta(x::Length{<:Integer}) = x
 
+# Clipper's arc tolerance is in the same lattice units as the clipperized coordinates.
+# Integer coordinates are passed to Clipper unscaled, so their lattice unit is `oneunit(T)`.
+const IntegerCoordinate = Union{Integer, Length{<:Integer}}
+arc_tolerance(::Type{T}, ::Nothing) where {T <: IntegerCoordinate} = 0.25
+arc_tolerance(::Type{T}, ::Nothing) where {T} =
+    arc_tolerance(T, DeviceLayout.onenanometer(T))
+function arc_tolerance(::Type{T}, atol) where {T <: IntegerCoordinate}
+    dimension(T) != dimension(atol) && throw(Unitful.DimensionError(oneunit(T), atol))
+    return Float64(uconvert(Unitful.NoUnits, atol / oneunit(T)))
+end
+function arc_tolerance(::Type{T}, atol) where {T}
+    dimension(T) != dimension(atol) && throw(Unitful.DimensionError(oneunit(T), atol))
+    return Float64(ustrip(prescaledelta(float(atol))))
+end
+
 function offset(
     s::AbstractVector{Polygon{T}},
     delta::T;
     j::Clipper.JoinType=Clipper.JoinTypeMiter,
-    e::Clipper.EndType=Clipper.EndTypeClosedPolygon
+    e::Clipper.EndType=Clipper.EndTypeClosedPolygon,
+    atol=nothing
 ) where {T <: Coordinate}
     sc = clipperize(s)
     d = prescaledelta(delta)
-    polys = _offset(sc, d, j=j, e=e)
+    polys = _offset(sc, d, j=j, e=e, arc_tolerance=arc_tolerance(T, atol))
     return declipperize.(polys, T)
 end
 
@@ -557,9 +588,10 @@ function offset(
     s::ClippedPolygon,
     delta::T;
     j::Clipper.JoinType=Clipper.JoinTypeMiter,
-    e::Clipper.EndType=Clipper.EndTypeClosedPolygon
+    e::Clipper.EndType=Clipper.EndTypeClosedPolygon,
+    atol=nothing
 ) where {T <: Coordinate}
-    return offset(to_polygons(s), delta, j=j, e=e)
+    return offset(to_polygons(s), delta, j=j, e=e, atol=atol)
 end
 
 function add_path!(
@@ -584,10 +616,11 @@ function _offset(
     s::AbstractVector{Polygon{T}},
     delta;
     j::Clipper.JoinType=Clipper.JoinTypeMiter,
-    e::Clipper.EndType=Clipper.EndTypeClosedPolygon
+    e::Clipper.EndType=Clipper.EndTypeClosedPolygon,
+    arc_tolerance::Float64
 ) where {T <: Union{Int64, Unitful.Quantity{Int64}}}
-    c = coffset()
-    Clipper.clear!(c)
+    # Clipper.jl only sets the arc tolerance at construction, so build one per call
+    c = Clipper.ClipperOffset(2.0, arc_tolerance)
     for s0 in s
         add_path!(c, s0.p, j, e)
     end

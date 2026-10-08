@@ -18,6 +18,10 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - `offset` with `Clipper.JoinTypeRound` or `Clipper.EndTypeOpenRound` discretizes arcs to a
+    tolerance of 1 nm for floating-point coordinates instead of a quarter femtometer, which
+    gave on the order of 10⁵ vertices per rounded corner. The new `atol` keyword sets the
+    tolerance; integer coordinates keep Clipper's default of a quarter grid unit.
   - `Intersect.AirBridge` crossings give the CPW open termination after the bridge
     `initial=true`, so its trace-corner vertices sit on the side facing the following segment
     and are shared with that segment's gap polygons instead of leaving T-junctions.

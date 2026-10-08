@@ -861,6 +861,35 @@ end
         result_i = offset(ring_i, 5)
         @test length(result_i) == 1
     end
+
+    @testset "Round join arc tolerance" begin
+        # Max deviation of the rounded corner at (10μm, 10μm) from the true 1μm arc
+        function corner_sagitta(o)
+            c = Point(10.0μm, 10.0μm)
+            arc = filter(p -> p.x > c.x && p.y > c.y, points(o))
+            return maximum(
+                1μm - norm((arc[i] + arc[i + 1]) / 2 - c) for i = 1:(length(arc) - 1)
+            )
+        end
+        r = Rectangle(10.0μm, 10.0μm)
+        o = only(offset(r, 1μm; j=Clipper.JoinTypeRound))
+        @test length(points(o)) < 100
+        @test 0.9nm < corner_sagitta(o) <= 1.01nm
+        o_coarse = only(offset(r, 1μm; j=Clipper.JoinTypeRound, atol=10nm))
+        @test length(points(o_coarse)) < length(points(o))
+        @test 9nm < corner_sagitta(o_coarse) <= 10.1nm
+        # Unitless coordinates are in μm
+        @test length(
+            points(only(offset(Rectangle(10.0, 10.0), 1.0; j=Clipper.JoinTypeRound)))
+        ) == length(points(o))
+        # Integer coordinates use grid units: Clipper's default of a quarter grid unit
+        ri = Rectangle(10nm, 10nm)
+        n_default = length(points(only(offset(ri, 1000nm; j=Clipper.JoinTypeRound))))
+        n_1nm = length(points(only(offset(ri, 1000nm; j=Clipper.JoinTypeRound, atol=1nm))))
+        @test n_1nm < n_default
+        @test_throws DimensionError offset(r, 1μm; j=Clipper.JoinTypeRound, atol=0.001)
+        @test_throws DimensionError offset(Rectangle(10, 10), 1; atol=1nm)
+    end
 end
 
 @testitem "Clipping CurvilinearPolygon" setup = [CommonTestSetup] begin

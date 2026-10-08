@@ -105,17 +105,19 @@ footprint(geo) = bounds(geo)
     offset(ent::GeometryEntity,
         delta;
         j::Clipper.JoinType=Clipper.JoinTypeMiter,
-        e::Clipper.EndType=Clipper.EndTypeClosedPolygon)
+        e::Clipper.EndType=Clipper.EndTypeClosedPolygon,
+        atol=nothing)
     offset(ents,
         delta;
         j::Clipper.JoinType=Clipper.JoinTypeMiter,
-        e::Clipper.EndType=Clipper.EndTypeClosedPolygon)
+        e::Clipper.EndType=Clipper.EndTypeClosedPolygon,
+        atol=nothing)
 
 Return a `Vector` containing the result of offsetting boundaries outwards by `delta`.
 
 Entities will be resolved into `Polygon`s using [`to_polygons`](@ref) before
-offsetting using Clipper with options `j` and `e`. Styles on the inputs are not carried
-to the result; see [Entity Styles](@ref concept-entitystyles).
+offsetting using Clipper with options `j`, `e`, and `atol` as for polygons. Styles on the
+inputs are not carried to the result; see [Entity Styles](@ref concept-entitystyles).
 
 Offsetting is specifically a polygon operation, as performed by Clipper. An alternative
 method [`halo`](@ref) may be defined that produces an equivalent non-polygon `GeometryEntity`.
@@ -124,9 +126,10 @@ function offset(
     ent,
     delta::Coordinate;
     j::Clipper.JoinType=Clipper.JoinTypeMiter,
-    e::Clipper.EndType=Clipper.EndTypeClosedPolygon
+    e::Clipper.EndType=Clipper.EndTypeClosedPolygon,
+    atol=nothing
 )
-    return offset(to_polygons(ent), delta, j=j, e=e)
+    return offset(to_polygons(ent), delta, j=j, e=e, atol=atol)
 end
 
 """

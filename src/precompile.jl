@@ -29,10 +29,9 @@ else
             ".gds",
             [:DeviceLayout => UUID("ebf59a4a-04ec-49d7-8cd4-c9382ceb8e85")]
         )
-        # Clipper handles are normally created in `__init__`, which has not run yet;
-        # `__init__` replaces these when the package is loaded.
+        # The Clipper handle is normally created in `__init__`, which has not run yet;
+        # `__init__` replaces it when the package is loaded.
         global _clip = Ref(Clipper.Clip())
-        global _coffset = Ref(Clipper.ClipperOffset())
         outdir = mktempdir()
         @compile_workload begin
             cs = CoordinateSystem("test", nm)
@@ -129,6 +128,5 @@ else
         reset_uniquename!()
         # Don't bake stale Clipper handles into the package image
         global _clip = nothing
-        global _coffset = nothing
     end
 end
