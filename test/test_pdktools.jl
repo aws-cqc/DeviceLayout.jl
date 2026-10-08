@@ -6,7 +6,11 @@
     pdkpath = joinpath(tdir, "MyPDK")
     using Pkg
     pdktoml = Pkg.TOML.parsefile(joinpath(pdkpath, "Project.toml"))
-    @test VersionNumber(pdktoml["compat"]["DeviceLayout"]).major == 1
+    @test VersionNumber(pdktoml["compat"]["DeviceLayout"]).major ==
+          pkgversion(DeviceLayout).major
+    # The tests run from a checkout, which the PDK develops instead of adding from the registry
+    pdkmanifest = Pkg.TOML.parsefile(joinpath(pdkpath, "Manifest.toml"))
+    @test haskey(only(pdkmanifest["deps"]["DeviceLayout"]), "path")
     @test pdktoml["preferences"]["DeviceLayout"]["units"] == DeviceLayout.unit_preference
 
     quiet_test_output() do

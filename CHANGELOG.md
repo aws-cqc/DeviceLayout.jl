@@ -12,6 +12,10 @@ The format of this changelog is based on
   - `perimeter(::ClippedPolygon)` now includes the lengths of all contours (holes and nested islands), not just the outermost contours (#264)
   - `Rounded` now defaults to `selection_tolerance=1.0nm` (`0.001` for unitless coordinates), so `p0` only selects vertices within that distance; pass an infinite tolerance (e.g. `selection_tolerance=Inf*μm`) to restore the previous nearest-vertex selection. Explicitly non-finite tolerances no longer warn
 
+### Changed
+
+  - `generate_pdk` and `generate_component_package` develop the running DeviceLayout when it is a local checkout, rather than adding DeviceLayout from the registry
+
 ### Removed
 
   - `MeshingParameters` and the `meshing_parameters` keyword argument for `SolidModel` rendering (deprecated in 1.8.0 in favor of `mesh_scale`, `mesh_order`, `mesh_grading_default` accessed from `SolidModels`)

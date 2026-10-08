@@ -8,6 +8,10 @@ Generates a PDK package named `name` in the parent directory `dir` based on `tem
 
 Additional keyword arguments are forwarded to [`PkgTemplates.Template`](https://juliaci.github.io/PkgTemplates.jl/stable/user/#PkgTemplates.Template).
 
+DeviceLayout is added as a dependency from the registry, unless the running DeviceLayout is
+a local checkout (for example, one installed with `Pkg.develop`), in which case the PDK
+develops that same checkout.
+
 The PDK package can be registered in your private registry `MyRegistry` as follows
 using the `LocalRegistry` package. First, make sure you are on a branch of the
 `MyRegistry` registry in `~/.julia/registries/MyRegistry`. Then add the `LocalRegistry`
@@ -96,12 +100,29 @@ function without_precompile(f)
     end
 end
 
+# The running DeviceLayout's directory if it is a local checkout (developed, or the active
+# project) rather than installed under a depot's `packages` directory, else `nothing`.
+# Generated packages develop such a checkout instead of adding DeviceLayout from the
+# registry, which may have no version compatible with it (e.g. on a pre-release branch).
+function _devicelayout_checkout()
+    dir = realpath(pkgdir(DeviceLayout))
+    installed = any(DEPOT_PATH) do depot
+        pkgs = joinpath(depot, "packages")
+        return isdir(pkgs) && startswith(dir, joinpath(realpath(pkgs), ""))
+    end
+    return installed ? nothing : dir
+end
+
 function update_package_toml!(path, add_pkgs, dev_paths=[]; set_unit_pref=true, compat=true)
     compat_dict = Dict{String, String}()
+    dl_path = _devicelayout_checkout()
+    dev_dl = !isnothing(dl_path) && "DeviceLayout" in add_pkgs
+    dev_dl && (add_pkgs = filter(!=("DeviceLayout"), add_pkgs))
     PkgTemplates.with_project(path) do
         # Use Pkg to make sure manifest is immediately usable without needing resolve or dev
         without_precompile() do
-            Pkg.add(add_pkgs)
+            dev_dl && Pkg.develop(path=dl_path)
+            isempty(add_pkgs) || Pkg.add(add_pkgs)
             for path in dev_paths
                 Pkg.develop(path=path)
             end
@@ -146,7 +167,8 @@ end
 Generates a new component package named `name` in the components directory of `pdk`.
 
 Adds `pdk` and `DeviceLayout` as dependencies and sets non-inclusive upper bounds of the
-next major versions.
+next major versions. As with [`generate_pdk`](@ref), a running DeviceLayout that is a local
+checkout is developed rather than added from the registry.
 Creates a definition for a `Component` type named `compname` in the main module file, using
 a template for standard components or for composite components depending on the keyword
 argument `composite`.
