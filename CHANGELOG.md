@@ -9,6 +9,7 @@ The format of this changelog is based on
 ### Breaking
 
   - `route!` for schematic graphs now defaults to `global_waypoints=true`, so `waypoints` and `waydirs` are interpreted in the global coordinate system of the parent `Schematic`; pass `global_waypoints=false` for the previous route-local interpretation
+  - `perimeter(::ClippedPolygon)` now includes the lengths of all contours (holes and nested islands), not just the outermost contours (#264)
 
 ### Removed
 
