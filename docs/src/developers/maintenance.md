@@ -126,18 +126,14 @@ Because of organization settings, the action cannot open PRs itself. Instead, th
 **fails** whenever it finds something to bump, and leaves a branch behind. When you see it
 fail:
 
-1. Open a PR from the branch CompatHelper created.
-2. If tests pass, merge it. If they don't, decide whether to fix our code or pin the
-   dependency.
+1. Look at the changelog for the new version of the dependency. If any changes are high risk for DeviceLayout.jl, pin the dependency or investigate the impact of the changes more deeply.
+2. Open a PR from the branch CompatHelper created.
+3. If tests pass, merge it. If they don't, decide whether to fix our code or pin the   dependency.
 
 Upgrades that need more than a green test run:
 
 - **`gmsh_jll`** can change fragmentation behavior and mesh output. The "Single Transmon" test
-  item and `test_solidmodel.jl` are the main guards; they check physical groups, not meshes.
-- **`PkgTemplates`** has had breaking minor releases. `test_pdktools.jl` covers
-  `generate_pdk` and friends.
-- **`Unitful`** occasionally changes promotion rules for mixed-unit arithmetic, which shows up
-  in the mixed-preference tests.
+  item and `test_solidmodel.jl` are the main guards in CI, but these primarily test physical groups. Meshing changes should be tested manually against Palace simulations.
 
 `Aqua.test_deps_compat` in the test suite ensures every non-stdlib dependency has a compat
 entry, so adding a dependency without one fails CI.

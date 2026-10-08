@@ -11,7 +11,8 @@ elseif isempty(ARGS) || ARGS == ["--full"]
 elseif any(startswith(arg, "--") for arg in ARGS)
     error("Usage: julia --project=. scripts/test.jl [--full | name-pattern ...]")
 else
-    # TestEnv keeps targeted tests from modifying the checkout's project files.
+    # TestEnv keeps targeted tests from modifying the checkout's project files
+    # and ensures the presence of test-only dependencies.
     using TestEnv
     TestEnv.activate()
 

@@ -286,6 +286,6 @@ Gmsh callbacks) locally. A PR can merge once the checks pass and a maintainer ha
 Squash-merge is the norm; the PR title becomes the commit message, so make it descriptive.
 
 DeviceLayout-specific things reviewers should look for beyond standard criteria:
-correctness on unitful *and* unitless coordinates; whether the change silently alters
+correctness on unitless coordinates and mixed-unit coordinates; whether the change silently alters
 rendered geometry; new warnings or log noise, including in tests and docs builds;
 and whether the changelog entry and breaking-change assessment are right.
