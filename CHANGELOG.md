@@ -6,6 +6,10 @@ The format of this changelog is based on
 
 ## 2.0.0 (upcoming)
 
+### Breaking
+
+  - `route!` for schematic graphs now defaults to `global_waypoints=true`, so `waypoints` and `waydirs` are interpreted in the global coordinate system of the parent `Schematic`; pass `global_waypoints=false` for the previous route-local interpretation
+
 ### Removed
 
   - `MeshingParameters` and the `meshing_parameters` keyword argument for `SolidModel` rendering (deprecated in 1.8.0 in favor of `mesh_scale`, `mesh_order`, `mesh_grading_default` accessed from `SolidModels`)

@@ -321,6 +321,7 @@
                 z_node => :feedline, # 0.5mm, 0.5mm - 100nm, -pi/2 (in)
                 sty,
                 meta;
+                global_waypoints=false,
                 waypoints=[
                     Point(0.1mm, 0.1mm),
                     Point(0.2mm, 0.2mm),
