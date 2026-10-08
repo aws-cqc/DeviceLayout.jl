@@ -70,4 +70,4 @@ even when the final goal is plain polygons. A canonical geometry form based on
 `Vector{CurvilinearRegion}` [has been proposed](https://github.com/aws-cqc/DeviceLayout.jl/issues/293)
 for an eventual v2.
 
-The [Architecture](@ref dev-architecture) page describes how this is laid out in the source.
+The [Architecture](@ref dev-architecture) page describes how this architecture is laid out in the source.
