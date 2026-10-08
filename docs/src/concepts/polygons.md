@@ -113,7 +113,8 @@ curved boundaries cross, the arcs are clipped to polylines (see
 [Recovering curves through clipping](@ref)) and the corner becomes line-arc or polygonal.
 
 Corner selection uses the `p0` keyword to target specific vertices by their coordinates.
-When `p0` is empty (the default), all eligible corners are rounded. The
+A vertex is selected only if it lies within `selection_tolerance` (default 1nm) of a point in
+`p0`. When `p0` is empty (the default), all eligible corners are rounded. The
 `inverse_selection` flag inverts the selection.
 
 #### Per-corner fillet radii (nested rounding)
