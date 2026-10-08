@@ -63,13 +63,10 @@
 
     # Clipping subrounded style
     rd1 = Polygons._round_poly(difference2d(r1, r2), 0.25μm, corner_indices=[1, 3])
-    rd2 = with_test_logger(
-        log ->
-            log.level == Logging.Warn &&
-                occursin("Non-finite `selection_tolerance`", log.message)
-    ) do
-        return Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]])(difference2d(r1, r2))
-    end
+    # Infinite tolerance selects the nearest vertex of every contour
+    rd2 = Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]], selection_tolerance=Inf * μm)(
+        difference2d(r1, r2)
+    )
     @test all(isapprox.(to_polygons(rd1), to_polygons(rd2), atol=0.1nm))
 
     # StyleDict to apply different style at each level.
@@ -282,20 +279,8 @@
         difference2d(centered(Rectangle(4.0μm, 4.0μm)), centered(Rectangle(2.0μm, 2.0μm)))
 
     sty = StyleDict()
-    sty[1] = with_test_logger(
-        log ->
-            log.level == Logging.Warn &&
-                occursin("Non-finite `selection_tolerance`", log.message)
-    ) do
-        return RelativeRounded(0.5, p0=[Point(2.0μm, 2.0μm), Point(-2.0μm, -2.0μm)])
-    end
-    sty[1, 1] = with_test_logger(
-        log ->
-            log.level == Logging.Warn &&
-                occursin("Non-finite `selection_tolerance`", log.message)
-    ) do
-        return RelativeRounded(0.5, p0=[Point(2.0μm, -2.0μm), Point(-2.0μm, 2.0μm)])
-    end
+    sty[1] = RelativeRounded(0.5, p0=[Point(2.0μm, 2.0μm), Point(-2.0μm, -2.0μm)])
+    sty[1, 1] = RelativeRounded(0.5, p0=[Point(1.0μm, -1.0μm), Point(-1.0μm, 1.0μm)])
     e = styled(poly, sty)
     # correct end points removed
     pp = points(to_polygons(e)[1])
@@ -325,13 +310,7 @@
     c = Cell("test", nm)
     @test_nowarn render!(c, cs)
 
-    er = with_test_logger(
-        log ->
-            log.level == Logging.Warn &&
-                occursin("Non-finite `selection_tolerance`", log.message)
-    ) do
-        return Rotation(90°)(e)
-    end
+    er = Rotation(90°)(e)
     pp = points(Rotation(-90°)(to_polygons(er)[1]))
     # Should be equivalent to original (although keyhole will be different)
     # correct end points removed
@@ -366,13 +345,8 @@
     r1 = centered(Rectangle(2.0μm, 2.0μm))
     r2 = centered(Rectangle(4.0μm, 4.0μm))
     p0 = [Point(1.0μm, 1.0μm)] # should be only point on outer poly
-    sty = with_test_logger(
-        log ->
-            log.level == Logging.Warn &&
-                occursin("Non-finite `selection_tolerance`", log.message)
-    ) do
-        return Rounded(1.0μm; p0)
-    end
+    # Infinite tolerance selects the nearest vertex of every contour
+    sty = Rounded(1.0μm; p0, selection_tolerance=Inf * μm)
 
     # Removes top right
     pp = points(to_polygons(styled(r1, sty)))
@@ -402,8 +376,8 @@
     @test Point(-2.0μm, -2.0μm) ∈ pp
     @test Point(2.0μm, -2.0μm) ∈ pp
 
-    # Rounded style with tight tolerance
-    sty = Rounded(1.0μm; p0, selection_tolerance=1nm)
+    # Default tolerance selects only vertices near p0
+    sty = Rounded(1.0μm; p0)
 
     # Removes top right
     pp = points(to_polygons(styled(r1, sty)))
@@ -730,9 +704,6 @@ end
     # Last two points are not too close together
     poly = points(to_polygons(e, atol=60nm))
     @test norm(poly[1] - poly[end]) > norm(poly[end] - poly[end - 1]) / 2
-
-    # circle is deprecated
-    @test_logs (:warn, r"deprecated") circle(10.0)
 
     # Issue #228
     @test Circle(Point(1µm, 1µm), 1.0µm) isa Ellipse  # was MethodError
