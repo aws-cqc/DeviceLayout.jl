@@ -10,6 +10,7 @@ The format of this changelog is based on
 
   - `route!` for schematic graphs now defaults to `global_waypoints=true`, so `waypoints` and `waydirs` are interpreted in the global coordinate system of the parent `Schematic`; pass `global_waypoints=false` for the previous route-local interpretation
   - `perimeter(::ClippedPolygon)` now includes the lengths of all contours (holes and nested islands), not just the outermost contours (#264)
+  - `perimeter(::CurvilinearPolygon)` and `perimeter(::CurvilinearRegion)` now measure curves by arclength rather than by the chord between their endpoints, and `perimeter(::CurvilinearRegion)` now includes holes, matching `ClippedPolygon`
   - `Rounded` now defaults to `selection_tolerance=1.0nm` (`0.001` for unitless coordinates), so `p0` only selects vertices within that distance; pass an infinite tolerance (e.g. `selection_tolerance=Inf*μm`) to restore the previous nearest-vertex selection. Explicitly non-finite tolerances no longer warn
 
 ### Changed

@@ -1007,12 +1007,27 @@ function pathtopolys(node::Paths.Node, ::Val{false}; kwargs...)
 end
 
 ## Helper methods
+"""
+    perimeter(p::CurvilinearRegion)
+
+The perimeter of a `CurvilinearRegion`: the total length of its exterior and all of its holes,
+measured along curves.
+"""
 function perimeter(p::CurvilinearRegion)
-    return sum(norm.(points(p.exterior) .- circshift(points(p.exterior), -1)))
+    return perimeter(p.exterior) + sum(perimeter, p.holes; init=zero(perimeter(p.exterior)))
 end
 
+"""
+    perimeter(p::CurvilinearPolygon)
+
+The perimeter of a `CurvilinearPolygon`, measured along curves.
+"""
 function perimeter(p::CurvilinearPolygon)
-    return sum(norm.(points(p) .- circshift(points(p), -1)))
+    edges = norm.(circshift(p.p, -1) .- p.p)
+    for (c, i) in zip(p.curves, p.curve_start_idx)
+        edges[i] = Paths.arclength(c)
+    end
+    return sum(edges)
 end
 
 # Only indices that don't start or end a curve are available for rounding.
