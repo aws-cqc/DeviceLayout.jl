@@ -2415,6 +2415,7 @@ end
                 cs,
                 zmap=(_) -> 0μm,
                 postrender_ops=postrender_ops,
+                post_fragment_ops=[("bnd_post", SolidModels.get_boundary, ("ext1", 3))],
                 verbose=verbose
             )
         end
@@ -2442,6 +2443,9 @@ end
     # No message generation failed (`@info` reports those as `Error` records)
     @test !any(record -> record.level >= Logging.Error, logs)
     @test any(contains.(msgs, "fragmented dimensions [2, 3]"))
+    # Post-fragment operations are reported like postrender operations
+    @test any(contains.(msgs, "sm[\"bnd_post\"] = get_boundary(sm, \"ext1\", 3)"))
+    @test any(contains.(msgs, "bnd_post: 6 entities (dim 2) in bounds"))
     @test any(contains.(msgs, "render!: done"))
     # Elapsed time comes first, in a fixed-width label, so slow steps can be skimmed for
     @test any(startswith.(msgs, r"\[ +\d+\.\d{3} s\]   l1: "))
@@ -2751,4 +2755,59 @@ end
         @test_logs fragment_near!(sm, ["a", "b"])   # no "nothing to fragment" warning
         @test length(intersect(faces("a"), faces("b"))) == 1
     end
+end
+
+@testitem "SolidModel verbose rendering through a Schematic" setup =
+    [CommonTestSetup, QuietGmshSetup] begin
+    using .SchematicDrivenLayout, Logging
+    # The schematic's logger tees to the `current_logger()` at `plan` time, so the test logger
+    # standing in for the console must be installed before planning.
+    console = TestLogger(min_level=Logging.Info)
+    logdir = mktempdir()
+    g = SchematicGraph("verbose_sch")
+    add_node!(g, Spacer())
+    floorplan = with_logger(console) do
+        return plan(g; log_dir=logdir, log_level=Logging.Debug)
+    end
+    render!(
+        floorplan.coordinate_system,
+        centered(Rectangle(20μm, 10μm)),
+        SemanticMeta(:simulated_area)
+    )
+    check!(floorplan)
+    tech = ProcessTechnology(
+        (; simulated_area=GDSMeta(2)),
+        (; height=(; simulated_area=-1μm), thickness=(; simulated_area=2μm))
+    )
+    target = SchematicDrivenLayout.SolidModelTarget(
+        tech;
+        bounding_layers=[:simulated_area],
+        postrender_ops=[("bnd", SolidModels.get_boundary, ("simulated_area_extrusion", 3))],
+        solidmodel=true,
+        simulation=true
+    )
+    sm = SolidModel("verbose_sch"; overwrite=true)
+    with_logger(console) do
+        return render!(sm, floorplan, target; verbose=true)
+    end
+    msgs = string.(getproperty.(console.logs, :message))
+    @test any(
+        contains.(msgs, "sm[\"bnd\"] = get_boundary(sm, \"simulated_area_extrusion\", 3)")
+    )
+    @test any(occursin.(r"^\[ +\d+\.\d{3} s\] render!: done$", msgs))
+    # The rendering stage is a line prefix in the log file only, not a keyword on the console
+    @test !any(log -> haskey(log.kwargs, :stage), console.logs)
+    logfile = read(joinpath(logdir, "verbose_sch.log"), String)
+    @test occursin(r"render_solidmodel \| \[Info\] \[ +[\d.]+ s\] render!: done", logfile)
+
+    # Debug messages below the console's level go to the log file only
+    SchematicDrivenLayout.reopen_logfile(floorplan, :debug_check)
+    with_logger(floorplan.logger) do
+        @debug "verbose_sch debug message"
+    end
+    SchematicDrivenLayout.close_logfile(floorplan)
+    @test !any(contains.(string.(getproperty.(console.logs, :message)), "debug message"))
+    @test contains(
+        read(joinpath(logdir, "verbose_sch.log"), String),
+    )
 end
