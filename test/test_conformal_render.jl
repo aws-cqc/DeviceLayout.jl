@@ -891,5 +891,121 @@
         total_holes = sum(length(rr.holes) for rr in out)
         @test total_holes >= 2
         @test all(length(points(h)) >= 3 for rr in out for h in rr.holes)
+
+    @testset "render_conformal! with a non-circular Ellipse (native OCC primitive)" begin
+        # `to_primitives(sm, ::Ellipse)` keeps ellipses as native OCC ellipses
+        # rather than discretizing to polygons. A non-circular ellipse is not
+        # exactly representable as arcs (`CurvilinearPolygon(::Ellipse)` throws),
+        # so `_add_conformal!(::Ellipse)` falls through to the native
+        # `add_ellipse` path and emits a single smooth boundary curve.
+        cs = CoordinateSystem("ellipse", nm)
+        place!(cs, DeviceLayout.Ellipse(Point(0.0μm, 0.0μm), (5.0μm, 3.0μm), 0.0°), :l1)
+
+        sm = SolidModel("ellipse"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
+        render_conformal!(sm, cs)
+        @test hasgroup(sm, "l1", 2)
+        @test length(gmsh.model.occ.getEntities(2)) == 1
+        # OCC keeps the boundary as a single smooth ellipse curve (not a chord
+        # chain), so the surface has exactly one bounding curve.
+        surf_curves = gmsh.model.occ.getEntities(1)
+        @test length(surf_curves) == 1
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal! routes a Circle through arc contour" begin
+        # A circle IS exactly arc-representable, so `_add_conformal!(::Ellipse)`
+        # routes it through `CurvilinearPolygon(e)` — four 90° `Paths.Turn` arcs,
+        # the same contour a circular hole comes out of `difference2d_curved`.
+        # This puts the arcs into the shared edge cache instead of emitting a
+        # native `add_ellipse`, so a directly-placed circle can share entities
+        # with a boolean-cut circular hole at the same location.
+        cs = CoordinateSystem("mixed", nm)
+        place!(cs, Rectangle(Point(0.0μm, 0.0μm), Point(10.0μm, 10.0μm)), :l1)
+        place!(cs, Rectangle(Point(10.0μm, 0.0μm), Point(20.0μm, 10.0μm)), :l1)
+        place!(cs, DeviceLayout.Polygons.Circle(Point(30.0μm, 5.0μm), 2.0μm), :l1)
+
+        ctx = ConformalRenderContext()
+        sm = SolidModel("mixed"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
+        render_conformal!(sm, cs; context=ctx)
+        @test hasgroup(sm, "l1", 2)
+        # 3 surfaces: two rects + circle.
+        @test length(gmsh.model.occ.getEntities(2)) == 3
+        # Edge count: 4 (left rect) + 3 (right rect, shared edge reused) + 4
+        # (circle as four arcs) = 11. The rectangles' shared edge still dedups.
+        @test length(gmsh.model.occ.getEntities(1)) == 11
+        @test ctx.stats[:arcs] == 4   # the circle emitted four arc entities
+        @test ctx.stats[:hits] >= 1   # rectangles' shared edge reused
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal! shares arcs between co-located circles" begin
+        # The point of routing circles through `CurvilinearPolygon`: two circles
+        # at the SAME center and radius (e.g. a placed `Circle` and a circular
+        # hole cut into an adjacent layer) resolve to the SAME four cached arc
+        # entities. Without arc caching each circle would emit its own four
+        # curves (8 total); with it, the second circle's four arcs are all cache
+        # hits and only four unique arc entities exist.
+        cs = CoordinateSystem("cocirc", nm)
+        place!(cs, DeviceLayout.Polygons.Circle(Point(10.0μm, 10.0μm), 3.0μm), :l1)
+        place!(cs, DeviceLayout.Polygons.Circle(Point(10.0μm, 10.0μm), 3.0μm), :l2)
+
+        ctx = ConformalRenderContext()
+        sm = SolidModel("cocirc"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
+        render_conformal!(sm, cs; context=ctx)
+        @test hasgroup(sm, "l1", 2)
+        @test hasgroup(sm, "l2", 2)
+        @test length(gmsh.model.occ.getEntities(2)) == 2  # two circle surfaces
+        # Four unique arcs shared by both circles (8 without sharing).
+        @test length(gmsh.model.occ.getEntities(1)) == 4
+        @test ctx.stats[:hits] == 4  # second circle's four arcs all reused
+        gmsh.finalize()
+    end
+
+    @testset "shared offset-BSpline boundary is conformal in both directions" begin
+        # Two faces share a curved boundary that is a `Paths.OffsetSegment`
+        # (offset of a `Paths.BSpline`). Each face traverses that boundary in the
+        # opposite direction. `bspline_approximation` is not reversal-symmetric,
+        # so without direction canonicalization the two faces get different
+        # sub-BSpline chains on the shared edge and the boundary is left
+        # non-manifold (an edge adjacent to only one face). Canonicalizing makes
+        # both faces approximate the boundary identically, so every interior edge
+        # is shared by exactly two faces.
+        b = Paths.BSpline(
+            Point.([(0, 0), (40, 20), (80, -20), (120, 20)]) .* μm,
+            Point(100.0, 0.0)μm,
+            Point(100.0, 0.0)μm
+        )
+        seg = Paths.offset(b, 2μm)
+        P0, P1 = Paths.p0(seg), Paths.p1(seg)
+        # A rectangle whose top side is `seg`, and its neighbor across `seg` (the
+        # neighbor stores the reversed segment, as the closed loops require).
+        region_B = CurvilinearPolygon(
+            [P0, P1, Point(getx(P1), -30μm), Point(getx(P0), -30μm)],
+            [seg],
+            [1]
+        )
+        region_A = CurvilinearPolygon(
+            [P1, P0, Point(getx(P0), 70μm), Point(getx(P1), 70μm)],
+            [Paths.reverse(seg)],
+            [1]
+        )
+        sm = SolidModel("offset_dir"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
+        cs = CoordinateSystem("test")
+        place!(cs, region_A, :l1)
+        place!(cs, region_B, :l1)
+        render_conformal!(sm, cs)
+        tags_1d = last.(gmsh.model.occ.getEntities(1))
+        adj_2d = first.(gmsh.model.getAdjacencies.(1, tags_1d))
+        # Exactly the exterior edges have a single 2D neighbor; every edge on the
+        # shared boundary is adjacent to both faces (a duplicated shared edge from
+        # a direction-dependent approximation would push the single-adjacency
+        # count above 6).
+        @test count(adj -> length(adj) == 1, adj_2d) == 6
+        @test count(adj -> length(adj) == 2, adj_2d) == length(tags_1d) - 6
+        gmsh.finalize()
     end
 end

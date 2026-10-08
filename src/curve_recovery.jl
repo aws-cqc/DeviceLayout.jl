@@ -280,6 +280,9 @@ end
 
 Curve-preserving variant of [`difference2d`](@ref), returning `Vector{CurvilinearRegion}`.
 See [`recover_curves`](@ref).
+
+Styles on the inputs are not carried to the result; see
+[Entity Styles](@ref concept-entitystyles).
 """
 difference2d_curved(p, m; kwargs...) = recover_curves(difference2d, p, m; kwargs...)
 """
@@ -290,6 +293,9 @@ Curve-preserving variant of [`union2d`](@ref), returning `Vector{CurvilinearRegi
 The single-argument form self-unions `p` (equivalent to `union2d_curved(p, [])`), which is
 useful for merging a collection of overlapping curved entities into one region per piece.
 See [`recover_curves`](@ref).
+
+Styles on the inputs are not carried to the result; see
+[Entity Styles](@ref concept-entitystyles).
 """
 union2d_curved(p, m; kwargs...) = recover_curves(union2d, p, m; kwargs...)
 union2d_curved(p; kwargs...) = recover_curves(union2d, p, []; kwargs...)
@@ -299,6 +305,9 @@ union2d_curved(p; kwargs...) = recover_curves(union2d, p, []; kwargs...)
 
 Curve-preserving variant of [`intersect2d`](@ref), returning `Vector{CurvilinearRegion}`.
 See [`recover_curves`](@ref).
+
+Styles on the inputs are not carried to the result; see
+[Entity Styles](@ref concept-entitystyles).
 """
 intersect2d_curved(p, m; kwargs...) = recover_curves(intersect2d, p, m; kwargs...)
 """
@@ -306,5 +315,8 @@ intersect2d_curved(p, m; kwargs...) = recover_curves(intersect2d, p, m; kwargs..
 
 Curve-preserving variant of [`xor2d`](@ref), returning `Vector{CurvilinearRegion}`.
 See [`recover_curves`](@ref).
+
+Styles on the inputs are not carried to the result; see
+[Entity Styles](@ref concept-entitystyles).
 """
 xor2d_curved(p, m; kwargs...) = recover_curves(xor2d, p, m; kwargs...)

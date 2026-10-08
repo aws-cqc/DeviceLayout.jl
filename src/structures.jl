@@ -14,12 +14,14 @@ function _with_lock(f, d::ThreadSafeDict)
 end
 
 """
-    uniquename(str, dlm="\\\$"; modify_first=false, counter=GLOBAL_NAME_COUNTER, case_sensitive=true)
+    uniquename(str, dlm="\\\$"; modify_first=false, parse_suffix=true, counter=GLOBAL_NAME_COUNTER, case_sensitive=true)
 
 Given string input `str` for the `n`th time, return `str * dlm * string(n)`.
 
-If `str` is already formatted as `str0 * dlm * n`, where `n` is an integer, then `str0`
-will be used with the larger of `n` and the number of times `str0` has been counted plus one.
+If `parse_suffix` is `true` (the default) and `str` is already formatted as `str0 * dlm * n`,
+where `n` is an integer, then `str0` will be used with the larger of `n` and the number of times
+`str0` has been counted plus one. Set `parse_suffix=false` to always treat `str` literally, e.g.
+for names that legitimately end in `dlm * n` (like `"x_3_1"` with `dlm='_'`).
 
 If `modify_first` is `false`, then `str` will be returned the first time
 `uniquename(str, dlm; modify_first=false)` is called.
@@ -51,6 +53,15 @@ julia> uniquename("name\\\$3")
 
 julia> uniquename("name")
 "name\\\$6"
+
+julia> uniquename("x_3_1", '_')
+"x_3_1"
+
+julia> uniquename("x_3_1", '_'; parse_suffix=false)
+"x_3_1"
+
+julia> uniquename("x_3_1", '_'; parse_suffix=false)
+"x_3_1_2"
 ```
 
 `counter` is the `Dict{String,Int}` that counts how many times each name has been seen.
@@ -61,6 +72,7 @@ function uniquename(
     str,
     dlm='\$';
     modify_first=false,
+    parse_suffix=true,
     counter=GLOBAL_NAME_COUNTER,
     case_sensitive=true
 )
@@ -68,9 +80,11 @@ function uniquename(
     _with_lock(counter) do d
         # if format is already str0 * dlm * n, count it like the (>=n)th occurrence of str0
         substrings = split(str, dlm)
-        if !isnothing(tryparse(Int, last(substrings)))
+        if parse_suffix &&
+           length(substrings) > 1 &&
+           !isnothing(tryparse(Int, last(substrings)))
             n0 = parse(Int, last(substrings))
-            str0 = join(substrings[1:(end - 1)])
+            str0 = join(substrings[1:(end - 1)], dlm)
             n1 = 1 + get(d, key(str0), 0)
             n = max(n0, n1)
             d[key(str0)] = n

@@ -225,7 +225,6 @@ const SINGLECHIP_SOLIDMODEL_TARGET = SolidModelTarget(
         ("vacuum", 3),
         ("substrate", 3),
         ("metal", 2),
-        ("metal_negative", 2),
         ("exterior_boundary", 2)
     ]
 )

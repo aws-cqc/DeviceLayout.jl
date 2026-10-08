@@ -35,10 +35,11 @@
         @test pathlength(b4) ≈ pathlength(comp_seg) atol = 1nm
         @test b4(pathlength(b3)) ≈ Point(55μm, -50μm) atol = 0.01nm
 
-        # Reverse offset should get the original curve
+        # Reverse offset should get the original curve (two 50μm arcs)
         b5 = Paths.bspline_approximation.(Paths.offset.(b4.segments, -5μm))
-        for b in b5
-            @test all(Paths._approximation_error.(comp_seg.segments, b.segments) .< 1nm)
+        centers = (Point(0μm, -50μm), Point(100μm, -50μm))
+        for b in b5, s in range(zero(pathlength(b)), pathlength(b), length=51)
+            @test minimum(c -> abs(Paths.norm(b(s) - c) - 50μm), centers) < 1nm
         end
 
         # General offset of bspline
@@ -491,7 +492,7 @@
     selected_rounding = with_test_logger(
         log ->
             log.level == Logging.Warn &&
-                occursin("Non-finite selection tolerance", log.message)
+                occursin("Non-finite `selection_tolerance`", log.message)
     ) do
         return Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]])
     end
@@ -1460,14 +1461,6 @@
             "fragment_geom!(sm, [\"tile00\", \"foo\"], [\"tile01\", \"bar\"], 2, 2): invalid arguments ([\"bar\"], 2)"
         ) SolidModels.fragment_geom!(sm, ["tile00", "foo"], ["tile01", "bar"])) ==
               [(2, 1), (2, 2)]
-
-        # Use of MeshingParameters is deprecated.
-        sm = SolidModel("test", overwrite=true)
-        @test_logs (:warn, "Using `MeshingParameters` is deprecated!") render!(
-            sm,
-            CoordinateSystem("test", nm),
-            meshing_parameters=SolidModels.MeshingParameters()
-        )
     end
 
     @testset "Mesh size modifications" begin
@@ -2135,5 +2128,144 @@ end
         @test length(remaining) == 1
         @test remaining[1].val == fresh
         SolidModels.gmsh.finalize()
+    end
+end
+
+@testitem "Mesh sizing for imported models" setup = [CommonTestSetup] begin
+    using DeviceLayout.SolidModels
+    import DeviceLayout.SolidModels:
+        dimtags,
+        gmsh,
+        gmsh_meshsize,
+        mesh_respect_lc,
+        load_mesh_control_points!,
+        set_mesh_size_callback!,
+        mesh_control_points,
+        clear_mesh_control_points!,
+        reset_mesh_control!,
+        mesh_grading_default
+
+    # A 10 μm cube as external CAD, imported twice below.
+    chip = SolidModel("sizing_chip"; overwrite=true)
+    brep = joinpath(tdir, "sizing_box.brep")
+    gmsh.model.add("sizing_author")
+    gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
+    gmsh.model.occ.synchronize()
+    gmsh.write(brep)
+    gmsh.model.remove()
+
+    # The shape a JSON parser returns for an externally written control-point file.
+    doc = Dict(
+        "points" => [
+            Dict(
+                "h_um" => 1.0,
+                "alpha" => -1.0,
+                "coords_um" => [[0.0, 0.0, 0.0], [10.0, 10.0, 10.0]]
+            ),
+            Dict("h_um" => 4.0, "alpha" => 0.5, "coords_um" => [[5.0, 5.0, 5.0]])
+        ]
+    )
+
+    @testset "load_mesh_control_points! fills the field by tier" begin
+        tiers = load_mesh_control_points!(doc)
+        @test length(tiers) == 2
+        @test tiers[1].n == 2 && tiers[2].n == 1
+        cp = mesh_control_points()
+        @test haskey(cp, (1.0, -1.0)) && length(cp[(1.0, -1.0)]) == 2   # -1 kept: global default
+        @test haskey(cp, (4.0, 0.5)) && cp[(4.0, 0.5)][1] == [5.0, 5.0, 5.0]
+        # scale applies to sizes and coordinates; clear=false appends.
+        load_mesh_control_points!(doc; scale=2.0, clear=false)
+        cp = mesh_control_points()
+        @test haskey(cp, (2.0, -1.0)) && cp[(2.0, -1.0)][2] == [20.0, 20.0, 20.0]
+        @test length(cp[(1.0, -1.0)]) == 2                                # untouched
+        @test_throws ArgumentError load_mesh_control_points!(Dict("nope" => []))
+        @test_throws ArgumentError load_mesh_control_points!(
+            Dict(
+                "points" =>
+                    [Dict("h_um" => 1.0, "alpha" => -1.0, "coords_um" => [[0.0, 0.0]])]
+            )
+        )
+    end
+
+    @testset "mesh_respect_lc combines with gmsh's proposal" begin
+        load_mesh_control_points!(doc)
+        args(lc) = (Cint(3), Cint(1), Cdouble(0.0), Cdouble(0.0), Cdouble(0.0), Cdouble(lc))
+        @test !mesh_respect_lc()                          # default off
+        @test gmsh_meshsize(args(0.25)...) ≈ 1.0          # at a control point of h = 1, lc ignored
+        mesh_respect_lc(true)
+        @test gmsh_meshsize(args(0.25)...) ≈ 0.25         # gmsh's smaller proposal wins
+        @test gmsh_meshsize(args(3.0)...) ≈ 1.0           # control point still wins when smaller
+        clear_mesh_control_points!()
+        load_mesh_control_points!(Dict("points" => []))
+        @test gmsh_meshsize(args(7.0)...) ≈ 7.0           # no control points: lc alone
+        reset_mesh_control!()
+        @test !mesh_respect_lc()
+        @test mesh_grading_default() == 0.75
+    end
+
+    @testset "set_mesh_size_callback! sizes an imported model" begin
+        # Nodes within 1 μm of the cube corner at the origin. Gmsh's default sizing on a 10 μm
+        # cube puts elements of a micron or two there, so only the corner node itself is inside;
+        # a 0.25 μm control point at the corner (grading 0.25·(d/0.25)^0.75) packs in dozens.
+        function nodes_near_origin()
+            _, coords, _ = gmsh.model.mesh.getNodes()
+            xyz = reshape(coords, 3, :)
+            return count(i -> sqrt(sum(abs2, @view xyz[:, i])) < 1.0, axes(xyz, 2))
+        end
+        coarse = SolidModel("sizing_coarse"; overwrite=true)
+        coarse["part"] = gmsh.model.occ.importShapes(brep)
+        gmsh.model.mesh.removeSizeCallback()                 # gmsh default sizing
+        gmsh.model.mesh.generate(3)
+        n_coarse = nodes_near_origin()
+
+        fine = SolidModel("sizing_fine"; overwrite=true)
+        fine["part"] = gmsh.model.occ.importShapes(brep)
+        load_mesh_control_points!(
+            Dict(
+                "points" => [
+                    Dict("h_um" => 0.25, "alpha" => -1.0, "coords_um" => [[0.0, 0.0, 0.0]])
+                ]
+            )
+        )
+        set_mesh_size_callback!()
+        gmsh.model.mesh.generate(3)
+        n_fine = nodes_near_origin()
+        @test n_coarse <= 3
+        @test n_fine >= 20
+        gmsh.model.mesh.removeSizeCallback()
+        clear_mesh_control_points!()
+    end
+end
+
+@testitem "Physical group names survive a stale name registry" setup = [CommonTestSetup] begin
+    using DeviceLayout.SolidModels
+    import DeviceLayout.SolidModels: gmsh, dimtags, dimgroupdict
+
+    sm = SolidModel("stale_names"; overwrite=true)
+    gmsh.model.set_current("stale_names")
+    a = gmsh.model.occ.addBox(0, 0, 0, 1, 1, 1)
+    b = gmsh.model.occ.addBox(2, 0, 0, 1, 1, 1)
+    gmsh.model.occ.synchronize()
+    pgname(pg) = gmsh.model.getPhysicalName(pg.dim, pg.grouptag)
+
+    @testset "re-registering a name after the table was wiped" begin
+        sm["part"] = [(3, a)]
+        @test pgname(sm["part", 3]) == "part"
+        # Booleans followed by a synchronize drop group entries but keep their names registered.
+        gmsh.model.removePhysicalGroups()
+        delete!(dimgroupdict(sm, 3), "part")
+        sm["part"] = [(3, b)]
+        @test length(dimtags(sm["part", 3])) == 1
+        @test pgname(sm["part", 3]) == "part"
+    end
+
+    @testset "same name in two dimensions keeps both names" begin
+        f = gmsh.model.getBoundary([(3, a)], false, false, false)[1]
+        sm["mixed"] = [(2, abs(f[2])), (3, a)]
+        @test pgname(sm["mixed", 2]) == "mixed"
+        @test pgname(sm["mixed", 3]) == "mixed"
+        sm["mixed"] = [(3, b)]                  # replace the dim-3 group only
+        @test pgname(sm["mixed", 3]) == "mixed"
+        @test pgname(sm["mixed", 2]) == "mixed" # dim-2 name restored after the clear
     end
 end

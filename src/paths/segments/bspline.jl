@@ -124,6 +124,9 @@ end
 BSpline(p::Vector{Point{T}}, t0::Point{T}, t1::Point{T}, r, p0, p1, α0, α1) where {T} =
     BSpline{T}(p, t0, t1, r, p0, p1, α0, α1)
 
+summary(b::BSpline) =
+    string("BSpline through ", length(b.p), " points from ", b.p0, " to ", b.p1)
+
 # `reparam` is intentionally excluded: it is derived from the fields below, so two
 # splines that are equal in those fields are equal regardless of whether either has
 # built its cache. (Same reasoning as `r`, which follows from `p`, `t0`, `t1`.)

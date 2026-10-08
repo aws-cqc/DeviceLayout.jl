@@ -40,6 +40,13 @@ Base.convert(::Type{GeometryEntity{T}}, e::StyledEntity) where {T} =
     StyledEntity(convert(GeometryEntity{T}, e.ent), e.sty)
 Base.copy(ent::StyledEntity) = styled(ent.ent, ent.sty)
 
+Base.show(io::IO, e::StyledEntity) = print(io, e.ent, " styled as ", e.sty)
+function Base.show(io::IO, mime::MIME"text/plain", e::StyledEntity)
+    show(io, mime, e.ent)
+    print(io, "\n  style: ")
+    return show(io, e.sty)
+end
+
 """
     style(styled_ent::StyledEntity)
 
@@ -120,6 +127,7 @@ Plain style. Does not affect rendering of the styled entity.
 """
 struct Plain <: GeometryEntityStyle end
 to_polygons(ent::GeometryEntity, ::Plain; kwargs...) = to_polygons(ent; kwargs...)
+Base.show(io::IO, ::Plain) = print(io, "Plain()")
 
 """
     NoRender <: GeometryEntityStyle
@@ -130,6 +138,7 @@ Style that marks an entity to be skipped when rendering.
 """
 struct NoRender <: GeometryEntityStyle end
 to_polygons(::GeometryEntity{T}, ::NoRender; kwargs...) where {T} = Polygon{T}[]
+Base.show(io::IO, ::NoRender) = print(io, "NoRender()")
 lowerleft(::StyledEntity{T, U, NoRender}) where {T, U} = zero(Point{T})
 upperright(::StyledEntity{T, U, NoRender}) where {T, U} = zero(Point{T})
 footprint(ent::StyledEntity{T, U, NoRender}) where {T, U} = bounds(ent)
@@ -204,6 +213,12 @@ struct MeshSized{T, S} <: GeometryEntityStyle where {T <: Coordinate, S <: Real}
     MeshSized(h::T, α::S=-1.0) where {T <: Coordinate, S <: Real} = new{T, S}(h, α) # Silence Aqua
 end
 
+function Base.show(io::IO, s::MeshSized)
+    print(io, "MeshSized(", s.h)
+    s.α == -1.0 || print(io, ", α=", s.α)
+    return print(io, ")")
+end
+
 """
     meshsized_entity(ent::GeometryEntity, h::T, α::S=-1.0) where {T, S <: Real}
 
@@ -263,6 +278,13 @@ function OptionalStyle(
     default::Bool=true
 )
     return OptionalStyle(true_style, false_style, flag, default)
+end
+
+function Base.show(io::IO, s::OptionalStyle)
+    print(io, "OptionalStyle(", s.true_style, ", ", repr(s.flag))
+    s.false_style isa Plain || print(io, ", false_style=", s.false_style)
+    s.default || print(io, ", default=false")
+    return print(io, ")")
 end
 
 function to_polygons(ent::GeometryEntity, opt::OptionalStyle; kwargs...)
@@ -345,6 +367,7 @@ struct ToTolerance{T <: Coordinate} <: GeometryEntityStyle
 end
 to_polygons(ent::GeometryEntity, sty::ToTolerance; kwargs...) =
     to_polygons(ent; merge((; kwargs...), (; atol=sty.atol))...)
+Base.show(io::IO, s::ToTolerance) = print(io, "ToTolerance(", s.atol, ")")
 
 """
     struct WithDirection <: GeometryEntityStyle

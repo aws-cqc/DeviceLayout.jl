@@ -31,7 +31,13 @@ using DeviceLayout, DeviceLayout.PreferredUnits, FileIO # hide
 import DeviceLayout.Graphics: inch
 cs = CoordinateSystem("cs", nm)
 polytext!(cs, "AaBbCcDdEe", DotMatrix(; pixelsize=20μm, rounding=6μm))
-save("dotmatrix_rounded_nosep.svg", Cell(cs, nm), width=6inch, height=1inch);
+save(
+    "dotmatrix_rounded_nosep.svg",
+    Cell(cs, nm),
+    width=6inch,
+    height=1inch,
+    background=:white
+);
 nothing; # hide
 ```
 
@@ -42,7 +48,7 @@ nothing; # hide
 ```@example 11
 cs = CoordinateSystem("cs", nm)
 polytext!(cs, "AaBbCcDdEe", DotMatrix(; pixelsize=20μm, pixelspacing=30μm, rounding=6μm))
-save("dotmatrix_rounded.svg", Cell(cs, nm), width=6inch, height=1inch);
+save("dotmatrix_rounded.svg", Cell(cs, nm), width=6inch, height=1inch, background=:white);
 nothing; # hide
 ```
 
@@ -53,7 +59,7 @@ nothing; # hide
 ```@example 11
 cs = CoordinateSystem("cs", nm)
 polytext!(cs, "AaBbCcDdEe", DotMatrix(; pixelsize=20μm, meta=GDSMeta(1)))
-save("dotmatrix.svg", Cell(cs, nm), width=6inch, height=1inch);
+save("dotmatrix.svg", Cell(cs, nm), width=6inch, height=1inch, background=:white);
 nothing; # hide
 ```
 
@@ -64,7 +70,7 @@ nothing; # hide
 ```@example 11
 cs = CoordinateSystem("cs", nm)
 polytext!(cs, "AaBbCcDdEe", PolyTextSansMono(20μm, GDSMeta(0)))
-save("sansmono.svg", Cell(cs, nm), width=6inch, height=1inch);
+save("sansmono.svg", Cell(cs, nm), width=6inch, height=1inch, background=:white);
 nothing; # hide
 ```
 
@@ -75,7 +81,7 @@ nothing; # hide
 ```@example 11
 cs = CoordinateSystem("cs", nm)
 polytext!(cs, "AaBbCcDdEe", PolyTextComic(20μm, GDSMeta(0)))
-save("comic.svg", Cell(cs, nm), width=6inch, height=1inch);
+save("comic.svg", Cell(cs, nm), width=6inch, height=1inch, background=:white);
 nothing; # hide
 ```
 

@@ -47,7 +47,7 @@ These determine how Clipper treats overlapping polygons based on the sum of thei
 See the [`Clipper` docs](https://www.angusj.com/clipper2/Docs/Units/Clipper/Types/FillRule.htm)
 for further information.
 
-See also [union2d](@ref), [difference2d](@ref), [intersect2d](@ref), and [xor2d](@ref).
+See also [`union2d`](@ref), [`difference2d`](@ref), [`intersect2d`](@ref), and [`xor2d`](@ref).
 """
 function clip(op::Clipper.ClipType, s, c; kwargs...)
     return clip(op, _normalize_clip_arg(s), _normalize_clip_arg(c); kwargs...)
@@ -120,7 +120,8 @@ end
 Return the geometric union of p1 and p2 as a `ClippedPolygon`.
 
 Each of `p1` and `p2` may be a `GeometryEntity` or array of `GeometryEntity`. All entities
-are first converted to polygons using [`to_polygons`](@ref).
+are first converted to polygons using [`to_polygons`](@ref). Styles on the inputs are not
+carried to the result; see [Entity Styles](@ref concept-entitystyles).
 
 Each of `p1` and `p2` can also be a `GeometryStructure` or `GeometryReference`, in which case
 `elements(flatten(p))` will be converted to polygons.
@@ -154,6 +155,9 @@ end
     union2d(p)
 
 Return the geometric union of `p` or all entities in `p`.
+
+Styles on the inputs are not carried to the result; see
+[Entity Styles](@ref concept-entitystyles).
 """
 union2d(p::AbstractGeometry{T}) where {T} = union2d(p, Polygon{T}[])
 union2d(p::AbstractArray) = union2d(p, Polygon{DeviceLayout.coordinatetype(p)}[])
@@ -165,7 +169,8 @@ union2d(p::Pair{<:AbstractGeometry{T}}) where {T} = union2d(p, Polygon{T}[])
 Return the geometric union of `p1` minus the geometric union of `p2` as a `ClippedPolygon`.
 
 Each of `p1` and `p2` may be a `GeometryEntity` or array of `GeometryEntity`. All entities
-are first converted to polygons using [`to_polygons`](@ref).
+are first converted to polygons using [`to_polygons`](@ref). Styles on the inputs are not
+carried to the result; see [Entity Styles](@ref concept-entitystyles).
 
 Each of `p1` and `p2` can also be a `GeometryStructure` or `GeometryReference`, in which case
 `elements(flatten(p))` will be converted to polygons.
@@ -197,7 +202,8 @@ end
 Return the geometric union of `p1` intersected with the geometric union of `p2`  as a `ClippedPolygon`.
 
 Each of `p1` and `p2` may be a `GeometryEntity` or array of `GeometryEntity`. All entities
-are first converted to polygons using [`to_polygons`](@ref).
+are first converted to polygons using [`to_polygons`](@ref). Styles on the inputs are not
+carried to the result; see [Entity Styles](@ref concept-entitystyles).
 
 Each of `p1` and `p2` can also be a `GeometryStructure` or `GeometryReference`, in which case
 `elements(flatten(p))` will be converted to polygons.
@@ -232,7 +238,8 @@ The XOR operation returns regions that are in either `p1` or `p2`, but not in bo
 This is useful for finding non-overlapping regions between two sets of polygons.
 
 Each of `p1` and `p2` may be a `GeometryEntity` or array of `GeometryEntity`. All entities
-are first converted to polygons using [`to_polygons`](@ref).
+are first converted to polygons using [`to_polygons`](@ref). Styles on the inputs are not
+carried to the result; see [Entity Styles](@ref concept-entitystyles).
 
 Each of `p1` and `p2` can also be a `GeometryStructure` or `GeometryReference`, in which case
 `elements(flatten(p))` will be converted to polygons.

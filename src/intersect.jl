@@ -276,7 +276,7 @@ function intersection(
     straight!(x, 2 * crossing_extent, nr)
     intersection!(x, sty, crossing_extent, (s2_1 - s2_0), xsty)
     (termlen_1 > zero(termlen_1)) &&
-        straight!(x, termlen_1, Paths.CPWOpenTermination(sty, s2_1))
+        straight!(x, termlen_1, Paths.CPWOpenTermination(sty, s2_1; initial=true))
     return x
 end
 

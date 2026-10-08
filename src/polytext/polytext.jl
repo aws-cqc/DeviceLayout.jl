@@ -185,7 +185,11 @@ end
 
 function drawchar(sty::FontDerived, c, s)
     dict = chardict(sty)
-    cs = typeof(c)(uniquename(string(name(sty), "_", s)))
+    # Glyph cells are named by codepoint rather than by the character itself: GDS readers
+    # (and the GDS writer's duplicate check) compare cell names case-insensitively, so
+    # `_A` and `_a` would collide, and characters outside the GDSII name charset
+    # (`/`, `"`, `α`, ...) would make the name itself invalid.
+    cs = typeof(c)(uniquename(string(name(sty), "_U", string(UInt32(s); base=16, pad=4))))
     render!(cs, union2d(elements(dict[s])), sty.meta)
     return cs
 end

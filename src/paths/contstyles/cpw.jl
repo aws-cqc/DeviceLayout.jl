@@ -6,8 +6,7 @@ abstract type CPW{T} <: ContinuousStyle{T} end
         gap::T
     end
 
-A CPW with variable trace and gap as a function of path length. `trace` and `gap` are
-callable.
+A CPW with variable trace and gap as a function of path length. `trace` and `gap` are callable.
 """
 struct GeneralCPW{S, T} <: CPW{false}
     trace::S
@@ -56,6 +55,8 @@ reverse(s::SimpleCPW, l) = s
 
 Constructors for CPW styles. Automatically chooses between `SimpleCPW`,
 `GeneralCPW`, or `TaperCPW` styles as appropriate.
+
+CPWs are drawn as their two gap regions (that is, with negative polarity).
 """
 CPW(trace::Coordinate, gap::Coordinate) = SimpleCPW(trace, gap)
 CPW(trace, gap::Coordinate) = GeneralCPW(trace, x -> float(gap))

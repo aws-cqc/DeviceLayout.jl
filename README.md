@@ -7,7 +7,7 @@
 [![codecov](https://codecov.io/gh/aws-cqc/DeviceLayout.jl/graph/badge.svg?token=D3EQ7I4LP0)](https://codecov.io/gh/aws-cqc/DeviceLayout.jl)
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.19849070-blue)](https://doi.org/10.5281/zenodo.19849070)
 
-DeviceLayout.jl is a [Julia](http://julialang.org) package for computer-aided design (CAD) of quantum integrated circuits, developed at the Amazon Center for Quantum Computing. The package supports 
+DeviceLayout.jl is a [Julia](http://julialang.org) package for computer-aided design (CAD) of quantum integrated circuits, developed at the AWS Center for Quantum Computing. The package supports 
 
 - **2D layout generation** for fabrication (GDSII export)
 - **3D model generation** for electromagnetic simulation

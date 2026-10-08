@@ -958,4 +958,71 @@ end
         groups = Dict("a" => [A], "b" => [B])
         @test split_t_junctions!(groups) == 1
     end
+
+    @testset "Dict method works with SemanticMeta keys" begin
+        # SemanticMeta is totally ordered (Base.isless on (layer, index, level)),
+        # so it can key the all-pairs Dict directly — the shape the target-driven
+        # conformal orchestrator uses (levelwise metadata → regions).
+        T = typeof(1.0μm)
+        A = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[p(0μm, 0μm), p(10μm, 0μm), p(10μm, 10μm), p(0μm, 10μm)]
+            )
+        )
+        B = CurvilinearRegion(
+            CurvilinearPolygon(
+                Point{T}[
+                    p(10μm, 0μm),
+                    p(20μm, 0μm),
+                    p(20μm, 10μm),
+                    p(10μm, 10μm),
+                    p(10μm, 5μm)
+                ]
+            )
+        )
+        groups = Dict(SemanticMeta(:metal) => [A], SemanticMeta(:ground) => [B])
+        @test split_t_junctions!(groups) == 1
+    end
+end
+
+@testitem "SemanticMeta ordering" setup = [CommonTestSetup] begin
+    import DeviceLayout: SemanticMeta
+
+    @testset "isless orders by (layer, index, level)" begin
+        # Primary key: layer (Symbols compare lexicographically)
+        @test SemanticMeta(:a) < SemanticMeta(:b)
+        @test !(SemanticMeta(:b) < SemanticMeta(:a))
+        # Secondary key: index, within the same layer
+        @test SemanticMeta(:a; index=1) < SemanticMeta(:a; index=2)
+        # Tertiary key: level, within the same (layer, index)
+        @test SemanticMeta(:a; index=1, level=1) < SemanticMeta(:a; index=1, level=2)
+        # layer dominates index and level
+        @test SemanticMeta(:a; index=9, level=9) < SemanticMeta(:b; index=1, level=1)
+    end
+
+    @testset "consistent with == (no strict-order ties for distinct values)" begin
+        x = SemanticMeta(:a; index=1, level=1)
+        @test !(x < x)                              # irreflexive
+        @test x == SemanticMeta(:a; index=1, level=1)
+        y = SemanticMeta(:a; index=1, level=2)
+        @test (x < y) ⊻ (y < x)                     # exactly one direction for x != y
+    end
+
+    @testset "sortable / deterministic key order" begin
+        ks = [
+            SemanticMeta(:ground),
+            SemanticMeta(:metal; index=2),
+            SemanticMeta(:metal; index=1),
+            SemanticMeta(:metal; index=1, level=2)
+        ]
+        s = sort(ks)
+        @test s == [
+            SemanticMeta(:ground),
+            SemanticMeta(:metal; index=1, level=1),
+            SemanticMeta(:metal; index=1, level=2),
+            SemanticMeta(:metal; index=2)
+        ]
+        # Sorting is stable regardless of starting permutation
+        @test sort(reverse(ks)) == s
+    end
 end

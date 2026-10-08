@@ -273,7 +273,6 @@ in referenced structures.
 """
 gdslayers(x::GeometryStructure) =
     unique(map(gdslayer ∘ DeviceLayout.default_meta_map, element_metadata(x)))
-layers(x::Cell) = unique(map(gdslayer, x.element_metadata))
 
 @deprecate layers(x) gdslayers(x)
 

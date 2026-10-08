@@ -385,6 +385,8 @@ struct StyledHook{T, H <: Hook{T}, S <: Paths.Style} <: Hook{T}
 end
 StyledHook(h::Hook, ::Nothing) = StyledHook(h, Paths.NoRenderContinuous())
 
+show(io::IO, h::StyledHook) = print(io, getfield(h, :h), " styled as ", getfield(h, :style))
+
 function DeviceLayout.transformation(h1::StyledHook, h2::StyledHook)
     return transformation(getfield(h1, :h), getfield(h2, :h))
 end
@@ -520,6 +522,11 @@ p1_hook(pa::Path, right_handed=true) =
 """
     hooks(pa::Path)
 
+Hooks at the start and endpoints of `pa`, along with left-handed variants.
+
+Hooks look into the path: `:p0` hooks have inward direction `α0(pa)`, and `:p1` hooks have inward direction
+opposite `α1(pa)`.
+
   - `:p0`: A right-handed `StyledHook` looking into the start of path `pa` with `nextstyle` of the reversed path.
   - `:p1`: A right-handed `StyledHook` looking into the end of path `pa` with `nextstyle(pa)`.
   - `:p0_lh`: A left-handed `StyledHook` looking into the start of path `pa` with `nextstyle` of the reversed path.
@@ -538,6 +545,42 @@ pathf(p) = segment(p[1]).f
 
 function show(io::IO, x::Node)
     return print(io, "$(segment(x)) styled as $(style(x))")
+end
+
+_node_count_str(n) = string(n, n == 1 ? " node" : " nodes")
+
+function _show_path_header(io::IO, p::Path{T}) where {T}
+    print(io, "Path{", DeviceLayout.coordinate_type_string(T), "} ")
+    show(io, p.name)
+    return print(io, " with ", _node_count_str(length(p)))
+end
+
+show(io::IO, p::Path) = _show_path_header(io, p)
+
+function show(io::IO, ::MIME"text/plain", p::Path)
+    _show_path_header(io, p)
+    print(io, " and metadata ", p.metadata)
+    print(io, "\n  from ", p.p0, " with ∠", p.α0)
+    isempty(p) && return nothing
+    print(io, "\n  to ", p1(p), " with ∠", α1(p))
+    # List nodes, truncated if the output is limited (as in the REPL)
+    n = length(p)
+    maxnodes = get(io, :limit, false)::Bool ? 20 : n
+    if n <= maxnodes
+        for (i, node) in enumerate(nodes(p))
+            print(io, "\n   [", i, "] ", node)
+        end
+    else
+        half = maxnodes ÷ 2
+        for i = 1:half
+            print(io, "\n   [", i, "] ", nodes(p)[i])
+        end
+        print(io, "\n   ⋮")
+        for i = (n - half + 1):n
+            print(io, "\n   [", i, "] ", nodes(p)[i])
+        end
+    end
+    return nothing
 end
 
 Path{T}(p0::Point=zero(Point{T}), α0=0.0°, meta::Meta=UNDEF_META) where {T} =
@@ -1285,9 +1328,13 @@ const launchdefaults = Dict([
 """
     launch!(p::Path; kwargs...)
 
-Add a coplanar-waveguide "launcher" structure to `p`.
+Add a coplanar-waveguide "launcher" structure to `p`, with a taper, pad, and open termination.
 
-If `p` is empty, start the path with a launcher; otherwise, terminate with a launcher.
+If `p` is empty, start the path with a launcher. This moves `p0(p)` backward by the pad gap
+`gap0` to make room for the open termination, so that the pad metal starts at the original `p0(p)`.
+
+If `p` is not empty, terminate with a launcher. This extends the path by `taperlen + flatlen + gap0`,
+with the last `gap0` being the open termination past the pad metal.
 
 This method exists mainly for use in demonstrations. The launcher design is not optimized
 for microwave properties.
@@ -1301,6 +1348,8 @@ Keywords:
   - `gap1 = 6.0μm`: Gap width of the final CPW
   - `flatlen = 250.0μm`: Length of the pad
   - `taperlen = 250.0μm`: Length of the taper between pad and launched CPW
+
+Returns the launched CPW style `SimpleCPW(trace1, gap1)`.
 """
 launch!(p::Path{<:Real}; kwargs...) = _launch!(p; launchdefaults..., kwargs...)
 

@@ -74,6 +74,24 @@ Base.convert(::Type{Text{T}}, t::Text{T}) where {T} = t
 
 transformation(t::Text) = ScaledIsometry(t.origin, t.rot, t.xrefl, t.mag)
 
+function Base.show(io::IO, t::Text)
+    print(io, "Text ")
+    show(io, t.text)
+    print(io, " at ", t.origin, " with width ", t.width)
+    # Only mention the orientation when it is not the identity
+    iszero(t.rot) && !t.xrefl && t.mag == 1 && return nothing
+    return print(io, " with ", ScaledIsometry(nothing, t.rot, t.xrefl, t.mag))
+end
+
+function Base.show(io::IO, ::MIME"text/plain", t::Text)
+    show(io, t)
+    print(io, "\n  can scale: ", t.can_scale)
+    print(io, "\n  x alignment: ")
+    show(io, t.xalign)
+    print(io, "\n  y alignment: ")
+    return show(io, t.yalign)
+end
+
 function transform(t::Text{S}, f::Transformation) where {S}
     tf = f ∘ transformation(t)
     return Text(;

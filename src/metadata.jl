@@ -42,6 +42,15 @@ SemanticMeta(meta::SemanticMeta; index=layerindex(meta), level=level(meta)) =
 SemanticMeta(meta::Meta; index=layerindex(meta), level=level(meta)) =
     SemanticMeta(layername(meta); index=index, level=level)
 
+# Total ordering on the struct fields, so `SemanticMeta` can key a sorted
+# collection (e.g. `sort!(collect(keys(groups)))` in `split_t_junctions!`, where
+# a deterministic key order makes all-pairs ownership independent of `Dict`
+# iteration order). Ordered by `layer` first (the primary grouping), then
+# `index`, then `level`. `Symbol` is itself totally ordered, so the tuple
+# comparison is a total order consistent with the derived `==`.
+Base.isless(a::SemanticMeta, b::SemanticMeta) =
+    isless((a.layer, a.index, a.level), (b.layer, b.index, b.level))
+
 const UNDEF_META = SemanticMeta(:undefined)
 const NORENDER_META = SemanticMeta(:norender)
 

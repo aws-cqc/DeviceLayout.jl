@@ -39,6 +39,8 @@ struct Rectangle{T} <: AbstractPolygon{T}
     end
 end
 
+Base.show(io::IO, r::Rectangle) = print(io, "Rectangle(", r.ll, ", ", r.ur, ")")
+
 """
     Rectangle(ll::Point, ur::Point)
 

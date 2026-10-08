@@ -8,7 +8,7 @@ It's not really recommended to do this directly from geometry-level layout. Ther
 
 The 2D-to-3D pipeline is one reason to work with "native" geometry in a `CoordinateSystem`, rather than discretizing everything into `Polygon`s as we would for a `Cell`. When we render curved Paths and rounded shapes to a `SolidModel`, circular arcs in paths and rounded corners are represented as exact circular arcs, and arbitrary curves are approximated with cubic B-splines. This not only keeps model size down but also allows Gmsh to make better meshes.
 
-Moreover, when DeviceLayout.jl renders path segments and certain other entities, it automatically sets mesh sizing information to help Gmsh make better meshes. You can also annotate entities with the [MeshSized](@ref) style to provide such information manually.
+Moreover, when DeviceLayout.jl renders path segments and certain other entities, it automatically sets mesh sizing information to help Gmsh make better meshes. You can also annotate entities with the [`MeshSized`](@ref) style to provide such information manually.
 
 See [API Reference: SolidModels](@ref api-solidmodels).
 

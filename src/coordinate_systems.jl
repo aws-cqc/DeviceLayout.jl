@@ -24,6 +24,8 @@ import DeviceLayout:
     UPREFERRED,
     aref,
     coordinatetype,
+    coordinate_type_string,
+    type_with_coordinate_string,
     coordsys_type,
     elements,
     element_metadata,

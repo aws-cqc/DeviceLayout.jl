@@ -606,7 +606,7 @@ sides. Modifies `targets` in place and returns the number of vertices inserted.
     (possibly slightly off-curve) source vertex.
 
 Candidate lookup uses an `RTree` of the `sources` vertices (see
-[`mbr_spatial_index`](@ref)), so cost scales with the number of on-edge hits
+`DeviceLayout.mbr_spatial_index`), so cost scales with the number of on-edge hits
 rather than the product of edge and vertex counts.
 
 Fixing T junctions avoids ~1 nm gaps from manufacturing-grid snapping in GDS

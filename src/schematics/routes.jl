@@ -19,8 +19,9 @@ Route(rule, hook0::PointHook, hook1::PointHook; kwargs...) =
 Wraps a `Route` in a `Component` type for use with schematics.
 
 `name` should be unique. If `global_waypoints` is false, then the waypoints and waydirs are
-taken to be relative to the component coordinate system. Otherwise, they will be relative to
-the schematic global coordinate system.
+taken to be in a route-local coordinate system, with the origin at the route start
+and the x-axis in the route's initial direction. Otherwise, they will be relative to
+the parent `Schematic` global coordinate system.
 """
 mutable struct RouteComponent{T, R <: Paths.RouteRule} <: AbstractComponent{T}
     name::String
@@ -179,8 +180,9 @@ If one or both hook symbols are not specified, then `matching_hook` or `matching
 will be used to attempt to automatically find the correct hook or hooks.
 
 The route will have start and endpoints at the origin until a method like `plan!` is called.
-`waypoints` and `waydirs` are in component-local coordinates (unless `global_waypoints` is
-`true`), and `rule` determines how they will be used.
+`waypoints` and `waydirs` are in route-local coordinates where the origin is the route start
+and the x-axis is the route's initial direction (unless `global_waypoints` is `true`, in which
+case they are in global coordinates of the parent `Schematic`), and `rule` determines how they will be used.
 
 Additional keyword arguments will become vertex properties for the `RouteComponent`'s node.
 

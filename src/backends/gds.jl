@@ -755,7 +755,7 @@ end
 A dictionary of top-level cells (`Cell` objects) found in the GDSII file is
 returned. The dictionary keys are the cell names. The other cells in the GDSII
 file are retained by `CellReference` or `CellArray` objects held by the
-top-level cells. Currently, cell references and arrays are not implemented.
+top-level cells.
 
 The FileIO package recognizes files based on "magic bytes" at the start of the
 file. To permit any version of GDSII file to be read, we consider the magic

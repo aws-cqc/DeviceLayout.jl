@@ -22,12 +22,14 @@ using PRIMA
         cap_width=24μm,
         cap_length=620μm,
         cap_gap=30μm,
+        total_length=5000μm,
         meander_turn_count=5,
         hanger_length=500μm,
         bend_radius=50μm,
         wave_ports::Bool=false,
         save_mesh::Bool=false,
-        save_gds::Bool=false)
+        save_gds::Bool=false,
+        mesh_order=2)
 
 Generate a SolidModel and mesh for a single transmon design, using a rectangular transmon island and claw resonator.
 """
@@ -175,7 +177,7 @@ function single_transmon(;
     # Adjust mesh_scale to increase the resolution of the mesh, < 1 will result in greater
     # resolution near edges of the geometry.
     SolidModels.set_gmsh_option("General.Verbosity", 1)
-    SolidModels.mesh_order(2)
+    SolidModels.mesh_order(mesh_order)
     render!(sm, floorplan, tech)
 
     if save_mesh

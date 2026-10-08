@@ -8,6 +8,84 @@ The format of this changelog is based on
 
 ### Added
 
+  - `SolidModels.mesh_respect_lc` makes the mesh-size callback return the smaller of the
+    control-point size and the size gmsh proposes itself, so curvature or boundary sizing
+    applies to geometry without control points, such as imported CAD. Off by default.
+  - `SolidModels.load_mesh_control_points!` loads a parsed control-point document (tiers of
+    `h_um`, `alpha`, `coords_um`) into the mesh-size field, and
+    `SolidModels.set_mesh_size_callback!` installs the size callback for models assembled
+    without `render!`.
+
+### Fixed
+
+  - `Intersect.AirBridge` crossings give the CPW open termination after the bridge
+    `initial=true`, so its trace-corner vertices sit on the side facing the following segment
+    and are shared with that segment's gap polygons instead of leaving T-junctions.
+  - Assigning a physical group to a `SolidModel` by name now clears any stale entry for that
+    name in gmsh's name registry first. Booleans and synchronization drop group-table entries
+    but keep names registered, and a stale name silently left the re-created group unnamed, so
+    it was written to `.xao` as `G_<dim>_<tag>`.
+
+## 1.20.0 (2026-10-06)
+
+### Changed
+
+  - The required top-level `ParameterSet` namespace `global` is renamed to
+    `globals`, so shared parameters are now accessed as `ps.globals.version` (and written as
+    `globals:` in YAML). A YAML file or `Dict` that still uses `global:` is read as `globals`
+    with a warning (once per session), so existing parameter files keep working.
+  - Deprecation warnings follow a consistent policy (#300): `Base.depwarn` (visible under
+    `--depwarn=yes`, once per call site) where a spelling is simply going away, and a
+    default-visible `@warn` with `maxlog=1` where there is a new behavior to opt into. The
+    `meshing_parameters` keyword no longer forces its warning past `--depwarn=no` on every
+    `render!`, non-finite `Rounded` `selection_tolerance` no longer warns once per style
+    construction, and every message names the replacement spelling. `layers(::Cell)` no
+    longer shadows the `layers` deprecation, so `layers` now warns and points at
+    `gdslayers` for cells as it already did for other structures.
+  - B-spline approximation of curves and offset curves (used in SolidModel and conformal
+    rendering) estimates candidate error at Gauss-Legendre nodes against the exact curve
+    and fits the candidate endpoint tangent magnitudes by least squares before
+    subdividing. Construction is several times faster and typically produces 2–5× fewer
+    subsegments at the same tolerance.
+
+### Fixed
+
+  - `uniquename(str, dlm)` dropped the delimiter when reconstructing the base name of a
+    `str0 * dlm * n` input containing several delimiters (`uniquename("x_3_1", '_')` returned
+    `"x3_1"`), and a bare number was treated as a suffix. `uniquename` also takes a new keyword
+    `parse_suffix=false` to count a name literally, which `add_node!` now uses so that schematic
+    node ids honor their documented behavior: a `base_id` ending in `_<n>` (e.g. `x_3_1`) is used
+    as-is and only gets a `_n` suffix if that id is already in use.
+  - The `SingleTransmon` example's `single_transmon` now honors its `mesh_order` keyword: the
+    solid-model meshing order was hardcoded to `2`, so passing `mesh_order` had no effect. It
+    now calls `SolidModels.mesh_order(mesh_order)`, and the docstring lists the previously
+    omitted `mesh_order` and `total_length` keywords.
+  - `polytext!` names glyph cells by Unicode codepoint (e.g. `PolyTextSansMono_U0041`) instead
+    of by the character itself, so upper- and lowercase glyphs no longer produce cell names that
+    collide under the GDS writer's case-insensitive duplicate check, and glyphs for characters
+    outside the GDSII name charset (`/`, `"`, `α`, …) no longer trigger invalid-name warnings
+    on save. (#321)
+  - `bspline_approximation` now canonicalizes traversal direction, so approximating a segment
+    and its `reverse` yields chains that are exact reverses of one another (same sub-segment
+    count, same split points). Previously the error-driven refinement was not reversal-symmetric,
+    so it could place split points at ulp-different coordinates — or split into a different number
+    of sub-segments — depending on traversal direction. This surfaced in `render_conformal!`: two
+    faces sharing a curved edge traverse it in opposite directions, so a direction-dependent
+    approximation left the shared boundary non-manifold. Endpoints are compared with a tolerance
+    band (so nearly-coincident endpoints don't flip on floating-point noise), and the result is
+    reversed back to the caller's traversal direction, so GDS discretization, stock `render!`, and
+    `render_conformal!` all agree on a shared curve.
+  - Graphics: datatypes other than `0` on a GDS layer now get a color derived from that
+    layer's base color (same hue, four evenly spread CIELCh lightness levels, repeating every
+    five datatypes) instead of an unrelated categorical color from a large index jump. Datatype
+    `0` colors are unchanged. (#306)
+
+## 1.19.0 (2026-09-14)
+
+### Added
+
+  - `load_parameter_set` (exported from `SchematicDrivenLayout`) loads a `ParameterSet` from a
+    YAML file path. Requires `YAML.jl` to be loaded.
   - `split_t_junctions!` (exported from `DeviceLayout`) injects foreign vertices onto edges
     (straight or `Paths.Turn`/`Paths.BSpline`) using an `RTree`-based noding core, with three
     methods: asymmetric `(targets, sources...)` for general 2D / GDS-gap use, single-argument
@@ -15,6 +93,23 @@ The format of this changelog is based on
     that injects each group's vertices onto every other group's edges — the form needed to
     make adjacent physical groups conformal before `render_conformal!`. Curved edges are split
     natively via `Paths.split`; no discretization.
+  - `SemanticMeta` is now totally ordered (`Base.isless` on `(layer, index, level)`), so it can
+    key a sorted collection. In particular the all-pairs `split_t_junctions!(groups::AbstractDict)`
+    can be keyed directly by `SemanticMeta`, giving deterministic all-pairs ownership without a
+    caller-supplied `Symbol` key.
+
+### Fixed
+
+  - `render_conformal!` now handles `Ellipse` primitives (including circles
+    produced by `Circle` and by autofill patterns). Previously `to_primitives`
+    kept ellipses as native OCC primitives, but the conformal-emit dispatch had
+    no `Ellipse` method, so `render_conformal!` on any `CoordinateSystem`
+    containing an ellipse fell through to the generic vector path and errored.
+    Circles route through `CurvilinearPolygon` (four 90° arcs), the same contour
+    a circular hole comes out of `difference2d_curved`, so a placed circle and a
+    boolean-cut circular hole at the same location share cached arc entities.
+    Non-circular ellipses (not exactly arc-representable) emit a native
+    `add_ellipse`; a smooth closed curve has nothing to share with neighbours.
 
 ### Changed
 
@@ -24,6 +119,10 @@ The format of this changelog is based on
   (after coordinate type). This should not have functional consequences for ordinary usage, but it
   does mean that `Route{T}` and `RouteComponent{T}` are no longer concrete, and their `RouteRule` cannot
   be changed in-place to a different type.
+  - Improved pretty printing at the REPL for paths, routes, schematics, coordinate systems,
+    components, solid models, geometry entities, styles, hooks, references, and text. Compact
+    displays now summarize the most useful state, while detailed displays expose items such as
+    nodes, edges, coordinates, style settings, array shape, and physical-group entity counts.
 
 ### Removed
 
@@ -34,6 +133,10 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - B-spline approximation of an offset curve near or beyond a cusp (offset magnitude
+    approaching or exceeding the base curve's radius of curvature) could silently return
+    results exceeding the requested tolerance; such curves are now refined to tolerance
+    where possible and warn otherwise.
   - Curve recovery (`union2d_curved` and friends) preserves arcs from path nodes styled with
     `Plain` or `OptionalStyle` (as produced by `not_simulated`/`only_simulated` and friends),
     which previously fell back to discretization.

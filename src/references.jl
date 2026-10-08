@@ -117,6 +117,37 @@ Base.convert(::Type{GeometryReference{S}}, x::ArrayReference) where {S} = ArrayR
 Base.convert(::Type{ArrayReference{S}}, x::ArrayReference) where {S} =
     convert(GeometryReference{S}, x)
 
+# Orientation part of the reference transformation (omitting translation), or `nothing` if
+# it is the identity; used to keep `show` output short for plain placements
+function _orientation_str(x::GeometryReference)
+    f = ScaledIsometry(nothing, x.rot, x.xrefl, x.mag)
+    return iszero(x.rot) && !x.xrefl && x.mag == 1 ? nothing : string(f)
+end
+
+function Base.show(io::IO, x::StructureReference)
+    print(io, "StructureReference at ", x.origin)
+    o = _orientation_str(x)
+    isnothing(o) || print(io, " with ", o)
+    return print(io, " to ", x.structure)
+end
+
+function Base.show(io::IO, x::ArrayReference)
+    print(io, "ArrayReference at ", x.origin, " of ")
+    print(
+        io,
+        x.col,
+        " × ",
+        x.row,
+        " (cols × rows) spaced by ",
+        x.deltacol,
+        ", ",
+        x.deltarow
+    )
+    o = _orientation_str(x)
+    isnothing(o) || print(io, " with ", o)
+    return print(io, " to ", x.structure)
+end
+
 """
     ArrayReference(x::GeometryStructure{S}; kwargs...) where {S <: Coordinate}
     ArrayReference(x::GeometryStructure{S}, origin::Point{T}; kwargs...) where

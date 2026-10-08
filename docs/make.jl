@@ -29,13 +29,13 @@ makedocs(
     checkdocs=:none,
     format=Documenter.HTML(
         prettyurls=true,
-        assets=["assets/favicon.ico"],
+        assets=["assets/favicon.ico", "assets/dark_figures.css"],
         size_threshold=400_000,
         collapselevel=1
     ),
     sitename="DeviceLayout.jl",
     authors="""
-  Amazon Center for Quantum Computing
+  AWS Center for Quantum Computing
   """,
     pages=[
         "Home" => "index.md",

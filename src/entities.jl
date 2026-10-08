@@ -114,7 +114,8 @@ footprint(geo) = bounds(geo)
 Return a `Vector` containing the result of offsetting boundaries outwards by `delta`.
 
 Entities will be resolved into `Polygon`s using [`to_polygons`](@ref) before
-offsetting using Clipper with options `j` and `e`.
+offsetting using Clipper with options `j` and `e`. Styles on the inputs are not carried
+to the result; see [Entity Styles](@ref concept-entitystyles).
 
 Offsetting is specifically a polygon operation, as performed by Clipper. An alternative
 method [`halo`](@ref) may be defined that produces an equivalent non-polygon `GeometryEntity`.

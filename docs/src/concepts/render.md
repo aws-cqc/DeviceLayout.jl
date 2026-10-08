@@ -65,7 +65,7 @@ These also have in-place versions that can be applied to `CoordinateSystem`s (as
 ## Rendering Arbitrary Paths
 
 A `Segment` and `Style` together define one or more closed curves in the plane.
-The job of rendering to a `Cell` is to approximate these curves by closed polygons. In many cases, including circular arcs and simple styles along B-spline segments, [DeviceLayout.discretize_curve](@ref) is used. This discretization uses curvature information to render the curve to a tolerance provided to `render!` using the `atol` keyword (default `1.0nm`). For these curves, assuming slowly varying curvature, no point on the true curve is more than approximately `atol` from the discretization. To enable rendering
+The job of rendering to a `Cell` is to approximate these curves by closed polygons. In many cases, including circular arcs and simple styles along B-spline segments, [`DeviceLayout.discretize_curve`](@ref) is used. This discretization uses curvature information to render the curve to a tolerance provided to `render!` using the `atol` keyword (default `1.0nm`). For these curves, assuming slowly varying curvature, no point on the true curve is more than approximately `atol` from the discretization. To enable rendering
 of styles along generic paths in the plane, segment/style rendering falls back to this same
 curvature-based discretization when no specialized polygon method is available.
 
@@ -100,7 +100,12 @@ and so on. You can save a cell to a graphics file by, e.g. `save("/path/to/file.
     and datatype.
   - `layercolors`: A dictionary mapping either exact `GDSMeta` values or integer GDS layer
     numbers to RGBA tuples. Exact metadata keys allow datatypes on one layer to have different
-    colors. For example, `(1.0, 0.0, 0.0, 0.5)` is red with 50% opacity.
+    colors. For example, `(1.0, 0.0, 0.0, 0.5)` is red with 50% opacity. Layers not given an
+    explicit color get one from the Glasbey categorical scheme, keyed by layer number; datatypes
+    other than `0` get a variant of their layer's color with the same hue but a different
+    lightness (stepping darker first on the light theme, lighter first on the dark theme)
+    rather than an unrelated color; the variants repeat every five datatypes. Layers are
+    painted in order of ascending `(gdslayer, datatype)`.
   - `background`: `:transparent` (the default), `:white`, `:black`, `nothing`, or an RGB(A)
     tuple with components between zero and one.
   - `bboxes`: Whether to draw yellow bounding boxes around top-level cell arrays or cell

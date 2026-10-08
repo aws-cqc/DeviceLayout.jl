@@ -301,6 +301,15 @@ See [Shapes](./shapes.md).
     SolidModels.save(::File, ::SolidModel)
 ```
 
+### Conformal rendering
+
+```@docs
+    SolidModels.ConformalRender
+    SolidModels.render_conformal!
+    SolidModels.ConformalRenderContext
+    SolidModels.add_conformal_loop!
+```
+
 ### Physical Groups
 
 ```@docs
@@ -337,12 +346,15 @@ See [Shapes](./shapes.md).
     SolidModels.mesh_order
     SolidModels.mesh_scale
     SolidModels.mesh_grading_default
+    SolidModels.mesh_respect_lc
     SolidModels.set_gmsh_option
     SolidModels.get_gmsh_number
     SolidModels.get_gmsh_string
     SolidModels.mesh_control_points
     SolidModels.mesh_control_trees
     SolidModels.add_mesh_size_point
+    SolidModels.load_mesh_control_points!
+    SolidModels.set_mesh_size_callback!
     SolidModels.finalize_size_fields!
     SolidModels.clear_mesh_control_points!
     SolidModels.reset_mesh_control!

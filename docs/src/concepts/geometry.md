@@ -16,7 +16,7 @@ Here's a type hierarchy with the most important types for geometry representatio
 AbstractGeometry{S<:Coordinate}
     ├── GeometryEntity (basic "shapes")
     │   ├── Polygon, Rectangle, Text, Ellipse...
-    │   ├── ClippedPolygon (result of polygon [clipping](./polygons.md#Clipping) — `union2d`, etc.)
+    │   ├── ClippedPolygon (result of polygon clipping — `union2d`, etc.)
     │   ├── Paths.Node (one segment+style pair in a Path)
     │   └── StyledEntity (entity + rounding or other rendering customization)
     ├── GeometryStructure (can contain entities & references)
@@ -67,6 +67,8 @@ rect_rounded_meshsized = meshsized_sty(rect_rounded)
 Some styles, like `MeshSized`, can be used with any entity to supply additional rendering directives. The `Plain` style does nothing, and the `NoRender` style prevents rendering; others control rendering tolerance, mesh sizing, and toggles for other styles based on global rendering options.
 
 `AbstractPolygon`s have the special [`Rounded`](@ref) style, and `ClippedPolygon`s can have a [`StyleDict`](@ref) applying different styles to different contours.
+
+Styles are annotations on an entity rather than part of its geometry, and only operations that keep the entity itself carry them along. Transformations preserve styles (rotating a `StyledEntity` gives a `StyledEntity`), but operations that construct new geometry—the clipping operations `union2d`, `difference2d`, `intersect2d`, and `xor2d` and their `_curved` variants, as well as `offset` and `halo`—return unstyled results, so a `MeshSized` input yields an output without mesh sizing. Geometry-affecting styles on the inputs are applied as the inputs are converted for the operation: an `OptionalStyle` is resolved to its default; `NoRender` is resolved to empty geometry; `Rounded` is discretized by the non-`_curved` clipping operations, whereas the `_curved` variants recover the arcs where possible (see [Recovering curves through clipping](@ref)); and `ToTolerance` discretizes even in the `_curved` variants. For `halo`, `footprint`, and `bounds`, most styled entities fall back to the underlying entity, with the exception of `OptionalStyle` and `NoRender`, which are resolved as just described.
 
 ### [Structures](@id concept-geometrystructure)
 
@@ -130,7 +132,7 @@ dogbone = union2d([r, r2, r3]) # Boolean union of the three rectangles as a sing
 rounded_dogbone = Rounded(4μm)(dogbone) # Apply the Rounded style
 ```
 
-The printed output above is a bit hard to read, and it's not necessary to understand it in detail to get started. The most important information here is that `rounded_dogbone` is a certain kind of `GeometryEntity` that only describes the vertices of the dogbone polygon and the rounding radius—in particular, we have not discretized the rounded corners to represent the result as a polygon. In more detail, `rounded_dogbone` is a `StyledEntity{T,U,S}` with three type parameters: the coordinate type `T = typeof(1.0μm)`, the underlying entity type `U = ClippedPolygon{T}`, and the style `S = Rounded{T}`—that is, it is a `GeometryEntity` that composes the result of a polygon clipping (Boolean) operation with a `GeometryEntityStyle` specifying rules for rounding that entity.
+The printed output summarizes the clipped geometry and identifies the `Rounded` style applied to it. The important point is that `rounded_dogbone` still describes a composition of the clipped geometry and its rounding rule—in particular, we have not discretized the rounded corners to represent the result as a polygon. Its concrete type, available with `typeof(rounded_dogbone)`, is a `StyledEntity{T,U,S}` whose parameters identify the coordinate type, underlying `ClippedPolygon`, and `Rounded` style.
 
 ### Cells and Rendering
 
@@ -151,7 +153,12 @@ elements(cr)
 Our `Rounded` `ClippedPolygon` has been reduced to a mere `Polygon`, as necessary to represent it within the GDSII format. It's also what we need in order to use the SVG backend:
 
 ```@example 1
-save("dogbone.svg", cr; layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)));
+save(
+    "dogbone.svg",
+    cr;
+    layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)),
+    background=:white
+);
 nothing; # hide
 ```
 
@@ -192,7 +199,12 @@ The entities making up the `Path` are rendered into `Polygon`s, but the `Geometr
 Let's see how it looks:
 
 ```@example 1
-save("dogbone_path.svg", c; layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)));
+save(
+    "dogbone_path.svg",
+    c;
+    layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)),
+    background=:white
+);
 nothing; # hide
 ```
 
@@ -210,7 +222,8 @@ addref!(c_wrapper, sref(c, rot=90°))
 save( # hide
     "rotated_dogbone_path.svg", # hide
     flatten(c_wrapper); # hide
-    layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)) # hide
+    layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)), # hide
+    background=:white # hide
 ); # hide
 nothing; # hide
 ```
@@ -264,7 +277,8 @@ cell = Cell(cs; map_meta=m -> layer_record[layer(m)])
 save( # hide
     "cs_dogbone_path.svg", # hide
     flatten(cell); # hide
-    layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)) # hide
+    layercolors=Dict(0 => (0, 0, 0, 1), 1 => (1, 0, 0, 1)), # hide
+    background=:white # hide
 ); # hide
 nothing; # hide
 ```
@@ -320,7 +334,7 @@ Let's zoom in on the CPW bend:
 
 One notable thing about this solid model is that the arcs in the bent CPW are exact circular arcs. When we render to a `Cell`, all shapes get discretized into `Polygon`s. But since we were working with our "native" `CoordinateSystem`, curved shapes like the CPW bend can be rendered as native curves in the solid geometry kernel. This not only keeps model size down but also allows Gmsh to make better meshes.
 
-Moreover, when DeviceLayout.jl renders path segments and certain other entities, it automatically sets mesh sizing information to help Gmsh make better meshes. (You can also annotate entities with the [MeshSized](@ref) style to provide such information manually.)
+Moreover, when DeviceLayout.jl renders path segments and certain other entities, it automatically sets mesh sizing information to help Gmsh make better meshes. (You can also annotate entities with the [`MeshSized`](@ref) style to provide such information manually.)
 
 ```julia
 SolidModels.gmsh.model.mesh.generate(3)

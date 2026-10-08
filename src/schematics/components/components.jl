@@ -334,8 +334,12 @@ function set_parameters(::AbstractComponent, sub::MissingNamespace)
     return throw(ParameterKeyError(getfield(sub, :key), _namespace_path(sub)))
 end
 
-Base.show(io::IO, ::MIME"text/plain", c::T) where {T <: AbstractComponent} =
-    print(io, "$T \"$(name(c))\" with non-default parameters $(non_default_parameters(c))")
+function Base.show(io::IO, ::MIME"text/plain", c::T) where {S, T <: AbstractComponent{S}}
+    print(io, DeviceLayout.type_with_coordinate_string(T, S), " ")
+    show(io, name(c))
+    print(io, " with non-default parameters ")
+    return show(io, non_default_parameters(c))
+end
 
 """
     non_default_parameters(c::AbstractComponent)

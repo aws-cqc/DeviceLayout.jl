@@ -66,7 +66,7 @@
     rd2 = with_test_logger(
         log ->
             log.level == Logging.Warn &&
-                occursin("Non-finite selection tolerance", log.message)
+                occursin("Non-finite `selection_tolerance`", log.message)
     ) do
         return Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]])(difference2d(r1, r2))
     end
@@ -285,14 +285,14 @@
     sty[1] = with_test_logger(
         log ->
             log.level == Logging.Warn &&
-                occursin("Non-finite selection tolerance", log.message)
+                occursin("Non-finite `selection_tolerance`", log.message)
     ) do
         return RelativeRounded(0.5, p0=[Point(2.0μm, 2.0μm), Point(-2.0μm, -2.0μm)])
     end
     sty[1, 1] = with_test_logger(
         log ->
             log.level == Logging.Warn &&
-                occursin("Non-finite selection tolerance", log.message)
+                occursin("Non-finite `selection_tolerance`", log.message)
     ) do
         return RelativeRounded(0.5, p0=[Point(2.0μm, -2.0μm), Point(-2.0μm, 2.0μm)])
     end
@@ -328,7 +328,7 @@
     er = with_test_logger(
         log ->
             log.level == Logging.Warn &&
-                occursin("Non-finite selection tolerance", log.message)
+                occursin("Non-finite `selection_tolerance`", log.message)
     ) do
         return Rotation(90°)(e)
     end
@@ -369,7 +369,7 @@
     sty = with_test_logger(
         log ->
             log.level == Logging.Warn &&
-                occursin("Non-finite selection tolerance", log.message)
+                occursin("Non-finite `selection_tolerance`", log.message)
     ) do
         return Rounded(1.0μm; p0)
     end
@@ -1018,6 +1018,19 @@ end
 
         # test that no errors thrown with integer arg
         polytext("AaBbCcDdEe", PolyTextSansMono(20μm, GDSMeta(0)))
+
+        # issue #321: glyph cell names must be unique case-insensitively (GDS readers compare
+        # cell names case-insensitively) and must use only GDSII name characters
+        let c = Cell("polytext321", nm)
+            polytext!(c, "AaBbCcDdEe/\\\"'{}αΩ", PolyTextSansMono(20μm, GDSMeta(0)))
+            glyphs = name.(structure.(c.refs))
+            @test allunique(lowercase.(glyphs))
+            @test all(occursin(r"^[A-Za-z0-9_?$]+$", g) && length(g) <= 32 for g in glyphs)
+            @test_logs min_level = Logging.Warn save(
+                joinpath(mktempdir(), "polytext321.gds"),
+                c
+            )
+        end
 
         # issue #42, make sure it works with both Cell and CoordinateSystem
         let fmark = Cell("fmark_1", nm)

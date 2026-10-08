@@ -207,7 +207,7 @@ end
 """
     ExampleShuntClawCapacitor <: Component
 
-Similar to [ExampleSeriesClawCapacitor](@ref), but the capacitor is teed off a feedline.
+Similar to [`ExampleSeriesClawCapacitor`](@ref), but the capacitor is teed off a feedline.
 
 Contains hooks `p0` at the feedline input and `p1` at the feedline output, as well as
 `p2` at the capacitively coupled output, as well as left-handed versions. (When left-handed hooks
