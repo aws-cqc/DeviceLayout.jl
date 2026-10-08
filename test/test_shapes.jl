@@ -544,6 +544,36 @@ end
     @test isempty(to_polygons(xor2d(rec, cr_curved)))
 end
 
+@testitem "Curvilinear perimeter" setup = [CommonTestSetup] begin
+    using DeviceLayout.Curvilinear: to_curvilinear
+    # Curves count by arclength, not by the chord between their endpoints
+    t = Paths.Turn(180°, 1.0μm, p0=Point(1.0μm, 0.0μm), α0=90°)
+    half_disk = CurvilinearPolygon([Point(-1.0μm, 0.0μm), Point(1.0μm, 0.0μm)], [t], [2])
+    @test perimeter(half_disk) ≈ (2 + π)μm
+    # Offset curves count by their own length, not the length of the original curve
+    half_disk_offset = CurvilinearPolygon(
+        [Point(-0.5μm, 0.0μm), Point(0.5μm, 0.0μm)],
+        [Paths.offset(t, 0.5μm)],
+        [2]
+    )
+    @test perimeter(half_disk_offset) ≈ (1 + π / 2)μm
+    @test perimeter(to_curvilinear(RelativeRounded(0.5)(centered(Rectangle(2μm, 2μm))))) ≈
+          2π * μm
+
+    # Holes count, as for ClippedPolygon
+    hole = CurvilinearPolygon(
+        points(convert(Polygon, Rectangle(1.0μm, 0.4μm) + Point(-0.5μm, 0.1μm)))
+    )
+    @test perimeter(CurvilinearRegion(half_disk, [hole])) ≈ (2 + π + 2.8)μm
+    outer = centered(Rectangle(4μm, 4μm))
+    inner = centered(Rectangle(2μm, 2μm))
+    region = CurvilinearRegion(
+        CurvilinearPolygon(points(convert(Polygon, outer))),
+        [CurvilinearPolygon(points(convert(Polygon, inner)))]
+    )
+    @test perimeter(region) ≈ perimeter(difference2d(outer, inner)) ≈ 24μm
+end
+
 @testitem "Ellipses" setup = [CommonTestSetup] begin
     import LinearAlgebra: norm
     e = Ellipse(2 .* Point(2.0μm, 1.0μm), (2.0μm, 1.0μm), 0°)
