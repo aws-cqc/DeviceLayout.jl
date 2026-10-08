@@ -1026,40 +1026,88 @@ function remove_group!(group::PhysicalGroup; recursive=true, remove_entities=tru
 end
 
 """
-    partition_material_groups!(sm::SolidModel, precedence)
+    exclude_groups(sm::SolidModel, group, excluded, d=2; remove_object=false)
 
-Make the physical groups named in `precedence` mutually exclusive by priority.
+Return the dimtags of the dimension-`d` physical group `group` that belong to none of the
+`excluded` groups (a name or a collection of names) in the same dimension.
 
-`precedence` contains `(name, dimension)` tuples, highest priority first. Each entity is kept
-only in its highest-priority listed group. Unlisted groups are unchanged.
+This is a set difference on group membership, not a geometric Boolean: entities are kept or
+dropped whole, and no geometry is created. Overlapping groups share entities only after
+fragmentation, so run this on a fragmented model; before that it finds nothing in common and
+returns `group` unchanged. Excluded groups that do not exist are skipped with an info message.
+If `group` does not exist, an error is logged and an empty list is returned.
 
-This changes physical-group membership, not geometry, and should run after fragmentation.
-All listed groups must exist and each `(name, dimension)` pair must be unique.
+With `remove_object=true`, the physical group `group` is removed (its entities are kept), so
+that assigning the result back to the same name replaces the group even when the result is
+empty. Gmsh has no empty physical groups, and assigning an empty list to an existing group
+leaves it unchanged.
 
-Returns `sm`.
+Has the postrender-operation signature, for use in a list of operations applied after
+fragmentation, for example
+`("vacuum", exclude_groups, ("vacuum", ["substrate", "bump_extrusion"], 3), :remove_object => true)`.
+Operations in `render!`'s `postrender_ops` run before fragmentation, so this does nothing
+there. See also [`apply_precedence`](@ref).
 """
-function partition_material_groups!(sm::SolidModel, precedence)
-    entries = [(string(name), Int(d)) for (name, d) in precedence]
-    all(0 <= d <= 3 for (_, d) in entries) ||
-        throw(ArgumentError("material group dimensions must be between 0 and 3"))
-    allunique(entries) || throw(ArgumentError("material precedence entries must be unique"))
-
-    absent = filter(entry -> !hasgroup(sm, entry...), entries)
-    isempty(absent) ||
-        throw(ArgumentError("material groups not found: $(join(absent, ", "))"))
-
+function exclude_groups(
+    sm::SolidModel,
+    group::Union{String, Symbol},
+    excluded,
+    d=2;
+    remove_object=false
+)
+    if !hasgroup(sm, group, d)
+        @error "exclude_groups(sm, $group, $excluded, $d): ($group, $d) is not a physical group."
+        return Tuple{Int32, Int32}[]
+    end
     claimed = Set{Tuple{Int32, Int32}}()
-    for (name, d) in entries
-        dts = dimtags(sm[name, d])
-        keep = filter(dt -> !(dt in claimed), dts)
-        union!(claimed, keep)
-        if isempty(keep)
-            remove_group!(sm[name, d], remove_entities=false)
+    for name in _group_names(excluded)
+        if hasgroup(sm, name, d)
+            union!(claimed, dimtags(sm[name, d]))
         else
-            sm[name] = keep
+            @info "exclude_groups(sm, $group, $excluded, $d): ($name, $d) is not a physical group, skipping it."
         end
     end
-    return sm
+    keep = filter(dt -> !(dt in claimed), dimtags(sm[group, d]))
+    remove_object && remove_group!(sm[group, d]; remove_entities=false)
+    return keep
+end
+
+_group_names(name::Union{String, Symbol}) = (name,)
+_group_names(names) = names
+
+"""
+    apply_precedence(precedence)
+
+Return postrender operations that make the physical groups in `precedence` mutually
+exclusive by priority.
+
+`precedence` contains `(name, dimension)` tuples, highest priority first. Each group loses the
+entities it shares with any higher-priority group of the same dimension, so every entity ends
+up in exactly one listed group; unlisted groups are unchanged. The result is a vector of
+[`exclude_groups`](@ref) operations, which can be splatted into a list of operations alongside
+others. They must run after fragmentation; before it, overlapping groups share no entities and
+nothing changes. A group that loses all of its entities is removed.
+"""
+function apply_precedence(precedence)
+    entries = [(string(name), Int(d)) for (name, d) in precedence]
+    all(0 <= d <= 3 for (_, d) in entries) ||
+        throw(ArgumentError("precedence dimensions must be between 0 and 3"))
+    allunique(entries) || throw(ArgumentError("precedence entries must be unique"))
+    ops = Tuple{
+        String,
+        typeof(exclude_groups),
+        Tuple{String, Vector{String}, Int},
+        Pair{Symbol, Bool}
+    }[]
+    for (i, (name, d)) in enumerate(entries)
+        higher = [n for (n, dn) in entries[1:(i - 1)] if dn == d]
+        # The top group of each dimension has nothing above it to exclude.
+        # `remove_object` makes a group that ends up empty disappear instead of keeping its
+        # old members (see `exclude_groups`).
+        isempty(higher) ||
+            push!(ops, (name, exclude_groups, (name, higher, d), :remove_object => true))
+    end
+    return ops
 end
 
 """
