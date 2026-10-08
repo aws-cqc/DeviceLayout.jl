@@ -37,8 +37,11 @@ function check_budget(report)
     end
     return report
 end
+# `rng` must be passed to `@check` explicitly: `SuppositionReport` defaults it to a
+# fresh `RandomDevice` seed and merges that over `config`, so `LAWS.rng` alone would be
+# ignored and every run would be randomly seeded. `TestState` copies the RNG per check.
 macro lawcheck(def)
-    return esc(:(check_budget(@check config = LAWS $def)))
+    return esc(:(check_budget(@check config = LAWS rng = LAWS.rng $def)))
 end
 
 # Laws known to fail on the current kernel, keyed by law id and generator family.

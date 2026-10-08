@@ -187,6 +187,34 @@ end
     end
 end
 
+@testitem "GeomLaws B6 fixed: hole beside a coincident edge" setup =
+    [CommonTestSetup, LawsSetup] tags = [:geomlaws] begin
+    # The subject's edges v₁v₂ and v₄v₅ run along the clip edge c₂c₃ less than one unit
+    # inside it, and the concavity v₂v₃v₄ between them encloses, with that edge, a
+    # triangle that is in neither operand. Found by the B6 absorption law as
+    # `(A ∖ B) ∪ B` at 5000 examples on Clipper2 2.0.1 (and its `main` of 2026-04):
+    # `FixSelfIntersects` sees the touching point as a two-edge self-intersection and
+    # `DoSplitOp` deletes the split-off loop whenever its orientation is opposite to
+    # the parent's, however large — the hole is filled and v₃, v₄ vanish. Clipper1
+    # returns the region correctly. The two operands overlap only in the sub-unit
+    # sliver along the shared edge, so their even-odd region is the union within 1.
+    S = Polygon(
+        Point{Int}[
+            (9035040, -1518829),
+            (8467159, -916142),
+            (3130000, 0),
+            (3351655, 4512897),
+            (2983653, 4903454),
+            (-4290000, 1480000),
+            (2860000, -7470000)
+        ]
+    )
+    C = Polygon(Point{Int}[(6864912, 5923282), (-155381, 8234882), (9645694, -2166911)])
+    for out in (union2d([S], [C]), union2d([C], [S]), union2d([S, C]))
+        @test first(region_within(out, [S, C], 1))
+    end
+end
+
 @testitem "GeomLaws B7: point-membership oracle" setup = [CommonTestSetup, LawsSetup] tags =
     [:geomlaws] begin
     # For every sampled point off all boundaries, membership in each result must equal
