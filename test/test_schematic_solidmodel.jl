@@ -42,35 +42,15 @@
         u = base_shape(r)
 
         d[1] = Polygons.Rounded(r.d[1] / 4)
-        d[1, 1, 1, 1] = Polygons.Rounded(
-            r.d[4] / 4,
-            p0=u[1, 1, 1, 1].contour[[4]],
-            selection_tolerance=1nm
-        )
-        d[1, 2, 1, 1] = Polygons.Rounded(
-            r.d[4] / 4,
-            p0=u[1, 2, 1, 1].contour[[1]],
-            selection_tolerance=1nm
-        )
-        d[1, 3, 1, 1] = Polygons.Rounded(
-            r.d[4] / 4,
-            p0=u[1, 3, 1, 1].contour[[3]],
-            selection_tolerance=1nm
-        )
-        d[1, 4, 1, 1] = Polygons.Rounded(
-            r.d[4] / 4,
-            p0=u[1, 4, 1, 1].contour[[2]],
-            selection_tolerance=1nm
-        )
+        d[1, 1, 1, 1] = Polygons.Rounded(r.d[4] / 4, p0=u[1, 1, 1, 1].contour[[4]])
+        d[1, 2, 1, 1] = Polygons.Rounded(r.d[4] / 4, p0=u[1, 2, 1, 1].contour[[1]])
+        d[1, 3, 1, 1] = Polygons.Rounded(r.d[4] / 4, p0=u[1, 3, 1, 1].contour[[3]])
+        d[1, 4, 1, 1] = Polygons.Rounded(r.d[4] / 4, p0=u[1, 4, 1, 1].contour[[2]])
 
-        d[1, 1] =
-            Polygons.Rounded(r.d[2] / 4, p0=u[1, 1].contour[[4]], selection_tolerance=1nm)
-        d[1, 2] =
-            Polygons.Rounded(r.d[2] / 4, p0=u[1, 2].contour[[1]], selection_tolerance=1nm)
-        d[1, 3] =
-            Polygons.Rounded(r.d[2] / 4, p0=u[1, 3].contour[[1]], selection_tolerance=1nm)
-        d[1, 4] =
-            Polygons.Rounded(r.d[2] / 4, p0=u[1, 4].contour[[4]], selection_tolerance=1nm)
+        d[1, 1] = Polygons.Rounded(r.d[2] / 4, p0=u[1, 1].contour[[4]])
+        d[1, 2] = Polygons.Rounded(r.d[2] / 4, p0=u[1, 2].contour[[1]])
+        d[1, 3] = Polygons.Rounded(r.d[2] / 4, p0=u[1, 3].contour[[1]])
+        d[1, 4] = Polygons.Rounded(r.d[2] / 4, p0=u[1, 4].contour[[4]])
         return render!(cs, DeviceLayout.StyledEntity(u, d), BASE_NEGATIVE)
     end
 
@@ -90,10 +70,7 @@
     function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, r::NestedSquares)
         !r.rounded && return render!(cs, base_shape(r), BASE_NEGATIVE)
         p = base_shape(r)
-        u =
-            Polygons.Rounded(r.d[end] / 4, p0=p[1].contour[[1, 3]], selection_tolerance=1nm)(
-                p
-            )
+        u = Polygons.Rounded(r.d[end] / 4, p0=p[1].contour[[1, 3]])(p)
         return render!(cs, u, BASE_NEGATIVE)
     end
 
@@ -115,8 +92,7 @@
         p = base_shape(r)
         u = Polygons.Rounded(
             norm(upperright(r.p) - lowerleft(r.p)) / 5,
-            p0=p[1].contour[[1]],
-            selection_tolerance=1nm
+            p0=p[1].contour[[1]]
         )(
             p
         )
