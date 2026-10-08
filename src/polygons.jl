@@ -633,11 +633,11 @@ end
 """
     perimeter(poly::ClippedPolygon)
 
-The (Euclidean) perimeter of the outermost contours of a `ClippedPolygon`.
+The (Euclidean) perimeter of a `ClippedPolygon`: the total length of all of its contours,
+including holes and islands nested at any depth.
 """
 function perimeter(p::ClippedPolygon{T}) where {T}
-    isempty(p.tree.children) && return zero(T)
-    return sum([sum(norm.(points(c) .- circshift(points(c), -1))) for c in p.tree.children])
+    return sum(c -> sum(norm.(c .- circshift(c, -1))), _all_contours(p.tree); init=zero(T))
 end
 
 """

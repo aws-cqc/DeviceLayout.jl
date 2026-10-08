@@ -531,6 +531,11 @@
         @test iszero(perimeter(empty_poly))
         multi_poly = union2d(r1, r1 + Point(3, 0))
         @test perimeter(multi_poly) == 8
+        # Holes and islands at every depth count toward the perimeter (#264)
+        holey = difference2d(Rectangle(5, 5), Rectangle(3, 3) + Point(1, 1))
+        @test perimeter(holey) == 32
+        nested = union2d(holey, Rectangle(1, 1) + Point(2, 2))
+        @test perimeter(nested) == 36
     end
 end
 
