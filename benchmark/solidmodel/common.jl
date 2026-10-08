@@ -1,6 +1,6 @@
 # Shared helpers for the single-shot SolidModel benchmarks.
 
-using Dates, FileIO, JSON, Logging, SHA
+using Dates, JSON, SHA
 using DeviceLayout, DeviceLayout.SolidModels
 import Gmsh: gmsh
 
@@ -36,88 +36,25 @@ function environment_info()
     )
 end
 
-short_sha(env) = first(env["devicelayout_sha"], 8)
-
-function default_output_path(name)
-    env = environment_info()
+function default_output_path(name, env)
     stamp = Dates.format(now(UTC), dateformat"yyyymmdd-HHMMSS")
-    return joinpath(@__DIR__, "results", "$name-$(short_sha(env))-$stamp.json")
+    return joinpath(@__DIR__, "results", "$name-$(first(env["devicelayout_sha"], 8))-$stamp.json")
 end
 
 """
-    RecordingLogger(inner)
+    StepCollector()
 
-Logger that records every message with a timestamp and forwards it to `inner`. Used to
-capture `render!(...; verbose=true)` output for per-operation timings.
-
-Install it with `global_logger` *before* `plan`: a `Schematic`'s logger tees to whatever
-`current_logger()` is when the schematic is planned, so a logger installed later with
-`with_logger` never sees the schematic render messages.
+Step reporter for `render!(...; verbose=StepCollector())`: records each timed rendering step
+as `(phase, name, seconds)` while still logging it like `verbose=true` does.
 """
-struct RecordingLogger <: AbstractLogger
-    inner::AbstractLogger
-    t0::Float64
-    records::Vector{Dict{String, Any}}
+struct StepCollector
+    steps::Vector{Dict{String, Any}}
 end
-RecordingLogger(inner) = RecordingLogger(inner, time(), Dict{String, Any}[])
-Logging.min_enabled_level(l::RecordingLogger) = Logging.min_enabled_level(l.inner)
-Logging.shouldlog(l::RecordingLogger, args...) = Logging.shouldlog(l.inner, args...)
-Logging.catch_exceptions(l::RecordingLogger) = Logging.catch_exceptions(l.inner)
-function Logging.handle_message(l::RecordingLogger, level, message, args...; kwargs...)
-    push!(
-        l.records,
-        Dict("t" => time() - l.t0, "level" => string(level), "message" => string(message))
-    )
-    return Logging.handle_message(l.inner, level, message, args...; kwargs...)
-end
-
-"""
-    operation_timings(records) -> Vector{Dict}
-
-Extract `(phase, name, seconds)` entries from verbose `render!` log records. Phases follow the
-`render!:` marker messages; entries are the `[x s]   name: ...` result lines and the
-`[x s]   fragmented dimensions [d1, d2]` lines.
-"""
-function operation_timings(records)
-    ops = Dict{String, Any}[]
-    phase = "unknown"
-    for r in records
-        full_msg = r["message"]
-        # Timed messages start with an `[x s]` label
-        t = match(r"^\[\s*([\d.]+) s\]\s+(.*)$", full_msg)
-        seconds = isnothing(t) ? nothing : parse(Float64, t[1])
-        msg = isnothing(t) ? full_msg : t[2]
-        if startswith(msg, "render!:")
-            phase = if contains(msg, "rendering entities")
-                "groups"
-            elseif contains(msg, "unioning")
-                "auto_union"
-            elseif contains(msg, "postrendering operations")
-                "postrender"
-            else
-                "render"
-            end
-            isnothing(seconds) || push!(
-                ops,
-                Dict("phase" => phase, "name" => "total", "seconds" => seconds)
-            )
-            continue
-        end
-        isnothing(seconds) && continue
-        m = match(r"^fragmented dimensions (\[[\d, ]+\])$", msg)
-        if !isnothing(m)
-            push!(
-                ops,
-                Dict("phase" => "fragment", "name" => m[1], "seconds" => seconds)
-            )
-            continue
-        end
-        m = match(r"^([^:]+): ", msg)
-        if !isnothing(m)
-            push!(ops, Dict("phase" => phase, "name" => m[1], "seconds" => seconds))
-        end
-    end
-    return ops
+StepCollector() = StepCollector(Dict{String, Any}[])
+SolidModels._note(::StepCollector, text) = SolidModels._note(SolidModels.LogStepReporter(), text)
+function SolidModels._step(c::StepCollector, phase, name, seconds, result)
+    push!(c.steps, Dict("phase" => string(phase), "name" => name, "seconds" => seconds))
+    return SolidModels._step(SolidModels.LogStepReporter(), phase, name, seconds, result)
 end
 
 """
@@ -194,7 +131,7 @@ end
     mesh_summary() -> Dict
 
 Node and element counts (by element type name) for the current gmsh model, plus min/mean and a
-10-bin histogram of `minSICN` and `gamma` quality over the 3D elements.
+10-bin histogram over [0, 1] of `minSICN` and `gamma` quality over the 3D elements.
 """
 function mesh_summary()
     out = Dict{String, Any}("nodes" => length(gmsh.model.mesh.get_nodes()[1]))
@@ -227,21 +164,18 @@ end
     parse_benchmark_args(args) -> Dict
 
 Command-line options shared by the single-shot benchmark scripts:
-`--out=PATH --scales=1.0,0.5 --order=1 --skip-mesh --save-geometry`.
+`--out=PATH --scales=1.0,0.5 --order=1 --skip-mesh`.
 """
 function parse_benchmark_args(args)
     opts = Dict{String, Any}(
         "out" => nothing,
         "scales" => [1.0],
         "order" => 1,
-        "skip-mesh" => false,
-        "save-geometry" => false
+        "skip-mesh" => false
     )
     for a in args
         if a == "--skip-mesh"
             opts["skip-mesh"] = true
-        elseif a == "--save-geometry"
-            opts["save-geometry"] = true
         elseif startswith(a, "--out=")
             opts["out"] = a[7:end]
         elseif startswith(a, "--scales=")
@@ -259,45 +193,29 @@ end
     run_solidmodel_benchmark(name, setup, opts) -> Dict
 
 Time `setup()` (which must return `(schematic_or_cs, target, artwork_or_nothing)`), render
-the result to a fresh `SolidModel` with `verbose=true`, then mesh at each of `opts["scales"]`
-with element order `opts["order"]`, recording timings, entity/mesh statistics, peak RSS, and
-fingerprints. Writes JSON to `opts["out"]` (default under `results/`) and returns the dict.
+the result to a fresh `SolidModel` with per-step timings, then mesh at each of
+`opts["scales"]` with element order `opts["order"]`, recording timings, entity/mesh
+statistics, and fingerprints. Writes JSON to `opts["out"]` (default under `results/`) and
+returns the dict.
 """
 function run_solidmodel_benchmark(name, setup, opts)
-    results = Dict{String, Any}("benchmark" => name, "environment" => environment_info())
+    env = environment_info()
+    results = Dict{String, Any}("benchmark" => name, "environment" => env)
     phases = Dict{String, Any}()
     results["phases"] = phases
-    workdir = mktempdir()
-    log = RecordingLogger(global_logger())
-    global_logger(log)
 
     t = @elapsed cs, target, artwork = setup()
-    phases["setup"] = Dict("seconds" => t, "maxrss_bytes" => Sys.maxrss())
+    phases["setup"] = Dict("seconds" => t)
     isnothing(artwork) ||
         (results["artwork_fingerprint"] = Cells.geometry_fingerprint(artwork))
 
     sm = SolidModel("$(name)_benchmark"; overwrite=true)
     SolidModels.gmsh.option.set_number("General.Verbosity", 2)
-    n_setup_records = length(log.records)
-    t = @elapsed render!(sm, cs, target; verbose=true)
-    render_records = log.records[(n_setup_records + 1):end]
-    phases["render"] = Dict(
-        "seconds" => t,
-        "maxrss_bytes" => Sys.maxrss(),
-        "log" => render_records,
-        "operations" => operation_timings(render_records)
-    )
+    steps = StepCollector()
+    t = @elapsed render!(sm, cs, target; verbose=steps)
+    phases["render"] = Dict("seconds" => t, "steps" => steps.steps)
     results["geometry"] = geometry_summary(sm)
     results["geometry_fingerprint"] = solidmodel_fingerprint(sm)
-    if opts["save-geometry"]
-        path = joinpath(workdir, "$name.brep")
-        t = @elapsed save(path, sm)
-        results["brep"] = Dict(
-            "seconds" => t,
-            "bytes" => filesize(path),
-            "sha256" => bytes2hex(open(sha256, path))
-        )
-    end
 
     if !opts["skip-mesh"]
         SolidModels.mesh_order(opts["order"])
@@ -310,11 +228,7 @@ function run_solidmodel_benchmark(name, setup, opts)
             for dim = 1:3
                 entry["generate_$(dim)d_seconds"] = @elapsed gmsh.model.mesh.generate(dim)
             end
-            entry["maxrss_bytes"] = Sys.maxrss()
             merge!(entry, mesh_summary())
-            path = joinpath(workdir, "$name.msh2")
-            entry["save_seconds"] = @elapsed save(path, sm)
-            entry["msh2_bytes"] = filesize(path)
             push!(meshes, entry)
             println(
                 stderr,
@@ -334,7 +248,7 @@ function run_solidmodel_benchmark(name, setup, opts)
             0.0
         )
 
-    out = something(opts["out"], default_output_path(name))
+    out = something(opts["out"], default_output_path(name, env))
     mkpath(dirname(out))
     open(out, "w") do io
         return JSON.print(io, results, 2)

@@ -15,8 +15,10 @@ The format of this changelog is based on
     the last one logged. (#266)
   - Single-shot SolidModel rendering and meshing benchmarks in `benchmark/solidmodel/` for the
     single-transmon and DemoQPU17 workloads, with a comparison script and a manual
-    `Benchmark SolidModel` GitHub workflow. `examples/DemoQPU17/solidmodel.jl` now wraps its
-    setup in `qpu17_solidmodel_setup` instead of running it at include time.
+    `Benchmark SolidModel` GitHub workflow. The examples expose their schematic construction
+    for reuse: `examples/SingleTransmon/schematic.jl` defines `single_transmon_schematic`
+    (included by `SingleTransmon.jl`), and `examples/DemoQPU17/solidmodel.jl` wraps its setup
+    in `qpu17_solidmodel_setup` instead of running it at include time.
 
 ### Changed
 

@@ -692,9 +692,9 @@ function Logging.handle_message(
     # Only the log file uses the stage (as a line prefix). Passing it to the console logger
     # too would print `stage = ...` beneath every message.
     console, logfile = logger.logger.loggers
-    shouldlog(console, level, _module, group, id) &&
+    _sink_takes(console, level, _module, group, id) &&
         handle_message(console, level, message, _module, group, id, file, line; kwargs...)
-    shouldlog(logfile, level, _module, group, id) && handle_message(
+    _sink_takes(logfile, level, _module, group, id) && handle_message(
         logfile,
         level,
         message,
@@ -708,6 +708,11 @@ function Logging.handle_message(
     )
     return nothing
 end
+# The per-sink check `TeeLogger` applies: the sink's own `shouldlog` does not check its
+# minimum level (e.g. `ConsoleLogger` only checks `maxlog`), so a sink with a higher minimum
+# than the other would otherwise receive messages below it.
+_sink_takes(sink, level, _module, group, id) =
+    min_enabled_level(sink) <= level && shouldlog(sink, level, _module, group, id)
 # Otherwise just pass to internal TeeLogger
 Logging.shouldlog(logger::SchematicLogger, level, _module, group, id) =
     shouldlog(logger.logger, level, _module, group, id)

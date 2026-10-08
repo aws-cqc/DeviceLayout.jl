@@ -3,8 +3,8 @@
 #   julia --project=benchmark benchmark/solidmodel/compare.jl base.json head.json [--threshold=0.10]
 #
 # Prints a markdown report: environment, geometry identity (fingerprints, entity counts,
-# per-group entity counts and masses, mesh counts), then timings with relative deltas.
-# Exits with status 1 if any timing regresses by more than `threshold` (fraction) or if the
+# per-group entity counts and masses, mesh counts and low-quality element counts), then
+# timings with relative deltas. Exits with status 1 if any timing regresses by more than `threshold` (fraction) or if the
 # geometry differs, so it can gate a CI job. Two runs at the same commit on the same machine
 # form a determinism check: every "geometry identity" row should read `same`.
 
@@ -17,7 +17,6 @@ end
 
 fmt_s(x) = @sprintf("%.1f s", x)
 fmt_pct(x) = @sprintf("%+.1f%%", 100x)
-fmt_mb(x) = @sprintf("%.0f MB", x / 2^20)
 
 function delta_row(name, a, b; fmt=fmt_s, threshold=Inf)
     rel = (b - a) / a
@@ -122,6 +121,17 @@ function main(args)
                 println(row)
                 differs |= d
             end
+            # Elements below γ = 0.1 are the ones that hurt the solver; 0.1–0.2 is the band to
+            # watch. The histogram has 10 bins over [0, 1], so these are its first two bins.
+            for (i, label) in ((1, "γ < 0.1"), (2, "0.1 ≤ γ < 0.2"))
+                row, d = identity_row(
+                    "mesh scale $(ma["scale"]) elements with $label",
+                    ma["gamma"]["histogram"][i],
+                    mb["gamma"]["histogram"][i]
+                )
+                println(row)
+                differs |= d
+            end
         end
     end
 
@@ -137,12 +147,12 @@ function main(args)
         println(row)
         regressed |= r
     end
-    # Per-phase totals from the verbose render log.
+    # Per-phase totals from the recorded render steps (the `:render` phase is the whole call).
     function phase_totals(r)
         tot = Dict{String, Float64}()
-        for op in r["phases"]["render"]["operations"]
-            op["name"] == "total" && continue
-            tot[op["phase"]] = get(tot, op["phase"], 0.0) + op["seconds"]
+        for step in r["phases"]["render"]["steps"]
+            step["phase"] == "render" && continue
+            tot[step["phase"]] = get(tot, step["phase"], 0.0) + step["seconds"]
         end
         return tot
     end
@@ -165,37 +175,6 @@ function main(args)
             end
         end
     end
-    row, _ = delta_row(
-        "peak RSS after render",
-        base["phases"]["render"]["maxrss_bytes"],
-        head["phases"]["render"]["maxrss_bytes"];
-        fmt=fmt_mb
-    )
-    println(row)
-
-    # Slowest individual operations in head, with their base counterparts, for triage.
-    println("\n## Slowest render operations (head)\n")
-    println("| phase | operation | base | head |\n|---|---|---|---|")
-    # Operations are matched by (phase, name, occurrence), since a destination group like
-    # `metal` is typically the target of several postrender operations.
-    function keyed(ops)
-        seen = Dict{Tuple{String, String}, Int}()
-        return map(ops) do op
-            k = (op["phase"], op["name"])
-            seen[k] = get(seen, k, 0) + 1
-            return (k..., seen[k]) => op
-        end
-    end
-    ops_b = Dict(keyed(base["phases"]["render"]["operations"]))
-    ops_h = keyed(head["phases"]["render"]["operations"])
-    order = sortperm(ops_h, by=kv -> -kv.second["seconds"])
-    for i in order[1:min(15, end)]
-        k, op = ops_h[i]
-        op["name"] == "total" && continue
-        b = haskey(ops_b, k) ? fmt_s(ops_b[k]["seconds"]) : "—"
-        println("| $(op["phase"]) | `$(op["name"])` | $b | $(fmt_s(op["seconds"])) |")
-    end
-
     println()
     differs && println("**Geometry differs between base and head.**")
     regressed && println("**Timing regression above $(fmt_pct(threshold)) detected.**")

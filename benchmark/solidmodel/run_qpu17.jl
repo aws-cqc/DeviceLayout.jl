@@ -4,7 +4,7 @@
 # tens of minutes, so this is not part of the BenchmarkTools `SUITE`; run it directly:
 #
 #   julia --project=benchmark benchmark/solidmodel/run_qpu17.jl [--out=results.json]
-#       [--scales=1.0,0.5] [--order=1] [--skip-mesh] [--save-geometry]
+#       [--scales=1.0,0.5] [--order=1] [--skip-mesh]
 #
 # Results are written as JSON (default `benchmark/solidmodel/results/qpu17-<sha>-<timestamp>.json`)
 # and compared across runs with `compare.jl`.
