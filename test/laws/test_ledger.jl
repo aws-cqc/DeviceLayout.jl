@@ -168,14 +168,19 @@
 
     # L7 — Small offsets leave the input vertex on the output boundary at a sharp
     # corner. Found by: O3 `round_oracle_small` (2026-09-09, Clipper1, integer lattice).
-    # Class: kernel finding, |δ|·sin(angle) small relative to the lattice. Offsetting
+    # Class: kernel finding. `OffsetPoint` treats the 14.5° turn at (4,1) as collinear
+    # while sin(turn)·δ < 1 and returns before advancing its previous-normal index, so the
+    # tip is joined against the normal of the edge before (4,1); with that stale normal
+    # the tip looks reflex and the join degenerates to the vertex itself (L10 is the
+    # mirrored case of the same mechanism). Offsetting
     # the 4° tip below by δ = 2 returns, for every join type, a contour that passes
     # through the original vertex (-14,-7) — distance 0 from the input where the offset
     # boundary should be at distance 2 — flanked by the two edge-offset points. The
     # output is missing the bulge around the tip; the rest of the contour is correct,
-    # and containment laws (O2, O4) still hold. Reproduces for δ ≤ 3 at tip angles below
-    # ~5°; at δ ≥ 4, or with the same shape scaled ×10, the oracle holds within one
-    # unit, so on the fm lattice this needs a tip angle below ~1e-9 rad.
+    # and `A ⊆ offset(A, δ)` holds only because the boundary passes through the vertex.
+    # Reproduces exactly while sin(14.5°)·δ < 1, i.e. δ ≤ 3, whatever the tip angle; at
+    # δ ≥ 4, or with the same shape scaled ×10, the oracle holds within one unit, so on
+    # the fm lattice this needs a turn below ~1e-9 rad ahead of the tip.
     @testset "> L7 small offset leaves the input vertex in place at a sharp corner" begin
         A = Polygon(Point{Int}[(16, 3), (4, 1), (-14, -7)])
         tip = (Int128(-14), Int128(-7))
@@ -193,6 +198,30 @@
         A10 = Polygon(A.p .* 10)
         o20 = offset([A10], 20; j=Clipper.JoinTypeRound)
         @test all(q -> offset_class(q, togrid([A10]), 20, 1) == :band, only(togrid(o20)))
+    end
+
+    # L10 — Square and miter offsets cut a sharp tip inside the input when the tip
+    # follows a near-collinear vertex. Found by: O4 `join_order_int` (2026-09-21,
+    # Clipper1, seed 2 at 5000 examples). Class: kernel defect, the antiparallel case of
+    # L7's mechanism. The 9° turn at (11,0) has sin·δ < 1, so `OffsetPoint` skips it
+    # without advancing its previous-normal index; at the tip (-8,-3) the stale incoming
+    # normal (0,1) is exactly opposite the outgoing (0,-1), the cross product is IEEE
+    # -0.0, `atan2(-0.0, -1) = -π`, and `DoSquare` mirrors both join points through the
+    # vertex: the tip is cut δ inside the input, for every δ with sin(9°)·δ < 1 and at
+    # any scale. Round joins take their rotation sense from the step sign and are
+    # unaffected. Correct on Clipper2.
+    @testset "> L10 offset cuts a sharp tip inside the input after a near-collinear vertex" begin
+        A = Polygon(Point{Int}[(18, 0), (11, 0), (-8, -3), (19, -3)])
+        for j in (Clipper.JoinTypeSquare, Clipper.JoinTypeMiter)
+            o = offset([A], 3; j)
+            @test_broken first(region_subset_within([A], o, 0))
+            # The tip vertices land at (-5, 0) and (-5, -6) instead of (-11, 0) and (-11, -6).
+            @test_broken minimum(first, only(togrid(o))) <= -10
+        end
+        @test first(region_subset_within([A], offset([A], 3; j=Clipper.JoinTypeRound), 0))
+        # With sin(9°)·δ ≥ 1 the turn at (11,0) is not skipped and the joins are right.
+        @test first(region_subset_within([A], offset([A], 7; j=Clipper.JoinTypeSquare), 0))
+        @test minimum(first, only(togrid(offset([A], 7; j=Clipper.JoinTypeSquare)))) <= -14
     end
 
     # L9 — A micro-edge created by one offset misdirects the next.
