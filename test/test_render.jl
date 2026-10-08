@@ -1241,7 +1241,7 @@ end
 
 @testitem "Rounding on StyledEntity" setup = [CommonTestSetup] begin
     # Line-arc rounding should still happen
-    rnd1 = Rounded(1mm, p0=[Point(0, 0)mm, Point(5, 0)mm], selection_tolerance=1nm)
+    rnd1 = Rounded(1mm, p0=[Point(0, 0)mm, Point(5, 0)mm])
     rnd2 = Rounded(0.1mm)
     rect = Rectangle(1.0mm, 1.0mm)
     poly = to_polygons(rect) + Point(5mm, 0mm)

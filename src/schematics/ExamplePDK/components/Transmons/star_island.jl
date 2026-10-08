@@ -103,8 +103,7 @@ function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, isl::ExampleStar
     roundsty[1] = Rounded(
         rounding; # Outer contour: Round coupler pads and outer circumference
         p0=interface_pts, # Don't round these points so coupler interface is flat
-        inverse_selection=true,
-        selection_tolerance=DeviceLayout.onenanometer(rounding)
+        inverse_selection=true
     )
     roundsty[1, 1] = Rounded(rounding) # Inner contour: round everything
 

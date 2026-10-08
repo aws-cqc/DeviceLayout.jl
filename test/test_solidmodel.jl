@@ -184,7 +184,7 @@
     ymax = maximum(getindex.(pcorner, 2))
     # Find the coordinates of all points which have at least one coordinate at one of these limits
     pp = filter(c -> c[1] ≈ xmin || c[1] ≈ xmax || c[2] ≈ ymin || c[2] ≈ ymax, pcorner)
-    rs = RelativeRounded(0.25; inverse_selection=true, p0=pp, selection_tolerance=1nm)
+    rs = RelativeRounded(0.25; inverse_selection=true, p0=pp)
     rsc = rs(union2d([sc]))
     prim = SolidModels.to_primitives(sm, rsc)
 
@@ -573,10 +573,7 @@
     prim1 = SolidModels.to_primitives(sm, cp)
     prim2 = SolidModels.to_primitives(
         sm,
-        styled(
-            Rectangle(1.0μm, 1.0μm),
-            Rounded(1.0μm, p0=[Point(1.0μm, 1.0μm)], selection_tolerance=1nm)
-        )
+        styled(Rectangle(1.0μm, 1.0μm), Rounded(1.0μm, p0=[Point(1.0μm, 1.0μm)]))
     )
     # Manually check the fields given Turn is mutable.
     function test_turn(x, y, op)
@@ -629,10 +626,10 @@
         [Point(0.0μm, 0.0μm), Point(1.0μm, 0.0μm), Point(1.0μm, 1.0μm), Point(0.0μm, 1.0μm)]
     poly = Polygon(pp)
     sty = [
-        RelativeRounded(0.05, p0=[pp[1]], selection_tolerance=1nm),
-        RelativeRounded(0.125, p0=[pp[2]], selection_tolerance=1nm),
-        RelativeRounded(0.25, p0=[pp[3]], selection_tolerance=1nm),
-        RelativeRounded(0.5, p0=[pp[4]], selection_tolerance=1nm)
+        RelativeRounded(0.05, p0=[pp[1]]),
+        RelativeRounded(0.125, p0=[pp[2]]),
+        RelativeRounded(0.25, p0=[pp[3]]),
+        RelativeRounded(0.5, p0=[pp[4]])
     ]
     psty = styled(styled(styled(styled(poly, sty[1]), sty[2]), sty[3]), sty[4])
     pri = SolidModels.to_primitives(sm, psty)
@@ -664,8 +661,8 @@
     cs = CoordinateSystem("abc", nm)
     place!(cs, cc, SemanticMeta(:test))
     place!(cs, Rounded(1.0μm)(cc), SemanticMeta(:test))
-    sty1 = Rounded(2.0μm, p0=points(r), selection_tolerance=1nm)
-    sty2 = Rounded(0.5μm, p0=points(ss), selection_tolerance=1nm)
+    sty1 = Rounded(2.0μm, p0=points(r))
+    sty2 = Rounded(0.5μm, p0=points(ss))
     cs = CoordinateSystem("abc", nm)
     place!(cs, styled(styled(cc, sty1), sty2), SemanticMeta(:test))
     @test_nowarn render!(SolidModel("test"; overwrite=true), cs)
@@ -912,11 +909,7 @@
     @test SolidModels.to_primitives(sm, styled(e, sty); simulation=false) == e
 
     # Apply a Rounding style specified by target points
-    sty = Polygons.Rounded(
-        1.0μm,
-        p0=[Point(1.0μm, 1.0μm), Point(-1.0μm, -1.0μm)],
-        selection_tolerance=1nm
-    )
+    sty = Polygons.Rounded(1.0μm, p0=[Point(1.0μm, 1.0μm), Point(-1.0μm, -1.0μm)])
     r = centered(Rectangle(2.0μm, 2.0μm))
     rs = styled(r, sty)
     cs = CoordinateSystem("test", nm)
@@ -926,11 +919,7 @@
 
     # Targetted rounding with tight tolerance should skip outer
     cc = difference2d(centered(Rectangle(4.0μm, 4.0μm)), r)
-    sty = Polygons.Rounded(
-        1.0μm,
-        p0=[Point(1.0μm, 1.0μm), Point(-1.0μm, -1.0μm)],
-        selection_tolerance=1nm
-    )
+    sty = Polygons.Rounded(1.0μm, p0=[Point(1.0μm, 1.0μm), Point(-1.0μm, -1.0μm)])
     ccs = styled(cc, sty)
     cs = CoordinateSystem("test", nm)
     sm = SolidModel("test"; overwrite=true)
@@ -940,7 +929,7 @@
     # Reference transform should transform p0 too
     r = to_polygons(Rectangle(2μm, 1μm))
     cs_local = CoordinateSystem("test", nm)
-    sty = Rounded(0.25μm, p0=points(r), selection_tolerance=1nm)
+    sty = Rounded(0.25μm, p0=points(r))
     place!(cs_local, styled(r, sty), SemanticMeta(:test))
     cs = CoordinateSystem("outer", nm)
     addref!(cs, sref(cs_local, angle=π / 2))
@@ -950,7 +939,7 @@
     # Reference transform should transform p0 too
     r = to_polygons(Rectangle(2μm, 1μm))
     cs_local = CoordinateSystem("test", nm)
-    sty = RelativeRounded(0.25, p0=points(r)[[1, 2]], selection_tolerance=1nm)
+    sty = RelativeRounded(0.25, p0=points(r)[[1, 2]])
     place!(cs_local, styled(r, sty), SemanticMeta(:test))
     cs = CoordinateSystem("outer", nm)
     addref!(cs, sref(cs_local, angle=π / 2))
@@ -1150,18 +1139,8 @@
     r2 = Rectangle(1μm, 1μm) + Point(0.5μm, 0.5μm)
     cs = CoordinateSystem("test", nm)
     sty = StyleDict()
-    sty[1] = Rounded(
-        1μm;
-        p0=[Point(0.0μm, 0.0μm)],
-        inverse_selection=true,
-        selection_tolerance=1nm
-    )
-    sty[1, 1] = Rounded(
-        0.5μm;
-        p0=[Point(0.5μm, 0.5μm)],
-        inverse_selection=true,
-        selection_tolerance=1nm
-    )
+    sty[1] = Rounded(1μm; p0=[Point(0.0μm, 0.0μm)], inverse_selection=true)
+    sty[1, 1] = Rounded(0.5μm; p0=[Point(0.5μm, 0.5μm)], inverse_selection=true)
     place!(cs, sty(difference2d(r1, r2)), :test)
     place!(cs, Rectangle(0.5μm, 0.5μm), :test)
     sm = test_sm()

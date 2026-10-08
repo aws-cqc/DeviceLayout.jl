@@ -58,8 +58,8 @@
     @test_nowarn render!(Cell("test", nm), cs)
 
     # Rounding of subset of vertices with style
-    rs1 = Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]], selection_tolerance=1nm)(r1)
-    rs2 = Polygons.Rounded(0.25μm, p0=points(r2)[[1, 3]], selection_tolerance=1nm)(r2)
+    rs1 = Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]])(r1)
+    rs2 = Polygons.Rounded(0.25μm, p0=points(r2)[[1, 3]])(r2)
 
     # Clipping subrounded style
     rd1 = Polygons._round_poly(difference2d(r1, r2), 0.25μm, corner_indices=[1, 3])
@@ -161,11 +161,7 @@
     @test to_polygons(DeviceLayout.styled(rd1, d3)) == to_polygons(rds)
 
     # Apply a Rounding style specified by target points
-    sty = Polygons.Rounded(
-        2.0μm,
-        p0=[Point(1.0μm, 1.0μm), Point(-1.0μm, -1.0μm)],
-        selection_tolerance=1nm
-    )
+    sty = Polygons.Rounded(2.0μm, p0=[Point(1.0μm, 1.0μm), Point(-1.0μm, -1.0μm)])
     r = centered(Rectangle(2.0μm, 2.0μm))
     rs = styled(r, sty)
     cs = CoordinateSystem("test", nm)
@@ -195,8 +191,7 @@
     sty = Polygons.Rounded(
         2.0μm,
         p0=[Point(1.0μm, 1.0μm), Point(-1.0μm, -1.0μm)],
-        inverse_selection=true,
-        selection_tolerance=1nm
+        inverse_selection=true
     )
     rs = styled(r, sty)
     cs = CoordinateSystem("test", nm)
@@ -224,7 +219,7 @@
 
     r = Rectangle(2μm, 1μm)
     cs_local = CoordinateSystem("test", μm)
-    sty = Rounded(0.25μm, p0=points(r), selection_tolerance=1nm)
+    sty = Rounded(0.25μm, p0=points(r))
     place!(cs_local, styled(r, sty), GDSMeta())
     cs = CoordinateSystem("outer", nm)
     addref!(cs, sref(cs_local, angle=π / 2))
@@ -237,7 +232,7 @@
     # mixing rendering units works, and directly on polygons works
     r = to_polygons(Rectangle(2μm, 1μm))
     cs_local = CoordinateSystem("test", nm)
-    sty = Rounded(0.25μm, p0=points(r), selection_tolerance=1nm)
+    sty = Rounded(0.25μm, p0=points(r))
     place!(cs_local, styled(r, sty), GDSMeta())
     cs = CoordinateSystem("outer", nm)
     addref!(cs, sref(cs_local, angle=π / 2))
