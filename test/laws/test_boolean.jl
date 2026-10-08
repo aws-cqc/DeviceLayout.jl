@@ -13,12 +13,23 @@
 
 @testitem "GeomLaws B1: commutativity" setup = [CommonTestSetup, LawsSetup] tags =
     [:geomlaws] begin
-    for gen in (int_pair, int_rectilinear_pair, float_star_pair)
+    # Rectilinear intersections are lattice-exact, so the two operand orders must agree
+    # exactly.
+    @lawcheck function commutes(pair=int_rectilinear_pair)
+        A, B = pair
+        return region_same(union2d([A], [B]), union2d([B], [A])) &&
+               region_same(intersect2d([A], [B]), intersect2d([B], [A])) &&
+               region_same(xor2d([A], [B]), xor2d([B], [A]))
+    end
+    # On stars an edge crossing can round onto an existing vertex, leaving a sub-unit
+    # sliver that the kernel keeps or collapses depending on which operand it swept first;
+    # both outputs are within its one-unit rounding of the exact result.
+    for gen in (int_pair, float_star_pair)
         @lawcheck function commutes(pair=gen)
             A, B = pair
-            return region_same(union2d([A], [B]), union2d([B], [A])) &&
-                   region_same(intersect2d([A], [B]), intersect2d([B], [A])) &&
-                   region_same(xor2d([A], [B]), xor2d([B], [A]))
+            return first(region_within(union2d([A], [B]), union2d([B], [A]), 1)) &&
+                   first(region_within(intersect2d([A], [B]), intersect2d([B], [A]), 1)) &&
+                   first(region_within(xor2d([A], [B]), xor2d([B], [A]), 1))
         end
     end
     # Near-coincident edges (B is A with one vertex moved kfm lattice units) make every

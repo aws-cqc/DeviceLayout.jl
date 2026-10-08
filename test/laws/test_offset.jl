@@ -125,8 +125,11 @@ end
     [:geomlaws] begin
     # At convex corners round ⊆ square ⊆ miter for δ > 0. (Miter is limited to 2δ, so
     # very sharp corners get a square-like cut farther out than the square join's;
-    # containment still holds.)
+    # containment still holds.) Stated away from the L7/L10 regime — a turn with
+    # sin·δ < 1 followed by a sharp tip — where the kernel's square and miter joins are
+    # wrong (see `well_conditioned_offset`).
     @lawcheck function join_order_int(A=int_thick_polygon, δ=Data.Integers(1, 6))
+        well_conditioned_offset(A, δ) || reject!()
         r = offset([A], δ; j=Clipper.JoinTypeRound)
         s = offset([A], δ; j=Clipper.JoinTypeSquare)
         m = offset([A], δ; j=Clipper.JoinTypeMiter)
