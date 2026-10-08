@@ -5,7 +5,7 @@
 #   Open a Julia REPL in this directory, then:
 #     ] activate .
 #     ] instantiate            # precompiles dependencies (slow the first time)
-#     include("solidmodel.jl") # defines the functions below and builds the schematic/target
+#     include("solidmodel.jl") # defines the functions below
 #
 #   Then drive the simulation interactively:
 #     schematic, artwork, target = qpu17_solidmodel_setup() # plan + render artwork (~1 min)
