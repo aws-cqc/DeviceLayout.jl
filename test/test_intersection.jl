@@ -36,6 +36,19 @@
     render!.(c, paths_vert, GDSMeta(0))
     render!.(c, paths_horiz, GDSMeta(0))
 
+    ### Terminations around a crossing share vertices with the adjacent CPW gaps
+    # The termination after the bridge faces the following segment, so its trace-corner
+    # vertices must sit on that side; otherwise the following gap strips meet its edge in
+    # T-junctions.
+    pv = Path(Point(0.0μm, -500.0μm); α0=90°)
+    ph = Path(Point(-500.0μm, 0.0μm))
+    straight!.((pv, ph), 1mm, Ref(sty))
+    Intersect.intersect!(xsty, pv, ph)
+    c = Cell("int", nm)
+    render!(c, ph, GDSMeta(0))
+    gaps = [p for (p, m) in zip(c.elements, c.element_metadata) if m == GDSMeta(0)]
+    @test split_t_junctions!(copy.(gaps), gaps) == 0
+
     ### Crossings with a long meandering path
     paths_vert = [Path(i * 0.1mm, (-1)^(i + 1) * (1mm), α0=(-1)^i * π / 2) for i = -5:5]
     straight!.(paths_vert, 2mm, Ref(sty))

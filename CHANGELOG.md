@@ -18,6 +18,9 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - `Intersect.AirBridge` crossings give the CPW open termination after the bridge
+    `initial=true`, so its trace-corner vertices sit on the side facing the following segment
+    and are shared with that segment's gap polygons instead of leaving T-junctions.
   - Assigning a physical group to a `SolidModel` by name now clears any stale entry for that
     name in gmsh's name registry first. Booleans and synchronization drop group-table entries
     but keep names registered, and a stale name silently left the re-created group unnamed, so
