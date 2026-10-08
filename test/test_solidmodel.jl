@@ -489,13 +489,8 @@
     @test length(SolidModels.gmsh.model.get_entities(3)) == 0
 
     cs = CoordinateSystem("test", nm)
-    selected_rounding = with_test_logger(
-        log ->
-            log.level == Logging.Warn &&
-                occursin("Non-finite `selection_tolerance`", log.message)
-    ) do
-        return Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]])
-    end
+    selected_rounding =
+        Polygons.Rounded(0.25μm, p0=points(r1)[[1, 3]], selection_tolerance=Inf * μm)
     place!(cs, selected_rounding(u), SemanticMeta(:test))
     sm = SolidModel("test"; overwrite=true)
     @test_nowarn render!(sm, cs)

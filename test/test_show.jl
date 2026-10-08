@@ -275,9 +275,10 @@ end
           "Rounded(1.0 μm; min_side_len=3.0 μm)"
     @test compactstr(Rounded{typeof(1.0μm)}(; rel_r=0.2)) ==
           "Rounded{typeof(1.0Unitful.μm)}(; rel_r=0.2)"
-    selected_rounding = Rounded(1μm; p0=[Point(0μm, 0μm)], selection_tolerance=1nm)
-    @test compactstr(selected_rounding) ==
-          "Rounded(1.0 μm; 1 selected point, selection_tolerance=0.001 μm)"
+    selected_rounding = Rounded(1μm; p0=[Point(0μm, 0μm)])
+    @test compactstr(selected_rounding) == "Rounded(1.0 μm; 1 selected point)"
+    @test compactstr(Rounded(1μm; p0=[Point(0μm, 0μm)], selection_tolerance=2nm)) ==
+          "Rounded(1.0 μm; 1 selected point, selection_tolerance=0.002 μm)"
     selected_rounding_detail = showstr(selected_rounding)
     @test contains(selected_rounding_detail, "selected points:\n   [1] (0.0 μm,0.0 μm)")
     @test contains(selected_rounding_detail, "selection tolerance: 0.001 μm")

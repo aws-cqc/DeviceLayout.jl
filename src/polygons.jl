@@ -682,6 +682,7 @@ circle_polygon(r, Δθ=10°) =
         min_angle::Float64 = 1e-3
         p0::Vector{Point{T}} = []
         inverse_selection::Bool = false
+        selection_tolerance::T = 1.0nm
     end
 
 Rounded polygon style defined by either radius absolute radius `abs_r` or relative radius
@@ -733,9 +734,9 @@ rounded_rect_discretized_poly = to_polygons(rounded_rect)
   - `inverse_selection`: If true, the selection from `p0` is inverted;
     that is, all corners will be rounded except those selected by `p0`.
   - `selection_tolerance`: Selections using `p0` will only be chosen if they are within
-    `selection_tolerance` distance of `p0`. The current default of infinite reflects the
-    legacy behaviour of always finding the closest point, and will be replaced with a small
-    non-zero tolerance to capture floating point precision in future (approximately 1.0nm).
+    `selection_tolerance` distance of `p0`. The default of 1nm (or `0.001` for unitless
+    coordinates) absorbs floating point error. To select the nearest vertex to each point of
+    `p0` regardless of distance, pass an infinite tolerance (e.g. `selection_tolerance=Inf*μm`).
 """
 Base.@kwdef struct Rounded{T <: Coordinate} <: GeometryEntityStyle
     abs_r::T = zero(T)
@@ -744,7 +745,7 @@ Base.@kwdef struct Rounded{T <: Coordinate} <: GeometryEntityStyle
     min_angle::Float64 = 1e-3
     p0::Vector{Point{T}} = []
     inverse_selection::Bool = false
-    selection_tolerance::T = T(Inf) # TODO: Set to floating point accurate in next major release
+    selection_tolerance::T = DeviceLayout.onenanometer(T)
     function Rounded{T}(
         abs_r::Coordinate,
         rel_r,
@@ -756,10 +757,6 @@ Base.@kwdef struct Rounded{T <: Coordinate} <: GeometryEntityStyle
     ) where {T}
         if !iszero(abs_r) && !iszero(rel_r)
             throw(ArgumentError("`abs_r` and `rel_r` cannot both be non-zero"))
-        end
-        if !isempty(p0) && !isfinite(selection_tolerance)
-            @warn "Non-finite `selection_tolerance` is deprecated and will be replaced with `1.0nm`, after which `p0` will only select points within that distance. Pass `selection_tolerance=1.0nm` to `Rounded` to opt in to the future default now, or pass a tolerance covering the intended selections." maxlog =
-                1
         end
         return new{T}(
             abs_r,
@@ -791,7 +788,7 @@ function Base.show(io::IO, s::Rounded{T}) where {T}
         string(length(s.p0), length(s.p0) == 1 ? " selected point" : " selected points")
     )
     s.inverse_selection && push!(args, "inverse_selection=true")
-    default_tolerance = typeof(s.selection_tolerance)(Inf)
+    default_tolerance = typeof(s.selection_tolerance)(DeviceLayout.onenanometer(T))
     isequal(s.selection_tolerance, default_tolerance) ||
         push!(args, string("selection_tolerance=", s.selection_tolerance))
     if isempty(args)
