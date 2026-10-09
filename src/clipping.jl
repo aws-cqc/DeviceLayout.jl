@@ -758,7 +758,7 @@ function interiorcuts(nodeortree::Clipper.PolyNode, outpolys::Vector{Polygon{T}}
 
         # Construct an interval tree of the x-extents of each line segment.
         arr = reshape(reinterpret(Int, xinterval.(segs)), 2, :)
-        nodes = map(InteriorCutNode, enclosing_contour)
+        nodes = map(InteriorCutNode{Point{Int}}, enclosing_contour)
         node1 = first(nodes)
         for i in eachindex(nodes)
             i == firstindex(nodes) || (nodes[i].prev = nodes[i - 1])
