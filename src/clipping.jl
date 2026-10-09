@@ -819,8 +819,8 @@ function interiorcuts(nodeortree::Clipper.PolyNode, outpolys::Vector{Polygon{T}}
                 # nearer lattice point unless its kink crosses something and the other's
                 # does not. A vertex exactly on the edge gets a zero-length cut, i.e. a
                 # pinch, once duplicate points are dropped below.
-                x, y = round(Int64, getx(best_intersection_point)),
-                gety(best_intersection_point)
+                x = round(Int64, getx(best_intersection_point))
+                y = gety(best_intersection_point)
                 near = round(Int64, y)
                 far = near <= y ? ceil(Int64, y) : floor(Int64, y)
                 w = Point{Int64}(x, near)
@@ -836,8 +836,9 @@ function interiorcuts(nodeortree::Clipper.PolyNode, outpolys::Vector{Polygon{T}}
                 h = hole_contour[m]
                 best_node, d = nearest_segment(node1, h)
                 if !(d < 1)
-                    @warn "Dropping a hole that lies $d units outside its enclosing contour, \
-                           which has $(length(enclosing_contour)) vertices."
+                    @warn "Ray from a hole's lowest vertex met no edge, and vertex is not within a grid \
+                           unit of one. The hole was dropped from its enclosing contour, which has \
+                           $(length(enclosing_contour)) vertices."
                     continue
                 end
                 w = h
