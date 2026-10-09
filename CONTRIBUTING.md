@@ -38,6 +38,9 @@ To send us a pull request, please:
 GitHub provides additional documentation on [forking a repository](https://help.github.com/articles/fork-a-repo/) and
 [creating a pull request](https://help.github.com/articles/creating-a-pull-request/).
 
+The [Developer Guide](https://aws-cqc.github.io/DeviceLayout.jl/dev/developers/) covers the package architecture, running
+tests, formatting, the versioning and deprecation policy, and what reviewers look for.
+
 ## Finding contributions to work on
 
 Looking at the existing issues is a great way to find something to contribute on. As our projects, by default, use the default GitHub issue labels (enhancement/bug/duplicate/help wanted/invalid/question/wontfix), looking at any 'help wanted' issues is a great place to start.
