@@ -1123,7 +1123,7 @@ end
         @test length(out) == 2
         half_disk = only(filter(r -> !isempty(r.exterior.curves), out))
         @test length(points(half_disk.exterior)) == 2
-        @test only(half_disk.exterior.curves) === turn
+        @test only(half_disk.exterior.curves) == turn
         @test length(half_disk.holes) == 1
         @test material_area(out) ≈ 100 + π * 25 / 2 - 4 rtol = 1e-3
 
