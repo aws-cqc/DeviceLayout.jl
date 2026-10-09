@@ -2310,7 +2310,6 @@ end
         # One op per group below the top of its dimension; "ports" is alone in dimension 2.
         @test [op[1] for op in ops] == ["vacuum", "annotation"]
         @test ops[2][3] == ("annotation", ["chip", "vacuum"], 3)
-        @test all(op[4] == (:remove_object => true) for op in ops)
         @test_throws ArgumentError apply_precedence([("chip", 3), ("chip", 3)])
         @test_throws ArgumentError apply_precedence([("chip", 4)])
         @test isempty(apply_precedence([("chip", 3)]))
@@ -2326,10 +2325,8 @@ end
     end
 
     @testset "a group left with no entities is removed, its entities kept" begin
-        # Without `remove_object`, the empty result leaves the old group in place.
+        # Assigning the empty result alone would leave the old member in place.
         _postrender!(sm, [("annotation", exclude_groups, ("annotation", ["vacuum"], 3))])
-        @test tagset("annotation") == Set([Int(v[4])])
-        _postrender!(sm, apply_precedence([("vacuum", 3), ("annotation", 3)]))
         @test !SolidModels.hasgroup(sm, "annotation", 3)
         @test (3, v[4]) in gmsh.model.getEntities(3)
         @test tagset("vacuum") == Set(Int.(v[3:4]))

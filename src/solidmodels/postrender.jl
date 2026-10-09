@@ -1026,7 +1026,7 @@ function remove_group!(group::PhysicalGroup; recursive=true, remove_entities=tru
 end
 
 """
-    exclude_groups(sm::SolidModel, group, excluded, d=2; remove_object=false)
+    exclude_groups(sm::SolidModel, group, excluded, d=2)
 
 Return the dimtags of the dimension-`d` physical group `group` that belong to none of the
 `excluded` groups (a name or a collection of names) in the same dimension.
@@ -1037,24 +1037,18 @@ fragmentation, so run this on a fragmented model; before that it finds nothing i
 returns `group` unchanged. Excluded groups that do not exist are skipped with an info message.
 If `group` does not exist, an error is logged and an empty list is returned.
 
-With `remove_object=true`, the physical group `group` is removed (its entities are kept), so
-that assigning the result back to the same name replaces the group even when the result is
-empty. Gmsh has no empty physical groups, and assigning an empty list to an existing group
-leaves it unchanged.
+If every entity of `group` is excluded, the physical group `group` is removed from the model
+(its entities stay), also when the result is assigned to a different name. Gmsh has no empty
+physical groups, and assigning the empty result back to the same name would otherwise leave
+the old members in place.
 
 Has the postrender-operation signature, for use in a list of operations applied after
 fragmentation, for example
-`("vacuum", exclude_groups, ("vacuum", ["substrate", "bump_extrusion"], 3), :remove_object => true)`.
+`("vacuum", exclude_groups, ("vacuum", ["substrate", "bump_extrusion"], 3))`.
 Operations in `render!`'s `postrender_ops` run before fragmentation, so this does nothing
 there. See also [`apply_precedence`](@ref).
 """
-function exclude_groups(
-    sm::SolidModel,
-    group::Union{String, Symbol},
-    excluded,
-    d=2;
-    remove_object=false
-)
+function exclude_groups(sm::SolidModel, group::Union{String, Symbol}, excluded, d=2)
     if !hasgroup(sm, group, d)
         @error "exclude_groups(sm, $group, $excluded, $d): ($group, $d) is not a physical group."
         return Tuple{Int32, Int32}[]
@@ -1068,7 +1062,7 @@ function exclude_groups(
         end
     end
     keep = filter(dt -> !(dt in claimed), dimtags(sm[group, d]))
-    remove_object && remove_group!(sm[group, d]; remove_entities=false)
+    isempty(keep) && remove_group!(sm[group, d]; remove_entities=false)
     return keep
 end
 
@@ -1093,19 +1087,11 @@ function apply_precedence(precedence)
     all(0 <= d <= 3 for (_, d) in entries) ||
         throw(ArgumentError("precedence dimensions must be between 0 and 3"))
     allunique(entries) || throw(ArgumentError("precedence entries must be unique"))
-    ops = Tuple{
-        String,
-        typeof(exclude_groups),
-        Tuple{String, Vector{String}, Int},
-        Pair{Symbol, Bool}
-    }[]
+    ops = Tuple{String, typeof(exclude_groups), Tuple{String, Vector{String}, Int}}[]
     for (i, (name, d)) in enumerate(entries)
         higher = [n for (n, dn) in entries[1:(i - 1)] if dn == d]
         # The top group of each dimension has nothing above it to exclude.
-        # `remove_object` makes a group that ends up empty disappear instead of keeping its
-        # old members (see `exclude_groups`).
-        isempty(higher) ||
-            push!(ops, (name, exclude_groups, (name, higher, d), :remove_object => true))
+        isempty(higher) || push!(ops, (name, exclude_groups, (name, higher, d)))
     end
     return ops
 end
