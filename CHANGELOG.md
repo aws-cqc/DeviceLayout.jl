@@ -15,6 +15,10 @@ The format of this changelog is based on
     `h_um`, `alpha`, `coords_um`) into the mesh-size field, and
     `SolidModels.set_mesh_size_callback!` installs the size callback for models assembled
     without `render!`.
+  - `split_pinches` splits self-touching contours of `CurvilinearRegion`s, which
+    OpenCASCADE can reject when rendering to a `SolidModel`, into simple regions. Pieces are
+    classified by winding, so keyholed islands and holes are kept. Run it after boolean
+    operations and `split_t_junctions!`.
 
 ### Fixed
 

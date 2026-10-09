@@ -985,6 +985,291 @@ end
     end
 end
 
+@testitem "split_pinches" setup = [CommonTestSetup] begin
+    import DeviceLayout: CurvilinearPolygon, CurvilinearRegion, coordinatetype
+
+    pts(xy) = [Point(x * 1.0μm, y * 1.0μm) for (x, y) in xy]
+    contour(xy) = CurvilinearPolygon(pts(xy))
+    region(xy) = CurvilinearRegion(contour(xy))
+    # Areas in µm², with curves discretized. Material area takes the absolute area of each
+    # contour, so a hole wrongly made into a region adds to it instead of cancelling.
+    um2(a) = a isa Unitful.Quantity ? ustrip(μm^2, a) : Float64(a)
+    loop_area(c) = um2(Polygons.signed_area(to_polygons(c)))
+    material_area(regions) =
+        sum(regions; init=0.0) do r
+            return abs(loop_area(r.exterior)) -
+                   sum(h -> abs(loop_area(h)), r.holes; init=0.0)
+        end
+
+    @testset "keyhole around an enclosed island becomes a hole" begin
+        # From `union2d` of the DemoQPU17 metal negative layer: the gap around a CPW center
+        # conductor with open ends. Clipper joins the conductor, a hole in this layer, to
+        # the outer contour by a cut along y = 3274 µm traversed twice, so (-911, 3274)
+        # repeats.
+        r = region([
+            (-889, 1670),
+            (-889, 3280),
+            (-911, 3280),
+            (-911, 3274),
+            (-895, 3274),
+            (-895, 1676),
+            (-905, 1676),
+            (-905, 3274),
+            (-911, 3274),
+            (-911, 1670)
+        ])
+        out = split_pinches([r])
+        @test length(out) == 1
+        @test material_area(out) ≈ 19440
+        @test loop_area(out[1].exterior) ≈ 22 * 1610
+        # The hole is the conductor, plus the zero-width cut out to the pinch vertex
+        hole = only(out[1].holes)
+        @test loop_area(hole) ≈ -(10 * 1598)
+        @test Set(points(hole)) == Set(
+            pts([(-911, 3274), (-895, 3274), (-895, 1676), (-905, 1676), (-905, 3274)])
+        )
+    end
+
+    @testset "keyhole into an island inside a hole makes the island a region" begin
+        # The complementary contour, as in the metal layer: a clockwise hole joined by a
+        # cut to a counterclockwise island of metal inside it.
+        ext = contour([(0, 0), (100, 0), (100, 100), (0, 100)])
+        hole = contour([
+            (20, 20),
+            (20, 40),
+            (60, 40),
+            (60, 60),
+            (40, 60),
+            (40, 40),
+            (20, 40),
+            (20, 80),
+            (80, 80),
+            (80, 20)
+        ])
+        out = split_pinches([CurvilinearRegion(ext, [hole])])
+        @test length(out) == 2
+        @test material_area(out) ≈ 100^2 - 60^2 + 20^2
+        outer, island = out
+        @test loop_area(outer.exterior) ≈ 100^2
+        @test loop_area(only(outer.holes)) ≈ -(60^2)
+        @test loop_area(island.exterior) ≈ 20^2
+        @test isempty(island.holes)
+        # The island keeps the zero-width cut out to the pinch vertex at (20, 40)
+        @test Set(points(island.exterior)) ==
+              Set(pts([(20, 40), (40, 40), (60, 40), (60, 60), (40, 60)]))
+    end
+
+    @testset "hole touching the exterior at a point" begin
+        # The exterior runs around a triangular hole that touches it at (5, 0)
+        r = region([(0, 0), (5, 0), (3, 3), (7, 3), (5, 0), (10, 0), (10, 10), (0, 10)])
+        out = split_pinches([r])
+        @test length(out) == 1
+        @test material_area(out) ≈ 100 - 6
+        @test Set(points(only(out[1].holes))) == Set(pts([(5, 0), (3, 3), (7, 3)]))
+    end
+
+    @testset "squares touching at corners; a hole goes to the square containing it" begin
+        # Two squares touching at (10, 10)
+        out = split_pinches([
+            region([
+                (0, 0),
+                (10, 0),
+                (10, 10),
+                (20, 10),
+                (20, 20),
+                (10, 20),
+                (10, 10),
+                (0, 10)
+            ])
+        ])
+        @test length(out) == 2
+        @test all(r -> loop_area(r.exterior) ≈ 100 && isempty(r.holes), out)
+        # A chain of three squares touching at (10, 10) and (20, 20), with a hole in the
+        # middle square
+        ext = contour([
+            (0, 0),
+            (10, 0),
+            (10, 10),
+            (20, 10),
+            (20, 20),
+            (30, 20),
+            (30, 30),
+            (20, 30),
+            (20, 20),
+            (10, 20),
+            (10, 10),
+            (0, 10)
+        ])
+        hole = contour([(13, 13), (13, 17), (17, 17), (17, 13)])
+        out = split_pinches([CurvilinearRegion(ext, [hole])])
+        @test length(out) == 3
+        @test material_area(out) ≈ 300 - 16
+        owner = only(filter(r -> !isempty(r.holes), out))
+        @test Set(points(owner.exterior)) ==
+              Set(pts([(10, 10), (20, 10), (20, 20), (10, 20)]))
+    end
+
+    @testset "curves stay native, and a piece closed by a curve is kept" begin
+        # A square and a half disk touching at (10, 0). The half disk has only two
+        # vertices, and holds a hole in its bulge, away from its straight edge.
+        turn = Paths.Turn(180°, 5.0μm; p0=Point(20.0μm, 0.0μm), α0=90°)
+        ext = CurvilinearPolygon(
+            pts([(0, 0), (10, 0), (20, 0), (10, 0), (10, 10), (0, 10)]),
+            [turn],
+            [3]
+        )
+        hole = contour([(14, 1), (14, 3), (16, 3), (16, 1)])
+        out = split_pinches([CurvilinearRegion(ext, [hole])])
+        @test length(out) == 2
+        half_disk = only(filter(r -> !isempty(r.exterior.curves), out))
+        @test length(points(half_disk.exterior)) == 2
+        @test only(half_disk.exterior.curves) == turn
+        @test length(half_disk.holes) == 1
+        @test material_area(out) ≈ 100 + π * 25 / 2 - 4 rtol = 1e-3
+
+        # Two squares touching at (10, 10) with rounded corners on both sides of the pinch
+        r = 2.0μm
+        turn_a = Paths.Turn(90°, r; p0=Point(20.0μm, 18.0μm), α0=90°)
+        turn_b = Paths.Turn(90°, r; p0=Point(2.0μm, 10.0μm), α0=180°)
+        turn_c = Paths.Turn(90°, r; p0=Point(0.0μm, 2.0μm), α0=270°)
+        ext = CurvilinearPolygon(
+            pts([
+                (0, 2),
+                (2, 0),
+                (10, 0),
+                (10, 10),
+                (20, 10),
+                (20, 18),
+                (18, 20),
+                (10, 20),
+                (10, 10),
+                (2, 10),
+                (0, 8)
+            ]),
+            [turn_c, turn_a, turn_b],
+            [1, 6, 10]
+        )
+        out = split_pinches([CurvilinearRegion(ext)])
+        @test length(out) == 2
+        @test Set(length.(getfield.(getfield.(out, :exterior), :curves))) == Set([1, 2])
+        @test Set(c for r in out for c in r.exterior.curves) ==
+              Set([turn_a, turn_b, turn_c])
+        @test material_area(out) ≈ 200 - 3 * (4 - π) rtol = 1e-3
+    end
+
+    @testset "near pinch: a piece keeps the copy of the vertex its curve ends on" begin
+        # A square and a half disk touching at (10, 10), where the square's copy of the
+        # vertex is 1 nm from the end of the half disk's arc
+        turn = Paths.Turn(180°, 5.0μm; p0=Point(20.0μm, 10.0μm), α0=90°)
+        ext = CurvilinearPolygon(
+            [
+                Point(0.0μm, 0.0μm),
+                Point(10.0μm, 0.0μm),
+                Point(10.001μm, 10.0μm),
+                Point(20.0μm, 10.0μm),
+                Paths.p1(turn),
+                Point(0.0μm, 10.0μm)
+            ],
+            [turn],
+            [4]
+        )
+        out = split_pinches([CurvilinearRegion(ext)])
+        @test length(out) == 2
+        half_disk = only(filter(r -> !isempty(r.exterior.curves), out))
+        @test points(half_disk.exterior)[1] == Paths.p1(turn)
+        @test material_area(out) ≈ 100 + π * 25 / 2 rtol = 1e-3
+    end
+
+    @testset "keyholed hole attached to the wrong region moves to the one containing it" begin
+        # As Clipper can output for the DemoQPU17 metal layer: a hole keyholed to the
+        # open-ended center conductor inside it is attached to a neighboring conductor `b`
+        # rather than to the ground plane `g` that contains it
+        g = CurvilinearRegion(
+            contour([(0, 0), (100, 0), (100, 100), (0, 100)]),
+            [contour([(5, 65), (5, 85), (25, 85), (25, 65)])]
+        )
+        keyholed = contour([
+            (40, 20),
+            (40, 30),
+            (70, 30),
+            (70, 40),
+            (50, 40),
+            (50, 30),
+            (40, 30),
+            (40, 50),
+            (80, 50),
+            (80, 20)
+        ])
+        b = CurvilinearRegion(contour([(10, 70), (20, 70), (20, 80), (10, 80)]), [keyholed])
+        out = split_pinches([g, b])
+        @test length(out) == 3
+        @test material_area(out) ≈ 100^2 - 20^2 - 40 * 30 + 10^2 + 20 * 10
+        @test length(out[1].holes) == 2
+        @test loop_area(out[1].holes[2]) ≈ -40 * 30
+        @test isempty(out[2].holes)
+        @test loop_area(out[3].exterior) ≈ 20 * 10
+    end
+
+    @testset "zero-area pieces are dropped" begin
+        # The contour runs out to (10, 0) and back along itself to (5, 0)
+        out = split_pinches([region([(0, 0), (5, 0), (10, 0), (5, 0), (5, 5), (0, 5)])])
+        @test length(out) == 1
+        @test Set(points(out[1].exterior)) == Set(pts([(5, 0), (5, 5), (0, 5), (0, 0)]))
+    end
+
+    @testset "contour that crosses itself throws" begin
+        # The pieces have opposite windings, so the clockwise one is a hole, but it lies
+        # outside the counterclockwise one
+        r = region([(10, 0), (10, 10), (0, 10), (0, 0), (10, 0), (20, 10), (20, 0)])
+        @test_throws ArgumentError split_pinches([r])
+    end
+
+    @testset "regions without pinches are returned unchanged" begin
+        r = region([(0, 0), (10, 0), (10, 10), (0, 10)])
+        @test only(split_pinches([r])) === r
+        @test isempty(split_pinches(CurvilinearRegion{typeof(1.0nm)}[]))
+        # The result has the promoted coordinate type of the input
+        rn = convert(CurvilinearRegion{typeof(1.0nm)}, r)
+        mixed = CurvilinearRegion[r, rn]
+        @test split_pinches(mixed) isa Vector{CurvilinearRegion{coordinatetype(mixed)}}
+    end
+
+    @testset "split_t_junctions! can make a pinch, so split_pinches runs after it" begin
+        # `a` has a notch whose tip touches its own bottom edge at (5, 0), with no vertex
+        # there, so it has no pinch until noding against `b`, which fills the notch,
+        # injects (5, 0) into that edge
+        a = region([(0, 0), (10, 0), (10, 10), (0, 10), (0, 6), (5, 0), (0, 4)])
+        b = region([(0, 4), (5, 0), (0, 6)])
+        @test only(split_pinches([a])) === a
+        groups = Dict(:a => [a], :b => [b])
+        @test split_t_junctions!(groups) == 1
+        split = split_pinches(groups)
+        @test Set(keys(split)) == Set([:a, :b])
+        @test length(split[:a]) == 2
+        @test material_area(split[:a]) ≈ 100 - 5
+        @test only(split[:b]) === only(groups[:b])
+    end
+
+    @testset "atol is a length, with bare numbers in µm" begin
+        # Two squares touching at (10, 10), with the second copy of the vertex 1 nm away
+        xy =
+            [(0, 0), (10, 0), (10, 10), (20, 10), (20, 20), (10, 20), (10.001, 10), (0, 10)]
+        r = region(xy)
+        @test length(split_pinches([r])) == 2
+        @test length(split_pinches([r]; atol=0.5nm)) == 1
+        @test length(split_pinches([r]; atol=0.0005)) == 1
+        @test length(split_pinches([r]; atol=0.002)) == 2
+        @test length(split_pinches(Dict(:r => [r]); atol=0.5nm)[:r]) == 1
+        # The same physical tolerance applies to nm and unitless (µm) coordinates
+        rn = convert(CurvilinearRegion{typeof(1.0nm)}, r)
+        @test length(split_pinches([rn])) == 2
+        @test material_area(split_pinches([rn])) ≈ material_area(split_pinches([r]))
+        ru = CurvilinearRegion(CurvilinearPolygon([Point(x, y) for (x, y) in xy] .* 1.0))
+        @test length(split_pinches([ru])) == 2
+        @test length(split_pinches([ru]; atol=0.5nm)) == 1
+    end
+end
+
 @testitem "SemanticMeta ordering" setup = [CommonTestSetup] begin
     import DeviceLayout: SemanticMeta
 

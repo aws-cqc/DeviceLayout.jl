@@ -660,4 +660,37 @@
         @test count(adj -> length(adj) == 2, adj_2d) == length(tags_1d) - 6
         gmsh.finalize()
     end
+
+    @testset "split_pinches after split_t_junctions! makes noded geometry renderable" begin
+        # `a` has a notch whose tip touches its own bottom edge at (5, 0) without a vertex
+        # there. Noding against `b`, which fills the notch, injects (5, 0) into that edge,
+        # so `a` passes through (5, 0) twice and OCC rejects it.
+        pts(xy) = [Point(x * 1.0μm, y * 1.0μm) for (x, y) in xy]
+        a = CurvilinearRegion(
+            CurvilinearPolygon(
+                pts([(0, 0), (10, 0), (10, 10), (0, 10), (0, 6), (5, 0), (0, 4)])
+            )
+        )
+        b = CurvilinearRegion(CurvilinearPolygon(pts([(0, 4), (5, 0), (0, 6)])))
+        groups = Dict(:a => [a], :b => [b])
+        @test split_t_junctions!(groups) == 1
+        function render_groups(name, g)
+            cs = CoordinateSystem(name, nm)
+            for (layer, regions) in g, r in regions
+                place!(cs, r, layer)
+            end
+            sm = SolidModel(name; overwrite=true)
+            gmsh.option.setNumber("General.Verbosity", 0)
+            return render_conformal!(sm, cs)
+        end
+        @test_throws ErrorException render_groups("noded", groups)
+        gmsh.finalize()
+
+        render_groups("noded_split", split_pinches(groups))
+        # `a` splits at the pinch into a pentagon and a triangle, which share both of
+        # `b`'s slanted sides: 5 + 3 edges for `a`'s pieces plus `b`'s third side.
+        @test length(gmsh.model.occ.getEntities(2)) == 3
+        @test length(gmsh.model.occ.getEntities(1)) == 9
+        gmsh.finalize()
+    end
 end

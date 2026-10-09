@@ -780,3 +780,280 @@ function _noding_coordinate_type(groups::AbstractDict)
     end
     return nothing
 end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pinch splitting: see `split_pinches`.
+
+# Index pairs `(i, j)`, `i < j`, of non-adjacent vertices of the closed contour `pts` that
+# coincide within `atol_nm`. A hash grid with cells at least `atol_nm` wide means only the
+# neighboring cells need to be searched.
+function _find_pinch_points(pts, atol_nm)
+    n = length(pts)
+    n < 4 && return Tuple{Int, Int}[]
+    cell = max(atol_nm, 1.0)
+    coords = [(_nm(getx(p)), _nm(gety(p))) for p in pts]
+    grid = Dict{Tuple{Int, Int}, Vector{Int}}()
+    pinches = Tuple{Int, Int}[]
+    tol2 = atol_nm * atol_nm
+    for i = 1:n
+        x, y = coords[i]
+        ci = (floor(Int, x / cell), floor(Int, y / cell))
+        for dcx = -1:1, dcy = -1:1
+            for j in get(grid, (ci[1] + dcx, ci[2] + dcy), Int[])
+                # Only earlier vertices are in the grid, so j < i. Skip adjacent pairs.
+                (j == i - 1 || (j == 1 && i == n)) && continue
+                xj, yj = coords[j]
+                (x - xj)^2 + (y - yj)^2 <= tol2 && push!(pinches, (j, i))
+            end
+        end
+        push!(get!(Vector{Int}, grid, ci), i)
+    end
+    return pinches
+end
+
+# Split `cp` at the pinch between vertices `i < j` into the loops `i:(j - 1)` and
+# `j:n, 1:(i - 1)`, each with one copy of the pinch vertex. Curves go with their start
+# vertex. The two copies agree only to within the tolerance, so a loop whose closing edge
+# is a curve keeps the copy that curve ends on, unless its first edge is a curve too.
+function _split_at_pinch(cp::CurvilinearPolygon{T}, i::Int, j::Int) where {T}
+    pts = points(cp)
+    n = length(pts)
+    starts = Set(cp.curve_start_idx)
+    first1 = (j - 1 in starts && !(i in starts)) ? pts[j] : pts[i]
+    first2 = (mod1(i - 1, n) in starts && !(j in starts)) ? pts[i] : pts[j]
+    pts1 = pushfirst!(pts[(i + 1):(j - 1)], first1)
+    pts2 = pushfirst!(vcat(pts[(j + 1):n], pts[1:(i - 1)]), first2)
+    curves1, curves2 = empty(cp.curves), empty(cp.curves)
+    csi1, csi2 = Int[], Int[]
+    for (c, k) in zip(cp.curves, cp.curve_start_idx)
+        if i <= k < j
+            push!(curves1, c)
+            push!(csi1, k - i + 1)
+        else
+            push!(curves2, c)
+            push!(csi2, k >= j ? k - j + 1 : k + n - j + 1)
+        end
+    end
+    return CurvilinearPolygon{T}(pts1, curves1, csi1),
+    CurvilinearPolygon{T}(pts2, curves2, csi2)
+end
+
+# Split `cp` at its pinches, one at a time, until no piece has a pinch.
+function _split_cpoly_at_pinches(cp::CurvilinearPolygon{T}, atol_nm) where {T}
+    pieces = CurvilinearPolygon{T}[]
+    queue = [cp]
+    while !isempty(queue)
+        piece = popfirst!(queue)
+        pinches = _find_pinch_points(points(piece), atol_nm)
+        if isempty(pinches)
+            push!(pieces, piece)
+        else
+            append!(queue, _split_at_pinch(piece, pinches[1]...))
+        end
+    end
+    return pieces
+end
+
+# A simple loop with its vertices in nm (curves discretized to within 1 nm) and its signed
+# area in nm², positive for counterclockwise.
+struct _PinchPiece{T}
+    contour::CurvilinearPolygon{T}
+    loop::Vector{NTuple{2, Float64}}
+    signed_area::Float64
+end
+
+function _PinchPiece(cp::CurvilinearPolygon{T}) where {T}
+    curve_at = Dict(zip(cp.curve_start_idx, cp.curves))
+    loop = NTuple{2, Float64}[]
+    for (k, p) in enumerate(points(cp))
+        push!(loop, (_nm(getx(p)), _nm(gety(p))))
+        haskey(curve_at, k) || continue
+        disc = discretize_curve(curve_at[k], onenanometer(T); rtol=nothing)
+        append!(loop, [(_nm(getx(q)), _nm(gety(q))) for q in disc[2:(end - 1)]])
+    end
+    # Shoelace formula, relative to the first vertex for precision far from the origin
+    isempty(loop) && return _PinchPiece{T}(cp, loop, 0.0)
+    x0, y0 = loop[1]
+    a = 0.0
+    for k in eachindex(loop)
+        (x1, y1), (x2, y2) = loop[k], loop[mod1(k + 1, length(loop))]
+        a += (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)
+    end
+    return _PinchPiece{T}(cp, loop, a / 2)
+end
+
+# Distance from `(px, py)` to the closed loop `loop`.
+function _dist_to_loop(px, py, loop)
+    d2 = Inf
+    for k in eachindex(loop)
+        (x1, y1), (x2, y2) = loop[k], loop[mod1(k + 1, length(loop))]
+        dx, dy = x2 - x1, y2 - y1
+        len2 = dx^2 + dy^2
+        t = len2 > 0 ? clamp(((px - x1) * dx + (py - y1) * dy) / len2, 0.0, 1.0) : 0.0
+        d2 = min(d2, (px - x1 - t * dx)^2 + (py - y1 - t * dy)^2)
+    end
+    return sqrt(d2)
+end
+
+# Crossing-number test of `(px, py)` against the closed loop `loop`.
+function _inside_loop(px, py, loop)
+    inside = false
+    for k in eachindex(loop)
+        (x1, y1), (x2, y2) = loop[k], loop[mod1(k + 1, length(loop))]
+        if (y1 > py) != (y2 > py) && px < x1 + (py - y1) * (x2 - x1) / (y2 - y1)
+            inside = !inside
+        end
+    end
+    return inside
+end
+
+# Whether `inner` lies inside `outer`, judged at the first point of `inner` that is not
+# on the boundary of `outer` (a pinch vertex lies on both). `false` if there is none.
+function _piece_inside(inner::_PinchPiece, outer::_PinchPiece, atol_nm)
+    k = findfirst(((px, py),) -> _dist_to_loop(px, py, outer.loop) > atol_nm, inner.loop)
+    return !isnothing(k) && _inside_loop(inner.loop[k]..., outer.loop)
+end
+
+# Split `contour` at its pinches and sort the pieces by winding: pieces wound like the
+# whole contour keep its role and go to `same`, the others go to `opposite`. Pieces with
+# fewer than three vertices and no curves are dropped.
+function _classify_pieces!(same, opposite, contour::CurvilinearPolygon, atol_nm)
+    pieces = _split_cpoly_at_pinches(contour, atol_nm)
+    filter!(p -> length(points(p)) >= 3 || !isempty(p.curves), pieces)
+    loops = _PinchPiece.(pieces)
+    # The whole contour's signed area is the sum over its pieces
+    net = sum(p -> p.signed_area, loops; init=0.0)
+    for p in loops
+        push!((p.signed_area >= 0) == (net >= 0) ? same : opposite, p)
+    end
+end
+
+# Split the pinched contours of `region` and rebuild it as one region per material piece.
+# Holes that lie outside every material piece are pushed to `orphans`.
+function _split_pinches(region::CurvilinearRegion{T}, atol_nm, orphans) where {T}
+    contours = vcat([region.exterior], region.holes)
+    all(c -> isempty(_find_pinch_points(points(c), atol_nm)), contours) && return [region]
+    material, holes = _PinchPiece{T}[], _PinchPiece{T}[]
+    _classify_pieces!(material, holes, region.exterior, atol_nm)
+    for h in region.holes
+        _classify_pieces!(holes, material, h, atol_nm)
+    end
+    owned = [CurvilinearPolygon{T}[] for _ in material]
+    for h in holes
+        # An island lies inside a hole of a larger material piece, so pick the smallest
+        # piece containing the hole
+        best = _innermost_container(h, material, atol_nm)
+        best == 0 ? push!(orphans, h) : push!(owned[best], h.contour)
+    end
+    return [CurvilinearRegion{T}(m.contour, hs) for (m, hs) in zip(material, owned)]
+end
+
+# Index of the smallest of `pieces` containing `hole`, or 0 if none does.
+function _innermost_container(hole::_PinchPiece, pieces, atol_nm)
+    best = 0
+    for (k, m) in enumerate(pieces)
+        best != 0 && abs(m.signed_area) >= abs(pieces[best].signed_area) && continue
+        _piece_inside(hole, m, atol_nm) && (best = k)
+    end
+    return best
+end
+
+# Clipper can attach a hole to an outer contour that doesn't contain it. Give each such hole
+# of a split region to the innermost region of `regions` whose exterior does.
+function _adopt_orphans!(regions::Vector{CurvilinearRegion{T}}, orphans, atol_nm) where {T}
+    exteriors = [_PinchPiece(r.exterior) for r in regions]
+    for h in orphans
+        k = _innermost_container(h, exteriors, atol_nm)
+        k == 0 && throw(
+            ArgumentError(
+                "split_pinches: the hole at $(first(points(h.contour))) lies outside every " *
+                "region; a contour may cross itself"
+            )
+        )
+        regions[k] =
+            CurvilinearRegion{T}(regions[k].exterior, vcat(regions[k].holes, [h.contour]))
+    end
+end
+
+"""
+    split_pinches(regions::AbstractVector{<:CurvilinearRegion}; atol=2nm)
+
+Split self-touching contours of `regions` into simple pieces, returning a new
+`Vector{CurvilinearRegion}`.
+
+A contour is self-touching ("pinched") where two non-adjacent vertices coincide to within
+`atol`. OpenCASCADE can reject such a contour with "Curve loop is not closed" when it is
+rendered to a `SolidModel`. Pinches come from:
+
+  - Keyhole cuts, which Clipper can use to join an enclosed island to the contour around
+    it, traversing the cut twice. For example, the gap around a CPW center conductor with
+    open ends on both sides.
+  - Holes that touch the outer contour at a point, which Clipper can merge into the outer
+    contour.
+  - [`split_t_junctions!`](@ref), where a contour has a vertex on one of its own edges: a
+    neighbor's copy of that vertex injected into the edge means the contour passes through
+    the same point twice.
+
+Call `split_pinches` after boolean operations and after `split_t_junctions!`.
+
+Each pinched contour is split into simple pieces, and each piece is classified by its
+winding relative to the whole contour. Pieces of an exterior wound the same way as the
+exterior are material and the rest are holes, while pieces of a hole wound the same way as
+the hole are holes and the rest are islands of material. Each material piece becomes a
+region, and each hole goes to the innermost material piece containing it, with containment
+tested against the discretized curves.
+
+Clipper can also attach a hole to an outer contour that doesn't contain it. A hole of a
+split region that lies outside every piece of that region goes to the innermost region of
+`regions` whose exterior contains it, so `regions` should not overlap (for example, the
+output of one boolean operation). Throws an `ArgumentError` if a hole lies outside every
+region, as when a contour crosses itself rather than touching.
+
+Pieces with fewer than three vertices and no curves are dropped. Curves (`Paths.Turn`,
+`Paths.BSpline`, `Paths.OffsetSegment`) stay native. Regions without pinches are returned
+unchanged.
+
+`atol` should match the tolerance used to merge vertices when rendering (see the
+`vertex_merge_atol` option of [`SolidModels.ConformalRenderContext`](@ref), 2 nm by
+default). Pinches are found pairwise, so the vertices that meet at a pinch should lie within
+`atol` of each other, as the render-time merge also assumes. A cluster of nearby vertices
+spread over more than `atol` gives undefined results. By DeviceLayout convention, lengths
+without units are presumed to be in microns.
+
+# Example
+
+```julia
+groups = Dict(:metal => union2d_curved(cs => :metal), :gap => union2d_curved(cs => :gap))
+split_t_junctions!(groups)
+groups = split_pinches(groups)
+```
+"""
+function split_pinches(regions::AbstractVector{<:CurvilinearRegion}; atol=nothing)
+    T = coordinatetype(regions)
+    result = CurvilinearRegion{T}[]
+    isempty(regions) && return result
+    atol_nm = _nm(isnothing(atol) ? onenanometer(T) * 2 : atol)
+    orphans = _PinchPiece{T}[]
+    for region in regions
+        append!(
+            result,
+            _split_pinches(convert(CurvilinearRegion{T}, region), atol_nm, orphans)
+        )
+    end
+    isempty(orphans) || _adopt_orphans!(result, orphans, atol_nm)
+    return result
+end
+
+"""
+    split_pinches(groups::AbstractDict; atol=2nm)
+
+Apply [`split_pinches`](@ref) to each group of `groups`, whose values are vectors of
+[`CurvilinearRegion`](@ref), returning a new `Dict` with the same keys. Pinches never span
+groups; this method lets a pipeline call `split_pinches` on the same `groups` it passed to
+[`split_t_junctions!`](@ref), with the same default `atol`.
+"""
+function split_pinches(groups::AbstractDict; atol=nothing)
+    T = _noding_coordinate_type(groups)
+    atol_length = isnothing(atol) && !isnothing(T) ? onenanometer(T) * 2 : atol
+    return Dict(k => split_pinches(v; atol=atol_length) for (k, v) in groups)
+end

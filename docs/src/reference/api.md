@@ -194,6 +194,7 @@
     round_layer
     round_layer!
     split_t_junctions!
+    split_pinches
 ```
 
 #### [Curvilinear geometry](@id api-curvilinear)
