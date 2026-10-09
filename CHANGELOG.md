@@ -54,6 +54,15 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - `create_component(T, ps, address)` and `set_parameters(c, ps, address)` read `NamedTuple`
+    and `Dict` parameters from nested namespaces, as written by `extract_parameter_set`, and
+    reject namespace keys that are not fields of a non-empty `NamedTuple` parameter. Required
+    parameters declared as a `NamedTuple` or `Dict` are read from namespaces too. (#335)
+  - `@variant` and `@composite_variant` constructors reject unknown keyword arguments. (#336)
+  - A `@composite_variant` created from a `ParameterSet` passes it on to
+    `_build_subcomponents`. (#337)
+  - `create_component` and `set_parameters` give clearer errors for invalid `ParameterSet`
+    addresses and namespaces, and `set_parameters` on a composite keeps its `ParameterSet`.
   - `uniquename(str, dlm)` dropped the delimiter when reconstructing the base name of a
     `str0 * dlm * n` input containing several delimiters (`uniquename("x_3_1", '_')` returned
     `"x3_1"`), and a bare number was treated as a suffix. `uniquename` also takes a new keyword
