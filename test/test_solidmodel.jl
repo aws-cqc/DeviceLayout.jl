@@ -2269,3 +2269,66 @@ end
         @test pgname(sm["mixed", 2]) == "mixed" # dim-2 name restored after the clear
     end
 end
+
+@testitem "exclude_groups and apply_precedence" setup = [CommonTestSetup] begin
+    using DeviceLayout.SolidModels
+    import DeviceLayout.SolidModels:
+        gmsh, dimtags, exclude_groups, apply_precedence, _postrender!
+
+    # Model the overlapping memberships left by fragmentation.
+    sm = SolidModel("matpart"; overwrite=true)
+    v = [gmsh.model.occ.addBox(20i, 0, 0, 10, 10, 10) for i = 0:3]
+    gmsh.model.occ.synchronize()
+    sm["chip"] = [(3, v[1]), (3, v[2])]
+    sm["vacuum"] = [(3, v[2]), (3, v[3]), (3, v[4])]
+    sm["annotation"] = [(3, v[4])]
+    tagset(g) = Set(Int(t) for (d, t) in dimtags(sm[g, 3]))
+
+    @testset "exclude_groups is a membership difference" begin
+        @test Set(Int(t) for (_, t) in exclude_groups(sm, "vacuum", "chip", 3)) ==
+              Set(Int.(v[3:4]))
+        # Absent excluded groups are skipped, with an info message so typos are visible.
+        res = @test_logs (:info, r"\(missing, 3\) is not a physical group") exclude_groups(
+            sm,
+            "vacuum",
+            ["chip", "missing"],
+            3
+        )
+        @test Set(Int(t) for (_, t) in res) == Set(Int.(v[3:4]))
+        @test tagset("vacuum") == Set(Int.(v[2:4]))      # read-only: no group changed
+        @test (@test_logs (:error, r"not a physical group") exclude_groups(
+            sm,
+            "missing",
+            ["chip"],
+            3
+        )) == Tuple{Int32, Int32}[]
+    end
+
+    @testset "apply_precedence generates exclusion operations" begin
+        prec = [("chip", 3), ("vacuum", 3), ("annotation", 3), ("ports", 2)]
+        ops = apply_precedence(prec)
+        # One op per group below the top of its dimension; "ports" is alone in dimension 2.
+        @test [op[1] for op in ops] == ["vacuum", "annotation"]
+        @test ops[2][3] == ("annotation", ["chip", "vacuum"], 3)
+        @test_throws ArgumentError apply_precedence([("chip", 3), ("chip", 3)])
+        @test_throws ArgumentError apply_precedence([("chip", 4)])
+        @test isempty(apply_precedence([("chip", 3)]))
+    end
+
+    @testset "operations make the groups mutually exclusive" begin
+        _postrender!(sm, apply_precedence([("chip", 3), ("vacuum", 3)]))
+        @test tagset("chip") == Set(Int.(v[1:2]))
+        @test tagset("vacuum") == Set(Int.(v[3:4]))
+        @test isempty(intersect(tagset("chip"), tagset("vacuum")))
+        @test tagset("annotation") == Set([Int(v[4])])  # unlisted groups are unchanged
+        @test gmsh.model.getPhysicalName(3, sm["vacuum", 3].grouptag) == "vacuum"
+    end
+
+    @testset "a group left with no entities is removed, its entities kept" begin
+        # Assigning the empty result alone would leave the old member in place.
+        _postrender!(sm, [("annotation", exclude_groups, ("annotation", ["vacuum"], 3))])
+        @test !SolidModels.hasgroup(sm, "annotation", 3)
+        @test (3, v[4]) in gmsh.model.getEntities(3)
+        @test tagset("vacuum") == Set(Int.(v[3:4]))
+    end
+end

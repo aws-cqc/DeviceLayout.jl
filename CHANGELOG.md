@@ -8,6 +8,11 @@ The format of this changelog is based on
 
 ### Added
 
+  - `SolidModels.exclude_groups` returns the entities of a physical group that belong to none of
+    a list of other groups, a membership difference with the postrender-operation signature.
+    A group left with no entities is removed (its entities stay in the model).
+    `SolidModels.apply_precedence` turns a priority list of material groups into such operations;
+    run after fragmentation, they make the groups mutually exclusive.
   - `SolidModels.mesh_respect_lc` makes the mesh-size callback return the smaller of the
     control-point size and the size gmsh proposes itself, so curvature or boundary sizing
     applies to geometry without control points, such as imported CAD. Off by default.
