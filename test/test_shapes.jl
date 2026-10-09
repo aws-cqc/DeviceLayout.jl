@@ -967,14 +967,14 @@ end
         @test width(bounds(c)) ≈
               pixelsize + linelimit * (pixelspacing * 5) + (linelimit - 2) * pixelspacing
         path = joinpath(tdir, "characters.gds")
-        @test characters_demo(path) == 60138 # bytes written
+        @test characters_demo(path) == 59866 # bytes written
         rm(path; force=true)
         path = joinpath(tdir, "referenced_characters.gds")
         logger = TestLogger()
         result = with_logger(logger) do
             return referenced_characters_demo(path, verbose_override=true)
         end
-        @test result == 2460
+        @test result == 2428
         @test length(logger.logs) == 4
         @test all(
             log -> log.level == Logging.Warn && occursin("Cannot render", log.message),
@@ -982,7 +982,7 @@ end
         )
         rm(path; force=true)
         path = joinpath(tdir, "scripted.gds")
-        @test scripted_demo(path) == 8682
+        @test scripted_demo(path) == 8626
         rm(path; force=true)
 
         # testing other polytext, polytext! methods. Just looking for failure

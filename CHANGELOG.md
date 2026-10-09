@@ -22,6 +22,14 @@ The format of this changelog is based on
     tolerance of 1 nm for floating-point coordinates instead of a quarter femtometer, which
     gave on the order of 10⁵ vertices per rounded corner. The new `atol` keyword sets the
     tolerance; integer coordinates keep Clipper's default of a quarter grid unit.
+  - `to_polygons(::ClippedPolygon)` rounds each keyhole cut's attachment to the other
+    lattice point beside the enclosing edge when the nearer one would make the cut polygon
+    self-intersect (a hole vertex within half a lattice unit inside the edge, or the
+    contour folding back just outside it at an acute vertex). A hole whose lowest
+    vertex Clipper rounded to just outside its enclosing contour is now pinched onto the
+    nearest edge instead of silently dropped (#317), with a warning if no edge is within
+    one lattice unit. Consecutive repeated points (from a cut landing on a vertex, or a
+    hole touching its enclosing contour) are removed.
   - `Intersect.AirBridge` crossings give the CPW open termination after the bridge
     `initial=true`, so its trace-corner vertices sit on the side facing the following segment
     and are shared with that segment's gap polygons instead of leaving T-junctions.

@@ -1076,6 +1076,108 @@ end
     end
 end
 
+@testitem "Keyhole cut attachment" setup = [CommonTestSetup] begin
+    # The cut from a hole's lowest vertex meets the enclosing contour off-lattice, and the
+    # lattice point it attaches to puts a kink in that edge. Rounded to nearest, the
+    # attachment can land inside the contour, and the inward kink crosses any hole vertex
+    # within half a unit of the same edge; the first three holes below (counterclockwise,
+    # like the outer) each have such a vertex, ≈ 0.08 units inside. Rounded outward
+    # instead, the kink crosses the contour's next edge where that folds back just outside
+    # the edge at an acute vertex, as in the fourth case (0.65 units below at the ray).
+    function proper_crossings(pts)
+        n = length(pts)
+        orient(a, b, c) = sign((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x))
+        crossings = 0
+        for i = 1:n, j = (i + 2):n
+            (i == 1 && j == n) && continue
+            a, b = pts[i], pts[mod1(i + 1, n)]
+            c, d = pts[j], pts[mod1(j + 1, n)]
+            straddle(p, q, r, s) = orient(p, q, r) * orient(p, q, s) < 0
+            (straddle(a, b, c, d) && straddle(c, d, a, b)) && (crossings += 1)
+        end
+        return crossings
+    end
+    for (outer, hole, cut) in (
+        ([(-8, 66), (-79, 32), (86, -37)], [(20, -9), (-2, 16), (-19, 7)], (20, -10)),
+        (
+            [(49, 70), (45, 72), (-28, 70), (-18, -26)],
+            [(-5, -7), (14, 20), (13, 20), (-8, 19)],
+            (-5, -8)
+        ),
+        ([(31, 44), (-89, 3), (-29, -45)], [(-9, -14), (10, 13), (-27, 1)], (-9, -16)),
+        (
+            [(19, 6), (-45, -14), (-23, -10), (-29, -15)],
+            [(-16, -8), (10, 3), (-24, -8), (-12, -5)],
+            (-24, -10)
+        )
+    )
+        cp = difference2d([Polygon(Point{Int}.(outer))], [Polygon(Point{Int}.(hole))])
+        @test count(Clipper.ishole, Clipper.children(only(Clipper.children(cp.tree)))) == 1
+        p = only(to_polygons(cp))
+        @test proper_crossings(p.p) == 0
+        @test all(i -> p.p[i] != p.p[mod1(i + 1, end)], eachindex(p.p))
+        # The attachment is the lattice point next to the contour whose kink crosses nothing.
+        @test count(==(Point{Int}(cut...)), p.p) == 2
+    end
+end
+
+@testitem "Keyhole cut edge cases" setup = [CommonTestSetup] begin
+    # Area of the region the tree describes, outer contours minus their holes.
+    function tree_area(cp)
+        a(n) = abs(Polygons.area(Polygon(Clipper.contour(n))))
+        return sum(Clipper.children(cp.tree)) do n
+            return a(n) - sum(a, Clipper.children(n); init=0.0)
+        end
+    end
+    no_repeats(p) = all(i -> p.p[i] != p.p[mod1(i + 1, end)], eachindex(p.p))
+
+    # The cut from the hole's lowest vertex lands on a vertex of a step in the outer contour.
+    cp = difference2d(
+        [Polygon(Point{Int}[(0, 0), (10, 0), (10, 5), (20, 5), (20, 30), (0, 30)])],
+        [Polygon(Point{Int}[(10, 10), (15, 10), (15, 15), (10, 15)])]
+    )
+    poly = only(to_polygons(cp))
+    @test no_repeats(poly)
+    @test abs(Polygons.area(poly)) == tree_area(cp)
+
+    # A hole touching its enclosing contour at its lowest vertex is pinched there, with no
+    # zero-length cut.
+    cp = difference2d(
+        [Polygon(Point{Int}[(0, 0), (20, 0), (20, 20), (0, 20)])],
+        [Polygon(Point{Int}[(10, 0), (15, 5), (10, 10), (5, 5)])]
+    )
+    poly = only(to_polygons(cp))
+    @test no_repeats(poly)
+    @test count(==(Point(10, 0)), poly.p) == 2
+    @test abs(Polygons.area(poly)) == tree_area(cp)
+
+    # Clipper rounds this hole's lowest vertex to 0.08 units below its enclosing contour, so
+    # nothing is below it to attach to (#317); the hole is pinched onto that edge instead of
+    # being dropped.
+    A = Polygon(
+        Point{Float64}[(-2, 5), (-16, 11), (-12, -4), (-11, -9), (19, -4), (17, -3)] .*
+        0.37
+    )
+    B = Polygon(
+        Point{Float64}[
+            (14, 10),
+            (21, 14),
+            (11, 12),
+            (18, 20),
+            (-1, 12),
+            (-2, 4),
+            (5, -5),
+            (6, -11),
+            (8, 2),
+            (13, -5)
+        ] .* 0.37
+    )
+    cp = xor2d([A], [B])
+    polys = to_polygons(cp)
+    @test all(no_repeats, polys)
+    @test sum(q -> abs(Polygons.area(q)), polys) ≈ tree_area(cp) rtol = 1e-9
+end
+
 @testitem "Layerwise clipping" setup = [CommonTestSetup] begin
     c1 = CoordinateSystem("test1")
     c2 = CoordinateSystem("test2")
