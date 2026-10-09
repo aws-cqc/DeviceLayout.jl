@@ -1629,7 +1629,7 @@ function _remap_orphans!(entmap, allents, boxes_before, ents_before, frag_dims)
         end
     end
     n_fixed > 0 &&
-        @debug "fragment: recovered $n_fixed of $(length(lost)) entities reported deleted"
+        @info "fragment: recovered $n_fixed of $(length(lost)) entities reported deleted"
     return entmap
 end
 

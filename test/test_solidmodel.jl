@@ -2290,7 +2290,13 @@ end
 
     @testset "a unique new entity with the same box is adopted" begin
         allents, entmap, boxes_before, ents_before = setup()
-        _remap_orphans!(entmap, allents, boxes_before, ents_before, [3])
+        @test_logs (:info, r"recovered 1 of 1") _remap_orphans!(
+            entmap,
+            allents,
+            boxes_before,
+            ents_before,
+            [3]
+        )
         @test entmap[1] == [DT((3, a))]
     end
 
