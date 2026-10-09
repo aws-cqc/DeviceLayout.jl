@@ -56,7 +56,6 @@ const ccwerrboundC   = (9.0 + 64.0 * epsilon) * epsilon * epsilon
 function __init__()
     # To ensure no crashes
     global _clip = Ref(Clipper.Clip())
-    global _coffset = Ref(Clipper.ClipperOffset())
     # The magic bytes are the GDS HEADER tag (0x0002), preceded by the number of
     # bytes in total (6 == 0x0006) for the HEADER record.
     add_format(
