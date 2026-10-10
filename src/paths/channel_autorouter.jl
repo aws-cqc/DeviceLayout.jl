@@ -279,7 +279,9 @@ If `verbose=true`, prints a summary of routing results including net count and t
 
 Warns about any wire segment that is a sideways jog too short for `transition_rule` to
 route, such as from a pin nearly in line with a track of a crossing channel, and about any
-pair of wires whose legs run side by side closer than the track pitch.
+pair of wires whose legs run side by side closer than the track pitch. The jog check is
+exact for `StraightAnd90`. For `StraightAnd45` it catches jogs too short for a single 45°
+turn on each side, but longer jogs (up to `2 * margin`) can also fail to route.
 """
 function autoroute!(
     ar::ChannelRouter,
@@ -332,8 +334,14 @@ function _warn_short_jogs(ar::ChannelRouter{T}, transition_rule, margin) where {
         isnothing(segment_track(ar, ws)) && continue
         s_start, s_stop = unsorted_interval(ar, ws)
         jog = abs(s_stop - s_start)
-        # Zero tolerance matches StraightAnd90's for a lateral offset
-        (jog > 2 * margin || jog <= 1e-6 * oneunit(T) || jog >= min_jog) && continue
+        # A jog the rule treats as straight still has to arrive within `route!`'s default
+        # tolerance; the rule accepts a jog approximately equal to its minimum
+        (
+            jog > 2 * margin ||
+            jog <= 1e-9 * DeviceLayout.onemicron(T) ||
+            jog >= min_jog ||
+            jog ≈ min_jog
+        ) && continue
         from, to = _vertex_name.(ar, bounding_channels(ws))
         @warn """
             Net $net jogs $jog along channel $(running_channel(ws)) between $from and \
@@ -354,8 +362,9 @@ _vertex_name(ar, v) = is_pin(ar, v) ? "pin $(graphidx_to_pin(ar, v))" : "channel
 # Warn about each pair of wires whose legs leaving a channel run side by side closer than
 # the track pitch there, or overlap (see `_facing_end_pairs`). Close pairs are expected
 # unless `enforce_leg_spacing`; overlapping pairs and any remaining close pairs conflict
-# with other track constraints.
-function _warn_close_legs(ar::ChannelRouter, enforce_leg_spacing)
+# with other track constraints. `can_enforce` is false where the caller can't pass
+# `enforce_leg_spacing`, so the warning doesn't suggest it.
+function _warn_close_legs(ar::ChannelRouter, enforce_leg_spacing; can_enforce=true)
     for channel = 1:num_channels(ar)
         wiresegs_ascending =
             sort(channel_segments(ar, channel), by=(ws) -> interval(ar, ws))
@@ -377,9 +386,11 @@ function _warn_close_legs(ar::ChannelRouter, enforce_leg_spacing)
             remedy = if iszero(gap) || enforce_leg_spacing
                 "The other order conflicts with other track constraints; move a pin or \
                 channel to separate them."
-            else
+            elseif can_enforce
                 "Pass `enforce_leg_spacing=true` to reorder them, or move a pin or \
                 channel to separate them."
+            else
+                "Move a pin or channel to separate them."
             end
             @warn "$problem $remedy"
         end

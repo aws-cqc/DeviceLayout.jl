@@ -468,64 +468,60 @@ function example_fanout100()
     return c, ar
 end
 
-# ── Example 11: 100-net perimeter-to-edge escape ───────────────────────────────────────────────
-# 100 nets fan out through a single wide channel from inner to outer pin rows.
+# ── Example 11: 40-net perimeter-to-edge escape ─────────────────────────────
+# 40 nets fan out from all four sides of an inner die to the bottom outer edge, through a
+# channel along each side.
 
 function example_perimeter_to_edge_escape()
     lx_outer = ly_outer = 12e6nm
     lx_inner = ly_inner = 2e6nm
     w = 2.5e6nm
+    x_side = (lx_outer - lx_inner) / 4
+    y_side = (ly_outer - ly_inner) / 4
 
-    fanout_space_bottom =
-        Path(Point(-lx_outer / 2, (-ly_outer / 2 + (ly_outer - ly_inner) / 4)))
+    fanout_space_bottom = Path(Point(-lx_outer / 2, -ly_outer / 2 + y_side))
     straight!(fanout_space_bottom, lx_outer, Paths.Trace(w))
 
-    fanout_space_top =
-        Path(Point(-lx_outer / 2, +(ly_outer / 2 - (ly_outer - ly_inner) / 4)))
+    fanout_space_top = Path(Point(-lx_outer / 2, ly_outer / 2 - y_side))
     straight!(fanout_space_top, lx_outer, Paths.Trace(w))
 
-    fanout_space_left =
-        Path(Point(-lx_outer / 2 + (lx_outer - lx_inner)/4, (-ly_outer / 2 + (ly_outer - ly_inner) / 4)), α0=90°)
+    fanout_space_left = Path(Point(-lx_outer / 2 + x_side, -ly_outer / 2 + y_side), α0=90°)
     straight!(fanout_space_left, ly_outer, Paths.Trace(w))
 
-    fanout_space_right =
-        Path(Point(+lx_outer / 2 - (lx_outer - lx_inner)/4, (-ly_outer / 2 + (ly_outer - ly_inner) / 4)), α0=90°)
+    fanout_space_right = Path(Point(lx_outer / 2 - x_side, -ly_outer / 2 + y_side), α0=90°)
     straight!(fanout_space_right, ly_outer, Paths.Trace(w))
 
     n_nets = 40
+    n_side = n_nets ÷ 4
     x0s = range(-lx_outer / 2, stop=lx_outer / 2, length=n_nets + 2)[2:(end - 1)]
+    xs_side = range(-lx_inner / 2, stop=lx_inner / 2, length=n_side + 2)[2:(end - 1)]
+    ys_side = range(-ly_inner / 2, stop=ly_inner / 2, length=n_side + 2)[2:(end - 1)]
+    # Inner pins go counterclockwise from the top right corner: top, left, bottom, right
     x1s = [
-        reverse(range(-lx_inner / 2, stop=lx_inner/2, length=Int(n_nets/4) + 2)[2:(end - 1)]);
-        fill(-lx_inner/2, Int(n_nets/4));
-        range(-lx_inner / 2, stop=lx_inner / 2, length=Int(n_nets/4) + 2)[2:(end - 1)];
-        fill(lx_inner/2, Int(n_nets/4));
-        # reverse(range(-lx_inner / 2, stop=lx_inner / 2, length=Int(n_nets/4) + 2)[2:(end - 1)]);
+        reverse(xs_side)
+        fill(-lx_inner / 2, n_side)
+        xs_side
+        fill(lx_inner / 2, n_side)
     ]
     y1s = [
-        fill(ly_inner/2, Int(n_nets/4));
-        reverse(range(-ly_inner / 2, stop=ly_inner / 2, length=Int(n_nets/4) + 2)[2:(end - 1)])
-        fill(-ly_inner/2, Int(n_nets/4));
-        range(-ly_inner / 2, stop=ly_inner / 2, length=Int(n_nets/4) + 2)[2:(end - 1)];
-        # fill(ly_inner/2, Int(n_nets/8));
+        fill(ly_inner / 2, n_side)
+        reverse(ys_side)
+        fill(-ly_inner / 2, n_side)
+        ys_side
     ]
-    α1s = [
-        fill(-90°, Int(n_nets/4));
-        fill(0°, Int(n_nets/4));
-        fill(90°, Int(n_nets/4));
-        fill(180°, Int(n_nets/4));
-        # fill(-90°, Int(n_nets/8));
-    ]
+    α1s = [fill(-90°, n_side); fill(0°, n_side); fill(90°, n_side); fill(180°, n_side)]
     p0s = [PointHook(x, -ly_outer / 2, -90°) for x in x0s]
     p1s = [PointHook(x, y, α) for (x, y, α) in zip(x1s, y1s, α1s)]
     mynets = [(i, i + n_nets) for i = 1:n_nets]
-    ar = ChannelRouter(mynets, vcat(p0s, p1s),
-        RouteChannel.([fanout_space_bottom, fanout_space_left, fanout_space_right, fanout_space_top]))
+    channels =
+        [fanout_space_bottom, fanout_space_left, fanout_space_right, fanout_space_top]
+    ar = ChannelRouter(mynets, vcat(p0s, p1s), RouteChannel.(channels))
     # Pin 7 is within a left-channel track pitch of net 6's leg into the left channel, so
     # net 7 must go below net 6 in the bottom channel for their legs not to run side by side
     routes = Paths.autoroute!(ar, Paths.StraightAnd90(10μm), 10μm; enforce_leg_spacing=true)
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     paths = Path.(routes, Ref(Paths.Trace(10μm)))
-    c = Cell("fanout100")
+    c = Cell("perimeter_to_edge")
     render!.(c, paths, GDSMeta())
     @assert isempty(inter_path_intersections(paths)) "No crossings"
     return c, ar
