@@ -389,4 +389,87 @@ end
 
     # Runs without error
     test_simple()
+
+    # Fan-out from all four sides of an inner die to the bottom outer edge, via a channel on
+    # each side: bottom (B), left (C), right, top, assigned in that order. There are `q`
+    # pins per die side and 4q outer pins along the bottom edge, offset by `shift` pin
+    # pitches. Many outer pins lie under the side channels, so their segments in B are
+    # short jogs whose direction depends on side channel track assignment.
+    function perimeter_to_edge(q, shift)
+        lo, li, m = 10.0, 2.0, 1.5
+        w_h = lo / 2 - li / 2 - 2m
+        w_v = lo / 2 - li / 2 - m
+        y_b = -lo / 2 + (lo - li) / 4
+        x_l = -lo / 2 + (lo - li) / 4
+        bottom = Path(-lo / 2, y_b)
+        straight!(bottom, lo, Paths.Trace(w_h))
+        top = Path(-lo / 2, -y_b)
+        straight!(top, lo, Paths.Trace(w_h))
+        left = Path(x_l, y_b, α0=90°)
+        straight!(left, lo, Paths.Trace(w_v))
+        right = Path(-x_l, y_b, α0=90°)
+        straight!(right, lo, Paths.Trace(w_v))
+
+        n = 4q
+        side = range(-li / 2, li / 2, length=q + 2)[2:(end - 1)]
+        xs = range(-lo / 2, lo / 2, length=n + 2)[2:(end - 1)]
+        outer = [PointHook(x + shift * step(xs), -lo / 2, -90°) for x in xs]
+        inner = [
+            [PointHook(x, li / 2, -90°) for x in reverse(side)]
+            [PointHook(-li / 2, y, 0°) for y in reverse(side)]
+            [PointHook(x, -li / 2, 90°) for x in side]
+            [PointHook(li / 2, y, 180°) for y in side]
+        ]
+        ar = ChannelRouter(
+            [(i, i + n) for i = 1:n],
+            [outer; inner],
+            RouteChannel.([bottom, left, right, top])
+        )
+        routes = Paths.autoroute!(ar, Paths.StraightAnd90(0.01), 0.01)
+        paths = Path.(routes, Ref(Paths.Trace(0.01)))
+        return filter(Intersect.prepared_intersections(paths)) do ixn
+            return ixn[1][1] != ixn[2][1]
+        end
+    end
+    # Refinement must fix orders chosen against side channel centerlines.
+    # For example, in the first pass B is assigned before C, so it measures nets 5 and 6
+    # to C's centerline (¦). p₅ is just left of it, so net 5 appears to run right and
+    # net 6 left. Their runs only touch, so nothing orders their tracks:
+    #
+    #                  ¦
+    #              +-->¦<-----+
+    #              |   ¦      |
+    #              p₅         p₆
+    #
+    # Once C is assigned, both turn into C left of p₅, and with net 6 on the lower track
+    # in B they cross twice (×):
+    #
+    #        5     6                    5     6
+    #        |     |                    |     |
+    #        +-----×-+                  |     +-------+
+    #              +-×-----+            +-------+     |
+    #                |     |                    |     |
+    #                p₅    p₆                   p₅    p₆
+    #          first pass               after refinement
+    @test isempty(perimeter_to_edge(7, 0.2))
+
+    # Refinement must keep a crossing-free order that neighbor tracks don't constrain.
+    # After the first pass nets 5 and 6 run along disjoint stretches of B, so B is free
+    # to put net 6 on the lower track. Reassigning C must not read that as net 6 entering
+    # inside net 5, or it flips them, and net 6's run in B covers p₅:
+    #
+    #        5       6                  6       5
+    #        |       |                  |       |
+    #        +---+   |                  |   +---+
+    #            |   +-----+            +---×---------+
+    #            |         |                |         |
+    #            p₅        p₆               p₅        p₆
+    #          first pass                 flipped
+    @test isempty(perimeter_to_edge(6, -0.4))
+
+    # Shift 0 is omitted because it places an outer pin within a bend radius of a side
+    # channel track, which StraightAnd90 cannot route.
+    for shift in (-0.4, -0.2, 0.2, 0.4)
+        @test isempty(perimeter_to_edge(10, shift))
+    end
 end
