@@ -247,9 +247,6 @@ end
 function prev_next_tendency(ar, ws; use_wire_direction=true)
     channel_idx = running_channel(ws)
     start_channel, stop_channel = bounding_channels(ws)
-    # Distances along bounding channels
-    s_along_start = pathlength_at_intersection(ar, start_channel, channel_idx)
-    s_along_stop = pathlength_at_intersection(ar, stop_channel, channel_idx)
     # Directions of bounding and running channels (Float64 radians from interface)
     start_dir = direction_at_intersection(ar, start_channel, channel_idx)
     dir1 = direction_at_intersection(ar, channel_idx, start_channel)
@@ -263,10 +260,17 @@ function prev_next_tendency(ar, ws; use_wire_direction=true)
     sgn_bend2 = sign(rem2pi(stop_dir - dir2, RoundNearest))
     !use_wire_direction && return (sgn_bend1, sgn_bend2)
     ### Need to multiply according to direction in channel
+    ### Neighbor directions come from track-aware intervals. A neighbor ending within the
+    ### width of ws's channel can run the opposite way from what ws's centerline implies.
     ### Is prev upper-bounded by ws? Then it goes along with channel
-    sgn_start = s_along_start >= last(interval(ar, prev(ar, ws), use_track=false)) ? 1 : -1
+    ### (Pin intervals are sorted, which is correct for prev: pin rays run toward ws)
+    prev_start, prev_stop = unsorted_interval(ar, prev(ar, ws))
+    sgn_start = prev_stop >= prev_start ? 1 : -1
     ### Is next upper-bounded by ws? Then it goes against channel
-    sgn_stop = s_along_stop >= last(interval(ar, next(ar, ws), use_track=false)) ? -1 : 1
+    ### (Pin intervals are sorted, so handle explicitly: next always runs against the ray)
+    nws = next(ar, ws)
+    next_start, next_stop = unsorted_interval(ar, nws)
+    sgn_stop = (is_pin(ar, running_channel(nws)) || next_start >= next_stop) ? -1 : 1
     ### Bend signs get another -1 if ws runs opposite to its channel direction
     ### But then tendency definition is reversed also
     return (sgn_start * sgn_bend1, sgn_stop * sgn_bend2)
@@ -484,14 +488,18 @@ end
 # ──── Track assignment ───────────────────────────────────────────────────────
 
 """
-    assign_tracks!(ar::AbstractChannelProblem)
+    assign_tracks!(ar::AbstractChannelProblem; max_refinement_passes=4)
 
 Performs track assignment for all channels in `ar`.
 
 Track assignment operates on **all** channels, not a subset. Re-running after modifying
 a single net will reassign tracks globally in every channel that contains wire segments.
+
+After an initial pass over channels in index order, up to `max_refinement_passes`
+additional passes reassign each channel using the tracks assigned in all other channels,
+stopping early once a pass leaves every assignment unchanged.
 """
-function assign_tracks!(ar::AbstractChannelProblem)
+function assign_tracks!(ar::AbstractChannelProblem; max_refinement_passes=4)
     for channel = 1:num_channels(ar)
         empty!(channel_tracks(ar, channel))
     end
@@ -502,6 +510,26 @@ function assign_tracks!(ar::AbstractChannelProblem)
     # For now the user can worry about that
     for channel = 1:num_channels(ar)
         assign_tracks_matching!(ar, channel)
+    end
+    # The initial pass measures each segment to the centerline of any bounding channel not
+    # yet assigned. A segment whose endpoint is near that centerline can turn out to run
+    # the other way once the bounding channel has tracks, invalidating the order chosen
+    # here (see the "Channel Autorouter" tests for an example). Refinement passes reassign
+    # every channel with all neighboring tracks known. Reassignment must not discard a
+    # consistent order on the basis of unconstrained neighbor tracks; see
+    # `_outer_of_disjoint_neighbors`.
+    for _ = 1:max_refinement_passes
+        changed = false
+        for channel = 1:num_channels(ar)
+            tracks = channel_tracks(ar, channel)
+            old_tracks = copy(tracks)
+            # Old tracks stay in place while new ones are computed so that offsets
+            # of this channel's segments remain available to neighbor intervals
+            assign_tracks_matching!(ar, channel)
+            deleteat!(tracks, 1:length(old_tracks))
+            changed |= tracks != old_tracks
+        end
+        changed || break
     end
 end
 
@@ -794,28 +822,112 @@ function channel_problem_graphs(ar::AbstractChannelProblem, channel)
             pt2, nt2 = prev_next_tendency(ar, seg2)
             low1_tend, high1_tend = against_channel(ar, seg1) ? (nt1, pt1) : (pt1, nt1)
             low2_tend, high2_tend = against_channel(ar, seg2) ? (nt2, pt2) : (pt2, nt2)
-            avoidable = is_avoidable(
-                low1,
-                high1,
-                low2,
-                high2,
-                low1_tend,
-                high1_tend,
-                low2_tend,
-                high2_tend
-            )
+            # `is_avoidable` treats each neighbor as extending indefinitely along its
+            # channel, so it orders the segments by their neighbors' tracks. Neighbors on
+            # disjoint runs from the same side have unconstrained tracks, and the order is
+            # instead set by the runs (see `_outer_of_disjoint_neighbors`). That order is
+            # presented to `is_avoidable` as adjacent endpoints, the outer one inward.
+            i1, i2 = idx1, idx2
+            l1, h1, l2, h2 = low1, high1, low2, high2
+            lt1, ht1, lt2, ht2 = low1_tend, high1_tend, low2_tend, high2_tend
+            if lt1 == lt2
+                outer = _outer_of_disjoint_neighbors(ar, seg1, seg2, true)
+                if outer == 1 # The outer segment must have the larger low, so swap roles
+                    i1, i2 = idx2, idx1
+                    h1, h2 = h2, h1
+                    ht1, ht2 = ht2, ht1
+                end
+                if outer != 0
+                    l1 = min(l1, l2)
+                    l2 = nextfloat(l1)
+                end
+            end
+            if ht1 == ht2
+                outer = _outer_of_disjoint_neighbors(
+                    ar,
+                    wiresegs_ascending[i1],
+                    wiresegs_ascending[i2],
+                    false
+                )
+                if outer != 0
+                    h_inner = max(h1, h2)
+                    h_outer = prevfloat(h_inner)
+                    h1, h2 = outer == 1 ? (h_outer, h_inner) : (h_inner, h_outer)
+                end
+            end
+            avoidable = is_avoidable(l1, h1, l2, h2, lt1, ht1, lt2, ht2)
             !avoidable && continue
 
             # Crossing is avoidable, so add a constraint
             # Determine which goes on top based on the lower bound tendency of seg2
             # Is prev or next the lower bound?
             # top is rightmost segment iff its lower bound tends towards higher (lower index) tracks
-            top = (idx1, idx2)[1 + (low2_tend == 1)]
-            bottom = (idx1, idx2)[2 - (low2_tend == 1)]
+            top = (i1, i2)[1 + (lt2 == 1)]
+            bottom = (i1, i2)[2 - (lt2 == 1)]
             add_edge!(vcg, top, bottom) # VCG has edge from higher to lower tracks
         end
     end
     return vcg, zone_ig
+end
+
+# Which of `seg1` and `seg2` (1 or 2) is fixed as the outer one at their low (`at_low`) or
+# high end by their neighbors there, or 0 if the neighbors don't fix an order.
+#
+# The order is fixed when both neighbors run along the same bounding channel B, from the
+# same side, on assigned tracks, and occupy disjoint runs of B. Below, segments s₁ and s₂
+# run up channel C, and their neighbors come from pins below B:
+#
+#        current order               flipped order
+#
+#       s₁      s₂                   s₂      s₁
+#       |       |                    |       |
+#       +---+   |                    |   +---+
+#   B       |   +-----+          B   +---×---------+
+#           |         |                  |         |
+#           p₁        p₂                 p₁        p₂
+#
+# - With disjoint runs, B has no constraint between the neighbors, so their relative
+#   tracks are arbitrary (here s₂'s neighbor happens to be on the lower track).
+# - `is_avoidable` sees s₂ entering C below s₁ from the same side. Since it assumes s₂'s
+#   neighbor extends indefinitely to the right, it concludes s₂ must be inside s₁ and
+#   flips them.
+# - In the flipped order, s₂'s neighbor covers the point where s₁'s neighbor leaves B, so
+#   B can no longer avoid a crossing with either track order.
+#
+# The current order is kept instead. With disjoint runs from the same side, the segment
+# whose neighbor reaches farther along B is the one turning into C farther out, so that
+# segment is reported as outer.
+#
+# This is conservative if s₁'s neighbor leaves B toward C's side, where flipping could
+# also be crossing-free. That requires a pin or channel inside C's footprint.
+#
+# The condition needs both neighbors on assigned tracks, so it only applies in refinement
+# passes. Before that, same-side neighbors both end at C's centerline, and their runs
+# overlap.
+function _outer_of_disjoint_neighbors(ar, seg1, seg2, at_low)
+    nb1, reach1 = _neighbor_reach(ar, seg1, at_low)
+    nb2, reach2 = _neighbor_reach(ar, seg2, at_low)
+    running_channel(nb1) != running_channel(nb2) && return 0
+    is_pin(ar, running_channel(nb1)) && return 0
+    (isnothing(segment_track(ar, nb1)) || isnothing(segment_track(ar, nb2))) && return 0
+    lo1, hi1 = interval(ar, nb1)
+    lo2, hi2 = interval(ar, nb2)
+    (hi1 <= lo2 || hi2 <= lo1) || return 0
+    reach1 > reach2 && return 1
+    reach2 > reach1 && return 2
+    return 0
+end
+
+# The neighbor segment at `ws`'s low or high endpoint and its reach: the signed distance
+# from `ws`'s channel to the neighbor's far end, positive in the direction the neighbor
+# extends away from `ws`.
+function _neighbor_reach(ar, ws, at_low)
+    is_prev = xor(at_low, against_channel(ar, ws))
+    nb = is_prev ? prev(ar, ws) : next(ar, ws)
+    s_ws = pathlength_at_intersection(ar, running_channel(nb), running_channel(ws))
+    start, stop = unsorted_interval(ar, nb)
+    far, near = is_prev ? (start, stop) : (stop, start)
+    return nb, (far - s_ws) * sign(far - near)
 end
 
 # ──── Segment deletion / reset ───────────────────────────────────────────────
