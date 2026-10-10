@@ -261,7 +261,7 @@ function print_segments(ar::ChannelRouter, net)
 end
 
 """
-    autoroute!(ar::ChannelRouter, transition_rule, margin; net_indices, fixed_channel_paths, verbose)
+    autoroute!(ar::ChannelRouter, transition_rule, margin; net_indices, fixed_channel_paths, enforce_leg_spacing=false, verbose)
 
 Perform channel and track assignment, then make routes.
 
@@ -271,10 +271,15 @@ takes. Each channel may appear at most once in a fixed path. For example,
 `fixed_channel_paths=Dict(1 => [2, 4, 1, 5])` will force net 1 to be routed from its source
 pin, through channels 2, 4, 1, 5 in order, then to its destination pin.
 
+With `enforce_leg_spacing=true`, wires leaving a channel to opposite sides closer together
+than the track pitch of a bounding channel there are ordered so their legs don't run side by
+side (see `Paths.assign_tracks!`). This can increase the number of tracks.
+
 If `verbose=true`, prints a summary of routing results including net count and track usage.
 
 Warns about any wire segment that is a sideways jog too short for `transition_rule` to
-route, such as from a pin nearly in line with a track of a crossing channel.
+route, such as from a pin nearly in line with a track of a crossing channel, and about any
+pair of wires whose legs run side by side closer than the track pitch.
 """
 function autoroute!(
     ar::ChannelRouter,
@@ -282,10 +287,12 @@ function autoroute!(
     margin;
     net_indices=1:num_nets(ar),
     fixed_channel_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}(),
+    enforce_leg_spacing=false,
     verbose=false
 )
-    reroute_nets!(ar, net_indices; fixed_paths=fixed_channel_paths)
+    reroute_nets!(ar, net_indices; fixed_paths=fixed_channel_paths, enforce_leg_spacing)
     _warn_short_jogs(ar, transition_rule, margin)
+    _warn_close_legs(ar, enforce_leg_spacing)
     rule = AutoChannelRouting(ar, transition_rule, margin)
     routes = make_routes!(ar, rule)
 
@@ -343,6 +350,41 @@ _min_jog(rule::StraightAnd45) = 2 * rule.min_bend_radius * (1 - cos(π / 4))
 _min_jog(::RouteRule) = nothing
 
 _vertex_name(ar, v) = is_pin(ar, v) ? "pin $(graphidx_to_pin(ar, v))" : "channel $v"
+
+# Warn about each pair of wires whose legs leaving a channel run side by side closer than
+# the track pitch there, or overlap (see `_facing_end_pairs`). Close pairs are expected
+# unless `enforce_leg_spacing`; overlapping pairs and any remaining close pairs conflict
+# with other track constraints.
+function _warn_close_legs(ar::ChannelRouter, enforce_leg_spacing)
+    for channel = 1:num_channels(ar)
+        wiresegs_ascending =
+            sort(channel_segments(ar, channel), by=(ws) -> interval(ar, ws))
+        for (; top, bottom, gap, clearance) in _facing_end_pairs(ar, wiresegs_ascending)
+            top_ws, bottom_ws = wiresegs_ascending[top], wiresegs_ascending[bottom]
+            top_track, bottom_track =
+                segment_track(ar, top_ws), segment_track(ar, bottom_ws)
+            # Sharing a track keeps legs apart unless the ends coincide
+            (top_track > bottom_track || (iszero(gap) && top_track == bottom_track)) ||
+                continue
+            nets = "Nets $(net_index(top_ws)) and $(net_index(bottom_ws))"
+            problem = if iszero(gap)
+                "$nets leave channel $channel at the same point to opposite sides, in an \
+                order that overlaps their wires."
+            else
+                "$nets leave channel $channel $gap apart to opposite sides, in an order \
+                that runs their wires side by side closer than the track pitch $clearance."
+            end
+            remedy = if iszero(gap) || enforce_leg_spacing
+                "The other order conflicts with other track constraints; move a pin or \
+                channel to separate them."
+            else
+                "Pass `enforce_leg_spacing=true` to reorder them, or move a pin or \
+                channel to separate them."
+            end
+            @warn "$problem $remedy"
+        end
+    end
+end
 
 """
     make_routes!(ar::ChannelRouter, rule)
