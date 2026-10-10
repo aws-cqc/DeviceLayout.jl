@@ -272,6 +272,9 @@ takes. Each channel may appear at most once in a fixed path. For example,
 pin, through channels 2, 4, 1, 5 in order, then to its destination pin.
 
 If `verbose=true`, prints a summary of routing results including net count and track usage.
+
+Warns about any wire segment that is a sideways jog too short for `transition_rule` to
+route, such as from a pin nearly in line with a track of a crossing channel.
 """
 function autoroute!(
     ar::ChannelRouter,
@@ -282,6 +285,7 @@ function autoroute!(
     verbose=false
 )
     reroute_nets!(ar, net_indices; fixed_paths=fixed_channel_paths)
+    _warn_short_jogs(ar, transition_rule, margin)
     rule = AutoChannelRouting(ar, transition_rule, margin)
     routes = make_routes!(ar, rule)
 
@@ -305,6 +309,40 @@ function autoroute!(
 end
 
 ######## Route construction
+
+# Warn about each wire segment that `transition_rule` cannot route.
+#
+# A segment no longer than `2 * margin` has no straight section along its channel. Its
+# neighbors' transitions meet at its midpoint, so the wire jogs sideways by the segment's
+# length. `StraightAnd90` and `StraightAnd45` can route a jog only if it is zero or at least
+# a minimum set by their bend radius. A shorter jog typically comes from a pin nearly in
+# line with a track of a channel crossing the pin's channel. The route errors it causes
+# name only coordinates, so this names the net and where the jog is.
+function _warn_short_jogs(ar::ChannelRouter{T}, transition_rule, margin) where {T}
+    min_jog = _min_jog(transition_rule)
+    isnothing(min_jog) && return
+    for net = 1:num_nets(ar), ws in net_wire(ar, net)
+        isnothing(segment_track(ar, ws)) && continue
+        s_start, s_stop = unsorted_interval(ar, ws)
+        jog = abs(s_stop - s_start)
+        # Zero tolerance matches StraightAnd90's for a lateral offset
+        (jog > 2 * margin || jog <= 1e-6 * oneunit(T) || jog >= min_jog) && continue
+        from, to = _vertex_name.(ar, bounding_channels(ws))
+        @warn """
+            Net $net jogs $jog along channel $(running_channel(ws)) between $from and \
+            $to, but $(nameof(typeof(transition_rule))) needs a jog of zero or at least \
+            $min_jog. Move the pin or channel so the jog is zero or at least that long.\
+            """
+    end
+end
+
+# Shortest nonzero sideways jog at a collapsed segment, where each transition makes half
+# the jog with a single turn; `nothing` for rules without such a limit
+_min_jog(rule::StraightAnd90) = 2 * rule.min_bend_radius
+_min_jog(rule::StraightAnd45) = 2 * rule.min_bend_radius * (1 - cos(π / 4))
+_min_jog(::RouteRule) = nothing
+
+_vertex_name(ar, v) = is_pin(ar, v) ? "pin $(graphidx_to_pin(ar, v))" : "channel $v"
 
 """
     make_routes!(ar::ChannelRouter, rule)

@@ -472,4 +472,23 @@ end
     for shift in (-0.4, -0.2, 0.2, 0.4)
         @test isempty(perimeter_to_edge(10, shift))
     end
+
+    # A pin offset from a crossing channel's track by less than StraightAnd90 can jog is
+    # reported by net, since the resulting route errors only give coordinates
+    function pin_jog_router(offset)
+        bottom = Path(0.0, 0.0)
+        straight!(bottom, 10.0, Paths.Trace(2.0))
+        side = Path(5.0, 0.0, α0=90°)
+        straight!(side, 10.0, Paths.Trace(2.0))
+        pins = [PointHook(Point(5.0 + offset, -2.0), 270°), PointHook(Point(7.0, 8.0), 0°)]
+        return ChannelRouter([(1, 2)], pins, RouteChannel.([bottom, side]))
+    end
+    @test_logs (:warn, r"Net 1 jogs .* channel 1 between pin 1 and channel 2") Paths.autoroute!(
+        pin_jog_router(0.05),
+        Paths.StraightAnd90(0.1),
+        0.1
+    )
+    for offset in (0.0, 0.2)
+        @test_logs Paths.autoroute!(pin_jog_router(offset), Paths.StraightAnd90(0.1), 0.1)
+    end
 end

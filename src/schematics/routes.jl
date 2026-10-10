@@ -323,5 +323,6 @@ function _update_with_plan!(rule::Paths.AutoChannelRouting{T}, route_node, sch) 
         merge!(rule.router.channel_intersections, ixns)
         Paths.assign_channels!(rule.router)
         Paths.assign_tracks!(rule.router)
+        Paths._warn_short_jogs(rule.router, rule.transition_rule, rule.transition_margin)
     end
 end

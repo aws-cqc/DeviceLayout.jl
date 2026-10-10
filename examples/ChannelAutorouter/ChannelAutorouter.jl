@@ -472,25 +472,25 @@ end
 # 100 nets fan out through a single wide channel from inner to outer pin rows.
 
 function example_perimeter_to_edge_escape()
-    lx_outer = ly_outer = 10e6nm
+    lx_outer = ly_outer = 12e6nm
     lx_inner = ly_inner = 2e6nm
-    margin = 1.5e6nm
+    w = 2.5e6nm
 
     fanout_space_bottom =
         Path(Point(-lx_outer / 2, (-ly_outer / 2 + (ly_outer - ly_inner) / 4)))
-    straight!(fanout_space_bottom, lx_outer, Paths.Trace(ly_outer/2 - ly_inner / 2 - 2 * margin))
+    straight!(fanout_space_bottom, lx_outer, Paths.Trace(w))
 
     fanout_space_top =
         Path(Point(-lx_outer / 2, +(ly_outer / 2 - (ly_outer - ly_inner) / 4)))
-    straight!(fanout_space_top, lx_outer, Paths.Trace(ly_outer/2 - ly_inner / 2 - 2 * margin))
+    straight!(fanout_space_top, lx_outer, Paths.Trace(w))
 
     fanout_space_left =
         Path(Point(-lx_outer / 2 + (lx_outer - lx_inner)/4, (-ly_outer / 2 + (ly_outer - ly_inner) / 4)), α0=90°)
-    straight!(fanout_space_left, ly_outer, Paths.Trace(lx_outer/2 - lx_inner / 2 - margin))
+    straight!(fanout_space_left, ly_outer, Paths.Trace(w))
 
     fanout_space_right =
         Path(Point(+lx_outer / 2 - (lx_outer - lx_inner)/4, (-ly_outer / 2 + (ly_outer - ly_inner) / 4)), α0=90°)
-    straight!(fanout_space_right, ly_outer, Paths.Trace(lx_outer/2 - lx_inner / 2 - 2 * margin))
+    straight!(fanout_space_right, ly_outer, Paths.Trace(w))
 
     n_nets = 40
     x0s = range(-lx_outer / 2, stop=lx_outer / 2, length=n_nets + 2)[2:(end - 1)]
@@ -517,23 +517,15 @@ function example_perimeter_to_edge_escape()
     ]
     p0s = [PointHook(x, -ly_outer / 2, -90°) for x in x0s]
     p1s = [PointHook(x, y, α) for (x, y, α) in zip(x1s, y1s, α1s)]
-    # c = Cell("test")
-    # render!(c, fanout_space_bottom)
-    # render!(c, fanout_space_top)
-    # render!(c, fanout_space_right)
-    # render!(c, fanout_space_left)
-    # return c, 0
     mynets = [(i, i + n_nets) for i = 1:n_nets]
     ar = ChannelRouter(mynets, vcat(p0s, p1s),
         RouteChannel.([fanout_space_bottom, fanout_space_left, fanout_space_right, fanout_space_top]))
     routes = Paths.autoroute!(ar, Paths.StraightAnd90(10μm), 10μm)
-    # c = Paths.visualize_router_state(ar, wire_width=1μm)
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     paths = Path.(routes, Ref(Paths.Trace(10μm)))
     c = Cell("fanout100")
     render!.(c, paths, GDSMeta())
-    # @assert isempty(inter_path_intersections(paths)) "No crossings"
-    # @assert length(ar.channel_tracks[1]) <= n_nets/2 "Left and right halves share tracks"
+    @assert isempty(inter_path_intersections(paths)) "No crossings"
     return c, ar
 end
 
@@ -592,6 +584,7 @@ const ALL_EXAMPLES = [
     "dense" => example_dense,
     "bspline" => example_bspline,
     "fanout100" => example_fanout100,
+    "perimeter_to_edge" => example_perimeter_to_edge_escape,
     "crossing_schematic" => example_crossing_schematic,
 ]
 
