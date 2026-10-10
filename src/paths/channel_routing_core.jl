@@ -223,9 +223,11 @@ function unsorted_interval(ar::AbstractChannelProblem, ws::TrackWireSegment; use
         segment_offset(ar, next(ar, ws), s_stop; use_wire_direction=false) / sin_stop
     # Offset *also* depends on this wire segment's offset at a non-90° intersection
     start_offset_proj =
-        -segment_offset(ar, ws, s_start; use_wire_direction=false) / tan(α_ixn_start)
+        -segment_offset(ar, ws, s_start; use_wire_direction=false) *
+        _transverse_cotangent(α_ixn_start)
     stop_offset_proj =
-        -segment_offset(ar, ws, s_stop; use_wire_direction=false) / tan(α_ixn_stop)
+        -segment_offset(ar, ws, s_stop; use_wire_direction=false) *
+        _transverse_cotangent(α_ixn_stop)
     # This is approximate on bending or tapered tracks
     return s1 + (prev_offset_proj + start_offset_proj),
     s2 - (next_offset_proj + stop_offset_proj)
@@ -239,6 +241,15 @@ function _transverse_sine(α, channel, bounding_vertex)
         )
     )
     return sinα
+end
+
+# Exactly zero at a perpendicular intersection, where `1 / tan(π / 2)` is not. Refinement
+# passes compute intervals with the segment's own track assigned, and the residue would
+# otherwise make aligned ends differ by rounding error from pass to pass.
+function _transverse_cotangent(α)
+    sinα, cosα = sincos(α)
+    abs(cosα) <= sqrt(eps(Float64)) && return 0.0
+    return cosα / sinα
 end
 
 # ──── Tendency computation ───────────────────────────────────────────────────
@@ -497,11 +508,13 @@ a single net will reassign tracks globally in every channel that contains wire s
 
 After an initial pass over channels in index order, up to `max_refinement_passes`
 additional passes reassign each channel using the tracks assigned in all other channels,
-stopping early once a pass leaves every assignment unchanged.
+stopping early once a pass leaves every assignment unchanged. Warns if the last pass still
+changed an assignment.
 
-Two wires leaving a channel to opposite sides at the same point are always put in the
-order that keeps their legs from overlapping. With `enforce_leg_spacing=true`, the same
-order is imposed on wires leaving closer together than the track pitch of a bounding
+Two wires leaving a channel to opposite sides at the same point are put in the order that
+keeps their legs from overlapping, unless that order would make the vertical constraint
+graph cyclic (`autoroute!` then warns about the pair). With `enforce_leg_spacing=true`, the
+same order is imposed on wires leaving closer together than the track pitch of a bounding
 channel there, so their legs don't run side by side closer than that. This can increase
 the number of tracks, since such pairs could otherwise share a track.
 """
@@ -528,7 +541,7 @@ function assign_tracks!(
     # every channel with all neighboring tracks known. Reassignment must not discard a
     # consistent order on the basis of unconstrained neighbor tracks; see
     # `_outer_of_disjoint_neighbors`.
-    for _ = 1:max_refinement_passes
+    for pass = 1:max_refinement_passes
         changed = false
         for channel = 1:num_channels(ar)
             tracks = channel_tracks(ar, channel)
@@ -540,6 +553,11 @@ function assign_tracks!(
             changed |= tracks != old_tracks
         end
         changed || break
+        pass == max_refinement_passes && @warn """
+            Track assignment did not converge in $max_refinement_passes refinement passes. \
+            Some channels were assigned using outdated tracks of their neighbors, which \
+            can cause avoidable crossings.\
+            """
     end
 end
 
@@ -970,8 +988,11 @@ end
 # tracks. In the other order, they run side by side between the tracks, `gap` apart. That
 # is a collinear overlap if `gap` is zero (the classic vertical constraint between nets at
 # the same column), and closer than other wires there if `gap` is less than `clearance`.
-function _facing_end_pairs(ar, wiresegs_ascending)
-    pairs_found = []
+#
+# Ends within rounding error of each other count as the same point, with `gap` zero. Pin
+# coordinates that come from transformations, for example, rarely align exactly.
+function _facing_end_pairs(ar::AbstractChannelProblem{T}, wiresegs_ascending) where {T}
+    pairs_found = @NamedTuple{top::Int, bottom::Int, gap::T, clearance::T}[]
     isempty(wiresegs_ascending) && return pairs_found
     ends = map(wiresegs_ascending) do ws
         low, high = interval(ar, ws)
@@ -979,16 +1000,21 @@ function _facing_end_pairs(ar, wiresegs_ascending)
         low_tend, high_tend = against_channel(ar, ws) ? (nt, pt) : (pt, nt)
         low_pitch = _end_pitch(ar, ws, _end_vertex(ar, ws, true))
         high_pitch = _end_pitch(ar, ws, _end_vertex(ar, ws, false))
-        return (; low, high, low_tend, high_tend, low_pitch, high_pitch)
+        # Rounding error in pathlengths and track offsets scales with these
+        high_atol =
+            sqrt(eps(Float64)) * (abs(high) + channel_width(ar, running_channel(ws), high))
+        return (; low, high, low_tend, high_tend, low_pitch, high_pitch, high_atol)
     end
     max_pitch = maximum(e -> max(e.low_pitch, e.high_pitch), ends)
     for (idx1, end1) in pairs(ends)
         for (idx2, end2) in pairs(ends)
             # Segments are sorted by low end, so later ones are farther from end1.high
-            end2.low > end1.high + max_pitch && break
+            end2.low > end1.high + max_pitch + end1.high_atol && break
             gap = end2.low - end1.high
             # A zero-length segment's own ends coincide
-            (idx1 == idx2 || gap < zero(gap) || end1.high_tend == end2.low_tend) && continue
+            (idx1 == idx2 || gap < -end1.high_atol || end1.high_tend == end2.low_tend) &&
+                continue
+            abs(gap) <= end1.high_atol && (gap = zero(gap))
             clearance = max(end1.high_pitch, end2.low_pitch)
             (iszero(gap) || (gap < clearance && !(gap ≈ clearance))) || continue
             top, bottom = end1.high_tend == 1 ? (idx1, idx2) : (idx2, idx1)

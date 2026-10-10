@@ -517,4 +517,27 @@ end
     for offset in (0.0, 0.2)
         @test_logs Paths.autoroute!(pin_jog_router(offset), Paths.StraightAnd90(0.1), 0.1)
     end
+
+    # Pins in the same column on opposite sides of a channel keep their order through
+    # refinement passes, which see each segment's own track. In a wide channel, its offset
+    # must not move the aligned ends apart by rounding error, and pins misaligned by
+    # rounding error must still count as aligned.
+    function aligned_column_router(dx)
+        channel = Path(0.0, 0.0)
+        straight!(channel, 200.0, Paths.Trace(100.0))
+        pins = [
+            PointHook(Point(2.0, 60.0), 90°),
+            PointHook(Point(10.0, -60.0), -90°),
+            PointHook(Point(10.0 + dx, 60.0), 90°),
+            PointHook(Point(50.0, -60.0), -90°)
+        ]
+        ar = ChannelRouter([(1, 2), (3, 4)], pins, [RouteChannel(channel)])
+        Paths.assign_channels!(ar)
+        return ar
+    end
+    for dx in (0.0, 1e-12, -1e-12), passes = 0:4
+        ar = aligned_column_router(dx)
+        @test_logs Paths.assign_tracks!(ar; max_refinement_passes=passes)
+        @test [Paths.segment_track(ar, only(Paths.net_wire(ar, n))) for n = 1:2] == [2, 1]
+    end
 end
