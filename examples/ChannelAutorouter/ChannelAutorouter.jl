@@ -333,16 +333,16 @@ end
 
 function example_angled()
     channels = [
-        dchannel(-1, 0, 45°, 10 * sqrt(2); width=2.0),   # d1: NE from (-1,0)
-        hchannel(-2, 12, 3; width=2.0),                # h1 (y=3)
-        dchannel(-1, 10, -45°, 10 * sqrt(2); width=2.0) # d2: SE from (-1,10)
+        dchannel(-3, -2, 45°, 12 * sqrt(2); width=2.0),   # d1: NE from (-1,0)
+        hchannel(-4, 12, 3; width=2.0),                # h1 (y=3)
+        dchannel(-1, 10, -45°, 12 * sqrt(2); width=2.0) # d2: SE from (-1,10)
     ]
     # Pins offset so rays cross diagonal
     hooks = [
-        bpin(0, -2),     # p1: below d1, left side
-        bpin(8, -2),     # p2: below d2, right side
-        rpin(12, 1),     # p4: above d2, right side
-        lpin(-2, 1)     # p3: below d1, left side
+        bpin(0, -1),     # p1: below d1, left side
+        bpin(8, -1),     # p2: below d2, right side
+        rpin(11, 1),     # p4: above d2, right side
+        lpin(-3, 1)     # p3: below d1, left side
     ]
     # Net 1 goes left→right via h1 and diagonals
     # Net 2 goes right→left via h1 and diagonals
