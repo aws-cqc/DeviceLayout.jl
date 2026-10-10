@@ -395,7 +395,7 @@ end
     # pins per die side and 4q outer pins along the bottom edge, offset by `shift` pin
     # pitches. Many outer pins lie under the side channels, so their segments in B are
     # short jogs whose direction depends on side channel track assignment.
-    function perimeter_to_edge(q, shift)
+    function perimeter_to_edge(q, shift; kwargs...)
         lo, li, m = 10.0, 2.0, 1.5
         w_h = lo / 2 - li / 2 - 2m
         w_v = lo / 2 - li / 2 - m
@@ -425,7 +425,7 @@ end
             [outer; inner],
             RouteChannel.([bottom, left, right, top])
         )
-        routes = Paths.autoroute!(ar, Paths.StraightAnd90(0.01), 0.01)
+        routes = Paths.autoroute!(ar, Paths.StraightAnd90(0.01), 0.01; kwargs...)
         paths = Path.(routes, Ref(Paths.Trace(0.01)))
         return filter(Intersect.prepared_intersections(paths)) do ixn
             return ixn[1][1] != ixn[2][1]
@@ -451,7 +451,7 @@ end
     #                |     |                    |     |
     #                p₅    p₆                   p₅    p₆
     #          first pass               after refinement
-    @test isempty(perimeter_to_edge(7, 0.2))
+    @test isempty(@test_logs min_level = Logging.Error perimeter_to_edge(7, 0.2))
 
     # Refinement must keep a crossing-free order that neighbor tracks don't constrain.
     # After the first pass nets 5 and 6 run along disjoint stretches of B, so B is free
@@ -465,13 +465,39 @@ end
     #            |         |                |         |
     #            p₅        p₆               p₅        p₆
     #          first pass                 flipped
-    @test isempty(perimeter_to_edge(6, -0.4))
+    @test isempty(@test_logs min_level = Logging.Error perimeter_to_edge(6, -0.4))
 
     # Shift 0 is omitted because it places an outer pin within a bend radius of a side
     # channel track, which StraightAnd90 cannot route.
     for shift in (-0.4, -0.2, 0.2, 0.4)
-        @test isempty(perimeter_to_edge(10, shift))
+        @test isempty(@test_logs min_level = Logging.Error perimeter_to_edge(10, shift))
     end
+
+    # Wires leaving a channel at the same point to opposite sides must be ordered so their
+    # legs don't overlap. Here p₁₇ is exactly where net 18 turns into the right channel:
+    #
+    #          18                    18
+    #          |                     |
+    #          +-----           -----#
+    #     -----+                     #-----
+    #          |                     |
+    #          p₁₇                   p₁₇
+    #      18 above 17         17 above 18: legs overlap (#)
+    @test isempty(@test_logs min_level = Logging.Error perimeter_to_edge(5, -0.2))
+
+    # Wires leaving closer together than the track pitch run side by side in the wrong
+    # order. That is reported, and `enforce_leg_spacing=true` orders them instead.
+    @test_logs (:warn, r"Nets 6 and 5 leave channel 1 .* opposite sides") match_mode = :any perimeter_to_edge(
+        6,
+        -0.4
+    )
+    @test isempty(
+        @test_logs min_level = Logging.Warn perimeter_to_edge(
+            6,
+            -0.4;
+            enforce_leg_spacing=true
+        )
+    )
 
     # A pin offset from a crossing channel's track by less than StraightAnd90 can jog is
     # reported by net, since the resulting route errors only give coordinates

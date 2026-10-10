@@ -144,9 +144,12 @@ schematic to find their global coordinates. Channels must be provided to the aut
     cycle, track assignment reports the channel and nets involved.
   - Every net in a single `AutoChannelRouting` rule must start at a distinct pin. Nets
     that share a source pin should be split into separate rules (or merged upstream).
-  - Track assignment does not care about proximity of slightly misaligned tracks
-    entering from different channels or pins; only exact alignment of entry/exit segments
-    and topologically avoidable crossings constrain track assignment.
+  - Wires leaving a channel to opposite sides closer together than the track pitch of a
+    bounding channel can be put in an order that runs their legs side by side, for example
+    a pin lying just beside the track of a crossing channel. `autoroute!` warns about each
+    such pair. Passing `enforce_leg_spacing=true` orders them apart instead, at the cost of
+    extra tracks where the pair could otherwise have shared one; this option is not
+    available for schematic-level `AutoChannelRouting`.
 
 ## References
 

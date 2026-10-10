@@ -324,5 +324,6 @@ function _update_with_plan!(rule::Paths.AutoChannelRouting{T}, route_node, sch) 
         Paths.assign_channels!(rule.router)
         Paths.assign_tracks!(rule.router)
         Paths._warn_short_jogs(rule.router, rule.transition_rule, rule.transition_margin)
+        Paths._warn_close_legs(rule.router, false)
     end
 end
