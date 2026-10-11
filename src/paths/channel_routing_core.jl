@@ -583,8 +583,10 @@ function assign_tracks_matching!(ar, channel; enforce_leg_spacing=false)
     vcg, zone_ig = channel_problem_graphs(ar, channel; enforce_leg_spacing)
     zones = maximal_cliques(zone_ig)
     isempty(zones) && return
-    # Need to sort zones left to right (by their minimal element)
-    sort!(zones, by=minimum)
+    # Need to sort zones left to right. Segments are indexed in order of their low ends,
+    # so a zone's common overlap starts at its maximal element. Its minimal element can be
+    # a long segment shared by many zones, which leaves them unordered.
+    sort!(zones, by=maximum)
     # Same with wire segments, to follow same indexing as graphs
     wiresegs_ascending = sort(channel_segments(ar, channel), by=(ws) -> interval(ar, ws))
     L = Set{Int}()
