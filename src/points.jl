@@ -3,7 +3,7 @@ module Points
 import DeviceLayout: PointTypes, InverseLength, Coordinate
 import StaticArrays
 import Clipper: IntPoint
-import Base: convert, *, summary, show, reinterpret, isapprox
+import Base: convert, *, summary, show, isapprox
 import ForwardDiff: ForwardDiff, extract_derivative
 import Unitful:
     Unitful, Length, DimensionlessQuantity, Quantity, NoUnits, Units, ustrip, unit
@@ -49,11 +49,6 @@ Base.promote_rule(
     ::Type{Point{T}}
 ) where {S <: InverseLength, T <: InverseLength} = Point{promote_type(S, T)}
 show(io::IO, p::Point) = print(io, "(", string(getx(p)), ",", string(gety(p)), ")")
-
-function reinterpret(::Type{T}, a::Point{S}) where {T, S}
-    nel = Int(div(length(a) * sizeof(S), sizeof(T)))
-    return reinterpret(T, a, (nel,))
-end
 
 """
     getx(p::Point)

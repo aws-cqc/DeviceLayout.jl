@@ -421,14 +421,7 @@ end
     c = Cell{Float64}("main")
     c2 = Cell{Float64}("rect")
     render!(c2, Rectangle(5, 5), GDSMeta())
-    arr = ArrayReference(
-        c2,
-        Point(0, 0);
-        dc=Point(10, 0),
-        dr=Point(0, 10),
-        ncols=10,
-        nrows=10
-    )
+    arr = ArrayReference(c2, Point(0, 0); dc=Point(10, 0), dr=Point(0, 10), nc=10, nr=10)
     @test coordsys(arr) === c2
     push!(c.refs, arr)
 
@@ -808,8 +801,8 @@ end
             CellArray(
                 s2,
                 p(20.0μm, 0.0μm);
-                nrows=2,
-                ncols=1,
+                nr=2,
+                nc=1,
                 dc=p(0.0μm, 0.0μm),
                 dr=p(0.0μm, 20.0μm)
             )
@@ -930,8 +923,8 @@ end
             CellArray(
                 arr_dup,
                 p(20.0μm, 0.0μm);
-                nrows=2,
-                ncols=1,
+                nr=2,
+                nc=1,
                 dc=p(0.0μm, 0.0μm),
                 dr=p(0.0μm, 20.0μm)
             )
@@ -1083,10 +1076,10 @@ end
                 Point(5, -5)μm;
                 xrefl=true,
                 rot=90°,
-                nrow=3,
-                ncol=2,
-                drow=Point(0, 10)μm,
-                dcol=Point(10, 0)μm,
+                nr=3,
+                nc=2,
+                dr=Point(0, 10)μm,
+                dc=Point(10, 0)μm,
                 mag=2.0
             )
             push!(c.refs, c2ref)

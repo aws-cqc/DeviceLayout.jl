@@ -47,13 +47,14 @@ Base.convert(::Type{StructureReference{S}}, x::StructureReference) where {S} =
 
 Convenience constructor for `StructureReference{float(T), typeof(x)}`.
 
-Keyword arguments can specify x-reflection, magnification, or rotation.
-Synonyms are accepted, in case you forget the "correct keyword"...
+Keyword arguments:
 
-  - X-reflection: `:xrefl`, `:xreflection`, `:refl`, `:reflect`, `:xreflect`,
-    `:xmirror`, `:mirror`
-  - Magnification: `:mag`, `:magnification`, `:magnify`, `:zoom`, `:scale`
-  - Rotation: `:rot`, `:rotation`, `:rotate`, `:angle`
+  - `xrefl`: `true` to reflect across the x-axis
+  - `mag`: magnification factor
+  - `rot`: rotation angle
+
+Other spellings of these keywords (such as `mirror`, `zoom`, or `angle`) are deprecated
+and will be removed in DeviceLayout.jl 2.0.
 """
 function StructureReference(
     x::GeometryStructure{S},
@@ -159,18 +160,18 @@ Construct a `ArrayReference{float(T),typeof(x)}` object.
 Keyword arguments specify the column vector, row vector, number of columns,
 number of rows, x-reflection, magnification factor, and rotation.
 
-Synonyms are accepted for these keywords:
+Keyword arguments:
 
-  - Column vector `dc::Point{T}`: `:deltacol`, `:dcol`, `:dc`, `:vcol`, `:colv`, `:colvec`,
-    `:colvector`, `:columnv`, `:columnvec`, `:columnvector`
-  - Row vector: `:deltarow`, `:drow`, `:dr`, `:vrow`, `:rv`, `:rowvec`,
-    `:rowvector`
-  - Number of columns: `:nc`, `:numcols`, `:numcol`, `:ncols`, `:ncol`, `:col`
-  - Number of rows: `:nr`, `:numrows`, `:numrow`, `:nrows`, `:nrow`, `:row`
-  - X-reflection: `:xrefl`, `:xreflection`, `:refl`, `:reflect`, `:xreflect`,
-    `:xmirror`, `:mirror`
-  - Magnification: `:mag`, `:magnification`, `:magnify`, `:zoom`, `:scale`
-  - Rotation: `:rot`, `:rotation`, `:rotate`, `:angle`
+  - `dc::Point`: column vector
+  - `dr::Point`: row vector
+  - `nc::Int`: number of columns
+  - `nr::Int`: number of rows
+  - `xrefl`: `true` to reflect across the x-axis
+  - `mag`: magnification factor
+  - `rot`: rotation angle
+
+Other spellings of these keywords (such as `mirror`, `zoom`, `angle`, `deltacol`, or `ncols`)
+are deprecated and will be removed in DeviceLayout.jl 2.0.
 """
 function ArrayReference(
     x::GeometryStructure{S},
@@ -270,10 +271,10 @@ function transform(ref::ArrayReference, f)
     return ArrayReference(
         structure(ref),
         ScaledIsometry(f) ∘ transformation(ref),
-        deltacol=lin(ref.deltacol),
-        deltarow=lin(ref.deltarow),
-        col=ref.col,
-        row=ref.row
+        dc=lin(ref.deltacol),
+        dr=lin(ref.deltarow),
+        nc=ref.col,
+        nr=ref.row
     )
 end
 
@@ -435,12 +436,14 @@ flat_elements(geom_layer::Pair{<:Union{GeometryStructure, GeometryReference}}) =
 
 Convenience constructor for `StructureReference{float(T), typeof(x)}`.
 
-Synonyms are accepted for these keywords:
+Keyword arguments:
 
-    - X-reflection: `:xrefl`, `:xreflection`, `:refl`, `:reflect`, `:xreflect`,
-    `:xmirror`, `:mirror`
-    - Magnification: `:mag`, `:magnification`, `:magnify`, `:zoom`, `:scale`
-    - Rotation: `:rot`, `:rotation`, `:rotate`, `:angle`
+  - `xrefl`: `true` to reflect across the x-axis
+  - `mag`: magnification factor
+  - `rot`: rotation angle
+
+Other spellings of these keywords (such as `mirror`, `zoom`, or `angle`) are deprecated
+and will be removed in DeviceLayout.jl 2.0.
 """
 function sref(
     x::GeometryStructure{S},
@@ -462,35 +465,45 @@ sref(x::GeometryStructure{S}, f::Transformation; kwargs...) where {S} = sref(
 
 function sref_transform_values(origin::Point{T}; kwargs...) where {T <: Coordinate}
     argdict = Dict(k => v for (k, v) in kwargs)
-    xreflkeys = [:xrefl, :xreflection, :refl, :reflect, :xreflect, :xmirror, :mirror]
-    magkeys = [:mag, :magnification, :magnify, :zoom, :scale]
-    rotkeys = [:rot, :rotation, :rotate, :angle]
-
-    xrefl = false
-    for k in xreflkeys
-        if haskey(argdict, k)
-            @inbounds xrefl = argdict[k]
-            break
-        end
-    end
-
-    mag = 1.0
-    for k in magkeys
-        if haskey(argdict, k)
-            @inbounds mag = argdict[k]
-            break
-        end
-    end
-
-    rot = 0.0
-    for k in rotkeys
-        if haskey(argdict, k)
-            @inbounds rot = argdict[k]
-            break
-        end
-    end
-
+    xrefl = _ref_keyword(argdict, :xrefl, XREFL_SYNONYMS, false)
+    mag = _ref_keyword(argdict, :mag, MAG_SYNONYMS, 1.0)
+    rot = _ref_keyword(argdict, :rot, ROT_SYNONYMS, 0.0)
     return float(origin), xrefl, mag, rot
+end
+
+# Deprecated keyword synonyms for reference constructors. If several spellings of one
+# keyword are given, the canonical one wins, then the first synonym listed.
+const XREFL_SYNONYMS = (:xreflection, :refl, :reflect, :xreflect, :xmirror, :mirror)
+const MAG_SYNONYMS = (:magnification, :magnify, :zoom, :scale)
+const ROT_SYNONYMS = (:rotation, :rotate, :angle)
+const DC_SYNONYMS = (
+    :deltacol,
+    :dcol,
+    :vcol,
+    :colv,
+    :colvec,
+    :colvector,
+    :columnv,
+    :columnvec,
+    :columnvector
+)
+const DR_SYNONYMS = (:deltarow, :drow, :vrow, :rv, :rowvec, :rowvector)
+const NC_SYNONYMS = (:numcols, :numcol, :ncols, :ncol, :col)
+const NR_SYNONYMS = (:numrows, :numrow, :nrows, :nrow, :row)
+
+function _ref_keyword(argdict, canonical, synonyms, default)
+    haskey(argdict, canonical) && return argdict[canonical]
+    for k in synonyms
+        if haskey(argdict, k)
+            Base.depwarn(
+                "Reference keyword `$k` is deprecated and will be removed in " *
+                "DeviceLayout.jl 2.0. Use `$canonical` instead.",
+                :sref
+            )
+            return argdict[k]
+        end
+    end
+    return default
 end
 
 """
@@ -502,18 +515,18 @@ Construct a `ArrayReference{float(T),typeof(x)}` object.
 Keyword arguments specify the column vector, row vector, number of columns,
 number of rows, x-reflection, magnification factor, and rotation.
 
-Synonyms are accepted for these keywords:
+Keyword arguments:
 
-  - Column vector `dc::Point{T}`: `:deltacol`, `:dcol`, `:dc`, `:vcol`, `:colv`, `:colvec`,
-    `:colvector`, `:columnv`, `:columnvec`, `:columnvector`
-  - Row vector: `:deltarow`, `:drow`, `:dr`, `:vrow`, `:rv`, `:rowvec`,
-    `:rowvector`
-  - Number of columns: `:nc`, `:numcols`, `:numcol`, `:ncols`, `:ncol`
-  - Number of rows: `:nr`, `:numrows`, `:numrow`, `:nrows`, `:nrow`
-  - X-reflection: `:xrefl`, `:xreflection`, `:refl`, `:reflect`, `:xreflect`,
-    `:xmirror`, `:mirror`
-  - Magnification: `:mag`, `:magnification`, `:magnify`, `:zoom`, `:scale`
-  - Rotation: `:rot`, `:rotation`, `:rotate`, `:angle`
+  - `dc::Point`: column vector
+  - `dr::Point`: row vector
+  - `nc::Int`: number of columns
+  - `nr::Int`: number of rows
+  - `xrefl`: `true` to reflect across the x-axis
+  - `mag`: magnification factor
+  - `rot`: rotation angle
+
+Other spellings of these keywords (such as `mirror`, `zoom`, `angle`, `deltacol`, or `ncols`)
+are deprecated and will be removed in DeviceLayout.jl 2.0.
 """
 function aref(
     x::GeometryStructure{S},
@@ -542,13 +555,14 @@ Construct an `ArrayReference` based on ranges (probably `LinRange` or
 therefore do not specify the extrema of the resulting `ArrayReference`'s bounding box;
 some care is required.
 
-Keyword arguments specify x-reflection, magnification factor, and rotation,
-with synonyms allowed:
+Keyword arguments:
 
-  - X-reflection: `:xrefl`, `:xreflection`, `:refl`, `:reflect`, `:xreflect`,
-    `:xmirror`, `:mirror`
-  - Magnification: `:mag`, `:magnification`, `:magnify`, `:zoom`, `:scale`
-  - Rotation: `:rot`, `:rotation`, `:rotate`, `:angle`
+  - `xrefl`: `true` to reflect across the x-axis
+  - `mag`: magnification factor
+  - `rot`: rotation angle
+
+Other spellings of these keywords (such as `mirror`, `zoom`, or `angle`) are deprecated
+and will be removed in DeviceLayout.jl 2.0.
 """
 function aref(x, c::AbstractRange, r::AbstractRange; kwargs...)
     origin = Point(first(c), first(r))
@@ -570,55 +584,10 @@ end
 function aref_transform_values(origin::Point{T}; kwargs...) where {T <: Coordinate}
     _, xrefl, mag, rot = sref_transform_values(origin; kwargs...)
     argdict = Dict(k => v for (k, v) in kwargs)
-
-    dckeys = [
-        :deltacol,
-        :dcol,
-        :dc,
-        :vcol,
-        :colv,
-        :colvec,
-        :colvector,
-        :columnv,
-        :columnvec,
-        :columnvector
-    ]
-    drkeys = [:deltarow, :drow, :dr, :vrow, :rv, :rowvec, :rowvector]
-    ckeys = [:nc, :numcols, :numcol, :ncols, :ncol, :col]
-    rkeys = [:nr, :numrows, :numrow, :nrows, :nrow, :row]
-
-    dc = Point(zero(T), zero(T))
-    for k in dckeys
-        if haskey(argdict, k)
-            @inbounds dc = argdict[k]
-            break
-        end
-    end
-
-    dr = Point(zero(T), zero(T))
-    for k in drkeys
-        if haskey(argdict, k)
-            @inbounds dr = argdict[k]
-            break
-        end
-    end
-
-    c = 1
-    for k in ckeys
-        if haskey(argdict, k)
-            @inbounds c = argdict[k]
-            break
-        end
-    end
-
-    r = 1
-    for k in rkeys
-        if haskey(argdict, k)
-            @inbounds r = argdict[k]
-            break
-        end
-    end
-
+    dc = _ref_keyword(argdict, :dc, DC_SYNONYMS, Point(zero(T), zero(T)))
+    dr = _ref_keyword(argdict, :dr, DR_SYNONYMS, Point(zero(T), zero(T)))
+    c = _ref_keyword(argdict, :nc, NC_SYNONYMS, 1)
+    r = _ref_keyword(argdict, :nr, NR_SYNONYMS, 1)
     return (origin, dc, dr, c, r, xrefl, mag, rot)
 end
 
