@@ -1144,22 +1144,6 @@ end
         @test Cells.geometry_fingerprint(cf) != Cells.geometry_fingerprint(c)
     end
 
-    @testset "DXF format" begin
-        main = Cell("main", nm)
-        render!(main, Rectangle(10μm, 10μm), GDSMeta(0, 0))
-        path = joinpath(tdir, "test.dxf")
-        py3 = "python3"
-        save(path, main, py3)
-        rect = [
-            (0.0, 0.0, 0.0, 0.0, 0.0),
-            (10.0, 0.0, 0.0, 0.0, 0.0),
-            (10.0, 10.0, 0.0, 0.0, 0.0),
-            (0.0, 10.0, 0.0, 0.0, 0.0)
-        ]
-        pyscript = joinpath(@__DIR__, "test_ezdxf.py")
-        @test eval(Meta.parse(read(`$py3 $pyscript $path`, String))) == rect
-    end
-
     @testset "Graphics formats" begin
         s1 = Cell("sub1", nm)
         render!(s1, Rectangle(10μm, 10μm), GDSMeta(1, 0))

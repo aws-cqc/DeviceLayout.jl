@@ -64,7 +64,7 @@ end
     attach!(p_readout, sref(csport), 10μm, i=1) # @ start
     attach!(p_readout, sref(csport), 2mm - 10μm, i=2) # @ end
     p_readout_node = add_node!(g, p_readout)
-    attach!(g, p_readout_node, rres_node => :feedline, 0mm, location=1)
+    attach!(g, p_readout_node, rres_node => :feedline, 0mm, location=:right)
     logger = TestLogger()
     floorplan = with_logger(logger) do
         return plan(g; log_dir=nothing)

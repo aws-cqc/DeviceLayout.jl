@@ -74,7 +74,7 @@ else
                 ExampleTappedHairpin(; straight_length=1.25mm, name="res2") => :tap,
                 0.5mm;
                 i=1,
-                location=1
+                location=:right
             )
             fuse!(g, chip => :port_3, pa2_node => :p0)
             route!(

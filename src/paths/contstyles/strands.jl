@@ -18,12 +18,29 @@ abstract type Strands{T} <: ContinuousStyle{T} end
 
 Strands with variable center offset, width, and spacing as a function of path length.
 `offset`, `width`, and `spacing` are callable.
+
+!!! warning "Deprecated"
+
+    `GeneralStrands` is deprecated and will be removed in DeviceLayout.jl 2.0. Use
+    `SimpleStrands` for constant dimensions. For strands with varying offset or width, draw
+    each strand as its own `Path` (for example, with [`Paths.SingleChannelRouting`](@ref)
+    through a tapered [`Paths.RouteChannel`](@ref)).
 """
 struct GeneralStrands{S, T, U} <: Strands{false}
     offset::S
     width::T
     spacing::U
     num::Int
+    function GeneralStrands{S, T, U}(o, w, s, n) where {S, T, U}
+        Base.depwarn(
+            "`GeneralStrands` (`Strands` with a non-constant `offset`, `width`, or " *
+            "`spacing`) is deprecated and will be removed in DeviceLayout.jl 2.0. Use " *
+            "`Strands` with constant arguments, or draw each strand as its own `Path` (for " *
+            "example, with `SingleChannelRouting` through a tapered `RouteChannel`).",
+            :GeneralStrands
+        )
+        return new{S, T, U}(o, w, s, n)
+    end
 end
 copy(x::GeneralStrands) = GeneralStrands(x.offset, x.width, x.spacing, x.num)
 GeneralStrands(o, w, s, n) = GeneralStrands{typeof(o), typeof(w), typeof(s)}(o, w, s, n)
@@ -91,6 +108,9 @@ reverse(s::SimpleStrands, l) = s
 
 Constructors for Strands styles. Automatically chooses between `SimpleStrands`or
 `GeneralStrands` styles as appropriate.
+
+Methods taking a non-`Coordinate` (callable) argument construct `GeneralStrands`, which
+is deprecated and will be removed in DeviceLayout.jl 2.0.
 """
 function Strands(offset::Coordinate, width::Coordinate, spacing::Coordinate, num::Int)
     dimension(offset) != dimension(width) && throw(DimensionError(offset, width))

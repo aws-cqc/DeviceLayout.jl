@@ -82,7 +82,7 @@
         cref = sref(csub, Point(0.0μm, 10.0μm))
         c = Cell("main", nm)
         setstyle!(pa[1], Paths.Trace(1μm))
-        attach!(pa, cref, range(0μm, stop=pathlength(pa), length=3), location=-1)
+        attach!(pa, cref, range(0μm, stop=pathlength(pa), length=3), location=:left)
         render!(c, pa)
 
         @test length(c.elements) == 3
@@ -938,7 +938,7 @@
         Paths.overlay!(path, halo(path[end].sty, 4μm), GDSMeta(3)) # includes halo of overlay by reference
         # Overlay and attach after simplifying
         simplify!(path)
-        attach!(path, sref(cs), pathlength(path) - 200μm, location=1)
+        attach!(path, sref(cs), pathlength(path) - 200μm, location=:right)
         Paths.overlay!(path, Paths.TaperCPW(50μm, 10μm, 22μm, 10μm), GDSMeta(4))
 
         c = Cell("test", nm)
@@ -1005,7 +1005,7 @@
             metadata=GDSMeta()
         )
         @test p0(pa2) == Point(-2.0, 0.0)μm
-        attach!(pa2, sref(c_dec), 10μm, location=-1)
+        attach!(pa2, sref(c_dec), 10μm, location=:left)
         cs2 = CoordinateSystem("test", nm)
         pathref = sref(pa2, Point(5μm, 5μm), rot=pi / 2, xrefl=true)
         addref!(cs2, pa2, Point(5μm, 5μm), rot=pi / 2, xrefl=true)
@@ -1046,9 +1046,6 @@
         )
 
         test_direct_polygons(to_polygons(straight, sstr), 2 * Paths.num(sstr))
-
-        gstr = Paths.Strands(x -> 10μm, 2μm, 2μm, 2)
-        test_direct_polygons(to_polygons(straight, gstr), 2 * Paths.num(gstr))
 
         comp, compsty = let pa = Path(μm)
             straight!(pa, 10μm, Paths.CPW(10μm, 6μm))

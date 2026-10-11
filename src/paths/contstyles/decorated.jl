@@ -69,9 +69,9 @@ end
 
 """
     attach!(p::Path, c::GeometryReference, t::Coordinate;
-        i::Integer=length(p), location::Integer=0)
+        i::Integer=length(p), location::Symbol=:center)
     attach!(p::Path, c::GeometryReference, t;
-        i::Integer=length(p), location=zeros(Int, length(t)))
+        i::Integer=length(p), location=:center)
 
 Attach `c` along a path. The second method permits ranges or arrays of `t` and `location`
 to be specified (if the lengths do not match, `location` is cycled).
@@ -87,28 +87,32 @@ a straight line with angle 0°. Then an origin of `Point(0.,10.)` will put the
 cell at 10 above the path, or 10 to the left of the path if it turns left by
 90°.
 
-The `location` option is for convenience. If `location == 0`, nothing special happens.
-If `location == -1`, then the point of attachment for the reference is on the
+The `location` option is for convenience. If `location == :center`, nothing special happens.
+If `location == :left`, then the point of attachment for the reference is on the
 leftmost edge of the waveguide (the rendered polygons; the path itself has no
-width). Likewise if `location == 1`, the point of attachment is on the rightmost
+width). Likewise if `location == :right`, the point of attachment is on the rightmost
 edge. This option does not automatically rotate the cell reference, apart from
 what is already done as described in the first paragraph. You can think of this
 option as setting a special origin for the coordinate system that rotates with
 the path. For instance, an origin for the cell reference of `Point(0.,10.)`
-together with `location == -1` will put the cell at 10 above the edge of a
+together with `location == :left` will put the cell at 10 above the edge of a
 rendered (finite width) path with angle 0°.
+
+Integer `location` values `-1`, `0`, and `1` (for `:left`, `:center`, and `:right`) are
+deprecated and will be removed in DeviceLayout.jl 2.0. Their sign is opposite to the
+convention for path offsets, where positive is to the left.
 """
 function attach!(
     p::Path{T},
     c::GeometryReference{T},
     t::Coordinate;
     i::Int=length(p),
-    location::Int=0
+    location::Union{Symbol, Int}=:center
 ) where {T}
     i == 0 && error("cannot attach to an empty path.")
     node = p[i]
     seg0, sty0 = segment(node), style(node)
-    sty = decorate(sty0, coordinatetype(p), t, location, c)
+    sty = decorate(sty0, coordinatetype(p), t, attach_location(location), c)
     p[i] = Node(seg0, sty)
     return sty
 end
@@ -118,22 +122,47 @@ function attach!(
     c::GeometryReference{S},
     t::Coordinate;
     i::Int=length(p),
-    location::Int=0
+    location::Union{Symbol, Int}=:center
 ) where {S, T}
     return attach!(p, convert(GeometryReference{T}, c), t; i=i, location=location)
 end
 
-function attach!(
-    p::Path,
-    c::GeometryReference,
-    t;
-    i::Int=length(p),
-    location=zeros(Int, length(t))
-)
-    for (ti, li) in zip(t, Iterators.cycle(location))
+function attach!(p::Path, c::GeometryReference, t; i::Int=length(p), location=:center)
+    for (ti, li) in zip(t, cycle_locations(location))
         attach!(p, c, ti; i=i, location=li)
     end
 end
+
+# `DecoratedStyle` stores attachment locations as -1 (left), 0, or 1 (right); `reverse`
+# flips sides by negating them.
+const ATTACH_LOCATIONS = (; left=-1, center=0, right=1)
+
+# The integer used internally for `location` `:left`, `:center`, or `:right`; integer
+# `location` is still accepted, with a deprecation warning.
+function attach_location(location::Symbol)
+    haskey(ATTACH_LOCATIONS, location) || throw(
+        ArgumentError(
+            "attachment location must be :left, :center, or :right; got $location"
+        )
+    )
+    return ATTACH_LOCATIONS[location]
+end
+function attach_location(location::Integer)
+    -1 <= location <= 1 || throw(ArgumentError("location must be >=-1 and <=1"))
+    sym = location_symbol(location)
+    Base.depwarn(
+        "Integer attachment `location` is deprecated and will be removed in DeviceLayout.jl " *
+        "2.0. Use `location=$(repr(sym))` instead of `location=$location`.",
+        :attach!
+    )
+    return Int(location)
+end
+
+# Inverse of `attach_location`, for re-attaching decorations stored in a `DecoratedStyle`.
+location_symbol(dir::Integer) = dir < 0 ? :left : (dir > 0 ? :right : :center)
+
+cycle_locations(location::Union{Symbol, Integer}) = Iterators.repeated(location)
+cycle_locations(location) = Iterators.cycle(location)
 
 function transformation(p::Path, c::GeometryReference)
     x = false

@@ -136,7 +136,8 @@
             pa = Path(nm)
             straight!(pa, 100μm, Paths.SimpleTrace(10μm))
             pan = add_node!(g, pa)
-            arrow = attach!(g, pan, CutoutFlipchipArrow() => :tip, 50μm; i=1, location=-1)
+            arrow =
+                attach!(g, pan, CutoutFlipchipArrow() => :tip, 50μm; i=1, location=:left)
             sch = plan(g; log_dir=nothing)
             @test hooks(sch, arrow).tip.p ≈ Point(50μm, 5μm)
             @test hooks(sch, arrow).tip.in_direction == pi / 2

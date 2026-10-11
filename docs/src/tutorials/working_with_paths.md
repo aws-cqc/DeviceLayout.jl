@@ -201,9 +201,9 @@ res_extent = Paths.extent(resonator_path[1].sty)
 origin_offset = Point(0μm, -ground_strip_width - res_extent) # from bottom edge of feedline
 # Attach to the feedline
 # to the 3rd segment (i=3)
-# on the bottom edge (location=1)
+# on the bottom edge (location=:right)
 # 0mm into the segment
-attach!(feedline, sref(resonator_path, origin_offset), 0mm; i=3, location=1)
+attach!(feedline, sref(resonator_path, origin_offset), 0mm; i=3, location=:right)
 save("resonator.gds", Cell(preview_feedline_cs)) # save with arbitrary layer mapping
 preview_feedline_cs
 ```
