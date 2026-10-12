@@ -518,7 +518,9 @@ include("postrender.jl")
 include("import.jl")
 include("conformal/conformal.jl")
 
-using .ConformalRender: render_conformal!, ConformalRenderContext, add_conformal_loop!
-export render_conformal!, ConformalRenderContext, add_conformal_loop!
+using .ConformalRender:
+    render_conformal!, render_conformal_groups!, ConformalRenderContext, add_conformal_loop!
+export render_conformal!,
+    render_conformal_groups!, ConformalRenderContext, add_conformal_loop!
 
 end # module
