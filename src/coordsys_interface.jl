@@ -225,11 +225,8 @@ function flatten(
         s -> counts[s] > max_copy
     end
     flatrefs, keptrefs, deeprefs = flatten_refs(c; depth=depth, keep=keep)
-    # append the references beyond `depth` brought down to top level
     append!(cflat.refs, deeprefs)
-    # append the references that are kept rather than flattened
     append!(cflat.refs, keptrefs)
-    # append the elements of the flattened references
     append_coordsys!.(cflat, flatrefs; addrefs=false, metadata_filter=metadata_filter)
     return cflat
 end
@@ -269,8 +266,7 @@ function _structure_counts!(counts, geom, depth, n)
     end
 end
 
-# References to structures satisfying `keep` go into `keptrefs` without descending into them;
-# otherwise their contents would appear both inside the kept reference and flattened.
+# References to structures satisfying `keep` go into `keptrefs` without descending into them
 function flatten_refs(geom::GeometryStructure{T}; depth=-1, keep=Returns(false)) where {T}
     flatrefs = GeometryReference{T}[]
     keptrefs = GeometryReference{T}[]
