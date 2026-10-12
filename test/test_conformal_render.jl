@@ -299,6 +299,31 @@
         gmsh.finalize()
     end
 
+    @testset "render_conformal_groups! merges keys by name, into its own model" begin
+        square(x) = CurvilinearRegion(
+            CurvilinearPolygon(points(centered(Rectangle(10μm, 10μm)) + Point(x, 0μm)))
+        )
+        groups = Dict(
+            SemanticMeta(:a; index=1) => [square(0μm)],
+            SemanticMeta(:a; index=2) => [square(10μm)],
+            SemanticMeta(:b) => [square(30μm)]
+        )
+        sm = SolidModel("groups"; overwrite=true)
+        other = SolidModel("groups_other"; overwrite=true) # now gmsh's current model
+        gmsh.option.setNumber("General.Verbosity", 0)
+        SolidModels.render_conformal_groups!(sm, groups)
+        # Both `a` keys map to the layer name `a`; the two `a` squares share an edge
+        @test length(SolidModels.entitytags(sm["a", 2])) == 2
+        @test length(SolidModels.entitytags(sm["b", 2])) == 1
+        @test length(gmsh.model.getEntities(1)) == 4 + 3 + 4
+        # A second call adds to the existing group
+        SolidModels.render_conformal_groups!(sm, Dict(SemanticMeta(:b) => [square(50μm)]))
+        @test length(SolidModels.entitytags(sm["b", 2])) == 2
+        gmsh.model.set_current(SolidModels.name(other))
+        @test isempty(gmsh.model.getEntities(2))
+        gmsh.finalize()
+    end
+
     @testset "render_conformal! preserves shared vertex identity" begin
         # Two adjacent rectangles → the shared edge should resolve to a single
         # OCC edge tag. If dedup works, the total edge count is < 8 (would be
