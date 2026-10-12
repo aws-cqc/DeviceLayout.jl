@@ -401,6 +401,24 @@
             @test all(r -> structure(r) === s, refs(f))
             @test nrect(f) == nrect(top)
         end
+        # Each element of an ArrayReference gets the contents of its structure
+        top_arr = Cell("top_arr", nm)
+        addref!(top_arr, aref(A, dc=Point(10μm, 0μm), nc=3))
+        @test nrect(top_arr) == 3
+        @test length(refs(flatten(top_arr; depth=1))) == 3
+        # ArrayReference counts once, but references inside it count once per element
+        f = flatten(top_arr; max_copy=2)
+        @test isempty(elements(f))
+        @test length(refs(f)) == 3
+        @test all(r -> structure(r) === B, refs(f))
+        @test nrect(f) == 3
+        addref!(top_arr, A, Point(0μm, 10μm))
+        addref!(top_arr, A, Point(0μm, 20μm))
+        f = flatten(top_arr; max_copy=2)
+        @test isempty(elements(f))
+        @test length(refs(f)) == 3
+        @test all(r -> structure(r) === A, refs(f))
+        @test nrect(f) == nrect(top_arr) == 5
         # Kept references below a flattened intermediate structure
         mid = Cell("mid", nm)
         render!(mid, Rectangle(1μm, 1μm), GDSMeta())

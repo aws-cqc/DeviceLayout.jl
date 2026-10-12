@@ -200,7 +200,9 @@ This function has no effect on references for `depth == 0`, and unlimited depth 
 
 References to any structure that is referenced more than `max_copy` times within `depth`
 levels of the hierarchy are brought upwards but not flattened, and their contents stay
-inside them. Each `ArrayReference` counts as a single reference.
+inside them. References are counted as they would appear after flattening: an
+`ArrayReference` counts once, but each reference inside its structure counts once per array
+element.
 """
 function flatten(
     c::T;
@@ -237,19 +239,33 @@ end
 coordsys_type(::GeometryStructure{T}) where {T} = CoordinateSystem{T}
 coordsys_type(::T) where {T <: AbstractCoordinateSystem} = T
 
-# Number of references to each structure within `depth` levels of the hierarchy
+# Transformation of each copy of the referenced structure, in the parent's coordinates
+instance_transformations(ref::StructureReference) = (transformation(ref),)
+function instance_transformations(ref::ArrayReference)
+    a = transformation(ref)
+    return (
+        Transformations.Translation((i - 1) * ref.deltarow + (j - 1) * ref.deltacol) ∘ a for
+        i = 1:(ref.row) for j = 1:(ref.col)
+    )
+end
+
+ninstances(::StructureReference) = 1
+ninstances(ref::ArrayReference) = ref.row * ref.col
+
+# Number of references to each structure that flattening to `depth` would produce
 function structure_counts(geom::GeometryStructure; depth=-1)
     counts = Dict{GeometryStructure, Int}()
-    _structure_counts!(counts, geom, depth)
+    _structure_counts!(counts, geom, depth, 1)
     return counts
 end
 
-function _structure_counts!(counts, geom, depth)
+# `n` is the number of copies of `geom` in the flattened result
+function _structure_counts!(counts, geom, depth, n)
     depth == 0 && return
     for ref in refs(geom)
         s = structure(ref)
-        counts[s] = get(counts, s, 0) + 1
-        _structure_counts!(counts, s, depth - 1)
+        counts[s] = get(counts, s, 0) + n
+        _structure_counts!(counts, s, depth - 1, n * ninstances(ref))
     end
 end
 
@@ -283,15 +299,17 @@ function _flatten_refs(flatrefs, keptrefs, deeprefs, geom, a; depth, keep)
     end
     for ref in refs(geom)
         keep(structure(ref)) && continue
-        _flatten_refs(
-            flatrefs,
-            keptrefs,
-            deeprefs,
-            structure(ref),
-            a ∘ transformation(ref);
-            depth=depth - 1,
-            keep=keep
-        )
+        for t in instance_transformations(ref)
+            _flatten_refs(
+                flatrefs,
+                keptrefs,
+                deeprefs,
+                structure(ref),
+                a ∘ t;
+                depth=depth - 1,
+                keep=keep
+            )
+        end
     end
 end
 
