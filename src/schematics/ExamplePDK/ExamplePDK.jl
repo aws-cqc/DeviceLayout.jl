@@ -168,6 +168,31 @@ const SINGLECHIP_SOLIDMODEL_TARGET = SolidModelTarget(
     substrate_layers=[:chip_area], # CHIP_AREA will be extruded downward
     indexed_layers=[:port, :lumped_element, :integration, :wave_port], # Automatically index these layers
     wave_port_layers=[:wave_port], # WAVE_PORT are 1D line segments in x-y to be extruded in z
+    prerender_ops=[ # Curve-preserving 2D operations that `render_conformal!` runs instead
+        (   # Unify metal negative before removing from writeable_area
+            "metal_negative", # Output group name
+            union2d_curved!, # Operation
+            ("metal_negative", "metal_negative", 2, 2), # (object, tool, object_dim, tool_dim)
+            :remove_object => true
+        ),
+        (   # Get metal ground plane by subtracting negative from writeable area
+            "metal",
+            difference2d_curved!,
+            ("writeable_area", "metal_negative", 2, 2),
+            :remove_object => true # Remove "writeable_area" group after operation
+        ),
+        (   # Then add any positive back in
+            "metal",
+            union2d_curved!,
+            ("metal", "metal_positive", 2, 2),
+            :remove_tool => true
+        ),
+        (   # Remove the ports from the metal, as the postrender operations do
+            "metal",
+            difference2d_curved!,
+            ("metal", "port")
+        )
+    ],
     postrender_ops=[ # Manual definition of operations to run after 2D rendering
         (   # Unify metal negative before removing from writeable_area
             "metal_negative", # Output group name
@@ -245,6 +270,10 @@ function singlechip_solidmodel_target(boundary_groups...)
             ("metal", [boundary_groups...]),
             :remove_object => true
         )
+    )
+    push!(
+        target.prerenderer,
+        ("metal", difference2d_curved!, ("metal", [boundary_groups...]))
     )
     retained_physical_groups = [(x, 2) for x ∈ boundary_groups]
     append!(target.retained_physical_groups, retained_physical_groups)
