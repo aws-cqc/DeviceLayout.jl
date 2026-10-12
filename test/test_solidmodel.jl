@@ -948,7 +948,7 @@
     sty = Rounded(0.25μm, p0=points(r), selection_tolerance=1nm)
     place!(cs_local, styled(r, sty), SemanticMeta(:test))
     cs = CoordinateSystem("outer", nm)
-    addref!(cs, sref(cs_local, angle=π / 2))
+    addref!(cs, sref(cs_local, rot=π / 2))
     sm = SolidModel("test"; overwrite=true)
     @test_nowarn render!(sm, cs)
 
@@ -958,7 +958,7 @@
     sty = RelativeRounded(0.25, p0=points(r)[[1, 2]], selection_tolerance=1nm)
     place!(cs_local, styled(r, sty), SemanticMeta(:test))
     cs = CoordinateSystem("outer", nm)
-    addref!(cs, sref(cs_local, angle=π / 2))
+    addref!(cs, sref(cs_local, rot=π / 2))
     sm = SolidModel("test"; overwrite=true)
     @test_nowarn render!(sm, cs)
 

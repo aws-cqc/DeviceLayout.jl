@@ -129,7 +129,7 @@ function single_transmon(;
     ## Attach resonator to feedline
     # Instead of `fuse!` we use a schematic-based `attach!` method to place it along the path
     # Syntax is a mix of `fuse!` and how we attached the ports above
-    attach!(g, p_readout_node, rres_node => :feedline, 0mm, location=1)
+    attach!(g, p_readout_node, rres_node => :feedline, 0mm, location=:right)
 
     #### Create the schematic (position the components)
     floorplan = plan(g)

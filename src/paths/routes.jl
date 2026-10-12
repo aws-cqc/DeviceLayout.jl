@@ -152,10 +152,25 @@ end
 
 Specifies a sequence of rules for routing from one point to another, where `rules[i]` is used
 to route through the next `leg_lengths[i]` waypoints and/or endpoint.
+
+!!! warning "Deprecated"
+
+    `CompoundRouteRule` is deprecated and will be removed in DeviceLayout.jl 2.0. Call
+    `route!` once per leg with that leg's rule and style, or use
+    [`Paths.SingleChannelRouting`](@ref) for different behavior on different legs.
 """
 struct CompoundRouteRule <: RouteRule
     rules::Vector{RouteRule}
     leg_lengths::Vector{Int}
+    function CompoundRouteRule(rules, leg_lengths)
+        Base.depwarn(
+            "`CompoundRouteRule` is deprecated and will be removed in DeviceLayout.jl 2.0. " *
+            "Call `route!` once per leg with that leg's rule and style, or use " *
+            "`SingleChannelRouting` for different behavior on different legs.",
+            :CompoundRouteRule
+        )
+        return new(rules, leg_lengths)
+    end
 end
 CompoundRouteRule(rules::Vector{RouteRule}) =
     CompoundRouteRule(rules, ones(Int, length(rules)))

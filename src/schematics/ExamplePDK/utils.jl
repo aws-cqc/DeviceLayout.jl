@@ -55,7 +55,7 @@ function tap!(path::Path, sty::Paths.SimpleCPW=laststyle(path); location=1)
         centered(Rectangle(2 * Paths.extent(sty), laststyle(path).gap)),
         path.metadata
     )
-    attach!(path, sref(cs), zero(main_gap), location=(-location))
+    attach!(path, sref(cs), zero(main_gap), location=Paths.location_symbol(-location))
 
     return tap
 end

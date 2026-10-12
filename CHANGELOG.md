@@ -16,6 +16,28 @@ The format of this changelog is based on
     `SolidModels.set_mesh_size_callback!` installs the size callback for models assembled
     without `render!`.
 
+### Deprecated
+
+  - DXF export (`save("file.dxf", c, python)`); save to GDS and convert with an external tool
+    such as KLayout.
+  - `Paths.GeneralStrands`, including `Paths.Strands` with a callable `offset`, `width`, or
+    `spacing`; use constant arguments, or draw each strand as its own `Path`.
+  - `Paths.CompoundRouteRule`, and `RouteComponent` with a vector of styles (one per
+    `CompoundRouteRule` leg); call `route!` once per leg, or use channel routing.
+  - Integer `location` in `attach!` for `Path`, `RouteComponent`, and `SchematicGraph`, whose
+    sign is opposite the offset convention (positive to the left); use `location=:left`,
+    `:center`, or `:right` instead of `-1`, `0`, or `1`.
+  - `zero(::Segment)` and `zero(::Type{Segment{T}})`, which return a length rather than a
+    segment; use `zero(eltype(seg))` or `zero(T)`.
+  - Keyword synonyms in `sref`, `aref`, `StructureReference`, `ArrayReference`, `addref!`, and
+    `addarr!` (such as `mirror`, `zoom`, `angle`, `deltacol`, or `ncols`); use `xrefl`, `mag`,
+    `rot`, `dc`, `dr`, `nc`, and `nr`.
+
+### Removed
+
+  - `reinterpret(::Type, ::Point)`, which always threw a `MethodError`. `Point` now falls back to the
+    `AbstractArray` method from Base.
+
 ### Fixed
 
   - When OpenCASCADE's fragment history reports an entity as deleted with no successor while

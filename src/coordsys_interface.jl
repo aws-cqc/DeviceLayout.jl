@@ -26,12 +26,14 @@ Add a reference to `c2` to the list of references in `c1`.
 The reference to `c2` has origin `origin`; x-reflection, magnification factor, and rotation
 are set by keywords arguments.
 
-Synonyms are accepted for these keywords:
+Keyword arguments:
 
-  - X-reflection: `:xrefl`, `:xreflection`, `:refl`, `:reflect`, `:xreflect`,
-    `:xmirror`, `:mirror`
-  - Magnification: `:mag`, `:magnification`, `:magnify`, `:zoom`, `:scale`
-  - Rotation: `:rot`, `:rotation`, `:rotate`, `:angle`
+  - `xrefl`: `true` to reflect across the x-axis
+  - `mag`: magnification factor
+  - `rot`: rotation angle
+
+Other spellings of these keywords (such as `mirror`, `zoom`, or `angle`) are deprecated
+and will be removed in DeviceLayout.jl 2.0.
 """
 function addref!(
     c1::AbstractCoordinateSystem{T},
@@ -55,18 +57,18 @@ Add an `ArrayReference` to `c2` to the list of references in `c1`.
 The reference to `c2` has origin `origin`. Keyword arguments specify the column vector, row vector, number of columns,
 number of rows, x-reflection, magnification factor, and rotation.
 
-Synonyms are accepted for these keywords:
+Keyword arguments:
 
-  - Column vector `dc::Point{T}`: `:deltacol`, `:dcol`, `:dc`, `:vcol`, `:colv`, `:colvec`,
-    `:colvector`, `:columnv`, `:columnvec`, `:columnvector`
-  - Row vector: `:deltarow`, `:drow`, `:dr`, `:vrow`, `:rv`, `:rowvec`,
-    `:rowvector`
-  - Number of columns: `:nc`, `:numcols`, `:numcol`, `:ncols`, `:ncol`
-  - Number of rows: `:nr`, `:numrows`, `:numrow`, `:nrows`, `:nrow`
-  - X-reflection: `:xrefl`, `:xreflection`, `:refl`, `:reflect`, `:xreflect`,
-    `:xmirror`, `:mirror`
-  - Magnification: `:mag`, `:magnification`, `:magnify`, `:zoom`, `:scale`
-  - Rotation: `:rot`, `:rotation`, `:rotate`, `:angle`
+  - `dc::Point`: column vector
+  - `dr::Point`: row vector
+  - `nc::Int`: number of columns
+  - `nr::Int`: number of rows
+  - `xrefl`: `true` to reflect across the x-axis
+  - `mag`: magnification factor
+  - `rot`: rotation angle
+
+Other spellings of these keywords (such as `mirror`, `zoom`, `angle`, `deltacol`, or `ncols`)
+are deprecated and will be removed in DeviceLayout.jl 2.0.
 """
 function addarr!(
     c1::AbstractCoordinateSystem{T},
@@ -93,13 +95,14 @@ Add an `ArrayReference` to `c2` to the list of references in `c1`, based on rang
 therefore do not specify the extrema of the resulting `ArrayReference`'s bounding box;
 some care is required.
 
-Keyword arguments specify x-reflection, magnification factor, and rotation,
-with synonyms allowed:
+Keyword arguments:
 
-  - X-reflection: `:xrefl`, `:xreflection`, `:refl`, `:reflect`, `:xreflect`,
-    `:xmirror`, `:mirror`
-  - Magnification: `:mag`, `:magnification`, `:magnify`, `:zoom`, `:scale`
-  - Rotation: `:rot`, `:rotation`, `:rotate`, `:angle`
+  - `xrefl`: `true` to reflect across the x-axis
+  - `mag`: magnification factor
+  - `rot`: rotation angle
+
+Other spellings of these keywords (such as `mirror`, `zoom`, or `angle`) are deprecated
+and will be removed in DeviceLayout.jl 2.0.
 """
 function addarr!(
     c1::AbstractCoordinateSystem,
