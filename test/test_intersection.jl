@@ -95,6 +95,26 @@
     @test pathlength_nearest(turn, Point(0.9, -2)) ≈ 0
     @test pathlength_nearest(turn, Point(-1, 1)) ≈ 3π / 4
 
+    @testset "sweep for intersections" begin
+        # Crossing straights, a meander with curved segments, and a self-crossing loop
+        pas = [Path(i * 0.1mm, -1mm, α0=π / 2 + 0.1i) for i = -5:5]
+        straight!.(pas, 2mm, Ref(sty))
+        meander = Path(-1mm, 0.5mm)
+        for i = 1:5
+            straight!(meander, 2mm, sty)
+            turn!(meander, (-1)^i * π, 0.05mm)
+        end
+        loop = Path(-0.3mm, -0.3mm)
+        straight!(loop, 0.5mm, sty)
+        turn!(loop, 3π / 2, 0.1mm)
+        straight!(loop, 0.5mm)
+        all_paths = (pas..., meander, loop)
+        from_sweep = Intersect.intersections(all_paths...)
+        @test all(i1 < i2 for (i1, i2, _) in from_sweep)
+        @test length(from_sweep) == 126
+        @test any(i1[1] == i2[1] for (i1, i2, _) in from_sweep) # loop self-intersection
+    end
+
     @testset "mixed coordinate contexts (issue #212)" begin
         pa1 = Path(μm)  # μm-context
         Paths.turn!(pa1, -360°, 100μm, Paths.CPW(10μm, 6μm))
