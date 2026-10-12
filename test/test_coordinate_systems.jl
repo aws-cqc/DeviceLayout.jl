@@ -432,6 +432,26 @@
             @test all(r -> structure(r) === A2, refs(f))
             @test nrect(f) == nrect(top_mid) == 10
         end
+        # Contents of each array element are placed at that element, including under a
+        # rotated reference to the array, and when the array itself is kept
+        lls(c) = sort(lowerleft.(elements(flatten(c))))
+        sub = Cell("sub", nm)
+        render!(sub, Rectangle(Point(1, 1)μm, Point(2, 2)μm), GDSMeta())
+        sub_holder = Cell("sub_holder", nm)
+        addref!(sub_holder, sub, Point(2, 0)μm)
+        arr = Cell("arr", nm)
+        addref!(arr, aref(sub_holder, dc=Point(10μm, 0μm), nc=2))
+        @test lls(arr) ≈ [Point(3, 1)μm, Point(13, 1)μm]
+        top_rot = Cell("top_rot", nm)
+        addref!(top_rot, arr, rot=90°)
+        @test lls(top_rot) ≈ [Point(-2, 3)μm, Point(-2, 13)μm]
+        for i = 1:2 # sub_holder is now referenced 3 times, so the array is kept
+            addref!(top_rot, sub_holder, Point(0, 100i)μm)
+        end
+        f = flatten(top_rot; max_copy=2)
+        @test isempty(elements(f))
+        @test count(r -> r isa ArrayReference, refs(f)) == 1
+        @test lls(f) ≈ lls(top_rot)
     end
 
     @testset "Mapping metadata" begin
