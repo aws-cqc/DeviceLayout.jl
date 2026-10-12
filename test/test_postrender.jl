@@ -1180,6 +1180,32 @@ end
         @test material_area(out) ≈ 100 + π * 25 / 2 rtol = 1e-3
     end
 
+    @testset "near pinch with curves on both sides of a piece throws" begin
+        # A square and a disk touching at (10, 10). The disk's lower arc starts at the
+        # square's copy of the vertex and its upper arc ends at the other copy, so no single
+        # vertex ends both arcs unless the copies agree
+        upper = Paths.Turn(180°, 5.0μm; p0=Point(20.0μm, 10.0μm), α0=90°)
+        function square_and_disk(x)
+            lower = Paths.Turn(180°, (20 - x) / 2 * μm; p0=Point(x * μm, 10.0μm), α0=-90°)
+            vertices = [
+                Point(0.0μm, 0.0μm),
+                Point(10.0μm, 0.0μm),
+                Point(x * μm, 10.0μm),
+                Paths.p1(lower),
+                Paths.p1(upper),
+                Point(0.0μm, 10.0μm)
+            ]
+            return CurvilinearRegion(CurvilinearPolygon(vertices, [lower, upper], [3, 4]))
+        end
+        @test_throws ArgumentError split_pinches([square_and_disk(10.001)])
+        # With the copies 1e-6 nm apart, the disk splits off with both arcs
+        out = split_pinches([square_and_disk(10.000000001)])
+        @test length(out) == 2
+        disk = only(filter(r -> !isempty(r.exterior.curves), out))
+        @test length(disk.exterior.curves) == 2
+        @test material_area(out) ≈ 100 + π * 25 rtol = 1e-3
+    end
+
     @testset "keyholed hole attached to the wrong region moves to the one containing it" begin
         # As Clipper can output for the DemoQPU17 metal layer: a hole keyholed to the
         # open-ended center conductor inside it is attached to a neighboring conductor `b`
@@ -1213,6 +1239,11 @@ end
     @testset "zero-area pieces are dropped" begin
         # The contour runs out to (10, 0) and back along itself to (5, 0)
         out = split_pinches([region([(0, 0), (5, 0), (10, 0), (5, 0), (5, 5), (0, 5)])])
+        @test length(out) == 1
+        @test Set(points(out[1].exterior)) == Set(pts([(5, 0), (5, 5), (0, 5), (0, 0)]))
+        # The same with a vertex at (7, 0) on the way back, so the piece has three vertices
+        xy = [(0, 0), (5, 0), (10, 0), (7, 0), (5, 0), (5, 5), (0, 5)]
+        out = split_pinches([region(xy)])
         @test length(out) == 1
         @test Set(points(out[1].exterior)) == Set(pts([(5, 0), (5, 5), (0, 5), (0, 0)]))
     end

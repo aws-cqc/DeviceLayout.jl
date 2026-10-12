@@ -814,13 +814,25 @@ end
 # Split `cp` at the pinch between vertices `i < j` into the loops `i:(j - 1)` and
 # `j:n, 1:(i - 1)`, each with one copy of the pinch vertex. Curves go with their start
 # vertex. The two copies agree only to within the tolerance, so a loop whose closing edge
-# is a curve keeps the copy that curve ends on, unless its first edge is a curve too.
+# is a curve keeps the copy that curve ends on. If its first edge is a curve too, neither
+# copy fits both curves, so the copies must agree to within the 1e-3 nm that `to_polygons`
+# allows between a curve's end and the next vertex.
 function _split_at_pinch(cp::CurvilinearPolygon{T}, i::Int, j::Int) where {T}
     pts = points(cp)
     n = length(pts)
     starts = Set(cp.curve_start_idx)
-    first1 = (j - 1 in starts && !(i in starts)) ? pts[j] : pts[i]
-    first2 = (mod1(i - 1, n) in starts && !(j in starts)) ? pts[i] : pts[j]
+    if ((i in starts && j - 1 in starts) || (j in starts && mod1(i - 1, n) in starts)) &&
+       !isapprox(pts[i], pts[j]; atol=1e-3 * onenanometer(T))
+        gap = round(_nm(norm(pts[i] - pts[j])); sigdigits=3)
+        throw(
+            ArgumentError(
+                "split_pinches: at the pinch at $(pts[i]), a piece starts and ends with " *
+                "curves whose ends are $gap nm apart, so it can't be closed"
+            )
+        )
+    end
+    first1 = j - 1 in starts ? pts[j] : pts[i]
+    first2 = mod1(i - 1, n) in starts ? pts[i] : pts[j]
     pts1 = pushfirst!(pts[(i + 1):(j - 1)], first1)
     pts2 = pushfirst!(vcat(pts[(j + 1):n], pts[1:(i - 1)]), first2)
     curves1, curves2 = empty(cp.curves), empty(cp.curves)
@@ -854,12 +866,14 @@ function _split_cpoly_at_pinches(cp::CurvilinearPolygon{T}, atol_nm) where {T}
     return pieces
 end
 
-# A simple loop with its vertices in nm (curves discretized to within 1 nm) and its signed
-# area in nm², positive for counterclockwise.
+# A simple loop with its vertices in nm (curves discretized to within 1 nm), its signed
+# area in nm², positive for counterclockwise, and its bounding box
+# `(xmin, ymin, xmax, ymax)`.
 struct _PinchPiece{T}
     contour::CurvilinearPolygon{T}
     loop::Vector{NTuple{2, Float64}}
     signed_area::Float64
+    bbox::NTuple{4, Float64}
 end
 
 function _PinchPiece(cp::CurvilinearPolygon{T}) where {T}
@@ -871,15 +885,16 @@ function _PinchPiece(cp::CurvilinearPolygon{T}) where {T}
         disc = discretize_curve(curve_at[k], onenanometer(T); rtol=nothing)
         append!(loop, [(_nm(getx(q)), _nm(gety(q))) for q in disc[2:(end - 1)]])
     end
+    isempty(loop) && return _PinchPiece{T}(cp, loop, 0.0, (Inf, Inf, -Inf, -Inf))
+    (xmin, xmax), (ymin, ymax) = extrema(first, loop), extrema(last, loop)
     # Shoelace formula, relative to the first vertex for precision far from the origin
-    isempty(loop) && return _PinchPiece{T}(cp, loop, 0.0)
     x0, y0 = loop[1]
     a = 0.0
     for k in eachindex(loop)
         (x1, y1), (x2, y2) = loop[k], loop[mod1(k + 1, length(loop))]
         a += (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)
     end
-    return _PinchPiece{T}(cp, loop, a / 2)
+    return _PinchPiece{T}(cp, loop, a / 2, (xmin, ymin, xmax, ymax))
 end
 
 # Distance from `(px, py)` to the closed loop `loop`.
@@ -910,17 +925,21 @@ end
 # Whether `inner` lies inside `outer`, judged at the first point of `inner` that is not
 # on the boundary of `outer` (a pinch vertex lies on both). `false` if there is none.
 function _piece_inside(inner::_PinchPiece, outer::_PinchPiece, atol_nm)
+    # `inner` must lie within the bounding box of `outer`, up to `atol` at a pinch and the
+    # 1 nm by which a curve can bulge past its discretization
+    (ix0, iy0, ix1, iy1), (ox0, oy0, ox1, oy1) = inner.bbox, outer.bbox
+    m = atol_nm + 1.0
+    (ix0 < ox0 - m || iy0 < oy0 - m || ix1 > ox1 + m || iy1 > oy1 + m) && return false
     k = findfirst(((px, py),) -> _dist_to_loop(px, py, outer.loop) > atol_nm, inner.loop)
     return !isnothing(k) && _inside_loop(inner.loop[k]..., outer.loop)
 end
 
 # Split `contour` at its pinches and sort the pieces by winding: pieces wound like the
 # whole contour keep its role and go to `same`, the others go to `opposite`. Pieces with
-# fewer than three vertices and no curves are dropped.
+# an area of at most `atol`² are dropped.
 function _classify_pieces!(same, opposite, contour::CurvilinearPolygon, atol_nm)
-    pieces = _split_cpoly_at_pinches(contour, atol_nm)
-    filter!(p -> length(points(p)) >= 3 || !isempty(p.curves), pieces)
-    loops = _PinchPiece.(pieces)
+    loops = _PinchPiece.(_split_cpoly_at_pinches(contour, atol_nm))
+    filter!(p -> abs(p.signed_area) > atol_nm^2, loops)
     # The whole contour's signed area is the sum over its pieces
     net = sum(p -> p.signed_area, loops; init=0.0)
     for p in loops
@@ -1009,16 +1028,18 @@ split region that lies outside every piece of that region goes to the innermost 
 output of one boolean operation). Throws an `ArgumentError` if a hole lies outside every
 region, as when a contour crosses itself rather than touching.
 
-Pieces with fewer than three vertices and no curves are dropped. Curves (`Paths.Turn`,
-`Paths.BSpline`, `Paths.OffsetSegment`) stay native. Regions without pinches are returned
-unchanged.
+Pieces with an area of at most `atol^2`, such as a piece with two vertices and no curves,
+are dropped. Curves (`Paths.Turn`, `Paths.BSpline`, `Paths.OffsetSegment`) stay native.
+Regions without pinches are returned unchanged.
 
 `atol` should match the tolerance used to merge vertices when rendering (see the
 `vertex_merge_atol` option of [`SolidModels.ConformalRenderContext`](@ref), 2 nm by
 default). Pinches are found pairwise, so the vertices that meet at a pinch should lie within
 `atol` of each other, as the render-time merge also assumes. A cluster of nearby vertices
-spread over more than `atol` gives undefined results. By DeviceLayout convention, lengths
-without units are presumed to be in microns.
+spread over more than `atol` gives undefined results. Where a piece starts and ends with
+curves, both curves must end at one vertex, so the two copies of the pinch vertex must agree
+to within 1e-3 nm; otherwise `split_pinches` throws an `ArgumentError`. By DeviceLayout
+convention, lengths without units are presumed to be in microns.
 
 # Example
 
