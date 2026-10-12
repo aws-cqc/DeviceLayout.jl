@@ -217,7 +217,7 @@
         cref = CoordinateSystemReference(csub, Point(0.0μm, 10.0μm))
         c = Cell("main", nm)
         setstyle!(pa[1], Paths.Trace(1μm))
-        attach!(pa, cref, range(0μm, stop=pathlength(pa), length=3), location=-1)
+        attach!(pa, cref, range(0μm, stop=pathlength(pa), length=3), location=:left)
         render!(c, pa)
 
         @test length(c.elements) == 3
@@ -286,7 +286,7 @@
         @test bounds(cs) == bounds(c2)
         @test_throws DimensionError CoordinateSystemArray(cs_rect, Point(0, 0))
         cs2 = CoordinateSystem("temp", nm2μm)
-        addarr!(cs2, cs_rect, dcol=Point(10μm, 0μm), ncol=5)
+        addarr!(cs2, cs_rect, dc=Point(10μm, 0μm), nc=5)
         # Conversion does not copy structure
         aref_nm = convert(ArrayReference{typeof(1.0nm)}, cs2.refs[1])
         @test structure(aref_nm) === cs_rect
@@ -344,7 +344,7 @@
         render!(cs3, Rectangle(4, 2), GDSMeta())
         pa = Path(Point(0.0, 0.0), α0=90°)
         straight!(pa, 100, Paths.Trace(2.0))
-        attach!(pa, ref2, 50; location=-1)
+        attach!(pa, ref2, 50; location=:left)
         render!(cs, pa, GDSMeta())
         a = transformation(cs, ref)
         @test origin(a) ≈ Point(-1.0, 50.0)
@@ -363,7 +363,7 @@
         straight!(pa, 100, Paths.Trace(2))
         c = CoordinateSystem{Float64}("poly")
         render!(c, difference2d(Rectangle(2, 3), Rectangle(1, 2)), GDSMeta())
-        attach!(pa, sref(c, Point(1, 2), rot=10°), 100, location=-1)
+        attach!(pa, sref(c, Point(1, 2), rot=10°), 100, location=:left)
         Paths.simplify!(pa)
         c2 = CoordinateSystem{Float64}("path")
         render!(c2, pa, GDSMeta())

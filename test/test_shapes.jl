@@ -230,7 +230,7 @@
     sty = Rounded(0.25μm, p0=points(r), selection_tolerance=1nm)
     place!(cs_local, styled(r, sty), GDSMeta())
     cs = CoordinateSystem("outer", nm)
-    addref!(cs, sref(cs_local, angle=π / 2))
+    addref!(cs, sref(cs_local, rot=π / 2))
 
     # flattening must transform p0 too
     @test all(cs.refs[1].structure.elements[1].sty.p0 .≈ points(r))
@@ -243,7 +243,7 @@
     sty = Rounded(0.25μm, p0=points(r), selection_tolerance=1nm)
     place!(cs_local, styled(r, sty), GDSMeta())
     cs = CoordinateSystem("outer", nm)
-    addref!(cs, sref(cs_local, angle=π / 2))
+    addref!(cs, sref(cs_local, rot=π / 2))
 
     # flattening must transform p0 too
     @test all(cs.refs[1].structure.elements[1].sty.p0 .≈ points(r))

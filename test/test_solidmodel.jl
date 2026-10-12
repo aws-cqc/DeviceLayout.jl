@@ -948,7 +948,7 @@
     sty = Rounded(0.25μm, p0=points(r), selection_tolerance=1nm)
     place!(cs_local, styled(r, sty), SemanticMeta(:test))
     cs = CoordinateSystem("outer", nm)
-    addref!(cs, sref(cs_local, angle=π / 2))
+    addref!(cs, sref(cs_local, rot=π / 2))
     sm = SolidModel("test"; overwrite=true)
     @test_nowarn render!(sm, cs)
 
@@ -958,7 +958,7 @@
     sty = RelativeRounded(0.25, p0=points(r)[[1, 2]], selection_tolerance=1nm)
     place!(cs_local, styled(r, sty), SemanticMeta(:test))
     cs = CoordinateSystem("outer", nm)
-    addref!(cs, sref(cs_local, angle=π / 2))
+    addref!(cs, sref(cs_local, rot=π / 2))
     sm = SolidModel("test"; overwrite=true)
     @test_nowarn render!(sm, cs)
 
@@ -2267,5 +2267,50 @@ end
         sm["mixed"] = [(3, b)]                  # replace the dim-3 group only
         @test pgname(sm["mixed", 3]) == "mixed"
         @test pgname(sm["mixed", 2]) == "mixed" # dim-2 name restored after the clear
+    end
+end
+
+@testitem "_remap_orphans! matches vanished entities by bounding box" setup =
+    [CommonTestSetup] begin
+    using DeviceLayout.SolidModels
+    import DeviceLayout.SolidModels: gmsh, _remap_orphans!
+
+    # OCC occasionally reports an operand as deleted with no successor while a new entity
+    # with the same bounding box appears. The recovery is geometric, so it can be exercised
+    # without provoking that history: fabricate a vanished operand whose recorded box equals
+    # that of entities the model has never seen.
+    DT = Tuple{Int32, Int32}
+    sm = SolidModel("remap_orphans"; overwrite=true)
+    gmsh.model.set_current("remap_orphans")
+    a = gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
+    gmsh.model.occ.synchronize()
+    box = gmsh.model.getBoundingBox(3, a)
+    vanished = DT((3, 999))
+    setup() = ([vanished], [DT[]], Dict(vanished => box), Set{DT}())
+
+    @testset "a unique new entity with the same box is adopted" begin
+        allents, entmap, boxes_before, ents_before = setup()
+        @test_logs (:info, r"recovered 1 of 1") _remap_orphans!(
+            entmap,
+            allents,
+            boxes_before,
+            ents_before,
+            [3]
+        )
+        @test entmap[1] == [DT((3, a))]
+    end
+
+    @testset "two candidates sharing the box are ambiguous and warned about" begin
+        b = gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)   # coincident with `a`
+        gmsh.model.occ.synchronize()
+        allents, entmap, boxes_before, ents_before = setup()
+        @test_logs (:warn, r"2 new entities share its bounding box") _remap_orphans!(
+            entmap,
+            allents,
+            boxes_before,
+            ents_before,
+            [3]
+        )
+        @test isempty(entmap[1])
     end
 end

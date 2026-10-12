@@ -915,10 +915,10 @@ function load(f::File{format"GDS"}; verbose::Bool=false, nounits::Bool=false)
                     CellArray(
                         cells[x.name],
                         x.origin,
-                        deltacol=x.deltacol,
-                        deltarow=x.deltarow,
-                        col=x.col,
-                        row=x.row,
+                        dc=x.deltacol,
+                        dr=x.deltarow,
+                        nc=x.col,
+                        nr=x.row,
                         xrefl=x.xrefl,
                         mag=x.mag,
                         rot=x.rot

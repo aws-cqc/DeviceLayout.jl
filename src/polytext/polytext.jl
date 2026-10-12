@@ -163,7 +163,7 @@ function renderchar!(sty::FontDerived, c, s, existing_chars, hpos, vpos, offset,
             println("Character '", s, "' not found. Adding to CoordSysRef dictionary.")
         if haskey(chardict(sty), s)
             s_cs = drawchar(sty, c, s)
-            crs = sref(s_cs, Point(0.5charwidth, charwidth); scale)
+            crs = sref(s_cs, Point(0.5charwidth, charwidth); mag=scale)
             push!(
                 c.refs,
                 crs + Point(charwidth * (hpos - 1), -2charwidth * (vpos - offset))

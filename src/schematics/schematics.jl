@@ -567,14 +567,18 @@ matching_hooks(c1::S, c2::T) where {S <: AbstractComponent, T <: AbstractCompone
         nodehook2::Pair{T, Symbol},
         position;
         i=lastindex(component(pathnode)),
-        location=0) where {S <: ComponentNode, T <: ComponentNode}
-    Usage: attach!(g, pathnode, node2=>:hook2, position; i=segment_idx, location=0)
+        location=:center) where {S <: ComponentNode, T <: ComponentNode}
+    Usage: attach!(g, pathnode, node2=>:hook2, position; i=segment_idx, location=:center)
 
 Adds an edge to `g` between `pathnode` and `node2`, attaching `:hook2` to a specified point along `pathnode`.
 
 A new `HandedPointHook` is generated a distance `position` along the segment specified by `i`.
-If `location` is +1 or -1, the generated hook is offset to the right or left of the segment by
-the extent defined by the path's style, with the hook's inward direction pointing back to the segment.
+If `location` is `:right` or `:left`, the generated hook is offset to the right or left of the
+segment by the extent defined by the path's style, with the hook's inward direction pointing back
+to the segment.
+
+Integer `location` values `1`, `0`, and `-1` (for `:right`, `:center`, and `:left`) are
+deprecated and will be removed in DeviceLayout.jl 2.0.
 """
 function DeviceLayout.attach!(
     g::SchematicGraph,
@@ -582,16 +586,15 @@ function DeviceLayout.attach!(
     nodehook2::Pair{T, Symbol},
     position::Coordinate;
     i=lastindex(component(pathnode)),
-    location=0
+    location=:center
 ) where {S <: ComponentNode, T <: ComponentNode}
     pathcomp = component(pathnode)
+    location = Paths.attach_location(location)
 
     segment = pathcomp[i].seg
     dir = direction(segment, position)
     p_hook = segment(position)
     if location != 0
-        (location < -1 || location > 1) && error("Attachment location must be -1, 0, or 1.")
-
         offset = Paths.extent(pathcomp[i].sty, position)
         off_x = offset * cos(dir - location * π / 2)
         off_y = offset * sin(dir - location * π / 2)
@@ -610,7 +613,7 @@ function DeviceLayout.attach!(
     comphook2::Pair{T, Symbol},
     position::Coordinate;
     i=lastindex(component(pathnode)),
-    location=0
+    location=:center
 ) where {S <: ComponentNode, T <: AbstractComponent}
     n = add_node!(g, first(comphook2))
     return attach!(g, pathnode, n => last(comphook2), position; i=i, location=location)

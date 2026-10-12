@@ -16,10 +16,10 @@ _replace_structure(ref::StructureReference, geom::GeometryStructure) =
 _replace_structure(ref::ArrayReference, geom::GeometryStructure) = aref(
     geom,
     transformation(ref);
-    deltacol=ref.deltacol,
-    deltarow=ref.deltarow,
-    col=ref.col,
-    row=ref.row
+    dc=ref.deltacol,
+    dr=ref.deltarow,
+    nc=ref.col,
+    nr=ref.row
 )
 
 _apply_target_style!(geom::Union{Path, Cell}, sty::OptionalStyle) = throw(

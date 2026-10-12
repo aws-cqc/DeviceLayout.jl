@@ -92,7 +92,6 @@ const USCALE = 1.0 * Unitful.fm
 const SCALE  = 10.0^9
 
 clipper() = (DeviceLayout._clip[])::Clipper.Clip
-coffset() = (DeviceLayout._coffset[])::Clipper.ClipperOffset
 
 @inline unsafe_round(x::Number) = round(ustrip(x)) * unit(x)
 @inline unsafe_round(x::Point) = unsafe_round.(x)

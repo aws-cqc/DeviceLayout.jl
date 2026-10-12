@@ -128,24 +128,24 @@ Notice that we did not call `add_node!` for `feedline` first. When given a bare 
 
 [`attach!`](@ref) connects a component to a specific point along a path, rather than to a named hook. This is a schematic-based analogue of how you used `attach!` in [Working with Paths](./working_with_paths.md) to place a reference to the resonator along the feedline.
 
-Typically, you'd write something like `attach!(g, feedline_node, resonator_node => :feedline, 2mm, location=1)` to position a resonator's `:feedline` hook 2mm along and on the right side of the path. However, we made a choice to work with bare Paths as lightweight components, and the bare Path doesn't have such a hook at the necessary position and orientation.
+Typically, you'd write something like `attach!(g, feedline_node, resonator_node => :feedline, 2mm, location=:right)` to position a resonator's `:feedline` hook 2mm along and on the right side of the path. However, we made a choice to work with bare Paths as lightweight components, and the bare Path doesn't have such a hook at the necessary position and orientation.
 
 Instead, place a resonator at a coupling position on the feedline using a Spacer:
 
 ```@example schematic
 resonator_node = add_node!(g, resonator)
 # This won't attach with the desired spacing and orientation
-# attach!(g, feedline_node, resonator_node => :p0, 2mm, location=1)
+# attach!(g, feedline_node, resonator_node => :p0, 2mm, location=:right)
 # So we'll attach another Spacer
 coupling_gap = 5μm
 spacing = coupling_gap + Paths.extent(cpw)
-coupling_spacer_node = attach!(g, feedline_node, Spacer(0μm, -spacing) => :p0_south, 2mm; location=1)
+coupling_spacer_node = attach!(g, feedline_node, Spacer(0μm, -spacing) => :p0_south, 2mm; location=:right)
 fuse!(g, coupling_spacer_node => :p1_west, resonator_node => :p0)
 ```
 
 In practice, you'll usually avoid needing the `Spacer` by defining your own resonator component with the necessary hook. However, it may be a useful exercise to think through how this Spacer results in the desired resonator position.
 
-The `location=1` offsets the attachment to the right side of the feedline trace, as though with a feedline hook pointing back towards the trace ("north"). The `:p0_south` hook on the spacer points opposite that hook already, so `attach!` does not rotate it. The resonator then fuses to the `:p1_west` hook, by orienting its `:p0` hook in the opposite direction ("east"). Since the `:p0` hook points along a path's initial direction, the initial direction of the resonator path is "east". 
+The `location=:right` offsets the attachment to the right side of the feedline trace, as though with a feedline hook pointing back towards the trace ("north"). The `:p0_south` hook on the spacer points opposite that hook already, so `attach!` does not rotate it. The resonator then fuses to the `:p1_west` hook, by orienting its `:p0` hook in the opposite direction ("east"). Since the `:p0` hook points along a path's initial direction, the initial direction of the resonator path is "east". 
 
 Meanwhile, thanks to the Spacer, the path starts at a point `spacing` below the edge of the ground of the feedline CPW; since `spacing = coupling_gap + Paths.extent(cpw)`, the width of the ground plane between the feedline and resonator is `coupling_gap`.
 

@@ -148,28 +148,6 @@
     @test α0(pa) == α_start
     @test α1(pa) == α_end
 
-    crule = Paths.CompoundRouteRule([
-        Paths.StraightAnd90(min_bend_radius=20, max_bend_radius=100),
-        Paths.BSplineRouting(endpoints_speed=2000),
-        Paths.StraightAnd45(min_bend_radius=20, max_bend_radius=100)
-    ])
-    r5 = Route(
-        crule,
-        p_start,
-        Point(50, 90),
-        α_start,
-        135°,
-        waypoints=[Point(100, 45), Point(100, 70)],
-        waydirs=[0, π]
-    )
-    pa = Path(r5, [sty, sty, sty])
-    @test p1(pa) ≈ Point(50, 90)
-    @test p1(pa.nodes[2].seg) ≈ Point(100, 45)
-    @test α1(pa.nodes[2].seg) == 0
-    @test p1(pa.nodes[3].seg) ≈ Point(100, 70)
-    @test α1(pa.nodes[3].seg) == 180°
-    @test α1(pa) == 135°
-
     # StraightAnd45 with automatic snake after waypoints
     p_end = Point(200, 150)
     waypoints = [Point(40.0, 80.0), Point(100.0, 100.0)]

@@ -97,14 +97,14 @@ attach!.(
     rres_node => :readout_line,
     pathlength(SchematicDrivenLayout.component(coupling_seg_node).path) / 2,
     i=1,
-    location=1
+    location=:right
 )
 # ... then fuse/route these to other nodes as usual
 ```
 
 ##### How do I attach components along a route in the schematic?
 
-If you have an existing component created by `route!(::SchematicGraph, ...)`, you can attach `CoordinateSystemReferences` with the function `attach!(r::RouteComponent, c::CoordSysRef, t::Coordinate; location::Int=0)`, and it works like attaching things to a single-segment `Path`. Right now there's no way to attach a `Component` along a `RouteComponent` so that it becomes part of the schematic. For that, use a `Path` with `attach!(::SchematicGraph, ...)`.
+If you have an existing component created by `route!(::SchematicGraph, ...)`, you can attach `CoordinateSystemReferences` with the function `attach!(r::RouteComponent, c::CoordSysRef, t::Coordinate; location=:center)`, and it works like attaching things to a single-segment `Path`. Right now there's no way to attach a `Component` along a `RouteComponent` so that it becomes part of the schematic. For that, use a `Path` with `attach!(::SchematicGraph, ...)`.
 
 ##### What's with all the semicolons?
 

@@ -166,8 +166,15 @@ abstract type Segment{T <: Coordinate} end
 @inline Base.eltype(::Segment{T}) where {T} = T
 @inline Base.eltype(::Type{Segment{T}}) where {T} = T
 
-Base.zero(::Segment{T}) where {T} = zero(T)     # TODO: remove and fix for 0.6 only versions
-Base.zero(::Type{Segment{T}}) where {T} = zero(T)
+# Deprecated because it returns a length rather than a segment.
+function Base.zero(::Segment{T}) where {T}
+    Base.depwarn(
+        "`zero(::Segment)` is deprecated and will be removed in DeviceLayout.jl 2.0. " *
+        "Use `zero(eltype(seg))` for a zero length.",
+        :zero
+    )
+    return zero(T)
+end
 
 # Used only to get dispatch to work right with ForwardDiff.jl.
 struct Curv{T}
@@ -187,7 +194,14 @@ curvature(s, t) = ForwardDiff.derivative(Curv(s), t)
 abstract type DiscreteSegment{T} <: Segment{T} end
 abstract type ContinuousSegment{T} <: Segment{T} end
 
-Base.zero(::Type{ContinuousSegment{T}}) where {T} = zero(T)
+function Base.zero(::Union{Type{Segment{T}}, Type{ContinuousSegment{T}}}) where {T}
+    Base.depwarn(
+        "`zero(::Type{Segment{T}})` is deprecated and will be removed in DeviceLayout.jl " *
+        "2.0. Use `zero(T)` for a zero length.",
+        :zero
+    )
+    return zero(T)
+end
 
 # doubly linked-list behavior
 mutable struct Node{T} <: GeometryEntity{T}
@@ -705,7 +719,7 @@ function pathlength end
 pathlength(p::Path) = pathlength(nodes(p))
 pathlength(array::AbstractArray{Node{T}}) where {T} =
     mapreduce(pathlength, +, array; init=zero(T))
-pathlength(array::AbstractArray{T}) where {T <: Segment} =
+pathlength(array::AbstractArray{<:Segment{T}}) where {T} =
     mapreduce(pathlength, +, array; init=zero(T))
 pathlength(node::Node) = pathlength(segment(node))
 

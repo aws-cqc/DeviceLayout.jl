@@ -86,8 +86,18 @@ Export a `Cell` to a DXF file. Uses the `ezdxf` program in Python, and requires
 the python executable path that has that package installed
 (could simply be `python`, or `/Users/user/.julia/conda/3/bin/python`).
 Generates a Python script and runs it, to avoid PyCall dependency.
+
+!!! warning "Deprecated"
+
+    DXF export is deprecated and will be removed in DeviceLayout.jl 2.0. Save to GDS
+    instead and convert with an external tool such as KLayout.
 """
 function save(file::File{format"DXF"}, c::Cell, python::String)
+    Base.depwarn(
+        "DXF export is deprecated and will be removed in DeviceLayout.jl 2.0. " *
+        "Save to GDS with `save(\"file.gds\", c)` and convert with an external tool such as KLayout.",
+        :save
+    )
     #TODO convert Cell to DXF BLOCK. Just flattens for now.
     cflat = flatten(c)
     mktemp() do path, f

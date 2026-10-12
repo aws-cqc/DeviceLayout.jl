@@ -75,7 +75,7 @@
     straight!(pa, 10μm, Paths.Trace(2μm))
     cs = CoordinateSystem("test", nm)
     place!(cs, Rectangle(10μm, 10μm), GDSMeta())
-    attach!(pa, sref(cs), 5μm, location=1)
+    attach!(pa, sref(cs), 5μm, location=:right)
     psty_complex = PeriodicStyle(pa)
     # Note: PeriodicStyle doesn't work with generic taper; same as CompoundStyle issue #13
     # But constructor based on a path handles generic tapers

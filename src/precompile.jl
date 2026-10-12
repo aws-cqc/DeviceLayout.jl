@@ -29,10 +29,9 @@ else
             ".gds",
             [:DeviceLayout => UUID("ebf59a4a-04ec-49d7-8cd4-c9382ceb8e85")]
         )
-        # Clipper handles are normally created in `__init__`, which has not run yet;
-        # `__init__` replaces these when the package is loaded.
+        # The Clipper handle is normally created in `__init__`, which has not run yet;
+        # `__init__` replaces it when the package is loaded.
         global _clip = Ref(Clipper.Clip())
-        global _coffset = Ref(Clipper.ClipperOffset())
         outdir = mktempdir()
         @compile_workload begin
             cs = CoordinateSystem("test", nm)
@@ -75,7 +74,7 @@ else
                 ExampleTappedHairpin(; straight_length=1.25mm, name="res2") => :tap,
                 0.5mm;
                 i=1,
-                location=1
+                location=:right
             )
             fuse!(g, chip => :port_3, pa2_node => :p0)
             route!(
@@ -129,6 +128,5 @@ else
         reset_uniquename!()
         # Don't bake stale Clipper handles into the package image
         global _clip = nothing
-        global _coffset = nothing
     end
 end

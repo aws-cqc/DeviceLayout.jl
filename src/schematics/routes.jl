@@ -22,6 +22,10 @@ Wraps a `Route` in a `Component` type for use with schematics.
 taken to be in a route-local coordinate system, with the origin at the route start
 and the x-axis in the route's initial direction. Otherwise, they will be relative to
 the parent `Schematic` global coordinate system.
+
+A `sty` vector with more than one style, applying `sty[i]` to the `i`th leg of a
+`CompoundRouteRule`, is deprecated along with `CompoundRouteRule` and will be removed in
+DeviceLayout.jl 2.0, when the field becomes a single style.
 """
 mutable struct RouteComponent{T, R <: Paths.RouteRule} <: AbstractComponent{T}
     name::String
@@ -30,7 +34,15 @@ mutable struct RouteComponent{T, R <: Paths.RouteRule} <: AbstractComponent{T}
     sty::Vector{Paths.Style}
     meta::Meta
     _path::Path{T}
-    RouteComponent{T, R}(n, r, g, s, m) where {T, R} = new{T, R}(n, r, g, s, m, Path{T}(n))
+    function RouteComponent{T, R}(n, r, g, s, m) where {T, R}
+        length(s) > 1 && Base.depwarn(
+            "A `RouteComponent` with a vector of styles is deprecated and will be removed " *
+            "in DeviceLayout.jl 2.0, along with `CompoundRouteRule`. Use one `route!` per " *
+            "leg, each with a single style.",
+            :RouteComponent
+        )
+        return new{T, R}(n, r, g, s, m, Path{T}(n))
+    end
 end
 RouteComponent(
     name::String,
@@ -58,7 +70,13 @@ function redecorate!(path::Path, sty::Paths.DecoratedStyle)
             t = pathlength(path) + t
         end
         idx = findlast(seg_start_pos .<= t)
-        attach!(path, ref, t - seg_start_pos[idx], i=idx, location=dir)
+        attach!(
+            path,
+            ref,
+            t - seg_start_pos[idx],
+            i=idx,
+            location=Paths.location_symbol(dir)
+        )
     end
 end
 
@@ -227,22 +245,17 @@ function attach!(
     r::RouteComponent,
     c::CoordSysRef,
     t::Coordinate;
-    location::Int=0,
+    location::Union{Symbol, Int}=:center,
     mark_dirty=true
 )
     mark_dirty && empty!(r._path)
-    return r.sty[1] = Paths.decorate(r.sty[1], eltype(r.r), t, location, c)
+    return r.sty[1] =
+        Paths.decorate(r.sty[1], eltype(r.r), t, Paths.attach_location(location), c)
 end
 
-function attach!(
-    r::RouteComponent,
-    c::CoordSysRef,
-    t;
-    location=zeros(Int, length(t)),
-    mark_dirty=true
-)
+function attach!(r::RouteComponent, c::CoordSysRef, t; location=:center, mark_dirty=true)
     mark_dirty && empty!(r._path)
-    for (ti, li) in zip(t, Iterators.cycle(location))
+    for (ti, li) in zip(t, Paths.cycle_locations(location))
         attach!(r, c, ti, location=li, mark_dirty=false)
     end
 end

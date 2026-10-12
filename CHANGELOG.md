@@ -20,8 +20,38 @@ The format of this changelog is based on
     classified by winding, so keyholed islands and holes are kept. Run it after boolean
     operations and `split_t_junctions!`.
 
+### Deprecated
+
+  - DXF export (`save("file.dxf", c, python)`); save to GDS and convert with an external tool
+    such as KLayout.
+  - `Paths.GeneralStrands`, including `Paths.Strands` with a callable `offset`, `width`, or
+    `spacing`; use constant arguments, or draw each strand as its own `Path`.
+  - `Paths.CompoundRouteRule`, and `RouteComponent` with a vector of styles (one per
+    `CompoundRouteRule` leg); call `route!` once per leg, or use channel routing.
+  - Integer `location` in `attach!` for `Path`, `RouteComponent`, and `SchematicGraph`, whose
+    sign is opposite the offset convention (positive to the left); use `location=:left`,
+    `:center`, or `:right` instead of `-1`, `0`, or `1`.
+  - `zero(::Segment)` and `zero(::Type{Segment{T}})`, which return a length rather than a
+    segment; use `zero(eltype(seg))` or `zero(T)`.
+  - Keyword synonyms in `sref`, `aref`, `StructureReference`, `ArrayReference`, `addref!`, and
+    `addarr!` (such as `mirror`, `zoom`, `angle`, `deltacol`, or `ncols`); use `xrefl`, `mag`,
+    `rot`, `dc`, `dr`, `nc`, and `nr`.
+
+### Removed
+
+  - `reinterpret(::Type, ::Point)`, which always threw a `MethodError`. `Point` now falls back to the
+    `AbstractArray` method from Base.
+
 ### Fixed
 
+  - When OpenCASCADE's fragment history reports an entity as deleted with no successor while
+    the result holds a geometrically identical entity under a new tag, `SolidModel`
+    fragmentation now matches the two by bounding box, so the entity keeps its physical groups
+    instead of silently dropping out of them.
+  - `offset` with `Clipper.JoinTypeRound` or `Clipper.EndTypeOpenRound` discretizes arcs to a
+    tolerance of 1 nm for floating-point coordinates instead of a quarter femtometer, which
+    gave on the order of 10⁵ vertices per rounded corner. The new `atol` keyword sets the
+    tolerance; integer coordinates keep Clipper's default of a quarter grid unit.
   - `Intersect.AirBridge` crossings give the CPW open termination after the bridge
     `initial=true`, so its trace-corner vertices sit on the side facing the following segment
     and are shared with that segment's gap polygons instead of leaving T-junctions.
