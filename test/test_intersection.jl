@@ -111,7 +111,23 @@
         all_paths = (pas..., meander, loop)
         from_sweep = Intersect.intersections(all_paths...)
         @test all(i1 < i2 for (i1, i2, _) in from_sweep)
-        @test length(from_sweep) == 126
+        # Reference: test every pair of segments with the same endpoint-intersection predicate
+        all_segs = Tuple{Int, Int, Polygons.LineSegment}[]
+        for (pa_idx, pa) in enumerate(all_paths)
+            inds, segs = Paths.line_segments(pa)
+            append!(all_segs, ((pa_idx, n, s) for (n, s) in zip(inds, segs)))
+        end
+        reference = Set{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}}()
+        for (a, (i1, n1, s1)) in enumerate(all_segs)
+            for (i2, n2, s2) in all_segs[(a + 1):end]
+                intersects, atapoint, atendpoints = Polygons.intersects_at_endpoint(s1, s2)
+                if intersects && atapoint && !atendpoints
+                    push!(reference, minmax((i1, n1), (i2, n2)))
+                end
+            end
+        end
+        @test length(from_sweep) == length(reference)
+        @test Set(minmax(i1, i2) for (i1, i2, _) in from_sweep) == reference
         @test any(i1[1] == i2[1] for (i1, i2, _) in from_sweep) # loop self-intersection
     end
 

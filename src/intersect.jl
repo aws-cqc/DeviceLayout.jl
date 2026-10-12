@@ -2,7 +2,6 @@ module Intersect
 using LinearAlgebra
 import Base: intersect!
 import CoordinateTransformations: IdentityTransformation
-using IntervalTrees
 
 using Unitful
 using Unitful: Length
@@ -44,12 +43,12 @@ function sweep_intersections(paths::Path{T}...) where {T}
     # `a` in x are a contiguous run after it. Long straight segments overlap in x with many
     # short segments of discretized curves, so most candidate pairs are rejected by the
     # y check before the exact test.
-    sort!(segs, by=s -> min(s[3].p0.x, s[3].p1.x))
-    xmins = [min(s[3].p0.x, s[3].p1.x) for s in segs]
+    sort!(segs, by=s -> s[3].p0.x) # LineSegment has p0.x ≤ p1.x
+    xmins = [s[3].p0.x for s in segs]
     ixns = Tuple{Tuple{Int, Int}, Tuple{Int, Int}, Point{T}}[]
     for a in eachindex(segs)
         pa1_idx, node1_idx, seg1 = segs[a]
-        last_overlap = searchsortedlast(xmins, max(seg1.p0.x, seg1.p1.x))
+        last_overlap = searchsortedlast(xmins, seg1.p1.x)
         ymin1, ymax1 = minmax(seg1.p0.y, seg1.p1.y)
         for b = (a + 1):last_overlap
             pa2_idx, node2_idx, seg2 = segs[b]
@@ -63,7 +62,7 @@ function sweep_intersections(paths::Path{T}...) where {T}
             # ... Nontrivial endpoint intersections are not handled!
             (intersects && atapoint && !atendpoints) || continue
             # Lower (path, node) index is always first, so the computed intersection point
-            # doesn't depend on the order segments are visited in
+            # doesn't depend on the order segments are visited in.
             first_idx, sec_idx, seg_first, seg_sec =
                 (pa1_idx, node1_idx) < (pa2_idx, node2_idx) ?
                 ((pa1_idx, node1_idx), (pa2_idx, node2_idx), seg1, seg2) :
