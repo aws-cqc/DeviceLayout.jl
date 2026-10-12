@@ -15,94 +15,69 @@ using ..Polygons
 using ..CoordinateSystems
 using ..Rectangles
 
-const SegmentTree{T} =
-    IntervalTrees.IntervalMap{T, Tuple{Int, Int, Polygons.LineSegment{T}}}
-
-"""
-    segment_tree(paths::Path{T}...) where {T}
-
-Process `paths` into a `SegmentTree`, a data structure useful for finding intersections.
-
-Output can be used as input for `intersect_segment_tree`.
-"""
-function segment_tree(paths::Path{T}...) where {T}
-    x_iv = map(enumerate(paths)) do (path_idx, path)
-        inds, segs = Paths.line_segments(path)
-        segs_x = Polygons.xinterval.(segs)
-
-        # Interval values: segment x-interval => (path index, node index, segment)
-        # The path index keeps track of which path in `paths` the interval belongs to
-        iv = map(zip(inds, segs, segs_x)) do (node_idx, seg, seg_x)
-            return IntervalValue{T, Tuple{Int, Int, Polygons.LineSegment{T}}}(
-                first(seg_x),
-                last(seg_x),
-                (path_idx, node_idx, seg)
-            )
-        end
-        return iv
-    end
-    tree = SegmentTree{T}(sort!(collect(Iterators.flatten(x_iv))))
-    return tree
+function intersections(paths::Path...)
+    # Promote all paths to common coordinate type (fixes mixed-context dispatch on line segments).
+    # Dimension mismatch (e.g., Length vs Angle) will throw via promote_type.
+    T_common = promote_type(map(DeviceLayout.coordinatetype, paths)...)
+    paths_promoted = map(p -> convert(Path{T_common}, p), paths)
+    return sweep_intersections(paths_promoted...)
 end
 
 """
-    intersect_segment_tree(tree1::SegmentTree{T}, tree2::SegmentTree{T}) where {T}
+    sweep_intersections(paths::Path{T}...) where {T}
 
-Find intersections between the paths represented in `tree1` and `tree2`.
+Find intersections between the discretized segments of `paths`, including self-intersections.
 
-Results are returned as a vector of three-element `Tuple`s containing the following:
-
-  - A Tuple{Int, Int}, containing
-
-      + The index of the intersecting `Path` in `tree1`
-      + The index of the `Node` in that `Path` to which the intersecting segment belongs
-
-  - A corresponding `Tuple{Int, Int}` for the intersecting element in `tree2`
-  - The intersection `Point{T}`
+Results are a vector of `((path_idx_1, node_idx_1), (path_idx_2, node_idx_2), point)`, one per
+intersection, with the lower `(path index, node index)` first.
 """
-function intersect_segment_tree(tree1::SegmentTree{T}, tree2::SegmentTree{T}) where {T}
-    # This method does considerable extra work, checking intersections for every pair
-    # of segments overlapping in x. A better implementation would use an R-tree to take
-    # advantage of the 2D nature of the problem.
+function sweep_intersections(paths::Path{T}...) where {T}
+    segs = Tuple{Int, Int, Polygons.LineSegment{T}}[]
+    for (path_idx, path) in enumerate(paths)
+        inds, pathsegs = Paths.line_segments(path)
+        append!(
+            segs,
+            ((path_idx, node_idx, seg) for (node_idx, seg) in zip(inds, pathsegs))
+        )
+    end
+    # Sort-and-sweep in x: after sorting by x minimum, the segments that can overlap segment
+    # `a` in x are a contiguous run after it. Long straight segments overlap in x with many
+    # short segments of discretized curves, so most candidate pairs are rejected by the
+    # y check before the exact test.
+    sort!(segs, by=s -> min(s[3].p0.x, s[3].p1.x))
+    xmins = [min(s[3].p0.x, s[3].p1.x) for s in segs]
     ixns = Tuple{Tuple{Int, Int}, Tuple{Int, Int}, Point{T}}[]
-    for (i1, i2) in intersect(tree1, tree2)
-        # Each segment trivially intersects with itself
-        i1 === i2 && continue # Ignore trivial _and_ non-trivial segment self-intersections
-        pa1_idx, node1_idx, seg1 = i1.value
-        pa2_idx, node2_idx, seg2 = i2.value
-        intersects, atapoint, atendpoints = Polygons.intersects_at_endpoint(seg1, seg2)
-        # intersects => there is an overlap in x
-        # atapoint => there is only one intersection point
-        # !atendpoints => segments are not neighbors
-        # ... Nontrivial endpoint intersections are not handled!
-        if intersects && atapoint && !atendpoints
-            # Lower (path, node) index is always first seg in intersection
-            # ... Tuple comparison: Compare first element
-            # ... Then use successive elements as tiebreakers as far as is necessary
-            # (Guarantees the intersection (seg_a, seg_b) is the same as (seg_b, seg_a))
-            seg_first, seg_sec =
-                (pa1_idx, node1_idx) < (pa2_idx, node2_idx) ? (seg1, seg2) : (seg2, seg1)
-            # Check for an intersection
+    for a in eachindex(segs)
+        pa1_idx, node1_idx, seg1 = segs[a]
+        last_overlap = searchsortedlast(xmins, max(seg1.p0.x, seg1.p1.x))
+        ymin1, ymax1 = minmax(seg1.p0.y, seg1.p1.y)
+        for b = (a + 1):last_overlap
+            pa2_idx, node2_idx, seg2 = segs[b]
+            # Cheap rejection of pairs that don't overlap in y
+            (max(seg2.p0.y, seg2.p1.y) < ymin1 || min(seg2.p0.y, seg2.p1.y) > ymax1) &&
+                continue
+            intersects, atapoint, atendpoints = Polygons.intersects_at_endpoint(seg1, seg2)
+            # intersects => there is an overlap
+            # atapoint => there is only one intersection point
+            # !atendpoints => segments are not neighbors
+            # ... Nontrivial endpoint intersections are not handled!
+            (intersects && atapoint && !atendpoints) || continue
+            # Lower (path, node) index is always first, so the computed intersection point
+            # doesn't depend on the order segments are visited in
+            first_idx, sec_idx, seg_first, seg_sec =
+                (pa1_idx, node1_idx) < (pa2_idx, node2_idx) ?
+                ((pa1_idx, node1_idx), (pa2_idx, node2_idx), seg1, seg2) :
+                ((pa2_idx, node2_idx), (pa1_idx, node1_idx), seg2, seg1)
             tf, point = Polygons.intersection(
                 Polygons.Line(seg_first.p0, seg_first.p1),
                 Polygons.Line(seg_sec.p0, seg_sec.p1),
                 false
             )
-
-            !tf && continue # No intersection 
-            push!(ixns, ((pa1_idx, node1_idx), (pa2_idx, node2_idx), point))
+            !tf && continue # No intersection
+            push!(ixns, (first_idx, sec_idx, point))
         end
     end
     return ixns
-end
-
-function intersections(paths::Path...)
-    # Promote all paths to common coordinate type (fixes mixed-context dispatch on segment_tree).
-    # Dimension mismatch (e.g., Length vs Angle) will throw via promote_type.
-    T_common = promote_type(map(DeviceLayout.coordinatetype, paths)...)
-    paths_promoted = map(p -> convert(Path{T_common}, p), paths)
-    tree = segment_tree(paths_promoted...)
-    return intersect_segment_tree(tree, tree)
 end
 
 """
