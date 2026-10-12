@@ -45,6 +45,14 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - `render_conformal!` built faces with holes that OpenCASCADE treated as including the
+    holes: their area and extruded volume added the holes instead of subtracting them, and
+    points inside a hole counted as inside the face. `add_plane_surface` subtracts a hole
+    only if its loop winds like the exterior, but a `CurvilinearRegion` stores its holes
+    clockwise. The holes are now reversed under a counterclockwise exterior, and
+    `add_conformal_loop!` takes `reverse=true` for building such hole loops by hand. Its
+    docstring example now does that, and passes a `SolidModels.PointsCache` instead of an
+    `RTree`, which threw a `MethodError`.
   - When OpenCASCADE's fragment history reports an entity as deleted with no successor while
     the result holds a geometrically identical entity under a new tag, `SolidModel`
     fragmentation now matches the two by bounding box, so the entity keeps its physical groups
