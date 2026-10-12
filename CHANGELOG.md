@@ -58,6 +58,9 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - `flatten` and `flatten!` with finite `max_copy` no longer duplicate geometry when a
+    reference kept for exceeding `max_copy` has references of its own. The contents of a
+    kept reference stay inside it instead of also being flattened or kept at the top level.
   - When OpenCASCADE's fragment history reports an entity as deleted with no successor while
     the result holds a geometrically identical entity under a new tag, `SolidModel`
     fragmentation now matches the two by bounding box, so the entity keeps its physical groups

@@ -375,6 +375,45 @@
         poly_3 = vcat(to_polygons.((Rotation(45°) ∘ XReflection()).(elements(c3)))...)
 
         @test all(poly_2 .≈ poly_3)
+
+        # Structures referenced more than `max_copy` times are kept as references,
+        # and their contents are not also flattened
+        nrect(c) = length(elements(flatten(c)))
+        B = Cell("B", nm)
+        render!(B, Rectangle(1μm, 1μm), GDSMeta())
+        A = Cell("A", nm)
+        addref!(A, B)
+        A2 = Cell("A2", nm) # Child B is itself over-copied
+        for j = 1:3
+            addref!(A2, B, Point(0, 2j)μm)
+        end
+        tops = map((A, A2, B)) do s
+            top = Cell("top_" * name(s), nm)
+            for i = 1:3
+                addref!(top, s, Point(10i, 0)μm)
+            end
+            return top
+        end
+        for (top, s) in zip(tops, (A, A2, B)), depth in (-1, 1)
+            f = flatten(top; max_copy=2, depth=depth)
+            @test isempty(elements(f))
+            @test length(refs(f)) == 3
+            @test all(r -> structure(r) === s, refs(f))
+            @test nrect(f) == nrect(top)
+        end
+        # Kept references below a flattened intermediate structure
+        mid = Cell("mid", nm)
+        render!(mid, Rectangle(1μm, 1μm), GDSMeta())
+        addref!(mid, tops[2])
+        top_mid = Cell("top_mid", nm)
+        addref!(top_mid, mid)
+        for depth in (-1, 2, 3)
+            f = flatten(top_mid; max_copy=2, depth=depth)
+            @test length(elements(f)) == 1
+            @test length(refs(f)) == 3
+            @test all(r -> structure(r) === A2, refs(f))
+            @test nrect(f) == nrect(top_mid) == 10
+        end
     end
 
     @testset "Mapping metadata" begin
