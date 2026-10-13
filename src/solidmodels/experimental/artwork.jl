@@ -13,7 +13,7 @@ function _map_artwork_meta(
         # Levels at or below the base level (<= 0) render like level 1: they never
         # participate in the increment, so a layer declared e.g. `level=0 => 3` keeps its
         # declared GDS layer instead of receiving a negative offset.
-        delta = max(first(source_layer.level) - 1, 0)
+        delta = max(source_layer.level - 1, 0)
         return GDSMeta(
             gdslayer(source_layer.gds_meta) + delta * gdslayer(level_increment),
             datatype(source_layer.gds_meta) + delta * datatype(level_increment)

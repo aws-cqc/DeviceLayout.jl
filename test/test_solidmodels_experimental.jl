@@ -43,10 +43,10 @@
     pair_layer = SourceLayer(NULL; level=1 => 2)
     offset_pair_layer =
         SourceLayer(DIELECTRIC; level=1 => 2, offset=(10μm, -10μm), gds_meta=GDSMeta(8, 2))
-    @test first(offset_pair_layer.level) == 1
-    @test last(offset_pair_layer.level) == 2
-    @test first(offset_pair_layer.offset) == 10μm
-    @test last(offset_pair_layer.offset) == -10μm
+    @test offset_pair_layer.level == 1
+    @test offset_pair_layer.destination_level == 2
+    @test offset_pair_layer.offset == 10μm
+    @test offset_pair_layer.destination_offset == -10μm
     stack = SourceStack(:substrate => offset_pair_layer; levels=(1 => 0μm, 2 => 500μm))
     @test SolidModelsExperimental.thickness(pair_layer, stack) == 500μm
     @test SolidModelsExperimental.thickness(stack.layers[:substrate], stack) == 480μm
@@ -67,6 +67,17 @@
     # Mixed length types (all unitful)
     span_layer = SourceLayer(NULL; level=1 => 2, offset=(10μm, -5.4μm))
     stack = SourceStack(:substrate => span_layer; levels=(1 => 0μm, 2 => 500000.3nm))
+
+    @test_throws ArgumentError SourceLayer(NULL; level=1 => 2, thickness=1μm)
+    @test_throws ArgumentError SourceLayer(NULL; level=1, offset=(1μm, 2μm))
+    shifted_span_stack = SourceStack(
+        :span => SourceLayer(NULL; level=1 => 2, offset=1μm);
+        levels=(1 => 0μm, 2 => 5μm)
+    )
+    @test SolidModelsExperimental.thickness(
+        shifted_span_stack.layers[:span],
+        shifted_span_stack
+    ) == 5μm
 
     mixed_types_stack = SourceStack(
         :integer => SourceLayer(NULL),
