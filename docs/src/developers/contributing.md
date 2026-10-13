@@ -89,7 +89,7 @@ allowed to fail but failures should be investigated.
 | `test_aqua.jl` | [Aqua](https://github.com/JuliaTesting/Aqua.jl): compat entries for all deps, no type piracy (except one deliberate `ForwardDiff` method), no stale deps, no undefined exports, no method ambiguities. |
 | `*.gds`, `test_ezdxf.py` | Fixtures: malformed GDS files for reader robustness, and a Python helper for the DXF round-trip. |
 
-### Writing tests
+### [Writing tests](@id dev-writing-tests)
 
 - Put new tests in the topical `test_<topic>.jl` file, or create one. Use `@testitem` with the shared setup snippet:
   `setup = [CommonTestSetup]` (plus `QuietGmshSetup` for anything that touches Gmsh).
@@ -98,7 +98,7 @@ allowed to fail but failures should be investigated.
 - **Assert on logs.** Warnings are part of the contract. Use `with_test_logger`,
   `with_expected_info`, or `quiet_test_output` from the snippet to require that expected
   warnings appear and no others do, or `@test_logs` directly. Unexpected warnings in a
-  test are failures, not noise.
+  test are failures, not noise. The log should be quiet when tests are passing.
 - **Unitful and unitless.** If the code under test is generic in the coordinate type, test at
   least one `Length` type and `Float64`. The snippet's `μm2nm`, `μm2μm`, etc. let you test
   mixed-preference arithmetic without changing the compile-time preference. Only the default
@@ -116,7 +116,7 @@ allowed to fail but failures should be investigated.
   different hashes.
 - Files written during tests go under `tdir` (a `mktempdir()` from the snippet).
 
-## Formatting
+## [Formatting](@id dev-formatting)
 
 CI rejects unformatted code. Format with
 
@@ -129,7 +129,7 @@ way it would in CI) and formats `src/`, `test/`, and `scripts/` according to `.J
 `julia scripts/format.jl check` reports without modifying. Docstrings are also formatted
 (`format_docstrings = true`), so a formatting-only diff inside a docstring is normal.
 
-## Documentation
+## [Documentation](@id dev-docs)
 
 Docs are built with [Documenter](https://documenter.juliadocs.org/) from `docs/src/`,
 with the page tree in `docs/make.jl`. Docstrings are pulled in via `@docs` blocks on the
@@ -165,7 +165,7 @@ between these kinds of documentation and how to write each effectively, see
 [Diátaxis](https://diataxis.fr/). This "Developer Guide" section is for material that only
 matters if you're changing the package itself.
 
-## Benchmarks
+## [Benchmarks](@id dev-benchmarks)
 
 `benchmark/` is a [PkgBenchmark](https://github.com/JuliaCI/PkgBenchmark.jl) suite
 (`benchmarks.jl` defines `SUITE`; topical files add groups for autofill, bounds, clipping,
@@ -196,27 +196,30 @@ and fixes that would technically be breaking are made opt-in in v1 where possibl
 
 ### [What counts as breaking?](@id dev-breaking)
 
-We aim to be clear and consistent about what counts as a breaking change.
+We aim to be clear and consistent about what counts as a breaking change:
 
 - Backward-incompatible changes to the public API are breaking. The public API is what is
-  exported or documented, including the interfaces users implement for their own subtypes:
-  adding a required method to an abstract type, or changing what an interface method such as
+  exported or in [API documentation](@ref reference-index), including the interfaces users
+  implement for their own subtypes.
+- Adding a required method to an abstract type, or changing what an interface method like
   `_geometry!` or `_route_leg!` receives or must return, is breaking.
-- Changing the return type of a public function (e.g. scalar → vector) is breaking even when
-  the geometry is unchanged.
-- Changes to `ExamplePDK` are never breaking.
-- Changes to curve discretization within the default or a specified tolerance are not
-  breaking. Such changes can lead to out-of-tolerance changes further downstream (for
-  example, in autofill, if a grid point crosses from just inside to just outside a contour),
-  so they should still be called out prominently in the changelog.
-- Changing default mesh sizing is not breaking.
-- Changing silently incorrect behavior to match documented behavior is not breaking.
+- Changing the return type of a public function (e.g. scalar → vector) is breaking.
 - Changing underspecified behavior to something more "correct" is breaking. For example,
   [#8](https://github.com/aws-cqc/DeviceLayout.jl/issues/8) describes undesirable `halo`
   outputs, but there's no well-specified contract under which some are clearly "wrong". Other
   boundaries between bugfixes and breaking changes may be fuzzy; lean towards opt-in fixes in
   v1 (e.g., a keyword that selects the new behavior) and call out the fixed behavior as
   breaking in the 2.0 changelog.
+
+Not breaking:
+
+- Changing silently incorrect behavior to match documented behavior is not breaking.
+- Changes to `ExamplePDK` are never breaking.
+- Changes to curve discretization within the default or a specified tolerance are not
+  breaking. Such changes can lead to out-of-tolerance changes further downstream (for
+  example, in autofill, if a grid point crosses from just inside to just outside a contour),
+  so they should still be called out prominently in the changelog.
+- Changing default mesh sizing is not breaking.
 - Changes to graphical output (color schemes, text display) are not breaking.
 - Changes to auto-generated names are not breaking. For example, `flatten(c)` defaults to
   `name=uniquename("flatten_"*name(c))`, but this default or the `uniquename` mechanism itself
@@ -252,7 +255,7 @@ Deprecated functionality keeps working for the rest of 1.x and is removed in 2.0
 The last 1.x release is an upgrade-assist release: it removes nothing, makes every 2.0
 behavior reachable by opting in, and makes all deprecation warnings loud and repeated.
 
-### Changelog
+### [Changelog](@id dev-changelog)
 
 `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/). Every user-visible
 change lands with an entry under `## Unreleased` in one of `### Added`, `### Changed`,
@@ -261,32 +264,87 @@ symbols, say what changed and why it matters, and link the issue or PR when ther
 Tolerance-level geometry changes are called out explicitly. On the `v2.0.0-dev` branch,
 breaking changes go under `### Breaking` in a `## 2.0.0 (upcoming)` section.
 
-## Pull requests and review
+## [Pull requests and review](@id dev-pr)
 
-Before opening a PR:
+### [What a pull request includes](@id dev-pr-checklist)
 
-- The change is scoped: every changed line traces to the stated purpose. Don't reformat or
-  refactor code you aren't otherwise touching.
-- Tests pass locally (`Pkg.test()`), including new tests for new behavior and a regression
-  test for any bug fix.
-- `julia scripts/format.jl check` passes.
-- `CHANGELOG.md` has an entry under "Unreleased" in the appropriate subsection, as described
-  above. Decide whether the change is breaking using
-  [What counts as breaking?](@ref dev-breaking); if it is, make it opt-in on `main` or target
-  `v2.0.0-dev`.
-- Docstrings are updated for any changed public API, new public API functions are added
-  to the appropriate API reference page, and concept pages are updated if the
-  change alters behavior they describe.
-- Code adapted from another project has a compatible license and an entry in
-  `THIRDPARTY.md`, and the PR says so.
+Authors check this list before asking for review, and reviewers check the same list.
+
+- **Scope.** Every changed line traces to the stated purpose. Don't reformat or refactor code
+  you aren't otherwise touching.
+- **Conventions.** New and changed code follows [Conventions](@ref dev-conventions).
+- **Tests.** New tests for new behavior, and a regression test for any bug fix (see
+  [Writing tests](@ref dev-writing-tests)).
+- **Changelog.** An entry in `CHANGELOG.md` as described in [Changelog](@ref dev-changelog).
+  Decide whether the change is breaking using [What counts as breaking?](@ref dev-breaking);
+  if it is, make it opt-in on `main` or target `v2.0.0-dev` (see [Opt-in first](@ref dev-opt-in)).
+- **Documentation.** Docstrings are updated for any changed public API, new public API
+  functions are added to the appropriate API reference page, and concept pages are updated if
+  the change alters behavior they describe. The docs build does not fail on warnings, and some
+  breakage only produces warnings, so check the log when relevant. See [Documentation](@ref dev-docs) above.
+- **Third-party code.** Code adapted from another project has a compatible license and an
+  entry in `THIRDPARTY.md`, and the PR description says so.
+- **Title and description.** PRs are squash-merged, so the title becomes the commit summary:
+  make it a succinct one-line description of the change. The description links the issue it
+  addresses, gives a brief but complete account of the changes, and states the breaking-change
+  assessment. Changes to rendered geometry are highlighted even if they are not breaking.
+
+  Commit messages within the PR take the same form: a succinct one-line summary, then a
+  brief but complete description of the changes in the body.
+
+### CI and merging
 
 Required checks on `main` are: formatting, documentation build, and tests on each released
-Julia minor version in the CI matrix. Tests only start once the formatting check passes. CI
-runs only on Linux x64, so test platform-specific behavior (file paths, binary dependencies,
-Gmsh callbacks) locally. A PR can merge once the checks pass and a maintainer has approved.
-Squash-merge is the norm; the PR title becomes the commit message, so make it descriptive.
+Julia minor version in the CI matrix. Tests only start once the formatting check passes, so run
+`julia scripts/format.jl format` and the tests locally before pushing. A PR can merge once the
+checks pass and a maintainer has approved.
 
-DeviceLayout-specific things reviewers should look for beyond standard criteria:
-correctness on unitless coordinates and mixed-unit coordinates; whether the change silently alters
-rendered geometry; new warnings or log noise, including in tests and docs builds;
-and whether the changelog entry and breaking-change assessment are right.
+### [Reviewing](@id dev-review)
+
+Reviewers check the items above in [What a pull request includes](@ref dev-pr-checklist).
+They also consider standard review criteria. As it becomes possible to generate more code,
+faster, it becomes especially important to review contributions not just on their own terms
+but in terms of the package's overall direction, design, and code health. Some questions
+for reviewers are listed below.
+
+**Premise:**
+
+- Is the right problem being solved?
+- Is this the right solution?
+- Can the solution be simplified?
+
+**Design implications:**
+
+- Do the changes fit the existing design?
+- Do the changes reveal deficiencies in the existing design (e.g. simple behavior change requires complex code changes)?
+- Do the changes lock in one-way decisions?
+- Do the changes follow the [design principles](@id dev-principles)?
+
+**Clarity:**
+
+- Can the code be understood at a glance?
+- Do the comments add value to the surrounding code?
+- Is the code in the right place?
+
+**Correctness:**
+
+- Is the code clear enough to evaluate correctness by hand, or are there places for bugs to hide?
+- Have edge cases been foreseen?
+- Do the unit tests adequately test the code? The coverage report does not account for different types that can be used in the same code path.
+
+**Reused and duplicated code:**
+
+- Is code duplicated within the package?
+- Is there local functionality that should be in a shared library?
+- Is there code that could be completely removed or replaced with existing libraries?
+
+**Failure handling:**
+
+- Is the code resilient to garbage and null inputs?
+- If a user encounters an error, will they understand what went wrong and where?
+- Is there a clear and consistent exception handling strategy?
+
+**Performance:**
+
+- Are there signs of premature optimization?
+- Are there obvious performance or efficiency problems?
