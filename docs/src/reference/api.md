@@ -322,10 +322,12 @@ See [Shapes](./shapes.md).
 ### Postrendering
 
 ```@docs
+    SolidModels.apply_precedence
     SolidModels.box_selection
     SolidModels.check_port_connectivity
     SolidModels.connected_components
     SolidModels.difference_geom!
+    SolidModels.exclude_groups
     SolidModels.extrude_z!
     SolidModels.fragment_geom!
     SolidModels.get_boundary
