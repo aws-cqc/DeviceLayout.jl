@@ -33,7 +33,7 @@ recurring chores. The versioning policy these procedures apply is in
 6. If there are new authors, create a new version of the Zenodo record, which mints a DOI per
    version:
    - Download the tagged source as a `.zip` (green "Code" button on the release).
-   - At [the Zenodo record](https://zenodo.org/records/20430150), choose "New version" (you
+   - At [the Zenodo record](https://doi.org/10.5281/zenodo.19849069), choose "New version" (you
      need to be granted access to the record by an existing owner).
    - Upload the `.zip`, set the publication date to today and the version to `X.Y.Z`
      (no `v` prefix), add new contributors as authors, preview, and publish.
@@ -44,7 +44,7 @@ recurring chores. The versioning policy these procedures apply is in
 ### The 2.0 branch and release
 
 Breaking changes accumulate on the long-running `v2.0.0-dev` branch (see
-[Opt-in first](@ref dev-versioning) and the
+[Opt-in first](@ref dev-opt-in) and the
 [2.0 tracking issue](https://github.com/aws-cqc/DeviceLayout.jl/issues/300)).
 
 - Integrate `main` into `v2.0.0-dev` by **merge**, on a regular cadence, rather than rebasing.

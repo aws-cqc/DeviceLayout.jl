@@ -265,8 +265,9 @@ magic bytes, load and save), `format"DXF"`, `format"STEP"`, `format"BREP"`, and
 (`save("file.dxf", cell, "python3")`). There is no PyCall/PythonCall dependency.
 
 **Unitful and ForwardDiff.** `units.jl` defines `ForwardDiff.derivative` for `Unitful.Length`
-arguments, which is how segment tangents and curvature work with units; `Aqua.test_piracies`
-is told to treat it as our own. Segment code must therefore accept `ForwardDiff.Dual` numbers.
+arguments, which is how segment tangents and curvature work with units, and an `extract_derivative`
+method for `Quantity`, which `Aqua.test_piracies` is told to treat it as our own.
+Segment code must therefore accept `ForwardDiff.Dual` numbers.
 
 **Palace.** [Palace](https://awslabs.github.io/palace/stable/) is the finite-element solver
 `SolidModel` output is designed for. DeviceLayout does not depend on it; the interface is the
