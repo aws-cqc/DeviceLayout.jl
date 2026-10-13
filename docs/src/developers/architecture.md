@@ -166,12 +166,9 @@ There are two potential surprises in the hierarchy (see also "Why is `Path` a
 
 ## [Extension points](@id dev-extension-points)
 
-Many contributions add a new subtype of an abstract type or a new function to an abstract type's interface.
-
-New functions should have enough methods to handle any concrete subtype they might see. If you write
-a fallback that dispatches on the abstract type, it must be guaranteed to be correct for new future
-subtypes, not just existing ones not covered by specializations—otherwise, a new subtype that doesn't
-have a specialization will lead to silent incorrect results rather than a `MethodError`.
+Many contributions add a new subtype of an abstract type or a new function to an abstract type's
+interface. Rules for fallback methods and for extending functions from other modules are in
+[Conventions](@ref dev-conventions).
 
 For new subtypes, the required methods are documented in the docstring of each abstract type;
 this is a checklist of where to look.
@@ -188,35 +185,11 @@ this is a checklist of where to look.
 | Output format | — | `save(::File{format"X"}, ::Cell)` (or `::SolidModel`) in `src/backends/` | Register the format in `__init__`, and also in `precompile.jl` if the workload saves or loads it by file name |
 | Post-render operation (3D) | — | A function `op!(sm::SolidModel, args...; kwargs...)` returning the new group's entities, in `solidmodels/postrender.jl`; users reference it in `postrender_ops` tuples | Document it in `concepts/solidmodels.md`; check whether `_compose_meshsize!` needs a method for it |
 
-Methods extending functions from another module must be defined with a qualified name
-(`SchematicDrivenLayout.hooks(c::MyComp) = ...`). If the function is `import`ed, then Julia will
-accept the bare name as referring to the imported function, but prefer the qualified
-name for clarity.
-
 These interfaces are public API: adding a required method to an abstract type, or changing
 what an interface method receives or must return, breaks downstream subtypes (see
 [What counts as breaking?](@ref dev-breaking)).
 
-### Conventions
-
-**Units and coordinate types.** Almost everything is parameterized by a coordinate type
-`T <: Coordinate = Union{Real, Length}`. Code must work for unitless `Float64` (interpreted as microns), for
-`Unitful` lengths, and (in a few places) for `Int`. Use `zero(T)`, `oneunit(T)`,
-`DeviceLayout.onenanometer(T)`, and `ustrip(unit, x)` rather than assuming a unit.
-
-**Tolerances.** Curve discretization defaults to `atol = onenanometer(T)`; Clipper works on
-coordinates rounded to an `Int64` femtometer grid by `clipperize`. When comparing
-geometry, prefer `isapprox` with an explicit `atol` over `==`.
-
-**Naming.** `uniquename` appends a counter from a process-global, thread-safe dictionary; it is deterministic only in a fresh session or after calling `reset_uniquename!()`.
-If you need to generate a unique name (schematic node `id`, coordinate system `name`), use `uniquename` to avoid collisions, and allow the user to explicitly provide a name. Auto-generated names are not part of the public API (see [What counts as breaking?](@ref dev-breaking)).
-
-**Logging.** Use `@warn`/`@info` from `Logging`, never `println`, for anything a user should
-see. Many tests assert on logs (see [Testing](@ref dev-testing)), so a stray warning can be a
-test failure. Warn when a designer should know a result may not be what they expect, and
-sparingly otherwise.
-
-## Global state
+## [Global state](@id dev-global-state)
 
 Prefer to avoid global state, but be aware that it is used in a few places:
 
@@ -266,7 +239,7 @@ magic bytes, load and save), `format"DXF"`, `format"STEP"`, `format"BREP"`, and
 
 **Unitful and ForwardDiff.** `units.jl` defines `ForwardDiff.derivative` for `Unitful.Length`
 arguments, which is how segment tangents and curvature work with units, and an `extract_derivative`
-method for `Quantity`, which `Aqua.test_piracies` is told to treat it as our own.
+method for `Quantity`, which `Aqua.test_piracies` is told to treat as our own.
 Segment code must therefore accept `ForwardDiff.Dual` numbers.
 
 **Palace.** [Palace](https://awslabs.github.io/palace/stable/) is the finite-element solver

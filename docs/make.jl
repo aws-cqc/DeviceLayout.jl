@@ -87,6 +87,7 @@ makedocs(
             "Overview" => "developers/index.md",
             "Design Principles" => "developers/principles.md",
             "Architecture" => "developers/architecture.md",
+            "Conventions" => "developers/conventions.md",
             "Contributing" => "developers/contributing.md",
             "Maintainer Runbook" => "developers/maintenance.md"
         ]
