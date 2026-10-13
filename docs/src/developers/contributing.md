@@ -63,9 +63,10 @@ filter that matches test-item names against `ARGS`.
    TestItemRunner.run_tests(pkgdir(DeviceLayout); filter=ti -> ti.name == "Backends")
    ```
    The filter receives `(; filename::String, name::String, tags::Vector{Symbol})`; `filename`
-   is an absolute path. **Always pass an explicit path to `run_tests`.** Without it,
-   TestItemRunner scans upward from the current directory and can pick up test items from
-   sibling checkouts or `~/.julia`. Use `TestEnv.activate()` rather than running tests in the
+   is an absolute path. Never invoke `@run_package_tests` from the REPL or `-e`; it expands to
+   `run_tests(joinpath(dirname(__source__.file), ".."))`, which outside a file is the parent of the
+   current directory (every sibling checkout). Call `run_tests` with an explicit path instead. Use
+   `TestEnv.activate()` rather than running tests in the
    checkout's project directly: some tests write preferences, and TestEnv keeps them out of
    the repo's `Project.toml`/`LocalPreferences.toml`; tests also have some additional
    dependencies that are not present in the package's own project environment.
@@ -123,8 +124,8 @@ CI rejects unformatted code. Format with
 julia scripts/format.jl format
 ```
 
-which installs JuliaFormatter v1 into a temporary environment (so you get exactly the version
-CI uses) and formats `src/`, `test/`, and `scripts/` according to `.JuliaFormatter.toml`.
+which installs JuliaFormatter v1 into a temporary environment (so it resolves the
+way it would in CI) and formats `src/`, `test/`, and `scripts/` according to `.JuliaFormatter.toml`.
 `julia scripts/format.jl check` reports without modifying. Docstrings are also formatted
 (`format_docstrings = true`), so a formatting-only diff inside a docstring is normal.
 
@@ -190,7 +191,7 @@ DeviceLayout.jl follows [Semantic Versioning](https://semver.org/). The package 
 v1 since its public release. Since a major bump is a large event, breaking changes are
 collected for 2.0 in the
 [2.0 tracking issue](https://github.com/aws-cqc/DeviceLayout.jl/issues/300) and the
-[`DeviceLayout 2.0.0` milestone](https://github.com/aws-cqc/DeviceLayout.jl/milestone/1),
+[`DeviceLayout v2.0.0` milestone](https://github.com/aws-cqc/DeviceLayout.jl/milestone/1),
 and fixes that would technically be breaking are made opt-in in v1 where possible.
 
 ### [What counts as breaking?](@id dev-breaking)
@@ -226,7 +227,7 @@ We aim to be clear and consistent about what counts as a breaking change.
 For component packages in user PDKs rather than DeviceLayout itself, see
 [Component and package creation and versioning](@ref style-package) in the Style Guide.
 
-### Opt-in first
+### [Opt-in first](@id dev-opt-in)
 
 Whenever a change can be made available in a 1.x release behind a keyword or preference that
 defaults to current behavior, it should be. Then 2.0 mostly flips defaults, and users who opted
@@ -258,7 +259,7 @@ change lands with an entry under `## Unreleased` in one of `### Added`, `### Cha
 `### Deprecated`, `### Removed`, `### Fixed`. Entries are written for users: name the public
 symbols, say what changed and why it matters, and link the issue or PR when there is one.
 Tolerance-level geometry changes are called out explicitly. On the `v2.0.0-dev` branch,
-breaking changes go under `### Breaking` in a `## 2.0.0 (unreleased)` section.
+breaking changes go under `### Breaking` in a `## 2.0.0 (upcoming)` section.
 
 ## Pull requests and review
 
