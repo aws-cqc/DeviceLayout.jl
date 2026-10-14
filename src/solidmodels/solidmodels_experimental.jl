@@ -31,15 +31,14 @@ using Logging: with_logger
 Opt-in schematic target for the simulation-agnostic solid-model pipeline. Store the
 [`SourceStack`](@ref) and ordered layer operations used by schematic [`render!`](@ref).
 """
-struct SolidModelTarget{L <: SourceLayer, T <: Coordinate} <: SchematicDrivenLayout.Target
-    stack::SourceStack{L, T}
+struct SolidModelTarget{T <: Coordinate} <: SchematicDrivenLayout.Target
+    stack::SourceStack{T}
     ops::Vector{LayerOp}
 end
 
-SolidModelTarget(stack::SourceStack{L, T}) where {L, T} =
-    SolidModelTarget{L, T}(stack, LayerOp[])
-SolidModelTarget(stack::SourceStack{L, T}, ops::AbstractVector{<:LayerOp}) where {L, T} =
-    SolidModelTarget{L, T}(stack, LayerOp[ops...])
+SolidModelTarget(stack::SourceStack{T}) where {T} = SolidModelTarget{T}(stack, LayerOp[])
+SolidModelTarget(stack::SourceStack{T}, ops::AbstractVector{<:LayerOp}) where {T} =
+    SolidModelTarget{T}(stack, LayerOp[ops...])
 
 function _map_meta(target::SolidModelTarget)
     return meta -> begin

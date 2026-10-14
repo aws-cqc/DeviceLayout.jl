@@ -92,6 +92,18 @@ function SourceLayer(
     )
 end
 
+Base.convert(::Type{SourceLayer{T}}, layer::SourceLayer) where {T <: Coordinate} =
+    SourceLayer{T}(
+        layer.material,
+        layer.level,
+        layer.offset,
+        layer.destination_level,
+        layer.destination_offset,
+        layer.thickness,
+        layer.gds_meta,
+        layer.solidmodel
+    )
+
 _spans_levels(layer::SourceLayer) = !isnothing(layer.destination_level)
 
 """
@@ -99,16 +111,17 @@ _spans_levels(layer::SourceLayer) = !isnothing(layer.destination_level)
 
 Collect symbol-keyed [`SourceLayer`](@ref) pairs and assembly-level z coordinates. Every
 level referenced by a source layer must be present in `levels`. Length coordinates must be
-either all unitful or all unitless.
+either all unitful or all unitless; they are promoted to a common type `T`, and every layer
+is converted to `SourceLayer{T}`.
 """
-struct SourceStack{L <: SourceLayer, T <: Coordinate}
-    layers::Dict{Symbol, L}
+struct SourceStack{T <: Coordinate}
+    layers::Dict{Symbol, SourceLayer{T}}
     levels::Dict{Int, T}
 
     function SourceStack(
-        layers::Dict{Symbol, L},
-        levels::Dict{Int, T}
-    ) where {L <: SourceLayer, T <: Coordinate}
+        layers::AbstractDict{Symbol, <:SourceLayer},
+        levels::AbstractDict{Int, <:Coordinate}
+    )
 
         # Check that all fields representing lengths are either all unitless or all unitful
         coordinates = Any[]
@@ -139,7 +152,8 @@ struct SourceStack{L <: SourceLayer, T <: Coordinate}
             end
         end
 
-        return new{L, T}(layers, levels)
+        T = promote_type(map(typeof, coordinates)...)
+        return new{T}(Dict{Symbol, SourceLayer{T}}(layers), Dict{Int, T}(levels))
     end
 end
 

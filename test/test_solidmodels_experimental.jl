@@ -67,6 +67,9 @@
     # Mixed length types (all unitful)
     span_layer = SourceLayer(NULL; level=1 => 2, offset=(10μm, -5.4μm))
     stack = SourceStack(:substrate => span_layer; levels=(1 => 0μm, 2 => 500000.3nm))
+    @test stack isa SourceStack{typeof(1.0nm)}
+    @test stack.layers[:substrate] isa SourceLayer{typeof(1.0nm)}
+    @test SolidModelsExperimental.layer_z(:substrate, stack) == 10μm
 
     @test_throws ArgumentError SourceLayer(NULL; level=1 => 2, thickness=1μm)
     @test_throws ArgumentError SourceLayer(NULL; level=1, offset=(1μm, 2μm))
@@ -84,8 +87,11 @@
         :floating => SourceLayer(NULL; offset=0.0μm, thickness=0.0μm);
         levels=(1 => 0.0μm,)
     )
-    @test typeof(mixed_types_stack).parameters[1] === SourceLayer
-    @test typeof(mixed_types_stack).parameters[2] == typeof(mixed_types_stack.levels[1])
+    @test isconcretetype(typeof(mixed_types_stack.levels[1]))
+    @test all(
+        layer -> layer isa SourceLayer{typeof(mixed_types_stack.levels[1])},
+        values(mixed_types_stack.layers)
+    )
     @test SolidModelsExperimental.layer_z(:integer, mixed_types_stack) == 0.0μm
 
     # Referenced level does not exist
