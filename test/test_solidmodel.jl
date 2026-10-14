@@ -2348,6 +2348,10 @@ end
     @testset "exclude_groups is a membership difference" begin
         @test Set(Int(t) for (_, t) in exclude_groups(sm, "vacuum", "chip", 3)) ==
               Set(Int.(v[3:4]))
+        # Any string type works, alone or in a collection.
+        @test Set(
+            Int(t) for (_, t) in exclude_groups(sm, "vacuum", split("chip", ","), 3)
+        ) == Set(Int.(v[3:4]))
         # Absent excluded groups are skipped, with an info message so typos are visible.
         res = @test_logs (:info, r"\(missing, 3\) is not a physical group") exclude_groups(
             sm,
@@ -2452,12 +2456,10 @@ end
         sm["chip_bottom"] = filter(at_z10, faces)
         return nothing
     end
-    const BOX = (-41μm, -41μm, -1μm, 41μm, 41μm, 31μm)   # chip + both pads, not the far boxes
-
     @testset "targeted: fuses neighbors, leaves the rest untouched" begin
         sm = build_package("tf_pruned")
         far1_before, far2_before = vtags(sm, "far1"), vtags(sm, "far2")
-        targeted_fuse!(sm, "chip"; bbox=BOX)
+        targeted_fuse!(sm, "chip")
         @test shared(sm, "chip", "pad_a") == 1      # conformal interface formed
         @test shared(sm, "chip", "pad_b") == 1
         @test shared(sm, "chip", "far1") == 0       # never touched the far boxes
@@ -2473,26 +2475,24 @@ end
     @testset "targeted matches global: no orphan entities, dim-2 groups land on real faces" begin
         smg = build_package("tf_global")
         tag_chip_bottom!(smg)
-        targeted_fuse!(smg, "chip"; bbox=nothing)   # nothing → global fragment
+        _fragment_three_pass!(smg)                  # global reference
         @test shared(smg, "chip", "pad_a") == 1
         @test shared(smg, "chip", "pad_b") == 1
         @test isempty(orphan_faces(smg))
         nf_global, nc_global = nentities(smg, 2), nentities(smg, 1)
 
-        for (nm, kw) in (("tf_auto_cmp", (;)), ("tf_box_cmp", (; bbox=BOX)))
-            smt = build_package(nm)
-            tag_chip_bottom!(smt)
-            targeted_fuse!(smt, "chip"; warn=false, kw...)
-            # Same entity counts as the global pass and nothing floating.
-            @test nentities(smt, 2) == nf_global
-            @test nentities(smt, 1) == nc_global
-            @test isempty(orphan_faces(smt))
-            # The pre-tagged bottom face was split into three pieces (pad_a contact, pad_b
-            # contact, remainder), every one of which is a genuine boundary face of the chip.
-            cb = Set(t for (_, t) in dimtags(smt["chip_bottom", 2]))
-            @test length(cb) == 3
-            @test cb ⊆ faceset(smt, "chip")
-        end
+        smt = build_package("tf_auto_cmp")
+        tag_chip_bottom!(smt)
+        targeted_fuse!(smt, "chip"; warn=false)
+        # Same entity counts as the global pass and nothing floating.
+        @test nentities(smt, 2) == nf_global
+        @test nentities(smt, 1) == nc_global
+        @test isempty(orphan_faces(smt))
+        # The pre-tagged bottom face was split into three pieces (pad_a contact, pad_b
+        # contact, remainder), every one of which is a genuine boundary face of the chip.
+        cb = Set(t for (_, t) in dimtags(smt["chip_bottom", 2]))
+        @test length(cb) == 3
+        @test cb ⊆ faceset(smt, "chip")
     end
 
     @testset "free-standing sheet inside the region is fragmented too" begin
@@ -2506,7 +2506,7 @@ end
             return sm
         end
         smg = with_sheet("tf_sheet_global")
-        targeted_fuse!(smg, "chip"; bbox=nothing)
+        _fragment_three_pass!(smg)
         n_global = length(dimtags(smg["sheet", 2]))
         @test n_global == 3
 
@@ -2578,7 +2578,7 @@ end
         sm = build_package("tf_faredge")
         tag_edge!(sm, "far1", "far_edge")
         before = Set(t for (d, t) in dimtags(sm["far_edge", 1]))
-        targeted_fuse!(sm, "chip"; bbox=BOX)
+        targeted_fuse!(sm, "chip")
         @test Set(t for (d, t) in dimtags(sm["far_edge", 1])) == before
 
         # (b) For an edge inside the fused neighborhood, targeted is no worse than global.
@@ -2586,24 +2586,68 @@ end
         # `dimtags` queries gmsh's current model, so read each result before building the next.
         sg = build_package("tf_edge_global")
         tag_edge!(sg, "pad_a", "edge_grp")
-        targeted_fuse!(sg, "chip"; bbox=nothing)
+        _fragment_three_pass!(sg)
         n_global = length(dimtags(sg["edge_grp", 1]))
         st = build_package("tf_edge_targeted")
         tag_edge!(st, "pad_a", "edge_grp")
-        targeted_fuse!(st, "chip"; bbox=BOX)
+        targeted_fuse!(st, "chip")
         @test length(dimtags(st["edge_grp", 1])) == n_global
+    end
+
+    @testset "several parts in one call, one box per volume" begin
+        # A second part resting on far1, and an overlapping pair between the two parts. A single
+        # box around both parts would take in the pair and fuse it; one box per volume leaves
+        # it as it was, like everything else outside the region.
+        sm = build_package("tf_multi")
+        gmsh.model.set_current("tf_multi")
+        part = gmsh.model.occ.addBox(500, 500, 10, 10, 10, 5)
+        m1 = gmsh.model.occ.addBox(200, 200, 0, 10, 10, 10)
+        m2 = gmsh.model.occ.addBox(205, 200, 0, 10, 10, 10)
+        gmsh.model.occ.synchronize()
+        sm["part"] = [(Int32(3), Int32(part))]
+        sm["m1"] = [(Int32(3), Int32(m1))]
+        sm["m2"] = [(Int32(3), Int32(m2))]
+        far2_before = vtags(sm, "far2")
+        res = targeted_fuse!(sm, ["chip", "part"])
+        @test Set(res) == Set(vcat(dimtags(sm["chip", 3]), dimtags(sm["part", 3])))
+        @test shared(sm, "chip", "pad_a") == 1
+        @test shared(sm, "chip", "pad_b") == 1
+        @test shared(sm, "part", "far1") == 1
+        @test shared(sm, "m1", "m2") == 0          # outside every part's box: not fragmented
+        @test vtags(sm, "far2") == far2_before
+    end
+
+    @testset "an entity enclosed by the object is fused" begin
+        # Boxes around the object's faces alone would miss `inner`, which touches none of them.
+        sm = SolidModel("tf_enclosed"; overwrite=true)
+        gmsh.model.set_current("tf_enclosed")
+        inner = gmsh.model.occ.addBox(10, 10, 10, 10, 10, 10)
+        outer = gmsh.model.occ.addBox(0, 0, 0, 30, 30, 30)
+        gmsh.model.occ.synchronize()
+        sm["inner"] = [(Int32(3), Int32(inner))]
+        sm["outer"] = [(Int32(3), Int32(outer))]
+        targeted_fuse!(sm, "outer")
+        @test shared(sm, "outer", "inner") == 6
+        gmsh.model.mesh.generate(3)
+        _, et, _ = gmsh.model.mesh.getElements(3)
+        @test minimum(gmsh.model.mesh.getElementQualities(reduce(vcat, et))) > 0.1
     end
 
     @testset "validation and API" begin
         sm = build_package("tf_valid")
         # Missing group must error (not silently fall back to a global fragment).
-        @test_throws ArgumentError targeted_fuse!(sm, "nope"; bbox=nothing)
+        @test_throws ArgumentError targeted_fuse!(sm, "nope")
+        @test_throws ArgumentError targeted_fuse!(sm, ["chip", "nope"])
+        @test_throws ArgumentError targeted_fuse!(sm, String[])
         # Non-OpenCascade kernel is rejected.
         smn = SolidModel("tf_native", GmshNative(); overwrite=true)
         @test_throws ArgumentError targeted_fuse!(smn, "chip")
         # Symbol group names are accepted and behave like the String form.
         sm2 = build_package("tf_symbol")
-        @test targeted_fuse!(sm2, :chip; bbox=BOX) == dimtags(sm2["chip", 3])
+        @test targeted_fuse!(sm2, :chip) == dimtags(sm2["chip", 3])
+        # A SubString is one name, not a list of characters.
+        sm4 = build_package("tf_substring")
+        @test targeted_fuse!(sm4, split("chip,x", ",")[1]) == dimtags(sm4["chip", 3])
         # Targeted selection is the default.
         sm3 = build_package("tf_auto")
         far_before = vtags(sm3, "far1")
@@ -2613,23 +2657,7 @@ end
         @test vtags(sm3, "far1") == far_before
 
         gmsh.model.set_current("tf_valid")
-        @test_throws ArgumentError targeted_fuse!(sm, "chip"; bbox=:invalid)
-        @test_throws ArgumentError targeted_fuse!(sm, "chip"; bbox=(0μm, 1μm))
-        @test_throws ArgumentError targeted_fuse!(
-            sm,
-            "chip";
-            bbox=(1μm, 0μm, 0μm, 0μm, 1μm, 1μm)
-        )
-        # An explicit box that misses the object entirely is a user error, not a no-op.
-        @test_throws ArgumentError targeted_fuse!(
-            sm,
-            "chip";
-            bbox=(100μm, 100μm, 100μm, 110μm, 110μm, 110μm)
-        )
-        # delta is validated regardless of which bbox branch is taken.
         @test_throws ArgumentError targeted_fuse!(sm, "chip"; delta=-1μm)
-        @test_throws ArgumentError targeted_fuse!(sm, "chip"; delta=-1μm, bbox=nothing)
-        @test_throws ArgumentError targeted_fuse!(sm, "chip"; delta=-1μm, bbox=BOX)
         # A group whose entities were consumed is caught rather than returning [].
         gmsh.model.occ.remove(dimtags(sm["chip", 3]))
         gmsh.model.occ.synchronize()
