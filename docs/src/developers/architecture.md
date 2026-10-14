@@ -42,6 +42,29 @@ Package extensions in `ext/` load only when the corresponding weak dependency is
 
 ## [How a schematic becomes output](@id dev-render-pipeline)
 
+The diagram below illustrates the flow of data as schematics become 2D or 3D output files:
+
+ ```
+                                    ┌──<─────────┐
+     SchematicGraph ──plan──> Schematic──check!─>┘
+(components, connectivity)    │  (coordinate_system with component reference hierarchy)
+                              │
+     Target────────────────render!
+(map_meta, rendering options) │
+                              ▼
+[lazy geometry: elements(comp) → geometry(comp) → _geometry! (once, cached)]
+                              │
+                      ┌───────┴────────┐
+                      ▼                ▼
+                    Cell            SolidModel
+(reference hierarchy, polygons)   (flattened, exact curves)
+                      └───────┬────────┘
+                              ▼
+                           save(...)
+ ```
+
+(A sketch of schematic data flow can be found in [Concepts: Schematic-Driven Design](@ref schematic-driven-design).)
+
 Both backends start from a checked `Schematic`, whose internal `coordinate_system` holds
 references to the components placed by `plan`. Component geometry is produced lazily: the
 renderer asks for `elements(comp)`, which calls `geometry(comp)`, which runs `_geometry!` once
@@ -49,8 +72,17 @@ and caches the result. `build!` only forces that step early.
 
 Rendering options (`target.rendering_options` plus any keywords the caller passes) travel as
 keyword arguments through every layer down to `to_polygons`/`to_primitives`, where
-`OptionalStyle` reads its flag from them. Nothing validates them on the way, so a misspelled
-option is silently ignored ([#7](https://github.com/aws-cqc/DeviceLayout.jl/issues/7)).
+`OptionalStyle` reads its flag from them. 
+
+!!! warning "Keyword argument forwarding"
+
+   Many functions in the rendering call stack have a catch-all `; kwargs...` for arbitrary
+   keyword arguments, which are then passed forward together. This is done so that a function does not need to enumerate all possible keywords it might see (some of which may be user-defined flags for `OptionalStyle`) but can still pass them forward in case they
+   reach functions that use them.
+
+   However, nothing validates these keyword arguments on the way, so a misspelled
+   option is silently ignored ([#7](https://github.com/aws-cqc/DeviceLayout.jl/issues/7)).
+   This "keyword argument forwarding" pattern should be avoided going forward.
 
 Errors raised while rendering an individual structure are caught and logged with
 `_group=:render` rather than thrown, so one broken component doesn't abort a whole layout.
@@ -173,21 +205,28 @@ interface. Rules for fallback methods and for extending functions from other mod
 For new subtypes, the required methods are documented in the docstring of each abstract type;
 this is a checklist of where to look.
 
-| To add a... | Subtype | Implement | Also consider |
+| To add a... | Subtype | Implement |
 |---|---|---|---|
-| Geometry entity | `GeometryEntity{T}` | `to_polygons(::E)`, `transform(::E, f)` | `footprint`, `halo`, `lowerleft`/`upperright` for speed; `SolidModels.to_primitives(::SolidModel, ::E)` if the kernel can represent it exactly (the fallback is `to_polygons`); `to_curvilinear` methods if styled versions should keep exact curves (the fallback discretizes and warns); a `ConformalRender._add_conformal!` method if it should share edges |
-| Entity style | `GeometryEntityStyle` | `to_polygons(::E, ::S; kwargs...)` for each supported entity (or `::Polygon` as a fallback) | `transform(::S, f)` if the style holds geometric state such as a direction (the default returns the style unchanged); `lowerleft`/`upperright`/`footprint`/`halo` for `StyledEntity{T, E, S}` if the style changes the entity's extent (the defaults use the bare entity); watch `Aqua.test_ambiguities`: the generic `(::Type{<:GeometryEntityStyle})(::GeometryEntity, args...)` constructor makes a style whose first field is an entity ambiguous |
-| Path segment | `Paths.ContinuousSegment{T}` | `pathlength`, `p0`, `α0`, `α1`, `setp0!`, `setα0!`, callable `seg(t)` for `t ∈ [0, pathlength]` (arc length, not normalized); `pathtopolys(::Seg, ::Style)` for the styles it should render with, since the generic method throws | The generic style methods in `curvilinear.jl` accept only `BaseContinuousSegment = Union{Straight, Turn, BSpline}` and build edges with `Paths.offset`, so either make the segment work there or convert it first (as `OffsetSegment` does with `resolve_offset`); `curvature` uses `ForwardDiff` on `seg(t)`, so keep it differentiable; `reverse`; `hash`/`==` |
-| Path style | `Paths.ContinuousStyle{false}` (or `{true}` for stretchable, with the length as the last field) | `extent`, `width`, `translate`, `reverse`, `pin` (see `paths/contstyles/interface.jl`); `pathtopolys(::BaseContinuousSegment, ::S)` in `curvilinear.jl` | If it only produces straight edges on `Straight`, add it to `LinearStyle` with a fast `to_polygons(::Straight, ::S)` in `render/`; `to_primitives(::SolidModel, ::Segment, ::S)` only if 3D output must differ from `pathtopolys` (as for terminations) |
-| Route rule | `Paths.RouteRule` | `_route!` or `_route_leg!`; optionally `reconcile!` | Docstring of `RouteRule` in `paths/routes.jl` |
-| Component | `Component` via `@compdef` | `_geometry!(cs, ::C)`, `hooks(::C)` | [Components](@ref concept-components), [Building a Component](../tutorials/building_a_component.md), the [Style Guide](../concepts/styleguide.md) |
-| Composite component | `CompositeComponent` via `@compdef` | `_build_subcomponents`, `_graph!`, `map_hooks` | [Composite Components](@ref concept-composite-components) |
-| Output format | — | `save(::File{format"X"}, ::Cell)` (or `::SolidModel`) in `src/backends/` | Register the format in `__init__`, and also in `precompile.jl` if the workload saves or loads it by file name |
-| Post-render operation (3D) | — | A function `op!(sm::SolidModel, args...; kwargs...)` returning the new group's entities, in `solidmodels/postrender.jl`; users reference it in `postrender_ops` tuples | Document it in `concepts/solidmodels.md`; check whether `_compose_meshsize!` needs a method for it |
+| Geometry entity | `GeometryEntity{T}` | `to_polygons(::E)`, `transform(::E, f)` |
+| Entity style | `GeometryEntityStyle` | `to_polygons(::E, ::S; kwargs...)` for each supported entity (or `::Polygon` as a fallback) |
+| Path segment | `Paths.ContinuousSegment{T}` | `pathlength`, `p0`, `α0`, `α1`, `setp0!`, `setα0!`, callable `seg(t)` for `t ∈ [0, pathlength]` (arc length, not normalized); `pathtopolys(::Seg, ::Style)` for the styles it should render with, since the generic method throws |
+| Path style | `Paths.ContinuousStyle{false}` (or `{true}` for stretchable, with the length as the last field) | `extent`, `width`, `translate`, `reverse`, `pin` (see `paths/contstyles/interface.jl`); `pathtopolys(::BaseContinuousSegment, ::S)` in `curvilinear.jl` |
+| Route rule | `Paths.RouteRule` | `_route!` or `_route_leg!`; optionally `reconcile!` |
+| Component | `Component` via `@compdef` | `_geometry!(cs, ::C)`, `hooks(::C)`; see [Components](@ref concept-components), [Building a Component](../tutorials/building_a_component.md), the [Style Guide](../concepts/styleguide.md) |
+| Composite component | `CompositeComponent` via `@compdef` | `_build_subcomponents`, `_graph!`, `map_hooks` (see [Composite Components](@ref concept-composite-components)) |
+| Output format | — | `save(::File{format"X"}, ::Cell)` (or `::SolidModel`) in `src/backends/`; registration in `__init__` |
+| Post-render operation (3D) | — | A function `op!(sm::SolidModel, args...; kwargs...)` returning the new group's entities, in `solidmodels/postrender.jl`; users reference it in `postrender_ops` tuples |
 
 These interfaces are public API: adding a required method to an abstract type, or changing
 what an interface method receives or must return, breaks downstream subtypes (see
 [What counts as breaking?](@ref dev-breaking)).
+
+Other interface functions are optional but important in particular circumstances:
+
+- **Geometry entity:** Most interface functions have fallbacks that convert to polygons first. Specializations should be implemented when that loses information or is slower than necessary: `footprint`, `halo`, `lowerleft`/`upperright` for speed; `SolidModels.to_primitives(::SolidModel, ::E)` if the kernel can represent it exactly (the fallback is `to_polygons`); `to_curvilinear` methods if styled versions should keep exact curves (the fallback discretizes and warns); a `ConformalRender._add_conformal!` method if it should share edges; `SolidModels.meshsize` if it should carry mesh sizing information.
+- **Entity style:** Generic fallbacks assume the style does not change under coordinate transformations and does not change its entity's bounds. Implement `transform(::S, f)` if the style holds geometric state such as a direction (the default returns the style unchanged); `lowerleft`/`upperright`/`footprint`/`halo` for `StyledEntity{T, E, S}` if the style changes the entity's extent.
+- **Path segment:** The generic style methods in `curvilinear.jl` accept only `BaseContinuousSegment = Union{Straight, Turn, BSpline}` and build edges with `Paths.offset`, so either make the segment work there or convert it first (as `OffsetSegment` does with `resolve_offset`); methods may use `ForwardDiff` on `seg(t)`, so keep it differentiable; specialize `curvature` if it can be calculated faster than via `ForwardDiff`; add `reverse` to enable use in channel routing.
+- **Path style:** If it only produces straight edges on `Straight`, add it to `LinearStyle` with a fast `to_polygons(::Straight, ::S)` in `render/`; `SolidModels.meshsize`.
 
 ## [Global state](@id dev-global-state)
 

@@ -48,7 +48,7 @@ Many questions about why the package is the way it is are answered by principles
 "Capture and transmit design intent", "Separate physics and geometry", and "A process-agnostic core."
 
 A typical user of DeviceLayout.jl is working with a team in a fast-moving field, iterating on
-schematics, components, fabrication processes, and models of device physics. Mixing those four things together forces projects to form separate branches for variations on any one of them, where improvements in one branch might not make it to another. Isolating them under different data flows allows fabricated and simulated geometry to drift apart. Keeping the four in separate but connected abstraction layers allows each to be independently modified and swapped out when needed, with all output artifacts descending from a single source of truth.
+schematics, components, fabrication processes, and models of device physics. Mixing those four things together forces projects to form separate branches for variations on any one of them, where improvements in one branch might not make it to another. Separating them under divergent data flows allows fabricated and simulated geometry to drift apart. Keeping the four in separate but connected abstraction layers allows each to be independently modified and swapped out when needed, with all output artifacts descending from a single source of truth.
 This also makes standard tools for version control and dependency management effective for ensuring reproducibility and combining multiple work streams—related to the "Design projects are software projects" principle.
 
 The package is structured accordingly:
