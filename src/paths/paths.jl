@@ -166,16 +166,6 @@ abstract type Segment{T <: Coordinate} end
 @inline Base.eltype(::Segment{T}) where {T} = T
 @inline Base.eltype(::Type{Segment{T}}) where {T} = T
 
-# Deprecated because it returns a length rather than a segment.
-function Base.zero(::Segment{T}) where {T}
-    Base.depwarn(
-        "`zero(::Segment)` is deprecated and will be removed in DeviceLayout.jl 2.0. " *
-        "Use `zero(eltype(seg))` for a zero length.",
-        :zero
-    )
-    return zero(T)
-end
-
 # Used only to get dispatch to work right with ForwardDiff.jl.
 struct Curv{T}
     s::T
@@ -193,15 +183,6 @@ curvature(s, t) = ForwardDiff.derivative(Curv(s), t)
 
 abstract type DiscreteSegment{T} <: Segment{T} end
 abstract type ContinuousSegment{T} <: Segment{T} end
-
-function Base.zero(::Union{Type{Segment{T}}, Type{ContinuousSegment{T}}}) where {T}
-    Base.depwarn(
-        "`zero(::Type{Segment{T}})` is deprecated and will be removed in DeviceLayout.jl " *
-        "2.0. Use `zero(T)` for a zero length.",
-        :zero
-    )
-    return zero(T)
-end
 
 # doubly linked-list behavior
 mutable struct Node{T} <: GeometryEntity{T}

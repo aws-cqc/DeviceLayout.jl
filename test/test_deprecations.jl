@@ -4,13 +4,6 @@
     # fire under `--depwarn=yes` (as `Pkg.test` runs) and are silent otherwise; deprecations
     # with a new behavior to opt into warn at default visibility and are checked directly.
 
-    @testset "zero(::Segment)" begin
-        seg = Paths.Straight(1.0μm, Point(0.0μm, 0.0μm), 0.0°)
-        @test (@test_deprecated zero(seg)) === zero(eltype(seg)) === 0.0μm
-        @test (@test_deprecated zero(Paths.Segment{Float64})) === 0.0
-        @test (@test_deprecated zero(Paths.ContinuousSegment{Float64})) === 0.0
-    end
-
     @testset "Reference keyword synonyms" begin
         cs = CoordinateSystem("synonyms", nm)
         canonical = sref(cs; xrefl=true, mag=2.0, rot=90°)

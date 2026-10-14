@@ -25,6 +25,7 @@ The format of this changelog is based on
   - `circle` (deprecated in 1.6.0 in favor of `Circle` or `circle_polygon`)
   - `layers` (deprecated in favor of `gdslayers`)
   - `ExamplePDK.filter_params` (use `SchematicDrivenLayout.filter_parameters`)
+  - `zero(::Segment)` and `zero(::Type{Segment{T}})` (deprecated in favor of `zero(eltype(seg))` or `zero(T)`)
   - `Paths.CompoundRouteRule` (deprecated in favor of one `route!` per leg, or channel routing); `RouteComponent`'s `sty` field is now a single `Paths.Style` rather than a vector of styles
   - Integer `location` in `attach!` for `Path`, `RouteComponent`, and `SchematicGraph` (deprecated in favor of `:left`, `:center`, or `:right`)
   - `Paths.GeneralStrands` and `Paths.Strands` with a callable `offset`, `width`, or `spacing` (deprecated in favor of constant arguments, or drawing each strand as its own `Path`)
