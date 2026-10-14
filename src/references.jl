@@ -40,10 +40,10 @@ Base.convert(::Type{StructureReference{S}}, x::StructureReference) where {S} =
     convert(GeometryReference{S}, x)
 
 """
-    StructureReference(x::GeometryStructure{S}; kwargs...) where {S <: Coordinate}
-    StructureReference(x::GeometryStructure{S}, origin::Point{T}; kwargs...) where
-        {S <: Coordinate, T <: Coordinate}
-    StructureReference(x, origin::Point{T}; kwargs...) where {T <: Coordinate}
+    StructureReference(x::GeometryStructure{S}, origin::Point{T}=zero(Point{S});
+        xrefl=false,
+        mag=1.0, 
+        rot=0.0) where {S <: Coordinate, T <: Coordinate}
 
 Convenience constructor for `StructureReference{float(T), typeof(x)}`.
 
@@ -147,10 +147,14 @@ function Base.show(io::IO, x::ArrayReference)
 end
 
 """
-    ArrayReference(x::GeometryStructure{S}; kwargs...) where {S <: Coordinate}
-    ArrayReference(x::GeometryStructure{S}, origin::Point{T}; kwargs...) where
-        {S <: Coordinate, T <: Coordinate}
-    ArrayReference(x, origin::Point{T}; kwargs...) where {T <: Coordinate}
+    ArrayReference(x::GeometryStructure{S}, origin::Point{T}=zero(Point{S}); 
+        dc=zero(Point{T}),
+        dr=zero(Point{T}),
+        nc=1,
+        nr=1,
+        xrefl=false,
+        mag=1.0,
+        rot=0.0) where {S <: Coordinate, T <: Coordinate}
 
 Construct a `ArrayReference{float(T),typeof(x)}` object.
 
@@ -426,7 +430,8 @@ flat_elements(geom_layer::Pair{<:Union{GeometryStructure, GeometryReference}}) =
 
 ### Creating references
 """
-    sref(x::GeometryStructure{T}, origin=zero(Point{T}); kwargs...)
+    sref(x::GeometryStructure{T}, origin=zero(Point{T}); xrefl=false, mag=1.0, rot=0.0)
+    sref(x::GeometryStructure{T}, f::Transformation; kwargs...)
 
 Convenience constructor for `StructureReference{float(T), typeof(x)}`.
 
@@ -435,6 +440,9 @@ Keyword arguments:
   - `xrefl`: `true` to reflect across the x-axis
   - `mag`: magnification factor
   - `rot`: rotation angle
+
+A reference can also be constructed with `origin, xrefl, mag, rot` defined by a
+transformation, with keyword arguments still available as optional overrides.
 """
 function sref(
     x::GeometryStructure{S},
@@ -456,8 +464,16 @@ sref(x::GeometryStructure{S}, f::Transformation; kwargs...) where {S} = sref(
 )
 
 """
-    aref(x::GeometryStructure{S}, origin::Point{T}=zero(Point{S}); kwargs...) where
-        {S <: Coordinate, T <: Coordinate}
+    aref(x::GeometryStructure{S}, origin::Point{T}=zero(Point{S});
+        dc=zero(Point{T}),
+        dr=zero(Point{T}),
+        nc=1,
+        nr=1,
+        xrefl=false,
+        mag=1.0,
+        rot=0.0
+    ) where {S <: Coordinate, T <: Coordinate}
+    aref(x, f::Transformation; kwargs...)
 
 Construct a `ArrayReference{float(T),typeof(x)}` object.
 
@@ -473,6 +489,9 @@ Keyword arguments:
   - `xrefl`: `true` to reflect across the x-axis
   - `mag`: magnification factor
   - `rot`: rotation angle
+
+A reference can also be constructed with `origin, xrefl, mag, rot` defined by a
+transformation, with keyword arguments still available as optional overrides.
 """
 function aref(
     x::GeometryStructure{S},
@@ -498,11 +517,11 @@ aref(x::GeometryStructure{S}, f::Transformation; kwargs...) where {S} = aref(
 )
 
 """
-    aref(x, c::AbstractRange, r::AbstractRange; kwargs...)
+    aref(x, c::AbstractRange, r::AbstractRange; xrefl=false, mag=1.0, rot=0.0)
 
 Construct an `ArrayReference` based on ranges (probably `LinRange` or
 `StepRangeLen`). `c` specifies column coordinates and `r` for the rows. Pairs from
-`c` and `r` specify the origins of the repeated cells. The extrema of the ranges
+`c` and `r` specify the origins of the repeated structures. The extrema of the ranges
 therefore do not specify the extrema of the resulting `ArrayReference`'s bounding box;
 some care is required.
 

@@ -37,10 +37,10 @@ c_arrayed = Cell{Float64}("arrayed")
 addarr!(
     c_arrayed,
     c_circ,
-    numrows=31,
-    numcols=31,
-    deltarow=Point(0.0, 10.0),
-    deltacol=Point(10.0, 0.0)
+    nr=31,
+    nc=31,
+    dr=Point(0.0, 10.0),
+    dc=Point(10.0, 0.0)
 )
 
 SUITE["bounds"]["random_rectangles"] = @benchmarkable bounds($random_rectangles)
