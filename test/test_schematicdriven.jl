@@ -344,8 +344,7 @@
             flat = flatten(floorplan.coordinate_system)
             @test count(flat.element_metadata .== GDSMeta(100)) == 3
 
-            r2.component.sty[1] =
-                Paths._overlay!(r2.sty[1], Paths.Trace(1000nm), GDSMeta(1))
+            r2.component.sty = Paths._overlay!(r2.sty, Paths.Trace(1000nm), GDSMeta(1))
             empty!(r2._path)
             path = SchematicDrivenLayout.path(r2.component)
             @test path[1].sty.s isa Paths.OverlayStyle

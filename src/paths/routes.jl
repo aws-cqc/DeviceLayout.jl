@@ -147,35 +147,6 @@ Base.@kwdef struct BSplineRouting <: RouteRule
 end
 
 """
-    CompoundRouteRule <: RouteRule
-    CompoundRouteRule(rules::Vector{RouteRule}, leg_lengths::Vector{Int}=ones(Int, length(rules)))
-
-Specifies a sequence of rules for routing from one point to another, where `rules[i]` is used
-to route through the next `leg_lengths[i]` waypoints and/or endpoint.
-
-!!! warning "Deprecated"
-
-    `CompoundRouteRule` is deprecated and will be removed in DeviceLayout.jl 2.0. Call
-    `route!` once per leg with that leg's rule and style, or use
-    [`Paths.SingleChannelRouting`](@ref) for different behavior on different legs.
-"""
-struct CompoundRouteRule <: RouteRule
-    rules::Vector{RouteRule}
-    leg_lengths::Vector{Int}
-    function CompoundRouteRule(rules, leg_lengths)
-        Base.depwarn(
-            "`CompoundRouteRule` is deprecated and will be removed in DeviceLayout.jl 2.0. " *
-            "Call `route!` once per leg with that leg's rule and style, or use " *
-            "`SingleChannelRouting` for different behavior on different legs.",
-            :CompoundRouteRule
-        )
-        return new(rules, leg_lengths)
-    end
-end
-CompoundRouteRule(rules::Vector{RouteRule}) =
-    CompoundRouteRule(rules, ones(Int, length(rules)))
-
-"""
     mutable struct Route{S<:Coordinate, R <: RouteRule}
     Route(rule, startpoint::Point{S}, endpoint::Point, start_direction, end_direction; waypoints=Point{S}[], waydirs=[])
     Route(rule, path0::Path, endpoint::Point, end_direction)
@@ -613,48 +584,6 @@ function _route!(
         endpoints_curvature=rule.endpoints_curvature,
         auto_curvature=rule.auto_curvature
     )
-end
-
-function route!(
-    path::Path{S},
-    p1::Point,
-    α1,
-    crr::CompoundRouteRule,
-    sty=fill(Paths.nextstyle(path), length(crr.rules));
-    waypoints=Point{S}[],
-    waydirs=Vector{typeof(1.0°)}(undef, length(waypoints))
-) where {S}
-    sum(crr.leg_lengths) == length(waypoints) + 1 ||
-        @error "CompoundRouteRule leg lengths must match the number of waypoints + endpoint" _group =
-            :route
-    length(waydirs) == length(waypoints) ||
-        @error "CompoundRouteRule requires a direction for each waypoint" _group = :route
-    leg_start = 1
-    for (idx, leg_rule) in enumerate(crr.rules)
-        if idx == length(crr.rules)
-            route!(
-                path,
-                p1,
-                α1,
-                leg_rule,
-                sty[idx],
-                waypoints=waypoints[leg_start:end],
-                waydirs=waydirs[leg_start:end]
-            )
-        else
-            leg_end = leg_start + crr.leg_lengths[idx] - 1
-            route!(
-                path,
-                waypoints[leg_end],
-                waydirs[leg_end],
-                leg_rule,
-                sty[idx],
-                waypoints=waypoints[leg_start:(leg_end - 1)],
-                waydirs=waydirs[leg_start:(leg_end - 1)]
-            )
-            leg_start = leg_end + 1
-        end
-    end
 end
 
 function _route_leg!(

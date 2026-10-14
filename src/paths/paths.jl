@@ -88,7 +88,7 @@ import DeviceLayout:
 import DeviceLayout.Polygons: segmentize, intersects
 import DeviceLayout: bounds, halo
 
-export Path, Route, StraightAnd90, StraightAnd45, BSplineRouting, CompoundRouteRule
+export Path, Route, StraightAnd90, StraightAnd45, BSplineRouting
 
 export α0, α1, p0, p1, style0, style1, discretestyle1, contstyle1
 export reconcile!,

@@ -3,43 +3,6 @@
     # calling only current spellings. `@test_deprecated` covers `Base.depwarn` sites, which
     # fire under `--depwarn=yes` (as `Pkg.test` runs) and are silent otherwise; deprecations
     # with a new behavior to opt into warn at default visibility and are checked directly.
-    using DeviceLayout.SchematicDrivenLayout:
-        SchematicGraph, add_node!, RouteComponent, Spacer, path
-
-    @testset "CompoundRouteRule and RouteComponent style vectors" begin
-        crule = @test_deprecated Paths.CompoundRouteRule([
-            Paths.StraightAnd90(min_bend_radius=20, max_bend_radius=100),
-            Paths.BSplineRouting(endpoints_speed=2000),
-            Paths.StraightAnd45(min_bend_radius=20, max_bend_radius=100)
-        ])
-        r5 = Route(
-            crule,
-            Point(10.0, 20.0),
-            Point(50, 90),
-            90°,
-            135°,
-            waypoints=[Point(100, 45), Point(100, 70)],
-            waydirs=[0, π]
-        )
-        sty = Paths.CPW(10.0, 6.0)
-        pa = Path(r5, [sty, sty, sty])
-        @test p1(pa) ≈ Point(50, 90)
-        @test p1(pa.nodes[2].seg) ≈ Point(100, 45)
-        @test α1(pa.nodes[2].seg) == 0
-        @test p1(pa.nodes[3].seg) ≈ Point(100, 70)
-        @test α1(pa.nodes[3].seg) == 180°
-        @test α1(pa) == 135°
-
-        rc = @test_deprecated RouteComponent{Float64, typeof(crule)}(
-            "crr",
-            r5,
-            false,
-            [sty, sty, sty],
-            GDSMeta()
-        )
-        @test p1(path(rc)) ≈ Point(50, 90)
-        @test_nowarn RouteComponent("single", r5, false, sty, GDSMeta())
-    end
 
     @testset "zero(::Segment)" begin
         seg = Paths.Straight(1.0μm, Point(0.0μm, 0.0μm), 0.0°)

@@ -12,7 +12,7 @@ Route(rule, hook0::PointHook, hook1::PointHook; kwargs...) =
         name::String
         r::Paths.Route{T, R}
         global_waypoints::Bool
-        sty::Vector{Paths.Style}
+        sty::Paths.Style
         meta::Meta
         _path::Path{T}
 
@@ -22,27 +22,15 @@ Wraps a `Route` in a `Component` type for use with schematics.
 taken to be in a route-local coordinate system, with the origin at the route start
 and the x-axis in the route's initial direction. Otherwise, they will be relative to
 the parent `Schematic` global coordinate system.
-
-A `sty` vector with more than one style, applying `sty[i]` to the `i`th leg of a
-`CompoundRouteRule`, is deprecated along with `CompoundRouteRule` and will be removed in
-DeviceLayout.jl 2.0, when the field becomes a single style.
 """
 mutable struct RouteComponent{T, R <: Paths.RouteRule} <: AbstractComponent{T}
     name::String
     r::Paths.Route{T, R}
     global_waypoints::Bool
-    sty::Vector{Paths.Style}
+    sty::Paths.Style
     meta::Meta
     _path::Path{T}
-    function RouteComponent{T, R}(n, r, g, s, m) where {T, R}
-        length(s) > 1 && Base.depwarn(
-            "A `RouteComponent` with a vector of styles is deprecated and will be removed " *
-            "in DeviceLayout.jl 2.0, along with `CompoundRouteRule`. Use one `route!` per " *
-            "leg, each with a single style.",
-            :RouteComponent
-        )
-        return new{T, R}(n, r, g, s, m, Path{T}(n))
-    end
+    RouteComponent{T, R}(n, r, g, s, m) where {T, R} = new{T, R}(n, r, g, s, m, Path{T}(n))
 end
 RouteComponent(
     name::String,
@@ -50,14 +38,14 @@ RouteComponent(
     gw::Bool,
     sty::Paths.Style,
     meta::Meta
-) where {T, R} = RouteComponent{T, R}(name, r, gw, [sty], meta)
+) where {T, R} = RouteComponent{T, R}(name, r, gw, sty, meta)
 
 function hooks(rc::RouteComponent{T}) where {T}
     p0 = StyledHook(
         PointHook(rc.r.p0, rc.r.α0),
-        Paths.nextstyle(reverse(rc.sty[1], pathlength(rc._path)))
+        Paths.nextstyle(reverse(rc.sty, pathlength(rc._path)))
     )
-    p1 = StyledHook(PointHook(rc.r.p1, rc.r.α1 + 180°), Paths.nextstyle(rc.sty[end]))
+    p1 = StyledHook(PointHook(rc.r.p1, rc.r.α1 + 180°), Paths.nextstyle(rc.sty))
     return (; p0, p1)
 end
 
@@ -90,29 +78,16 @@ function path(rc::RouteComponent)
     path.α0 = r.α0
     path.name = rc.name
     path.metadata = rc.meta
-    if length(rc.sty) == 1
-        route!(
-            path,
-            r.p1,
-            r.α1,
-            r.rule,
-            _undec(rc.sty[1]);
-            waypoints=r.waypoints,
-            waydirs=r.waydirs
-        )
-        redecorate!(path, rc.sty[1]) # apply decorations
-    else # Vector of styles for each segment
-        route!(
-            path,
-            r.p1,
-            r.α1,
-            r.rule,
-            _undec.(rc.sty);
-            waypoints=r.waypoints,
-            waydirs=r.waydirs
-        )
-        redecorate!.(Ref(path), rc.sty)
-    end
+    route!(
+        path,
+        r.p1,
+        r.α1,
+        r.rule,
+        _undec(rc.sty);
+        waypoints=r.waypoints,
+        waydirs=r.waydirs
+    )
+    redecorate!(path, rc.sty) # apply decorations
 
     return rc._path
 end
@@ -250,8 +225,7 @@ function attach!(
     mark_dirty=true
 )
     mark_dirty && empty!(r._path)
-    return r.sty[1] =
-        Paths.decorate(r.sty[1], eltype(r.r), t, Paths.attach_location(location), c)
+    return r.sty = Paths.decorate(r.sty, eltype(r.r), t, Paths.attach_location(location), c)
 end
 
 function attach!(r::RouteComponent, c::CoordSysRef, t; location=:center, mark_dirty=true)

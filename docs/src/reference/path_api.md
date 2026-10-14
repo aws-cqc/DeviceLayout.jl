@@ -110,7 +110,6 @@
     Paths.BSplineRouting
     Paths.StraightAnd90
     Paths.StraightAnd45
-    Paths.CompoundRouteRule
     Paths.SingleChannelRouting
     Paths.RouteChannel
 ```
