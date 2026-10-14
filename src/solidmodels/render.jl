@@ -1294,24 +1294,30 @@ end
 
 # Adjacent-dimension pairs avoid both exterior boundary loss ([3,2,1], PR #145)
 # and stale OCC bindings when combined ([1,2,3], Gmsh #3446 / issue #172).
-# With `box`, each pass uses only entities whose bbox intersects it, rescanned per pass: OCC
-# binds split pieces as new entities while the parent may still reference the original, so
-# walking down from seed volumes would miss them and leave orphans.
-function _fragment_three_pass!(sm::SolidModel; box=nothing)
+# With `region` (a collection of boxes), each pass uses only entities whose bbox intersects
+# one of them, rescanned per pass: OCC binds split pieces as new entities while the parent
+# may still reference the original, so walking down from seed volumes would miss them and
+# leave orphans.
+function _fragment_three_pass!(sm::SolidModel; region=nothing)
     for dims in ([0, 1], [1, 2], [2, 3])
-        _fragment_and_map!(sm, dims; included_entities=_entities_in_box(sm, dims, box))
+        _fragment_and_map!(
+            sm,
+            dims;
+            included_entities=_entities_in_region(sm, dims, region)
+        )
     end
     return sm
 end
 
-_entities_in_box(::SolidModel, dims, ::Nothing) = nothing   # all entities of `dims`
-function _entities_in_box(sm::SolidModel, dims, box)
+_entities_in_region(::SolidModel, dims, ::Nothing) = nothing   # all entities of `dims`
+function _entities_in_region(sm::SolidModel, dims, region)
     gmsh.model.set_current(name(sm))
     ents = vcat([gmsh.model.get_entities(dim) for dim in dims]...)
-    selected = filter(dt -> _boxes_touch(box, bounds3d([dt])), ents)
-    # A boolean that rebuilds an entity can retag its sub-entities, including those outside the
-    # box. `_fragment_and_map!` can only follow operands, so the full boundary of every selected
-    # top-dimension entity is submitted too, as the global pass does implicitly.
+    selected = filter(dt -> _in_region(region, bounds3d([dt])), ents)
+    # A boolean that rebuilds an entity can retag its sub-entities, including those outside
+    # the region. `_fragment_and_map!` can only follow operands, so the full boundary of
+    # every selected top-dimension entity is submitted too, as the global pass does
+    # implicitly.
     top = maximum(dims)
     parents = filter(dt -> dt[1] == top, selected)
     isempty(parents) && return selected
@@ -1326,6 +1332,7 @@ end
 # always overlap and the test needs no tolerance.
 _rect(b) = SpatialIndexing.Rect((b[1], b[2], b[3]), (b[4], b[5], b[6]))
 _boxes_touch(a, b) = SpatialIndexing.intersects(_rect(a), _rect(b))
+_in_region(region, b) = any(r -> _boxes_touch(r, b), region)
 
 # Shared orchestrator body called by both `render!` and `render_conformal!`.
 # The two entry points differ only in:
