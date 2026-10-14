@@ -26,12 +26,15 @@
     ground = Ground(:metal)
     tag = Tag(:surface, "junction")
     lumped = LumpedPort(:ports, "drive"; index=2)
-    wave = WavePort(:ports, "readout"; index=3)
+    wave = WavePort(:ports, "readout")
     @test (layer(terminal), name(terminal)) == (:metal, "island")
     @test layer(ground) == :metal
     @test (layer(tag), name(tag)) == (:surface, "junction")
     @test (layer(lumped), name(lumped), layerindex(lumped)) == (:ports, "drive", 2)
-    @test (layer(wave), name(wave), layerindex(wave)) == (:ports, "readout", 3)
+    @test (layer(wave), name(wave), layerindex(wave)) == (:ports, "readout", 1)
+    @test SolidModelsExperimental._qualified(wave, "q1") == WavePort(:ports, "q1.readout")
+    @test SolidModelsExperimental._qualified(lumped, "q1") ==
+          LumpedPort(:ports, "q1.drive"; index=2)
 
     simple_layer = SourceLayer(NULL; thickness=10.0nm)
     offset_layer = SourceLayer(NULL; thickness=15μm, offset=5μm)
