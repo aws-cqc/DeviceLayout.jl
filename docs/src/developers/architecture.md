@@ -75,14 +75,14 @@ keyword arguments through every layer down to `to_polygons`/`to_primitives`, whe
 `OptionalStyle` reads its flag from them. 
 
 !!! warning "Keyword argument forwarding"
-
-   Many functions in the rendering call stack have a catch-all `; kwargs...` for arbitrary
-   keyword arguments, which are then passed forward together. This is done so that a function does not need to enumerate all possible keywords it might see (some of which may be user-defined flags for `OptionalStyle`) but can still pass them forward in case they
-   reach functions that use them.
-
-   However, nothing validates these keyword arguments on the way, so a misspelled
-   option is silently ignored ([#7](https://github.com/aws-cqc/DeviceLayout.jl/issues/7)).
-   This "keyword argument forwarding" pattern should be avoided going forward.
+    
+    Many functions in the rendering call stack have a catch-all `; kwargs...` for arbitrary
+    keyword arguments, which are then passed forward together. This is done so that a function does not need to enumerate all possible keywords it might see (some of which may be user-defined flags for `OptionalStyle`) but can still pass them forward in case they
+    reach functions that use them.
+    
+    However, nothing validates these keyword arguments on the way, so a misspelled
+    option is silently ignored ([#7](https://github.com/aws-cqc/DeviceLayout.jl/issues/7)).
+    This "keyword argument forwarding" pattern should be avoided going forward.
 
 Errors raised while rendering an individual structure are caught and logged with
 `_group=:render` rather than thrown, so one broken component doesn't abort a whole layout.
