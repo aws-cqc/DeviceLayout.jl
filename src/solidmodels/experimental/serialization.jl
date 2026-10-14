@@ -126,16 +126,17 @@ function _serialize!(sections, ::ResolvedLocator, lm::Tag, pgs::Vector{String})
 end
 
 function _serialize!(sections, rl::ResolvedLocator, lm::Port, pgs::Vector{String})
-    key = lm.index == 1 ? lm.name : "$(lm.name)_$(lm.index)"
+    key = lm isa LumpedPort && lm.index != 1 ? "$(lm.name)_$(lm.index)" : lm.name
     haskey(sections.ports, key) &&
         throw(ArgumentError("duplicate serialized ports with name '$key'"))
-    sections.ports[key] = Dict{String, Any}(
+    port_entry = Dict{String, Any}(
         "name" => lm.name,
-        "index" => lm.index,
         "type" => string(nameof(typeof(lm))),
         "layer" => string(lm.layer),
         "direction" => rl.direction,
         "pgs" => pgs
     )
+    lm isa LumpedPort && (port_entry["index"] = lm.index)
+    sections.ports[key] = port_entry
     return sections
 end

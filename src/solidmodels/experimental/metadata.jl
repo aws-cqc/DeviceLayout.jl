@@ -71,18 +71,15 @@ Abstract locator metadata for selecting a finalized port surface.
 abstract type Port <: LocatorMeta end
 
 """
-    WavePort(layer, name; index=1)
+    WavePort(layer, name)
 
-Metadata for locators selecting a named wave-port surface. `index` distinguishes ports sharing a name.
+Metadata for locators selecting a named wave-port surface.
 """
 struct WavePort <: Port
     layer::Symbol
     name::String
-    index::Int
-    WavePort(layer::Symbol, name::AbstractString, index::Int) =
-        new(layer, _locator_name(name), _port_index(index))
+    WavePort(layer::Symbol, name::AbstractString) = new(layer, _locator_name(name))
 end
-WavePort(layer::Symbol, name::AbstractString; index::Int=1) = WavePort(layer, name, index)
 
 """
     LumpedPort(layer, name; index=1)
@@ -103,5 +100,5 @@ LumpedPort(layer::Symbol, name::AbstractString; index::Int=1) =
 
 DeviceLayout.layer(lm::LocatorMeta) = lm.layer
 DeviceLayout.name(lm::Union{Terminal, Tag, Port}) = lm.name
-DeviceLayout.layerindex(port::Port) = port.index
+DeviceLayout.layerindex(port::LumpedPort) = port.index
 Base.broadcastable(lm::LocatorMeta) = Ref(lm)
