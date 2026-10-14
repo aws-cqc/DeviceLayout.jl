@@ -89,7 +89,6 @@
     Paths.TaperTrace
     Paths.TaperCPW
     Paths.SimpleStrands
-    Paths.GeneralStrands
     Paths.CompoundStyle
     Paths.DecoratedStyle
     Paths.PeriodicStyle

@@ -6,18 +6,6 @@
     using DeviceLayout.SchematicDrivenLayout:
         SchematicGraph, add_node!, RouteComponent, Spacer, path
 
-    @testset "GeneralStrands" begin
-        straight = let pa = Path(μm)
-            straight!(pa, 20μm, Paths.Trace(2μm))
-            pa[1].seg
-        end
-        gstr = @test_deprecated Paths.Strands(x -> 10μm, 2μm, 2μm, 2)
-        @test gstr isa Paths.GeneralStrands
-        polys = to_polygons(straight, gstr)
-        @test length(polys) == 2 * Paths.num(gstr)
-        @test all(poly -> !iszero(Polygons.area(poly)), polys)
-    end
-
     @testset "CompoundRouteRule and RouteComponent style vectors" begin
         crule = @test_deprecated Paths.CompoundRouteRule([
             Paths.StraightAnd90(min_bend_radius=20, max_bend_radius=100),
