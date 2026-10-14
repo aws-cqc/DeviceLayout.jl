@@ -41,43 +41,6 @@
         @test_nowarn RouteComponent("single", r5, false, sty, GDSMeta())
     end
 
-    @testset "Integer attach! location" begin
-        cs = CoordinateSystem("attachment", nm)
-        place!(cs, centered(Rectangle(1μm, 1μm)), GDSMeta())
-        for (old, new) in ((-1, :left), (0, :center), (1, :right))
-            pa_old = Path(nm)
-            straight!(pa_old, 10μm, Paths.CPW(2μm, 1μm))
-            pa_new = Path(nm)
-            straight!(pa_new, 10μm, Paths.CPW(2μm, 1μm))
-            @test_deprecated attach!(pa_old, sref(cs), 5μm; location=old)
-            attach!(pa_new, sref(cs), 5μm; location=new)
-            @test pa_old[end].sty.dirs == pa_new[end].sty.dirs
-        end
-        # Ranges of `t` take a vector of integer locations
-        pa = Path(nm)
-        straight!(pa, 10μm, Paths.CPW(2μm, 1μm))
-        @test_deprecated attach!(pa, sref(cs), (2μm, 8μm); location=[-1, 1])
-        @test pa[end].sty.dirs == [-1, 1]
-
-        # Schematic `attach!` and `RouteComponent` `attach!`
-        g = SchematicGraph("attach")
-        feed = Path(nm; name="feed")
-        straight!(feed, 100μm, Paths.CPW(10μm, 6μm))
-        feed_node = add_node!(g, feed)
-        @test_deprecated attach!(
-            g,
-            feed_node,
-            Spacer(0μm, 0μm) => :p0_south,
-            50μm;
-            location=1
-        )
-        r = Route(Paths.StraightAnd90(10μm), Point(0μm, 0μm), Point(100μm, 0μm), 0°, 0°)
-        rc = RouteComponent("rc", r, false, Paths.CPW(2μm, 1μm), GDSMeta())
-        @test_deprecated attach!(rc, sref(cs), 5μm; location=-1)
-        @test rc.sty[1].dirs == [-1]
-        @test_throws ArgumentError attach!(rc, sref(cs), 5μm; location=:up)
-    end
-
     @testset "zero(::Segment)" begin
         seg = Paths.Straight(1.0μm, Point(0.0μm, 0.0μm), 0.0°)
         @test (@test_deprecated zero(seg)) === zero(eltype(seg)) === 0.0μm

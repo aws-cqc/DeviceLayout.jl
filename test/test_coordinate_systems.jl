@@ -345,6 +345,8 @@
         pa = Path(Point(0.0, 0.0), α0=90°)
         straight!(pa, 100, Paths.Trace(2.0))
         attach!(pa, ref2, 50; location=:left)
+        @test_throws ArgumentError attach!(pa, ref2, 50; location=:up)
+        @test_throws TypeError attach!(pa, ref2, 50; location=-1)
         render!(cs, pa, GDSMeta())
         a = transformation(cs, ref)
         @test origin(a) ≈ Point(-1.0, 50.0)

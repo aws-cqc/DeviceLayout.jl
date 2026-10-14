@@ -25,6 +25,7 @@ The format of this changelog is based on
   - `circle` (deprecated in 1.6.0 in favor of `Circle` or `circle_polygon`)
   - `layers` (deprecated in favor of `gdslayers`)
   - `ExamplePDK.filter_params` (use `SchematicDrivenLayout.filter_parameters`)
+  - Integer `location` in `attach!` for `Path`, `RouteComponent`, and `SchematicGraph` (deprecated in favor of `:left`, `:center`, or `:right`)
   - `Paths.GeneralStrands` and `Paths.Strands` with a callable `offset`, `width`, or `spacing` (deprecated in favor of constant arguments, or drawing each strand as its own `Path`)
   - DXF export (`save("file.dxf", c, python)`) (deprecated in favor of saving to GDS and converting with an external tool such as KLayout)
 

@@ -97,17 +97,13 @@ option as setting a special origin for the coordinate system that rotates with
 the path. For instance, an origin for the cell reference of `Point(0.,10.)`
 together with `location == :left` will put the cell at 10 above the edge of a
 rendered (finite width) path with angle 0°.
-
-Integer `location` values `-1`, `0`, and `1` (for `:left`, `:center`, and `:right`) are
-deprecated and will be removed in DeviceLayout.jl 2.0. Their sign is opposite to the
-convention for path offsets, where positive is to the left.
 """
 function attach!(
     p::Path{T},
     c::GeometryReference{T},
     t::Coordinate;
     i::Int=length(p),
-    location::Union{Symbol, Int}=:center
+    location::Symbol=:center
 ) where {T}
     i == 0 && error("cannot attach to an empty path.")
     node = p[i]
@@ -122,7 +118,7 @@ function attach!(
     c::GeometryReference{S},
     t::Coordinate;
     i::Int=length(p),
-    location::Union{Symbol, Int}=:center
+    location::Symbol=:center
 ) where {S, T}
     return attach!(p, convert(GeometryReference{T}, c), t; i=i, location=location)
 end
@@ -137,8 +133,7 @@ end
 # flips sides by negating them.
 const ATTACH_LOCATIONS = (; left=-1, center=0, right=1)
 
-# The integer used internally for `location` `:left`, `:center`, or `:right`; integer
-# `location` is still accepted, with a deprecation warning.
+# The integer used internally for `location` `:left`, `:center`, or `:right`.
 function attach_location(location::Symbol)
     haskey(ATTACH_LOCATIONS, location) || throw(
         ArgumentError(
@@ -147,21 +142,11 @@ function attach_location(location::Symbol)
     )
     return ATTACH_LOCATIONS[location]
 end
-function attach_location(location::Integer)
-    -1 <= location <= 1 || throw(ArgumentError("location must be >=-1 and <=1"))
-    sym = location_symbol(location)
-    Base.depwarn(
-        "Integer attachment `location` is deprecated and will be removed in DeviceLayout.jl " *
-        "2.0. Use `location=$(repr(sym))` instead of `location=$location`.",
-        :attach!
-    )
-    return Int(location)
-end
 
 # Inverse of `attach_location`, for re-attaching decorations stored in a `DecoratedStyle`.
 location_symbol(dir::Integer) = dir < 0 ? :left : (dir > 0 ? :right : :center)
 
-cycle_locations(location::Union{Symbol, Integer}) = Iterators.repeated(location)
+cycle_locations(location::Symbol) = Iterators.repeated(location)
 cycle_locations(location) = Iterators.cycle(location)
 
 function transformation(p::Path, c::GeometryReference)

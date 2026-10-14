@@ -576,9 +576,6 @@ A new `HandedPointHook` is generated a distance `position` along the segment spe
 If `location` is `:right` or `:left`, the generated hook is offset to the right or left of the
 segment by the extent defined by the path's style, with the hook's inward direction pointing back
 to the segment.
-
-Integer `location` values `1`, `0`, and `-1` (for `:right`, `:center`, and `:left`) are
-deprecated and will be removed in DeviceLayout.jl 2.0.
 """
 function DeviceLayout.attach!(
     g::SchematicGraph,
@@ -586,21 +583,21 @@ function DeviceLayout.attach!(
     nodehook2::Pair{T, Symbol},
     position::Coordinate;
     i=lastindex(component(pathnode)),
-    location=:center
+    location::Symbol=:center
 ) where {S <: ComponentNode, T <: ComponentNode}
     pathcomp = component(pathnode)
-    location = Paths.attach_location(location)
+    side = Paths.attach_location(location)
 
     segment = pathcomp[i].seg
     dir = direction(segment, position)
     p_hook = segment(position)
-    if location != 0
+    if side != 0
         offset = Paths.extent(pathcomp[i].sty, position)
-        off_x = offset * cos(dir - location * π / 2)
-        off_y = offset * sin(dir - location * π / 2)
+        off_x = offset * cos(dir - side * π / 2)
+        off_y = offset * sin(dir - side * π / 2)
         p_hook += Point(off_x, off_y)
 
-        dir = dir + location * π / 2 # points back to path
+        dir = dir + side * π / 2 # points back to path
     end
 
     newhook = HandedPointHook(p_hook, dir)
@@ -613,7 +610,7 @@ function DeviceLayout.attach!(
     comphook2::Pair{T, Symbol},
     position::Coordinate;
     i=lastindex(component(pathnode)),
-    location=:center
+    location::Symbol=:center
 ) where {S <: ComponentNode, T <: AbstractComponent}
     n = add_node!(g, first(comphook2))
     return attach!(g, pathnode, n => last(comphook2), position; i=i, location=location)

@@ -246,7 +246,7 @@ function attach!(
     r::RouteComponent,
     c::CoordSysRef,
     t::Coordinate;
-    location::Union{Symbol, Int}=:center,
+    location::Symbol=:center,
     mark_dirty=true
 )
     mark_dirty && empty!(r._path)
