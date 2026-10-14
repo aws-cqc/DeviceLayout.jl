@@ -1,12 +1,12 @@
 # [Conventions](@id dev-conventions)
 
 Rules for writing code in DeviceLayout.jl. They apply to new and changed code. Existing code
-doesn't follow all of them, and isn't changed just to conform. Conventions for tests and docs are in
-[Writing tests](@ref dev-writing-tests) and [Documentation](@ref dev-docs).
+doesn't follow all of them, and isn't changed just to conform. On this page we highlight conventions that are not obvious from context (especially in older ports of the code), are specific to DeviceLayout.jl, or simply come up frequently. Conventions for tests and docs are in
+[Writing tests](@ref dev-writing-tests) and [Documentation](@ref dev-docs). 
 
 ## Substantive conventions
 
-Some conventions are particularly consequential:
+Some rules are particularly consequential:
 
 **Units and coordinate types.** Almost all geometry is parameterized by a coordinate type
 `T <: Coordinate = Union{Real, Length}`. Code must work for unitless `Float64` (interpreted as
@@ -26,11 +26,8 @@ If you need to generate a unique name (schematic node `id`, coordinate system `n
 Auto-generated names are not part of the public API (see
 [What counts as breaking?](@ref dev-breaking)).
 
-**Fallbacks.** New functions should have enough methods to handle any concrete subtype they
-might see. If you write a fallback that dispatches on an abstract type, it must be guaranteed to
-be correct for new future subtypes, not just existing ones not covered by
-specializations—otherwise, a new subtype that doesn't have a specialization will lead to silent
-incorrect results rather than a `MethodError`.
+**Fallbacks.** A fallback that dispatches on an abstract type must be correct for
+every subtype that could ever reach it, including ones that don't exist yet. If you can't guarantee that, throw instead. A plausible-looking fallback gives a new subtype silently wrong answers rather than a MethodError.
 
 **Logging.** Use `@warn`/`@info` from `Logging`, never `println`, for anything a user should see. Many tests
 assert on logs (see [Writing tests](@ref dev-writing-tests)), so a stray warning can be a test
@@ -45,11 +42,9 @@ otherwise. Throw an error rather than guess at what the user intended
 
 DeviceLayout.jl generally follows the [Julia manual's style guide](https://docs.julialang.org/en/v1/manual/style-guide/)
 and [Blue style](https://github.com/JuliaDiff/BlueStyle), but consistency with existing code
-is more important. Layout is whatever JuliaFormatter
+takes priority. Layout is whatever JuliaFormatter
 produces with `.JuliaFormatter.toml`, which CI enforces (see [Formatting](@ref dev-formatting)),
 so formatting is never a review topic. Remaining style decisions can be settled by [SciMLStyle](https://github.com/SciML/SciMLStyle) when it has an applicable rule.
-
-Some conventions are not obvious from context (especially in older ports of the code) or simply come up frequently:
 
 **Mutation.** Functions and methods that mutate any of their arguments have names ending in
 `!`. Mutated arguments come before non-mutated arguments, following SciML's
@@ -73,7 +68,7 @@ reader infer the type, use longer descriptive names.
 **Extending functions from other modules.** Define methods with a qualified name
 (`SchematicDrivenLayout.hooks(c::MyComp) = ...`). If the function is `import`ed, then Julia
 will accept the bare name as referring to the imported function, but prefer the qualified name
-for clarity.
+for clarity and protection against a deleted `import`.
 
 **Comments.** Comments explain why the code is the way it is, so future readers know what's safe or necessary to change. Comments are evergreen and do not make historical references ("refactored", "new", "improved", "fixed").
 

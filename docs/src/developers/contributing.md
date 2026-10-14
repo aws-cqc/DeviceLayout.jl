@@ -21,6 +21,8 @@ Optional pieces:
 
 - **TestEnv** in your default environment (`] add TestEnv` outside the project) to run
   individual test items without going through `Pkg.test()`.
+- **Revise** in your default environment (`] add Revise`), which can be imported before
+  a package under development to automatically reload changed code without restarting Julia.
 - **VS Code Julia extension** if you want the Testing sidebar (see below).
 - **Python + ezdxf** for the DXF backend and its test: `pip install -r requirements.txt`.
   The test calls `python3` from `PATH`; without ezdxf, the DXF testset in the "Backends" test
@@ -63,13 +65,20 @@ filter that matches test-item names against `ARGS`.
    TestItemRunner.run_tests(pkgdir(DeviceLayout); filter=ti -> ti.name == "Backends")
    ```
    The filter receives `(; filename::String, name::String, tags::Vector{Symbol})`; `filename`
-   is an absolute path. Never invoke `@run_package_tests` from the REPL or `-e`; it expands to
-   `run_tests(joinpath(dirname(__source__.file), ".."))`, which outside a file is the parent of the
-   current directory (every sibling checkout). Call `run_tests` with an explicit path instead. Use
-   `TestEnv.activate()` rather than running tests in the
-   checkout's project directly: some tests write preferences, and TestEnv keeps them out of
-   the repo's `Project.toml`/`LocalPreferences.toml`; tests also have some additional
-   dependencies that are not present in the package's own project environment.
+   is an absolute path.
+  
+   !!! warning "Don't invoke `@run_package_tests`"
+ 
+       Never invoke `@run_package_tests` from the REPL or `-e`; it expands to
+       `run_tests(joinpath(dirname(__source__.file), ".."))`, which outside a file is the parent of the
+       current directory (every sibling checkout). Call `run_tests` with an explicit path instead.
+ 
+   !!! warning "Use the test environment"
+ 
+       Use `TestEnv.activate()` rather than running tests in the
+       checkout's project directly: some tests write preferences, and TestEnv keeps them out of
+       the repo's `Project.toml`/`LocalPreferences.toml`. Tests also have some additional
+       dependencies that are not present in the package's own project environment.
 
 On Julia versions before 1.13, `Pkg.test()` runs with `--check-bounds=yes`, so it can't reuse
 the precompile cache from development and recompiles DeviceLayout and its dependencies. Prefer
@@ -101,11 +110,15 @@ allowed to fail but failures should be investigated.
   test are failures, not noise. The log should be quiet when tests are passing.
 - **Unitful and unitless.** If the code under test is generic in the coordinate type, test at
   least one `Length` type and `Float64`. The snippet's `μm2nm`, `μm2μm`, etc. let you test
-  mixed-preference arithmetic without changing the compile-time preference. Only the default
-  unit preference (`PreferNanometers`) is tested in CI. The test suite's `μm`, `nm`, etc. are imported
-  from Unitful (no preference), not `PreferNanometers`. Tests that pass in a user environment
-  can fail in the test environment, or vice versa, depending on unit preference and how unit symbols
-  were imported in the user environment.
+  mixed-preference arithmetic without changing the compile-time preference.
+  
+  !!! warning "Test environment units"
+  
+    Only the default unit preference (`PreferNanometers`) is tested in CI. The test suite's
+    `μm`, `nm`, etc. are imported from Unitful (no preference), not `PreferNanometers`. Tests
+    that pass in a user environment can fail in the test environment, or vice versa, depending
+    on unit preference and how unit symbols were imported in the user environment.
+
 - **Geometry comparisons** should use `isapprox` with an explicit `atol`, or compare
   invariants (area, perimeter, vertex count, `is_sliver`) rather than raw vertex lists, unless
   the vertex list is the contract.
@@ -185,85 +198,6 @@ numbers in the PR description.
 
 When adding benchmarks, you may need to delete `benchmark/tune.json` so it can be regenerated.
 
-## [Versioning and breaking changes](@id dev-versioning)
-
-DeviceLayout.jl follows [Semantic Versioning](https://semver.org/). The package has been at
-v1 since its public release. Since a major bump is a large event, breaking changes are
-collected for 2.0 in the
-[2.0 tracking issue](https://github.com/aws-cqc/DeviceLayout.jl/issues/300) and the
-[`DeviceLayout v2.0.0` milestone](https://github.com/aws-cqc/DeviceLayout.jl/milestone/1),
-and fixes that would technically be breaking are made opt-in in v1 where possible.
-
-### [What counts as breaking?](@id dev-breaking)
-
-We aim to be clear and consistent about what counts as a breaking change:
-
-- Backward-incompatible changes to the public API are breaking. The public API is what is
-  exported or in [API documentation](@ref reference-index), including the interfaces users
-  implement for their own subtypes.
-- Adding a required method to an abstract type, or changing what an interface method like
-  `_geometry!` or `_route_leg!` receives or must return, is breaking.
-- Changing the return type of a public function (e.g. scalar → vector) is breaking.
-- Changing underspecified behavior to something more "correct" is breaking. For example,
-  [#8](https://github.com/aws-cqc/DeviceLayout.jl/issues/8) describes undesirable `halo`
-  outputs, but there's no well-specified contract under which some are clearly "wrong". Other
-  boundaries between bugfixes and breaking changes may be fuzzy; lean towards opt-in fixes in
-  v1 (e.g., a keyword that selects the new behavior) and call out the fixed behavior as
-  breaking in the 2.0 changelog.
-
-Not breaking:
-
-- Changing silently incorrect behavior to match documented behavior is not breaking.
-- Changes to `ExamplePDK` are never breaking.
-- Changes to curve discretization within the default or a specified tolerance are not
-  breaking. Such changes can lead to out-of-tolerance changes further downstream (for
-  example, in autofill, if a grid point crosses from just inside to just outside a contour),
-  so they should still be called out prominently in the changelog.
-- Changing default mesh sizing is not breaking.
-- Changes to graphical output (color schemes, text display) are not breaking.
-- Changes to auto-generated names are not breaking. For example, `flatten(c)` defaults to
-  `name=uniquename("flatten_"*name(c))`, but this default or the `uniquename` mechanism itself
-  may change. If the user depends on an exact name downstream, they should set it explicitly,
-  both for this reason and because these names are already not stable for the same code run
-  multiple times in a Julia session (unless `reset_uniquename!()` is called before each run).
-
-For component packages in user PDKs rather than DeviceLayout itself, see
-[Component and package creation and versioning](@ref style-package) in the Style Guide.
-
-### [Opt-in first](@id dev-opt-in)
-
-Whenever a change can be made available in a 1.x release behind a keyword or preference that
-defaults to current behavior, it should be. Then 2.0 mostly flips defaults, and users who opted
-in early see no change at all. The opt-in PR targets `main`; the corresponding 2.0 PR only
-flips the default.
-
-Changes with no opt-in path (type and field changes, removals, restructuring) go in their own
-PR against the long-running `v2.0.0-dev` branch, so each stays reviewable and revertible.
-
-### [Deprecations](@id dev-deprecations)
-
-Deprecated functionality keeps working for the rest of 1.x and is removed in 2.0.
-
-- Use `Base.depwarn()` where a method is simply going away or being renamed.
-- Use a default-visible `@warn` with `maxlog` where there is a new, more correct usage to opt
-  into.
-- Every message names the replacement spelling, not just the removal.
-- The test suite runs quiet: tests don't trigger deprecation warnings except in one dedicated
-  test item asserting that each deprecation still warns.
-- Add a "Deprecated" changelog entry, and add the removal to the 2.0 tracking issue.
-
-The last 1.x release is an upgrade-assist release: it removes nothing, makes every 2.0
-behavior reachable by opting in, and makes all deprecation warnings loud and repeated.
-
-### [Changelog](@id dev-changelog)
-
-`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/). Every user-visible
-change lands with an entry under `## Unreleased` in one of `### Added`, `### Changed`,
-`### Deprecated`, `### Removed`, `### Fixed`. Entries are written for users: name the public
-symbols, say what changed and why it matters, and link the issue or PR when there is one.
-Tolerance-level geometry changes are called out explicitly. On the `v2.0.0-dev` branch,
-breaking changes go under `### Breaking` in a `## 2.0.0 (upcoming)` section.
-
 ## [Pull requests and review](@id dev-pr)
 
 ### [What a pull request includes](@id dev-pr-checklist)
@@ -279,8 +213,9 @@ Authors check this list before asking for review, and reviewers check the same l
   Decide whether the change is breaking using [What counts as breaking?](@ref dev-breaking);
   if it is, make it opt-in on `main` or target `v2.0.0-dev` (see [Opt-in first](@ref dev-opt-in)).
 - **Documentation.** Docstrings are updated for any changed public API, new public API
-  functions are added to the appropriate API reference page, and concept pages are updated if
-  the change alters behavior they describe. The docs build does not fail on warnings, and some
+  functions are added to the appropriate API reference page, concept pages, and the developer
+  guide are updated if
+  the change moves files or alters behavior they describe. The docs build does not fail on warnings, and some
   breakage only produces warnings, so check the log when relevant. See [Documentation](@ref dev-docs) above.
 - **Third-party code.** Code adapted from another project has a compatible license and an
   entry in `THIRDPARTY.md`, and the PR description says so.
@@ -302,8 +237,7 @@ checks pass and a maintainer has approved.
 ### [Reviewing](@id dev-review)
 
 Reviewers check the items above in [What a pull request includes](@ref dev-pr-checklist).
-They also consider standard review criteria. As it becomes possible to generate more code,
-faster, it becomes especially important to review contributions not just on their own terms
+They also review contributions not just on their own terms
 but in terms of the package's overall direction, design, and code health. Some questions
 for reviewers are listed below.
 
