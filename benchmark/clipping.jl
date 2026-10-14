@@ -34,7 +34,7 @@ function offset_difference()
     c = Cell{Float64}("test")
     poly = circle_polygon(1.5, 60°)
     render!(c, poly)
-    ref = aref(c, Point(-3.0, 5.0), nc=4, deltacol=Point(2.0, 0.0))
+    ref = aref(c, Point(-3.0, 5.0), nc=4, dc=Point(2.0, 0.0))
     els = [poly; elements(flatten(ref))]
     off = offset(els, 0.2)
     boo = difference2d(off, els)

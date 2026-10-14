@@ -31,9 +31,6 @@ Keyword arguments:
   - `xrefl`: `true` to reflect across the x-axis
   - `mag`: magnification factor
   - `rot`: rotation angle
-
-Other spellings of these keywords (such as `mirror`, `zoom`, or `angle`) are deprecated
-and will be removed in DeviceLayout.jl 2.0.
 """
 function addref!(
     c1::AbstractCoordinateSystem{T},
@@ -66,9 +63,6 @@ Keyword arguments:
   - `xrefl`: `true` to reflect across the x-axis
   - `mag`: magnification factor
   - `rot`: rotation angle
-
-Other spellings of these keywords (such as `mirror`, `zoom`, `angle`, `deltacol`, or `ncols`)
-are deprecated and will be removed in DeviceLayout.jl 2.0.
 """
 function addarr!(
     c1::AbstractCoordinateSystem{T},
@@ -100,9 +94,6 @@ Keyword arguments:
   - `xrefl`: `true` to reflect across the x-axis
   - `mag`: magnification factor
   - `rot`: rotation angle
-
-Other spellings of these keywords (such as `mirror`, `zoom`, or `angle`) are deprecated
-and will be removed in DeviceLayout.jl 2.0.
 """
 function addarr!(
     c1::AbstractCoordinateSystem,

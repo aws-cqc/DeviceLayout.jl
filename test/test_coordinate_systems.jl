@@ -324,6 +324,11 @@
         render!(c, centered(Rectangle(2mm, 2mm)))
         ref = aref(c, (-5:5)mm, (0:0)mm)
         @test bounds(ref) == Rectangle(Point(-6, -1)mm, Point(6, 1)mm)
+
+        # Unsupported keywords are rejected rather than ignored
+        @test_throws MethodError sref(c; mirror=true)
+        @test_throws MethodError aref(c; deltacol=Point(1μm, 0μm))
+        @test_throws MethodError aref(c, (-5:5)mm, (0:0)mm; nc=3)
     end
 
     @testset "Flattening" begin

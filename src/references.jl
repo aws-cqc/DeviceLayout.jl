@@ -52,9 +52,6 @@ Keyword arguments:
   - `xrefl`: `true` to reflect across the x-axis
   - `mag`: magnification factor
   - `rot`: rotation angle
-
-Other spellings of these keywords (such as `mirror`, `zoom`, or `angle`) are deprecated
-and will be removed in DeviceLayout.jl 2.0.
 """
 function StructureReference(
     x::GeometryStructure{S},
@@ -169,9 +166,6 @@ Keyword arguments:
   - `xrefl`: `true` to reflect across the x-axis
   - `mag`: magnification factor
   - `rot`: rotation angle
-
-Other spellings of these keywords (such as `mirror`, `zoom`, `angle`, `deltacol`, or `ncols`)
-are deprecated and will be removed in DeviceLayout.jl 2.0.
 """
 function ArrayReference(
     x::GeometryStructure{S},
@@ -441,18 +435,16 @@ Keyword arguments:
   - `xrefl`: `true` to reflect across the x-axis
   - `mag`: magnification factor
   - `rot`: rotation angle
-
-Other spellings of these keywords (such as `mirror`, `zoom`, or `angle`) are deprecated
-and will be removed in DeviceLayout.jl 2.0.
 """
 function sref(
     x::GeometryStructure{S},
     origin::Point{T}=zero(Point{S});
-    kwargs...
+    xrefl=false,
+    mag=1.0,
+    rot=0.0
 ) where {S, T}
     dimension(S) != dimension(T) && throw(Unitful.DimensionError(oneunit(S), oneunit(T)))
-    vals = sref_transform_values(origin; kwargs...)
-    return StructureReference{float(T), typeof(x)}(x, vals...)
+    return StructureReference{float(T), typeof(x)}(x, float(origin), xrefl, mag, rot)
 end
 sref(x::GeometryStructure{S}, f::Transformation; kwargs...) where {S} = sref(
     x,
@@ -462,49 +454,6 @@ sref(x::GeometryStructure{S}, f::Transformation; kwargs...) where {S} = sref(
     xrefl=xrefl(f),
     kwargs...
 )
-
-function sref_transform_values(origin::Point{T}; kwargs...) where {T <: Coordinate}
-    argdict = Dict(k => v for (k, v) in kwargs)
-    xrefl = _ref_keyword(argdict, :xrefl, XREFL_SYNONYMS, false)
-    mag = _ref_keyword(argdict, :mag, MAG_SYNONYMS, 1.0)
-    rot = _ref_keyword(argdict, :rot, ROT_SYNONYMS, 0.0)
-    return float(origin), xrefl, mag, rot
-end
-
-# Deprecated keyword synonyms for reference constructors. If several spellings of one
-# keyword are given, the canonical one wins, then the first synonym listed.
-const XREFL_SYNONYMS = (:xreflection, :refl, :reflect, :xreflect, :xmirror, :mirror)
-const MAG_SYNONYMS = (:magnification, :magnify, :zoom, :scale)
-const ROT_SYNONYMS = (:rotation, :rotate, :angle)
-const DC_SYNONYMS = (
-    :deltacol,
-    :dcol,
-    :vcol,
-    :colv,
-    :colvec,
-    :colvector,
-    :columnv,
-    :columnvec,
-    :columnvector
-)
-const DR_SYNONYMS = (:deltarow, :drow, :vrow, :rv, :rowvec, :rowvector)
-const NC_SYNONYMS = (:numcols, :numcol, :ncols, :ncol, :col)
-const NR_SYNONYMS = (:numrows, :numrow, :nrows, :nrow, :row)
-
-function _ref_keyword(argdict, canonical, synonyms, default)
-    haskey(argdict, canonical) && return argdict[canonical]
-    for k in synonyms
-        if haskey(argdict, k)
-            Base.depwarn(
-                "Reference keyword `$k` is deprecated and will be removed in " *
-                "DeviceLayout.jl 2.0. Use `$canonical` instead.",
-                :sref
-            )
-            return argdict[k]
-        end
-    end
-    return default
-end
 
 """
     aref(x::GeometryStructure{S}, origin::Point{T}=zero(Point{S}); kwargs...) where
@@ -524,18 +473,20 @@ Keyword arguments:
   - `xrefl`: `true` to reflect across the x-axis
   - `mag`: magnification factor
   - `rot`: rotation angle
-
-Other spellings of these keywords (such as `mirror`, `zoom`, `angle`, `deltacol`, or `ncols`)
-are deprecated and will be removed in DeviceLayout.jl 2.0.
 """
 function aref(
     x::GeometryStructure{S},
     origin::Point{T}=zero(Point{S});
-    kwargs...
+    dc=zero(Point{T}),
+    dr=zero(Point{T}),
+    nc=1,
+    nr=1,
+    xrefl=false,
+    mag=1.0,
+    rot=0.0
 ) where {S, T}
     dimension(S) != dimension(T) && throw(Unitful.DimensionError(oneunit(S), oneunit(T)))
-    vals = aref_transform_values(origin; kwargs...)
-    return ArrayReference{float(T), typeof(x)}(x, vals...)
+    return ArrayReference{float(T), typeof(x)}(x, origin, dc, dr, nc, nr, xrefl, mag, rot)
 end
 aref(x::GeometryStructure{S}, f::Transformation; kwargs...) where {S} = aref(
     x,
@@ -560,13 +511,9 @@ Keyword arguments:
   - `xrefl`: `true` to reflect across the x-axis
   - `mag`: magnification factor
   - `rot`: rotation angle
-
-Other spellings of these keywords (such as `mirror`, `zoom`, or `angle`) are deprecated
-and will be removed in DeviceLayout.jl 2.0.
 """
-function aref(x, c::AbstractRange, r::AbstractRange; kwargs...)
+function aref(x, c::AbstractRange, r::AbstractRange; xrefl=false, mag=1.0, rot=0.0)
     origin = Point(first(c), first(r))
-    _, xrefl, mag, rot = sref_transform_values(origin; kwargs...)
     T = promote_type(eltype(c), eltype(r))
     return ArrayReference{float(T), typeof(x)}(
         x,
@@ -579,16 +526,6 @@ function aref(x, c::AbstractRange, r::AbstractRange; kwargs...)
         mag,
         rot
     )
-end
-
-function aref_transform_values(origin::Point{T}; kwargs...) where {T <: Coordinate}
-    _, xrefl, mag, rot = sref_transform_values(origin; kwargs...)
-    argdict = Dict(k => v for (k, v) in kwargs)
-    dc = _ref_keyword(argdict, :dc, DC_SYNONYMS, Point(zero(T), zero(T)))
-    dr = _ref_keyword(argdict, :dr, DR_SYNONYMS, Point(zero(T), zero(T)))
-    c = _ref_keyword(argdict, :nc, NC_SYNONYMS, 1)
-    r = _ref_keyword(argdict, :nr, NR_SYNONYMS, 1)
-    return (origin, dc, dr, c, r, xrefl, mag, rot)
 end
 
 #################
