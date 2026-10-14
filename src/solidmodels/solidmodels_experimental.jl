@@ -52,7 +52,8 @@ end
 # Qualify a locator name with the id of the graph node that places it, e.g. `q1.island`.
 _qualified(lm::Terminal, id::String) = Terminal(lm.layer, id * "." * lm.name)
 _qualified(lm::Tag, id::String) = Tag(lm.layer, id * "." * lm.name)
-_qualified(lm::P, id::String) where {P <: Port} = P(lm.layer, id * "." * lm.name, lm.index)
+_qualified(lm::WavePort, id::String) = WavePort(lm.layer, id * "." * lm.name)
+_qualified(lm::LumpedPort, id::String) = LumpedPort(lm.layer, id * "." * lm.name, lm.index)
 _qualified(m::DeviceLayout.Meta, ::String) = m
 
 # Qualify locator names on placement-specific metadata copies under each graph node. The
