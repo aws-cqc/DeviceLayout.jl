@@ -13,7 +13,7 @@ DeviceLayout                          # Core abstractions
 ├── Intersect                         # Path intersections
 ├── Transformations                   # Coordinate transforms
 ├── Align                             # Bounding-box alignment transforms
-├── GDS, DXF, Graphics                # File import/export backends
+├── GDS, Graphics                     # File import/export backends
 ├── Texts, PolyText                   # Text elements
 ├── Autofill                          # Dummy fill for empty space
 ├── SimpleShapes                      # Simple geometry library

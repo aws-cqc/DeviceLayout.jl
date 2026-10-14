@@ -52,13 +52,6 @@ jobs:
       - run: |
           git config --global user.name github-actions
           git config --global user.email github-actions@github.com
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.13'
-          cache: 'pip' # caching pip dependencies
-      - run: |
-          pip install -r requirements.txt
-          export PYTHON=$(which python3)
       - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}

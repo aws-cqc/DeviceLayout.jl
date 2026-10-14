@@ -64,14 +64,6 @@ function __init__()
         ".gds",
         [:DeviceLayout => UUID("ebf59a4a-04ec-49d7-8cd4-c9382ceb8e85")]
     )
-    # A .dxf file should start with "0" on the first line and "SECTION" on the next, but
-    # sometimes there's extra whitespace. For now we'll trust the file extension.
-    add_format(
-        format"DXF",
-        (),
-        ".dxf",
-        [:DeviceLayout => UUID("ebf59a4a-04ec-49d7-8cd4-c9382ceb8e85"), FileIO.SAVE]
-    )
     # SolidModels can be saved to various formats depending on the geometry kernel
     add_format(
         format"STEP",
@@ -612,7 +604,6 @@ import .GDS: GDSWriterOptions
 export GDSWriterOptions
 
 include("backends/graphics.jl")
-include("backends/dxf.jl")
 
 include("solidmodels/solidmodels.jl")
 import .SolidModels: SolidModel

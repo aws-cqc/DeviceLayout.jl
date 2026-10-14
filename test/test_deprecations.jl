@@ -6,22 +6,6 @@
     using DeviceLayout.SchematicDrivenLayout:
         SchematicGraph, add_node!, RouteComponent, Spacer, path
 
-    @testset "DXF export" begin
-        main = Cell("main", nm)
-        render!(main, Rectangle(10μm, 10μm), GDSMeta(0, 0))
-        dxf_path = joinpath(tdir, "test.dxf")
-        py3 = "python3"
-        @test_deprecated save(dxf_path, main, py3)
-        rect = [
-            (0.0, 0.0, 0.0, 0.0, 0.0),
-            (10.0, 0.0, 0.0, 0.0, 0.0),
-            (10.0, 10.0, 0.0, 0.0, 0.0),
-            (0.0, 10.0, 0.0, 0.0, 0.0)
-        ]
-        pyscript = joinpath(@__DIR__, "test_ezdxf.py")
-        @test eval(Meta.parse(read(`$py3 $pyscript $dxf_path`, String))) == rect
-    end
-
     @testset "GeneralStrands" begin
         straight = let pa = Path(μm)
             straight!(pa, 20μm, Paths.Trace(2μm))

@@ -25,6 +25,7 @@ The format of this changelog is based on
   - `circle` (deprecated in 1.6.0 in favor of `Circle` or `circle_polygon`)
   - `layers` (deprecated in favor of `gdslayers`)
   - `ExamplePDK.filter_params` (use `SchematicDrivenLayout.filter_parameters`)
+  - DXF export (`save("file.dxf", c, python)`) (deprecated in favor of saving to GDS and converting with an external tool such as KLayout)
 
 ## Unreleased
 
