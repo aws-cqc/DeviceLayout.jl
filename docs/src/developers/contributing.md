@@ -67,18 +67,16 @@ filter that matches test-item names against `ARGS`.
    The filter receives `(; filename::String, name::String, tags::Vector{Symbol})`; `filename`
    is an absolute path.
   
-   !!! warning "Don't invoke `@run_package_tests`"
- 
-       Never invoke `@run_package_tests` from the REPL or `-e`; it expands to
-       `run_tests(joinpath(dirname(__source__.file), ".."))`, which outside a file is the parent of the
-       current directory (every sibling checkout). Call `run_tests` with an explicit path instead.
- 
-   !!! warning "Use the test environment"
- 
-       Use `TestEnv.activate()` rather than running tests in the
-       checkout's project directly: some tests write preferences, and TestEnv keeps them out of
-       the repo's `Project.toml`/`LocalPreferences.toml`. Tests also have some additional
-       dependencies that are not present in the package's own project environment.
+!!! warning "Don't invoke `@run_package_tests`" 
+    Never invoke `@run_package_tests` from the REPL or `-e`; it expands to
+    `run_tests(joinpath(dirname(__source__.file), ".."))`, which outside a file is the parent of the
+    current directory (every sibling checkout). Call `run_tests` with an explicit path instead.
+
+!!! warning "Use the test environment"
+    Use `TestEnv.activate()` rather than running tests in the
+    checkout's project directly: some tests write preferences, and TestEnv keeps them out of
+    the repo's `Project.toml`/`LocalPreferences.toml`. Tests also have some additional
+    dependencies that are not present in the package's own project environment.
 
 On Julia versions before 1.13, `Pkg.test()` runs with `--check-bounds=yes`, so it can't reuse
 the precompile cache from development and recompiles DeviceLayout and its dependencies. Prefer
@@ -113,11 +111,10 @@ allowed to fail but failures should be investigated.
   mixed-preference arithmetic without changing the compile-time preference.
   
   !!! warning "Test environment units"
-  
-    Only the default unit preference (`PreferNanometers`) is tested in CI. The test suite's
-    `μm`, `nm`, etc. are imported from Unitful (no preference), not `PreferNanometers`. Tests
-    that pass in a user environment can fail in the test environment, or vice versa, depending
-    on unit preference and how unit symbols were imported in the user environment.
+      Only the default unit preference (`PreferNanometers`) is tested in CI. The test suite's
+      `μm`, `nm`, etc. are imported from Unitful (no preference), not `PreferNanometers`. Tests
+      that pass in a user environment can fail in the test environment, or vice versa, depending
+      on unit preference and how unit symbols were imported in the user environment.
 
 - **Geometry comparisons** should use `isapprox` with an explicit `atol`, or compare
   invariants (area, perimeter, vertex count, `is_sliver`) rather than raw vertex lists, unless

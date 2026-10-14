@@ -61,7 +61,7 @@ The diagram below illustrates the flow of data as schematics become 2D or 3D out
                       └───────┬────────┘
                               ▼
                            save(...)
- ```
+```
 
 (A sketch of schematic data flow can be found in [Concepts: Schematic-Driven Design](@ref schematic-driven-design).)
 
@@ -206,7 +206,7 @@ For new subtypes, the required methods are documented in the docstring of each a
 this is a checklist of where to look.
 
 | To add a... | Subtype | Implement |
-|---|---|---|---|
+|---|---|---|
 | Geometry entity | `GeometryEntity{T}` | `to_polygons(::E)`, `transform(::E, f)` |
 | Entity style | `GeometryEntityStyle` | `to_polygons(::E, ::S; kwargs...)` for each supported entity (or `::Polygon` as a fallback) |
 | Path segment | `Paths.ContinuousSegment{T}` | `pathlength`, `p0`, `α0`, `α1`, `setp0!`, `setα0!`, callable `seg(t)` for `t ∈ [0, pathlength]` (arc length, not normalized); `pathtopolys(::Seg, ::Style)` for the styles it should render with, since the generic method throws |

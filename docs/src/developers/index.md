@@ -14,6 +14,8 @@ be working with. If you want to *use* the package, start with
 - [Contributing](@ref dev-contributing): setting up a checkout, running and writing tests,
   formatting, building docs, benchmarks, versioning and deprecation policy, what a pull
   request includes, and what reviewers look for.
+- [Versioning Policy](@ref dev-versioning): Versioning and deprecation policy; what counts
+  as a breaking change.
 - [Maintainer Runbook](@ref dev-maintenance): the release procedure, CI and the automation
   behind it, and recurring chores such as dependency and Julia version updates.
 

@@ -11,7 +11,7 @@ Some rules are particularly consequential:
 **Units and coordinate types.** Almost all geometry is parameterized by a coordinate type
 `T <: Coordinate = Union{Real, Length}`. Code must work for unitless `Float64` (interpreted as
 microns), for `Unitful` lengths, and (in some places) for `Int`. Functions that take more than
-one coordinate should work when they have different units. Use `zero(T)`, `oneunit(T)`,
+one unitful coordinate should work when they have different units. Use `zero(T)`, `oneunit(T)`,
 `DeviceLayout.onenanometer(T)`, `DeviceLayout.onemicron(T)`, and `ustrip(unit, x)` rather than
 assuming a unit.
 
