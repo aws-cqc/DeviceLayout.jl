@@ -10,12 +10,13 @@ be working with. If you want to *use* the package, start with
 - [Architecture](@ref dev-architecture): how the package is laid out in `src/`, how a
   schematic becomes a GDS file or a 3D model, the type hierarchy, and the interface a new
   entity, style, segment, route rule, component, or output format has to implement.
-- [Conventions](@ref dev-conventions): naming, generic code, interfaces, and warnings.
+- [Conventions](@ref dev-conventions): both style guidelines and substantive conventions
+  like writing coordinate–type generic code.
 - [Contributing](@ref dev-contributing): setting up a checkout, running and writing tests,
-  formatting, building docs, benchmarks, versioning and deprecation policy, what a pull
-  request includes, and what reviewers look for.
-- [Versioning Policy](@ref dev-versioning): Versioning and deprecation policy; what counts
-  as a breaking change.
+  formatting, building docs, benchmarks, what a pull request includes, and what reviewers
+  look for.
+- [Versioning Policy](@ref dev-versioning): versioning and deprecation policy; what
+  counts as a breaking change and what doesn't.
 - [Maintainer Runbook](@ref dev-maintenance): the release procedure, CI and the automation
   behind it, and recurring chores such as dependency and Julia version updates.
 

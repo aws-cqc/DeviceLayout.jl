@@ -63,7 +63,7 @@ The diagram below illustrates the flow of data as schematics become 2D or 3D out
                            save(...)
 ```
 
-(A sketch of schematic data flow can be found in [Concepts: Schematic-Driven Design](@ref schematic-driven-design).)
+(A sketch of schematic data flow can also be found in [Concepts: Schematic-Driven Design](@ref schematic-driven-design).)
 
 Both backends start from a checked `Schematic`, whose internal `coordinate_system` holds
 references to the components placed by `plan`. Component geometry is produced lazily: the
@@ -74,15 +74,18 @@ Rendering options (`target.rendering_options` plus any keywords the caller passe
 keyword arguments through every layer down to `to_polygons`/`to_primitives`, where
 `OptionalStyle` reads its flag from them. 
 
-!!! warning "Keyword argument forwarding"
+!!! warning "Keyword-argument slurping"
     
     Many functions in the rendering call stack have a catch-all `; kwargs...` for arbitrary
     keyword arguments, which are then passed forward together. This is done so that a function does not need to enumerate all possible keywords it might see (some of which may be user-defined flags for `OptionalStyle`) but can still pass them forward in case they
     reach functions that use them.
     
-    However, nothing validates these keyword arguments on the way, so a misspelled
-    option is silently ignored ([#7](https://github.com/aws-cqc/DeviceLayout.jl/issues/7)).
-    This "keyword argument forwarding" pattern should be avoided going forward.
+    However, because keywords are passed forward indiscriminately, even functions at the
+    bottom layer must accept `; kwargs...` to ignore unwanted keyword arguments without
+    throwing a `MethodError`. Nothing validates these keyword arguments on the way, so a
+    misspelled option is silently ignored
+    ([#7](https://github.com/aws-cqc/DeviceLayout.jl/issues/7)). This pattern of "bottomless"
+    keyword-argument slurping should be avoided going forward.
 
 Errors raised while rendering an individual structure are caught and logged with
 `_group=:render` rather than thrown, so one broken component doesn't abort a whole layout.
@@ -225,7 +228,7 @@ Other interface functions are optional but important in particular circumstances
 
 - **Geometry entity:** Most interface functions have fallbacks that convert to polygons first. Specializations should be implemented when that loses information or is slower than necessary: `footprint`, `halo`, `lowerleft`/`upperright` for speed; `SolidModels.to_primitives(::SolidModel, ::E)` if the kernel can represent it exactly (the fallback is `to_polygons`); `to_curvilinear` methods if styled versions should keep exact curves (the fallback discretizes and warns); a `ConformalRender._add_conformal!` method if it should share edges; `SolidModels.meshsize` if it should carry mesh sizing information.
 - **Entity style:** Generic fallbacks assume the style does not change under coordinate transformations and does not change its entity's bounds. Implement `transform(::S, f)` if the style holds geometric state such as a direction (the default returns the style unchanged); `lowerleft`/`upperright`/`footprint`/`halo` for `StyledEntity{T, E, S}` if the style changes the entity's extent.
-- **Path segment:** The generic style methods in `curvilinear.jl` accept only `BaseContinuousSegment = Union{Straight, Turn, BSpline}` and build edges with `Paths.offset`, so either make the segment work there or convert it first (as `OffsetSegment` does with `resolve_offset`); methods may use `ForwardDiff` on `seg(t)`, so keep it differentiable; specialize `curvature` if it can be calculated faster than via `ForwardDiff`; add `reverse` to enable use in channel routing.
+- **Path segment:** The generic style methods in `curvilinear.jl` accept only `BaseContinuousSegment = Union{Straight, Turn, BSpline}` and build edges with `Paths.offset`, so either make the segment work there or convert it first (as `OffsetSegment` does with `resolve_offset`); methods may use `ForwardDiff` on `seg(t)`, so keep it differentiable; specialize `direction` and `curvature` if they can be calculated faster than via `ForwardDiff`; add `reverse` to enable use in channel routing.
 - **Path style:** If it only produces straight edges on `Straight`, add it to `LinearStyle` with a fast `to_polygons(::Straight, ::S)` in `render/`; `SolidModels.meshsize`.
 
 ## [Global state](@id dev-global-state)
