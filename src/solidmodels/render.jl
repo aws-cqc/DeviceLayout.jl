@@ -1214,9 +1214,9 @@ Render `cs` to `sm`.
     group `"base_negative"` are both removed when `"base"` is created.
   - `post_fragment_ops`: Vector of Tuples in the same form as `postrender_ops`, executed after
     the global fragmentation pass. Use this for operations that need the rendered geometry to
-    be conformal already and that handle their own fusion, such as adding a part and fusing it
-    locally with [`targeted_fuse!`](@ref). Entities these operations add are not fragmented
-    against the rest of the model unless an operation does so itself.
+    be conformal already and that handle their own fragmentation, such as adding a part and
+    fragmenting around it with [`fragment_near!`](@ref). Entities these operations add are
+    not fragmented against the rest of the model unless an operation does so itself.
   - `retained_physical_groups`: Vector of `(name, dimension)` tuples specifying which physical groups to keep after rendering. All other groups are removed.
   - `zmap`: Function (m::SemanticMeta) -> `z` coordinate of corresponding elements. Default:
     Map all metadata to zero.
@@ -1325,7 +1325,9 @@ function _entities_in_region(sm::SolidModel, dims, region)
         dt -> dt[1] in dims,
         [(d, abs(t)) for (d, t) in gmsh.model.get_boundary(parents, false, false, false)]
     )
-    return unique(vcat(selected, closure))
+    # In the global pass's order (dimension, then tag): tag preservation depends on operand
+    # order, and a volume listed before its faces retags its boundary curves.
+    return sort!(unique(vcat(selected, closure)))
 end
 
 # OCC pads bounding boxes by about 1e-7 (see `bounds3d`), so the boxes of solids that touch
@@ -1392,7 +1394,6 @@ function _render_orchestrator!(
 
     # Build set of used layer names for skip_unused_layers optimization
     used_names = if skip_unused_layers
-        # Post-fragment operations reference layers the same way postrender operations do.
         _used_group_names(vcat(postrender_ops, post_fragment_ops), retained_physical_groups)
     else
         nothing
@@ -1476,9 +1477,8 @@ function _render_orchestrator!(
     # Get rid of redundant entities and update groups accordingly.
     fragment!(sm)
 
-    # Operations that need the rendered geometry to be conformal already, and take care of
-    # their own fusion: typically importing an external part and then `targeted_fuse!`, which
-    # fragments only around the part instead of repeating the global pass over everything.
+    # Operations that need conformal geometry and do their own fragmentation, such as
+    # importing a part and calling `fragment_near!`.
     if !isempty(post_fragment_ops)
         _postrender!(sm, post_fragment_ops)
         _synchronize!(sm)
@@ -1570,7 +1570,6 @@ function _fragment_and_map!(
         (name, dimtags(pg)) for dim in frag_dims for
         (name, pg) in pairs(dimgroupdict(sm, dim))
     ]
-    # Restrict fragmentation to a supplied subset when requested.
     allents =
         isnothing(included_entities) ?
         vcat([gmsh.model.get_entities(dim) for dim in frag_dims]...) :

@@ -331,13 +331,13 @@ See [Shapes](./shapes.md).
     SolidModels.exclude_groups
     SolidModels.extrude_z!
     SolidModels.fragment_geom!
+    SolidModels.fragment_near!
     SolidModels.get_boundary
     SolidModels.intersect_geom!
     SolidModels.remove_group!
     SolidModels.restrict_to_volume!
     SolidModels.revolve!
     SolidModels.set_periodic!
-    SolidModels.targeted_fuse!
     SolidModels.translate!
     SolidModels.union_geom!
     SolidModels.staple_bridge_postrendering
