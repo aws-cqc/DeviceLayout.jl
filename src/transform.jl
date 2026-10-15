@@ -268,7 +268,7 @@ struct ScaledIsometry{T <: Union{<:Point, Nothing}} <: AbstractAffineMap
     xrefl::Bool
     mag::Float64
     # Stored so that applying `f` to many points computes `cos`/`sin` once, not per point
-    linear::Union{IdentityTransformation, LinearMap{StaticArrays.SMatrix{2, 2, Float64, 4}}}
+    linmap::Union{IdentityTransformation, LinearMap{StaticArrays.SMatrix{2, 2, Float64, 4}}}
     # If mag is negative, add a pi rotation and use abs(mag)
     function ScaledIsometry{T}(origin, rotation, xrefl, mag) where {T}
         rot = convert(typeof(1.0°), mag > 0 ? rotation : rotation + 180°)
@@ -317,8 +317,8 @@ mag(f::ScaledIsometry) = isinteger(f.mag) ? Int(f.mag) : f.mag
 
 Return the `CoordinateTransformations.AffineMap` or `LinearMap` corresponding to the input.
 """
-affine(f::ScaledIsometry) = Translation(origin(f)) ∘ f.linear
-affine(f::ScaledIsometry{Nothing}) = f.linear
+affine(f::ScaledIsometry) = Translation(origin(f)) ∘ f.linmap
+affine(f::ScaledIsometry{Nothing}) = f.linmap
 affine(origin, rot, xrefl, mag) = Translation(origin) ∘ linearmap(rot, xrefl, mag)
 affine(::Nothing, rot, xrefl, mag) = linearmap(rot, xrefl, mag)
 
