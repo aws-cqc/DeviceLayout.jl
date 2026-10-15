@@ -26,7 +26,7 @@ The format of this changelog is based on
     operations and `split_t_junctions!`.
   - `render!` accepts `post_fragment_ops`, postrender operations executed after the global
     fragmentation pass.
-  - `SolidModels.targeted_fuse!` makes one or more dim-3 physical groups (e.g. imported CAD
+  - `SolidModels.fragment_near!` makes one or more dim-3 physical groups (e.g. imported CAD
     parts) conformal with nearby geometry by fragmenting only the entities that touch the
     bounding boxes of their volumes, instead of the whole model.
 

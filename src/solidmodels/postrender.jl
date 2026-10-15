@@ -96,44 +96,43 @@ box_selection(::SolidModel, x1, y1, z1, x2, y2, z2; dim=-1, delta=zero(x1)) =
     box_selection(x1, y1, z1, x2, y2, z2; dim=dim, delta=delta) # For use as postrender op
 
 """
-    targeted_fuse!(sm::SolidModel, object_groups; delta=1e-3 * STP_UNIT, warn=true)
+    fragment_near!(sm::SolidModel, object_groups; delta=1e-3 * STP_UNIT, warn=true)
 
 Make the dim-3 physical groups `object_groups` (a name or a collection of names) conformal
 with the geometry near them. Requires an `OpenCascade` kernel.
 
-The fusing region is the union of the bounding boxes of the groups' volumes, each padded
+The region is the union of the bounding boxes of the groups' volumes, each padded
 by `delta`. Every entity of every dimension whose bounding box intersects the region
 (volumes, but also free-standing surfaces and curves such as ports) is submitted to the
-same three-pass fragmentation used by `render!`. A volume can only overlap entities whose
-bounding boxes intersect its own, so this selects everything the fusion can change. Entities
-outside the region are left untouched and are assumed to already be conformal with one
-another. Like the global pass, fragmentation can retag or drop dim-0/1 groups on modified
-boundaries.
+same three-pass fragmentation used by `render!`, together with the full boundary of each
+selected volume. A volume can only overlap entities whose bounding boxes intersect its own,
+so this selects everything the fragmentation can change. Entities outside the region are
+assumed to be conformal already and are not fragmented; those on the boundary of a
+fragmented volume can still be retagged, and as in the global pass, dim-0/1 groups on
+modified boundaries can be dropped.
 
-To fuse several new parts, list all of their groups in one call. Using one box per volume
-keeps the region close to each part instead of spanning the space between them.
+To fragment around several new parts, list all of their groups in one call. Using one box
+per volume keeps the region close to each part instead of spanning the space between them.
 
 With `warn=true`, a warning is emitted when nothing but the object groups and their own
-boundaries lies in the region, and when two volumes in the region have overlapping bounding
-boxes but share no boundary entity (a possible pre-existing non-conformal seam that this
-call will not repair).
+boundaries lies in the region.
 
 Returns the updated dimtags of all object groups. As a postrender operation, the result is
 assigned to the destination group, so with several object groups that group receives the
 entities of all of them. Give it a name of its own to keep the object groups separate:
 
 ```julia
-post_fragment_ops = [("fused_parts", targeted_fuse!, (["die", "wirebond"],))]
+post_fragment_ops = [("conformal_parts", fragment_near!, (["die", "wirebond"],))]
 ```
 
 !!! note
 
-    `render!` runs its global fragment after `postrender_ops`, so a `targeted_fuse!` placed
+    `render!` runs its global fragment after `postrender_ops`, so a `fragment_near!` placed
     there is redone by the global pass. To save work inside `render!`, put the import and
-    the fuse in `post_fragment_ops` instead, or call `targeted_fuse!` directly on a finished
-    model.
+    the fragment in `post_fragment_ops` instead, or call `fragment_near!` directly on a
+    finished model.
 """
-function targeted_fuse!(
+function fragment_near!(
     sm::SolidModel{OpenCascade},
     object_groups;
     delta=1e-3 * STP_UNIT,
@@ -143,15 +142,15 @@ function targeted_fuse!(
     # `d` is in STP_UNIT.
     d = _stp_float(delta)
     isfinite(d) && d >= 0 ||
-        throw(ArgumentError("targeted_fuse!: delta must be finite and nonnegative"))
+        throw(ArgumentError("fragment_near!: delta must be finite and nonnegative"))
     groups = _group_names(object_groups)
-    isempty(groups) && throw(ArgumentError("targeted_fuse!: no object groups given"))
+    isempty(groups) && throw(ArgumentError("fragment_near!: no object groups given"))
     for g in groups
         hasgroup(sm, g, 3) ||
-            throw(ArgumentError("targeted_fuse!: no dim-3 physical group named \"$g\""))
+            throw(ArgumentError("fragment_near!: no dim-3 physical group named \"$g\""))
         # The group dict can outlive its entities (e.g. consumed by a boolean op).
         isempty(dimtags(sm[g, 3])) && throw(
-            ArgumentError("targeted_fuse!: dim-3 physical group \"$g\" has no entities")
+            ArgumentError("fragment_near!: dim-3 physical group \"$g\" has no entities")
         )
     end
     obj = _object_dimtags(sm, groups)
@@ -160,20 +159,19 @@ function targeted_fuse!(
     # pull in everything between them.
     region = [bounds3d([dt]; delta=d) for dt in obj]
     # Anything in the region that is not an object or one of its own sub-entities. Any
-    # dimension counts: a free-standing sheet is a valid fusing partner. The fragment selects
-    # its own entities; this only decides whether there is work to do.
+    # dimension counts: a free-standing sheet is a valid fragment partner. The fragment
+    # selects its own entities; this only decides whether there is work to do.
     others = setdiff(
         filter(dt -> _in_region(region, bounds3d([dt])), gmsh.model.getEntities()),
         _boundary_closure(obj)
     )
     if isempty(others)
         warn && @warn(
-            "targeted_fuse!: nothing other than $(join(repr.(groups), ", ")) intersects " *
-            "the fusing region; nothing to fuse. Check `delta` if a neighbour was expected."
+            "fragment_near!: nothing other than $(join(repr.(groups), ", ")) intersects " *
+            "the region; nothing to fragment. Check `delta` if a neighbour was expected."
         )
         return obj
     end
-    warn && _warn_bbox_overlap_no_boundary(filter(dt -> dt[1] == 3, others), d)
 
     _fragment_three_pass!(sm; region=region)
     return _object_dimtags(sm, groups)
@@ -195,29 +193,8 @@ function _boundary_closure(dimtags)
     return closure
 end
 
-targeted_fuse!(::SolidModel, object_groups; kwargs...) =
-    throw(ArgumentError("Only OpenCascade kernel supports targeted_fuse!"))
-
-# Overlapping boxes are only a hint: conformal volumes touching along a face, edge, or vertex
-# overlap too. Suspicious pairs are those that overlap yet share no boundary entity.
-function _warn_bbox_overlap_no_boundary(cand, d)
-    bxs = Dict(c => bounds3d([c]; delta=d) for c in cand)
-    pts = Dict(c => _boundary_points(c) for c in cand)
-    for (i, a) in enumerate(cand), b in cand[(i + 1):end]
-        _boxes_touch(bxs[a], bxs[b]) || continue
-        isdisjoint(pts[a], pts[b]) || continue
-        @warn(
-            "targeted_fuse!: bounding boxes of volumes $a and $b overlap but they share no " *
-            "boundary entity — possible pre-existing non-conformal seam near the fusing region " *
-            "(bbox overlap does not guarantee the solids touch)."
-        )
-    end
-    return nothing
-end
-
-# Sharing a point is equivalent to sharing a boundary entity of any dimension.
-_boundary_points(dt::Tuple{Int32, Int32}) =
-    Set(t for (_, t) in gmsh.model.getBoundary([dt], false, false, true))
+fragment_near!(::SolidModel, object_groups; kwargs...) =
+    throw(ArgumentError("Only OpenCascade kernel supports fragment_near!"))
 
 """
     translate!(group, dx, dy, dz; copy=true)
