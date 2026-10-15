@@ -375,6 +375,91 @@
         poly_3 = vcat(to_polygons.((Rotation(45°) ∘ XReflection()).(elements(c3)))...)
 
         @test all(poly_2 .≈ poly_3)
+
+        # Structures referenced more than `max_copy` times are kept as references,
+        # and their contents are not also flattened
+        nrect(c) = length(elements(flatten(c)))
+        B = Cell("B", nm)
+        render!(B, Rectangle(1μm, 1μm), GDSMeta())
+        A = Cell("A", nm)
+        addref!(A, B)
+        A2 = Cell("A2", nm) # Child B is itself over-copied
+        for j = 1:3
+            addref!(A2, B, Point(0, 2j)μm)
+        end
+        tops = map((A, A2, B)) do s
+            top = Cell("top_" * name(s), nm)
+            for i = 1:3
+                addref!(top, s, Point(10i, 0)μm)
+            end
+            return top
+        end
+        for (top, s) in zip(tops, (A, A2, B)), depth in (-1, 1)
+            f = flatten(top; max_copy=2, depth=depth)
+            @test isempty(elements(f))
+            @test length(refs(f)) == 3
+            @test all(r -> structure(r) === s, refs(f))
+            @test nrect(f) == nrect(top)
+        end
+        # Each element of an ArrayReference gets the contents of its structure
+        top_arr = Cell("top_arr", nm)
+        addref!(top_arr, aref(A, dc=Point(10μm, 0μm), nc=3))
+        @test nrect(top_arr) == 3
+        @test length(refs(flatten(top_arr; depth=1))) == 3
+        # Each element of an ArrayReference counts as a copy
+        f = flatten(top_arr; max_copy=2)
+        @test isempty(elements(f))
+        @test only(refs(f)) isa ArrayReference
+        @test structure(only(refs(f))) === A
+        @test nrect(f) == 3
+        # Copies inside an ArrayReference count once per element
+        top_arr2 = Cell("top_arr2", nm)
+        addref!(top_arr2, aref(A2, dc=Point(10μm, 0μm), nc=2))
+        f = flatten(top_arr2; max_copy=2)
+        @test isempty(elements(f))
+        @test length(refs(f)) == 6
+        @test all(r -> structure(r) === B, refs(f))
+        @test nrect(f) == nrect(top_arr2) == 6
+        addref!(top_arr, A, Point(0μm, 10μm))
+        addref!(top_arr, A, Point(0μm, 20μm))
+        f = flatten(top_arr; max_copy=2)
+        @test isempty(elements(f))
+        @test length(refs(f)) == 3
+        @test all(r -> structure(r) === A, refs(f))
+        @test nrect(f) == nrect(top_arr) == 5
+        # Kept references below a flattened intermediate structure
+        mid = Cell("mid", nm)
+        render!(mid, Rectangle(1μm, 1μm), GDSMeta())
+        addref!(mid, tops[2])
+        top_mid = Cell("top_mid", nm)
+        addref!(top_mid, mid)
+        for depth in (-1, 2, 3)
+            f = flatten(top_mid; max_copy=2, depth=depth)
+            @test length(elements(f)) == 1
+            @test length(refs(f)) == 3
+            @test all(r -> structure(r) === A2, refs(f))
+            @test nrect(f) == nrect(top_mid) == 10
+        end
+        # Contents of each array element are placed at that element, including under a
+        # rotated reference to the array, and when the array itself is kept
+        lls(c) = sort(lowerleft.(elements(flatten(c))))
+        sub = Cell("sub", nm)
+        render!(sub, Rectangle(Point(1, 1)μm, Point(2, 2)μm), GDSMeta())
+        sub_holder = Cell("sub_holder", nm)
+        addref!(sub_holder, sub, Point(2, 0)μm)
+        arr = Cell("arr", nm)
+        addref!(arr, aref(sub_holder, dc=Point(10μm, 0μm), nc=2))
+        @test lls(arr) ≈ [Point(3, 1)μm, Point(13, 1)μm]
+        top_rot = Cell("top_rot", nm)
+        addref!(top_rot, arr, rot=90°)
+        @test lls(top_rot) ≈ [Point(-2, 3)μm, Point(-2, 13)μm]
+        for i = 1:2 # sub_holder is now copied 4 times, so the array is kept
+            addref!(top_rot, sub_holder, Point(0, 100i)μm)
+        end
+        f = flatten(top_rot; max_copy=2)
+        @test isempty(elements(f))
+        @test count(r -> r isa ArrayReference, refs(f)) == 1
+        @test lls(f) ≈ lls(top_rot)
     end
 
     @testset "Mapping metadata" begin

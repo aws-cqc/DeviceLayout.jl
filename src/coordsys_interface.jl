@@ -168,6 +168,9 @@ Recursively flatten references and arrays up to a hierarchical `depth`, adding t
 The references and arrays that were flattened are then discarded. Deeper references and arrays are brought upwards and are not discarded.
 
 This function has no effect for `depth == 0`, and unlimited depth by default.
+
+`max_copy` keeps references to frequently referenced structures, as described for
+[`flatten`](@ref).
 """
 function flatten!(
     c::AbstractCoordinateSystem;
@@ -197,6 +200,12 @@ transformations, then discards those references. Deeper references and arrays ar
 upwards and are not discarded.
 
 This function has no effect on references for `depth == 0`, and unlimited depth by default.
+
+References to any structure that would be copied more than `max_copy` times within `depth`
+levels of the hierarchy are brought upwards but not flattened, and their contents stay
+inside them. Copies are counted throughout `depth` levels as if no references were kept:
+each element of an `ArrayReference` counts as a copy, and copies inside a kept structure
+still count.
 """
 function flatten(
     c::T;
@@ -212,27 +221,16 @@ function flatten(
     end
     # append the top-level elements
     append_coordsys!(cflat, c; addrefs=false, metadata_filter=metadata_filter)
-    flatrefs, deeprefs = flatten_refs(c, depth=depth)
-    # append the references beyond `depth` brought down to top level
-    append!(cflat.refs, deeprefs)
-    if isinf(max_copy)
-        # append the elements of the flattened references
-        append_coordsys!.(cflat, flatrefs; addrefs=false, metadata_filter=metadata_filter)
-    else # If any structures are referenced more than `max_copy` times, treat as deeprefs
-        structure_count = Dict{GeometryStructure, Int}() # Count up structures
-        for s in structure.(flatrefs)
-            structure_count[s] = get(structure_count, s, 0) + 1
-        end
-        keepref_idx = findall(r -> structure_count[structure(r)] > max_copy, flatrefs)
-        append_idx = findall(r -> !(structure_count[structure(r)] > max_copy), flatrefs)
-        append_coordsys!.(
-            cflat,
-            flatrefs[append_idx];
-            addrefs=false,
-            metadata_filter=metadata_filter
-        )
-        append!(cflat.refs, flatrefs[keepref_idx])
+    keep = if isinf(max_copy)
+        Returns(false)
+    else
+        counts = structure_counts(c; depth=depth)
+        s -> counts[s] > max_copy
     end
+    flatrefs, keptrefs, deeprefs = flatten_refs(c; depth=depth, keep=keep)
+    append!(cflat.refs, deeprefs)
+    append!(cflat.refs, keptrefs)
+    append_coordsys!.(cflat, flatrefs; addrefs=false, metadata_filter=metadata_filter)
     return cflat
 end
 
@@ -241,35 +239,81 @@ end
 coordsys_type(::GeometryStructure{T}) where {T} = CoordinateSystem{T}
 coordsys_type(::T) where {T <: AbstractCoordinateSystem} = T
 
-function flatten_refs(geom::GeometryStructure{T}; depth=-1) where {T}
+# Transformation of each copy of the referenced structure, in the parent's coordinates
+instance_transformations(ref::StructureReference) = (transformation(ref),)
+function instance_transformations(ref::ArrayReference)
+    a = transformation(ref)
+    return (
+        Transformations.Translation((i - 1) * ref.deltarow + (j - 1) * ref.deltacol) ∘ a for
+        i = 1:(ref.row) for j = 1:(ref.col)
+    )
+end
+
+ninstances(::StructureReference) = 1
+ninstances(ref::ArrayReference) = ref.row * ref.col
+
+# Number of copies of each structure that fully flattening to `depth` would produce
+function structure_counts(geom::GeometryStructure; depth=-1)
+    counts = Dict{GeometryStructure, Int}()
+    _structure_counts!(counts, geom, depth, 1)
+    return counts
+end
+
+# `n` is the number of copies of `geom` in the flattened result
+function _structure_counts!(counts, geom, depth, n)
+    depth == 0 && return
+    for ref in refs(geom)
+        s = structure(ref)
+        ns = n * ninstances(ref)
+        counts[s] = get(counts, s, 0) + ns
+        _structure_counts!(counts, s, depth - 1, ns)
+    end
+end
+
+# References to structures satisfying `keep` go into `keptrefs` without descending into them
+function flatten_refs(geom::GeometryStructure{T}; depth=-1, keep=Returns(false)) where {T}
     flatrefs = GeometryReference{T}[]
+    keptrefs = GeometryReference{T}[]
     deeprefs = GeometryReference{T}[]
     _flatten_refs(
         flatrefs,
+        keptrefs,
         deeprefs,
         geom,
         Transformations.IdentityTransformation();
-        depth=depth
+        depth=depth,
+        keep=keep
     )
-    return flatrefs, deeprefs
+    return flatrefs, keptrefs, deeprefs
 end
 
-# Recursive helper accumulates transformations and appends results to refs_flat
-function _flatten_refs(flatrefs, deeprefs, geom, a; depth=depth)
+# Recursive helper accumulates the transformation `a` from `geom` to the top level
+function _flatten_refs(flatrefs, keptrefs, deeprefs, geom, a; depth, keep)
     if depth == 0 # this structure's references will be brought upward but not flattened
         append!(deeprefs, a.(refs(geom)))
         return
     end
 
-    append!(flatrefs, a.(refs(geom)))
     for ref in refs(geom)
-        _flatten_refs(
-            flatrefs,
-            deeprefs,
-            structure(ref),
-            a ∘ transformation(ref);
-            depth=depth - 1
-        )
+        _push_ref!(flatrefs, keptrefs, ref, a, keep)
+    end
+    for ref in refs(geom)
+        _flatten_contents!(flatrefs, keptrefs, deeprefs, ref, a, depth, keep)
+    end
+end
+
+# `refs(geom)` has an abstract element type, so these helpers are function barriers: each
+# reference costs one dynamic dispatch, and the transformations composed inside are inferred
+_push_ref!(flatrefs, keptrefs, ref, a, keep) =
+    push!(keep(structure(ref)) ? keptrefs : flatrefs, a(ref))
+
+function _flatten_contents!(flatrefs, keptrefs, deeprefs, ref, a, depth, keep)
+    s = structure(ref)
+    # A kept reference's contents stay inside it rather than also being flattened.
+    # Without references, `s` has nothing to add here: `append_coordsys!` places its elements.
+    (keep(s) || isempty(refs(s))) && return
+    for t in instance_transformations(ref)
+        _flatten_refs(flatrefs, keptrefs, deeprefs, s, a ∘ t; depth=depth - 1, keep=keep)
     end
 end
 
@@ -283,18 +327,8 @@ function append_coordsys!(cs::AbstractCoordinateSystem, ref::StructureReference;
 end
 
 function append_coordsys!(cs::AbstractCoordinateSystem, ref::ArrayReference; kwargs...)
-    a = transformation(ref)
-    pts = [
-        (i - 1) * ref.deltarow + (j - 1) * ref.deltacol for i = 1:(ref.row) for
-        j = 1:(ref.col)
-    ]
-    for pt in pts
-        append_coordsys!(
-            cs,
-            structure(ref);
-            transformation=Transformations.Translation(pt) ∘ a,
-            kwargs...
-        )
+    for t in instance_transformations(ref)
+        append_coordsys!(cs, structure(ref); transformation=t, kwargs...)
     end
 end
 
