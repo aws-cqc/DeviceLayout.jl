@@ -33,6 +33,10 @@ The format of this changelog is based on
     `crossovers!` in the DemoQPU17 example takes about 0.05 s instead of 0.85 s.
     `Intersect.intersections` now reports each intersection once rather than once per
     ordering of the segment pair.
+  - `ScaledIsometry` stores its linear map when constructed instead of recomputing it each time
+    it is applied, so transforming an entity computes `cos`/`sin` once rather than once per
+    point. Results are unchanged; `flatten` of the DemoQPU17 example's artwork takes about
+    40 ms instead of 66 ms. Constructing a `ScaledIsometry` costs about 55 ns more.
 
 ### Deprecated
 

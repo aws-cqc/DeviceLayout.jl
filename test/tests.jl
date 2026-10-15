@@ -298,6 +298,15 @@ end
     @test convert(ScaledIsometry{Point{Int}}, tr).origin isa Point{Int}
     @test hash(ScaledIsometry()) == hash(ScaledIsometry(Point(0, 0)))
 
+    # Stored linear map agrees with the normalized fields
+    tr = ScaledIsometry(Point(1.0m, 2.0m), 30°, true, -2.0)
+    @test tr(Point(1.0m, 0.0m)) ≈ Point(1.0m, 2.0m) + Point(-2cosd(30)m, -2sind(30)m)
+    @test tr(Point(0.0m, 1.0m)) ≈ Point(1.0m, 2.0m) + Point(-2sind(30)m, 2cosd(30)m)
+    expected =
+        Translation(Point(1.0m, 2.0m)) ∘ Rotation(210°) ∘
+        Transformations.LinearMap([2 0; 0 2]) ∘ XReflection()
+    @test tr.(points(pfloat)) ≈ expected.(points(pfloat))
+
     # Point vector unfolding
     ux = Point(1, 0)
     uy = Point(0, 1)
