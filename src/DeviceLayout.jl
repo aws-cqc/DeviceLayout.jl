@@ -575,7 +575,7 @@ export Curvilinear,
 
 # After curvilinear.jl (rounding produces CurvilinearRegion) and cells.jl/render
 include("postrender.jl")
-export round_layer, round_layer!, split_t_junctions!
+export round_layer, round_layer!, split_t_junctions!, split_pinches
 
 include("simple_shapes.jl")
 import .SimpleShapes:

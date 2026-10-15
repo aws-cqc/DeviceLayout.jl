@@ -464,10 +464,9 @@ sref(x::GeometryStructure{S}, f::Transformation; kwargs...) where {S} = sref(
 )
 
 function sref_transform_values(origin::Point{T}; kwargs...) where {T <: Coordinate}
-    argdict = Dict(k => v for (k, v) in kwargs)
-    xrefl = _ref_keyword(argdict, :xrefl, XREFL_SYNONYMS, false)
-    mag = _ref_keyword(argdict, :mag, MAG_SYNONYMS, 1.0)
-    rot = _ref_keyword(argdict, :rot, ROT_SYNONYMS, 0.0)
+    xrefl = _ref_keyword(kwargs, :xrefl, XREFL_SYNONYMS, false)
+    mag = _ref_keyword(kwargs, :mag, MAG_SYNONYMS, 1.0)
+    rot = _ref_keyword(kwargs, :rot, ROT_SYNONYMS, 0.0)
     return float(origin), xrefl, mag, rot
 end
 
@@ -491,16 +490,18 @@ const DR_SYNONYMS = (:deltarow, :drow, :vrow, :rv, :rowvec, :rowvector)
 const NC_SYNONYMS = (:numcols, :numcol, :ncols, :ncol, :col)
 const NR_SYNONYMS = (:numrows, :numrow, :nrows, :nrow, :row)
 
-function _ref_keyword(argdict, canonical, synonyms, default)
-    haskey(argdict, canonical) && return argdict[canonical]
+# Reads `kwargs` directly rather than copying it into a `Dict`: references are constructed
+# this way every time one is transformed, including once per reference in `flatten`
+function _ref_keyword(kwargs, canonical, synonyms, default)
+    haskey(kwargs, canonical) && return kwargs[canonical]
     for k in synonyms
-        if haskey(argdict, k)
+        if haskey(kwargs, k)
             Base.depwarn(
                 "Reference keyword `$k` is deprecated and will be removed in " *
                 "DeviceLayout.jl 2.0. Use `$canonical` instead.",
                 :sref
             )
-            return argdict[k]
+            return kwargs[k]
         end
     end
     return default
@@ -583,11 +584,10 @@ end
 
 function aref_transform_values(origin::Point{T}; kwargs...) where {T <: Coordinate}
     _, xrefl, mag, rot = sref_transform_values(origin; kwargs...)
-    argdict = Dict(k => v for (k, v) in kwargs)
-    dc = _ref_keyword(argdict, :dc, DC_SYNONYMS, Point(zero(T), zero(T)))
-    dr = _ref_keyword(argdict, :dr, DR_SYNONYMS, Point(zero(T), zero(T)))
-    c = _ref_keyword(argdict, :nc, NC_SYNONYMS, 1)
-    r = _ref_keyword(argdict, :nr, NR_SYNONYMS, 1)
+    dc = _ref_keyword(kwargs, :dc, DC_SYNONYMS, Point(zero(T), zero(T)))
+    dr = _ref_keyword(kwargs, :dr, DR_SYNONYMS, Point(zero(T), zero(T)))
+    c = _ref_keyword(kwargs, :nc, NC_SYNONYMS, 1)
+    r = _ref_keyword(kwargs, :nr, NR_SYNONYMS, 1)
     return (origin, dc, dr, c, r, xrefl, mag, rot)
 end
 

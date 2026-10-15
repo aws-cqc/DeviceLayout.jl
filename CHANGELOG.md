@@ -20,6 +20,23 @@ The format of this changelog is based on
     `h_um`, `alpha`, `coords_um`) into the mesh-size field, and
     `SolidModels.set_mesh_size_callback!` installs the size callback for models assembled
     without `render!`.
+  - `split_pinches` splits self-touching contours of `CurvilinearRegion`s, which
+    OpenCASCADE can reject when rendering to a `SolidModel`, into simple regions. Pieces are
+    classified by winding, so keyholed islands and holes are kept. Run it after boolean
+    operations and `split_t_junctions!`.
+
+### Changed
+
+  - Finding path intersections (`Intersect.intersect!`, `prepared_intersections`, and
+    `SchematicDrivenLayout.crossovers!`) uses a sort-and-sweep over line segments instead of
+    enumerating every pair of segments that overlap in x. Results are unchanged, but
+    `crossovers!` in the DemoQPU17 example takes about 0.05 s instead of 0.85 s.
+    `Intersect.intersections` now reports each intersection once rather than once per
+    ordering of the segment pair.
+  - `ScaledIsometry` stores its linear map when constructed instead of recomputing it each time
+    it is applied, so transforming an entity computes `cos`/`sin` once rather than once per
+    point. Results are unchanged; `flatten` of the DemoQPU17 example's artwork takes about
+    40 ms instead of 66 ms. Constructing a `ScaledIsometry` costs about 55 ns more.
 
 ### Deprecated
 
@@ -45,6 +62,16 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - `flatten` and `flatten!` with finite `max_copy` no longer duplicate geometry when a
+    reference kept for exceeding `max_copy` has references of its own. The contents of a
+    kept reference stay inside it instead of also being flattened or kept at the top level.
+  - `flatten` and `flatten!` with finite `max_copy` count each element of an
+    `ArrayReference` toward `max_copy`. Previously, an array counted as a single reference to
+    its structure regardless of its size, so the structure's contents could be copied to the
+    top level many more than `max_copy` times.
+  - `flatten` and `flatten!` place the contents of a structure referenced by an
+    `ArrayReference` at every array element. Previously, references inside that structure
+    were placed only at the first element.
   - `render_conformal!` built faces with holes that OpenCASCADE treated as including the
     holes: their area and extruded volume added the holes instead of subtracting them, and
     points inside a hole counted as inside the face. `add_plane_surface` subtracts a hole
