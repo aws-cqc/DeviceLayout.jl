@@ -25,6 +25,15 @@ The format of this changelog is based on
     classified by winding, so keyholed islands and holes are kept. Run it after boolean
     operations and `split_t_junctions!`.
 
+### Changed
+
+  - Finding path intersections (`Intersect.intersect!`, `prepared_intersections`, and
+    `SchematicDrivenLayout.crossovers!`) uses a sort-and-sweep over line segments instead of
+    enumerating every pair of segments that overlap in x. Results are unchanged, but
+    `crossovers!` in the DemoQPU17 example takes about 0.05 s instead of 0.85 s.
+    `Intersect.intersections` now reports each intersection once rather than once per
+    ordering of the segment pair.
+
 ### Deprecated
 
   - DXF export (`save("file.dxf", c, python)`); save to GDS and convert with an external tool
