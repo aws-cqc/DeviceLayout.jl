@@ -1519,8 +1519,8 @@ end
         )
     )
     SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
-    # A metal connected component without a Terminal or Ground locator emits a warning,
-    # which strict=:warn promotes to an error.
+    # A metal connected component without a Terminal or Ground locator logs an error, which
+    # fails the render under strict=:warn (as under the default strict=:error).
     @test_throws ErrorException render!(
         SolidModel("strict_warning"; overwrite=true),
         schematic,
