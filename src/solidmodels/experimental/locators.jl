@@ -222,14 +222,14 @@ function _select_ccs!(
         rl.meta isa Union{Terminal, Ground} || continue
         entity_tag = _containing_entity_tag(rl, entity_rtree)
         if iszero(entity_tag)
-            @warn "$(rl.meta) at $(rl.r) did not match any metal connected component"
+            @error "$(rl.meta) at $(rl.r) did not match any metal connected component"
         else
             push!(selections[tag_to_cc[entity_tag]].locators, rl)
         end
     end
     for (cc_name, sel) in zip(cc_names, selections)
-        isempty(sel.locators) && @warn "Metal connected component '$cc_name' has no " *
-              "Terminal or Ground locator. Did you forget a Ground locator?"
+        isempty(sel.locators) && @error "Metal connected component '$cc_name' has no " *
+               "Terminal or Ground locator. Did you forget a Ground locator?"
     end
     return selections
 end
