@@ -61,6 +61,10 @@ The format of this changelog is based on
   - `flatten` and `flatten!` with finite `max_copy` no longer duplicate geometry when a
     reference kept for exceeding `max_copy` has references of its own. The contents of a
     kept reference stay inside it instead of also being flattened or kept at the top level.
+  - `flatten` and `flatten!` with finite `max_copy` count each element of an
+    `ArrayReference` toward `max_copy`. Previously, an array counted as a single reference to
+    its structure regardless of its size, so the structure's contents could be copied to the
+    top level many more than `max_copy` times.
   - `flatten` and `flatten!` place the contents of a structure referenced by an
     `ArrayReference` at every array element. Previously, references inside that structure
     were placed only at the first element.

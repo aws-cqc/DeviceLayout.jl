@@ -406,12 +406,20 @@
         addref!(top_arr, aref(A, dc=Point(10μm, 0μm), nc=3))
         @test nrect(top_arr) == 3
         @test length(refs(flatten(top_arr; depth=1))) == 3
-        # ArrayReference counts once, but references inside it count once per element
+        # Each element of an ArrayReference counts as a copy
         f = flatten(top_arr; max_copy=2)
         @test isempty(elements(f))
-        @test length(refs(f)) == 3
-        @test all(r -> structure(r) === B, refs(f))
+        @test only(refs(f)) isa ArrayReference
+        @test structure(only(refs(f))) === A
         @test nrect(f) == 3
+        # Copies inside an ArrayReference count once per element
+        top_arr2 = Cell("top_arr2", nm)
+        addref!(top_arr2, aref(A2, dc=Point(10μm, 0μm), nc=2))
+        f = flatten(top_arr2; max_copy=2)
+        @test isempty(elements(f))
+        @test length(refs(f)) == 6
+        @test all(r -> structure(r) === B, refs(f))
+        @test nrect(f) == nrect(top_arr2) == 6
         addref!(top_arr, A, Point(0μm, 10μm))
         addref!(top_arr, A, Point(0μm, 20μm))
         f = flatten(top_arr; max_copy=2)
@@ -445,7 +453,7 @@
         top_rot = Cell("top_rot", nm)
         addref!(top_rot, arr, rot=90°)
         @test lls(top_rot) ≈ [Point(-2, 3)μm, Point(-2, 13)μm]
-        for i = 1:2 # sub_holder is now referenced 3 times, so the array is kept
+        for i = 1:2 # sub_holder is now copied 4 times, so the array is kept
             addref!(top_rot, sub_holder, Point(0, 100i)μm)
         end
         f = flatten(top_rot; max_copy=2)

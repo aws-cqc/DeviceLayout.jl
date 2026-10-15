@@ -201,11 +201,11 @@ upwards and are not discarded.
 
 This function has no effect on references for `depth == 0`, and unlimited depth by default.
 
-References to any structure that is referenced more than `max_copy` times within `depth`
+References to any structure that would be copied more than `max_copy` times within `depth`
 levels of the hierarchy are brought upwards but not flattened, and their contents stay
-inside them. References are counted throughout `depth` levels as if none were kept: an
-`ArrayReference` counts once, each reference inside its structure counts once per array
-element, and references inside a kept structure still count.
+inside them. Copies are counted throughout `depth` levels as if no references were kept:
+each element of an `ArrayReference` counts as a copy, and copies inside a kept structure
+still count.
 """
 function flatten(
     c::T;
@@ -252,7 +252,7 @@ end
 ninstances(::StructureReference) = 1
 ninstances(ref::ArrayReference) = ref.row * ref.col
 
-# Number of references to each structure that flattening to `depth` would produce
+# Number of copies of each structure that fully flattening to `depth` would produce
 function structure_counts(geom::GeometryStructure; depth=-1)
     counts = Dict{GeometryStructure, Int}()
     _structure_counts!(counts, geom, depth, 1)
@@ -264,8 +264,9 @@ function _structure_counts!(counts, geom, depth, n)
     depth == 0 && return
     for ref in refs(geom)
         s = structure(ref)
-        counts[s] = get(counts, s, 0) + n
-        _structure_counts!(counts, s, depth - 1, n * ninstances(ref))
+        ns = n * ninstances(ref)
+        counts[s] = get(counts, s, 0) + ns
+        _structure_counts!(counts, s, depth - 1, ns)
     end
 end
 
