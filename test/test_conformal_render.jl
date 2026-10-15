@@ -286,6 +286,17 @@
         k.synchronize()
         @test gmsh.model.occ.getMass(2, tag) ≈ expected rtol = 1e-6
         gmsh.finalize()
+
+        # A region built with a clockwise exterior is normalized and renders the same face
+        cw_exterior = DeviceLayout.Curvilinear._reverse(region.exterior)
+        cs = CoordinateSystem("curved_holes_cw", nm)
+        place!(cs, CurvilinearRegion(cw_exterior, region.holes), :l1)
+        sm = SolidModel("curved_holes_cw"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
+        render_conformal!(sm, cs)
+        tag = only(SolidModels.entitytags(sm["l1", 2]))
+        @test gmsh.model.occ.getMass(2, tag) ≈ expected rtol = 1e-6
+        gmsh.finalize()
     end
 
     @testset "render_conformal! preserves shared vertex identity" begin

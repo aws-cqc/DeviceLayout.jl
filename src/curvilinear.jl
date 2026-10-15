@@ -281,15 +281,15 @@ A curvilinear region made up of an exterior::CurvilinearPolygon{T} and optional 
 holes made up of CurvilinearPolygon{T}. These holes cannot intersect each other or the
 exterior.
 
-Holes are normalized to clockwise (negative) winding on construction, opposite the
-counterclockwise exterior. This matches `ClippedPolygon` hole contours, so that `to_polygons`
+On construction, the exterior is normalized to counterclockwise (positive) winding and the
+holes to clockwise (negative). This matches `ClippedPolygon` contours, so that `to_polygons`
 can reconstitute the region with `union2d` under Clipper's positive fill rule. See issue #241.
 """
 struct CurvilinearRegion{T} <: GeometryEntity{T}
     exterior::CurvilinearPolygon{T}
     holes::Vector{CurvilinearPolygon{T}}
     CurvilinearRegion{T}(ext::CurvilinearPolygon, holes=CurvilinearPolygon{T}[]) where {T} =
-        new(ext, _to_hole_winding.(holes))
+        new(_to_exterior_winding(ext), _to_hole_winding.(holes))
 end
 
 # Normalize a hole to clockwise (negative) winding, matching `ClippedPolygon` hole contours,
@@ -301,6 +301,14 @@ function _to_hole_winding(h::CurvilinearPolygon)
     pg = isempty(h.curves) ? Polygon(h.p) : to_polygons(h)
     length(points(pg)) < 3 && return h
     return Polygons.orientation(pg) > 0 ? _reverse(h) : h
+end
+
+# Normalize the exterior to counterclockwise (positive) winding, opposite the holes. Winding
+# is read as for holes; Clipper-derived exteriors already arrive counterclockwise.
+function _to_exterior_winding(e::CurvilinearPolygon)
+    pg = isempty(e.curves) ? Polygon(e.p) : to_polygons(e)
+    length(points(pg)) < 3 && return e
+    return Polygons.orientation(pg) < 0 ? _reverse(e) : e
 end
 CurvilinearRegion(x) = CurvilinearRegion(CurvilinearPolygon(x))
 
