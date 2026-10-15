@@ -411,8 +411,8 @@ _add_conformal!(
 # each hole. The multi-loop form is one OCC call and preserves shared points
 # naturally, which is what we need for conformal rendering. `add_plane_surface`
 # subtracts a hole only if its loop winds like the exterior, and a
-# `CurvilinearRegion` stores its holes clockwise, so they are reversed under a
-# counterclockwise exterior.
+# `CurvilinearRegion` stores its holes clockwise, opposite its counterclockwise
+# exterior, so they are reversed.
 function _add_conformal!(
     ctx::ConformalRenderContext,
     surf::CurvilinearRegion{T},
@@ -425,19 +425,10 @@ function _add_conformal!(
 ) where {T}
     z = zmap(m)
     outer_loop = _add_conformal_loop!(ctx, surf.exterior, k, z; points_cache, atol)
-    reverse = !isempty(surf.holes) && _is_ccw(surf.exterior)
     hole_loops =
-        _add_conformal_loop!.(Ref(ctx), surf.holes, k, z; points_cache, atol, reverse)
+        _add_conformal_loop!.(Ref(ctx), surf.holes, k, z; points_cache, atol, reverse=true)
     surftag = k.add_plane_surface([outer_loop; hole_loops...])
     return (Int32(2), surftag)
-end
-
-# Whether `cl` winds counterclockwise. Curves are discretized, since vertices alone can't
-# determine the winding of a loop closed by curves (two vertices and two arcs have none).
-function _is_ccw(cl::CurvilinearPolygon)
-    pg =
-        isempty(cl.curves) ? DeviceLayout.Polygon(points(cl)) : DeviceLayout.to_polygons(cl)
-    return length(points(pg)) >= 3 && DeviceLayout.Polygons.orientation(pg) > 0
 end
 
 # Plain polygon path (rectilinear).

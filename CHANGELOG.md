@@ -49,7 +49,7 @@ The format of this changelog is based on
     holes: their area and extruded volume added the holes instead of subtracting them, and
     points inside a hole counted as inside the face. `add_plane_surface` subtracts a hole
     only if its loop winds like the exterior, but a `CurvilinearRegion` stores its holes
-    clockwise. The holes are now reversed under a counterclockwise exterior, and
+    clockwise, opposite its counterclockwise exterior. The holes are now reversed, and
     `add_conformal_loop!` takes `reverse=true` for building such hole loops by hand. Its
     docstring example now does that, and passes a `SolidModels.PointsCache` instead of an
     `RTree`, which threw a `MethodError`.
