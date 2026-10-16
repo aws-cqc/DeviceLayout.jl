@@ -55,14 +55,11 @@ flux (`Z`) ports must be `:short`; charge (`XY`) and readout (`RO`) ports must b
 Returns the connectivity dict from `SolidModels.check_port_connectivity`.
 """
 function verify_port_connectivity(sm::SolidModel, schematic; n_ports=42)
-    # Fast without staple detection, but then air bridges don't connect
-    # ~1 minute with staples (non-boundary contacts)
     @time conn = SolidModels.check_port_connectivity(
         sm,
         ["port_$i" for i = 1:n_ports],
         ["metal"];
-        dim=2,
-        detect_non_boundary_contacts=true
+        dim=2
     )
     for i = 1:n_ports
         port = "port_$i"
