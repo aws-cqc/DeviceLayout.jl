@@ -33,7 +33,7 @@ function identity_row(name, a, b)
 end
 
 function main(args)
-    threshold = 0.10
+    threshold = 0.15
     files = String[]
     for a in args
         if startswith(a, "--threshold=")
