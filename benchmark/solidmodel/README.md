@@ -19,7 +19,7 @@ enough to define them: at or after the commit that added this directory.
 From the repository root:
 
 ```sh
-julia --project=benchmark -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+julia --project=benchmark -e 'using Pkg; Pkg.develop(PackageSpec(path=".")); Pkg.instantiate()'
 julia --project=benchmark benchmark/solidmodel/run_single_transmon.jl
 julia --project=benchmark benchmark/solidmodel/run_qpu17.jl --order=1 --scales=1.0
 ```
@@ -39,8 +39,8 @@ Gmsh's own progress output goes to stderr; filter it with `2>&1 | grep -v '^Info
 julia --project=benchmark benchmark/solidmodel/compare.jl base.json head.json [--threshold=0.10]
 ```
 
-prints a markdown report and exits nonzero if geometry differs or any timing regresses by more
-than `threshold`:
+prints a markdown report and exits nonzero if geometry differs or a total timing (setup,
+render, or mesh generation at one scale) regresses by more than `threshold`:
 
 - **Geometry identity** — artwork fingerprint (`Cells.geometry_fingerprint`), SolidModel
   fingerprint (SHA-256 over sorted, rounded per-entity and per-physical-group mass and
@@ -48,8 +48,10 @@ than `threshold`:
   counts and masses, mesh node/element counts, minimum `minSICN` and `gamma` quality, and the
   number of elements with `γ < 0.1` and `0.1 ≤ γ < 0.2`.
 - **Timings** — setup (`plan` + artwork render), SolidModel render total and per phase
-  (physical groups, auto-union, postrender operations, three-pass fragment), 1D/2D/3D mesh
-  generation per scale.
+  (physical groups, auto-union, postrender operations, three-pass fragment), mesh generation
+  total and 1D/2D/3D per scale. Only the totals are checked against `threshold`; the
+  per-phase and per-dimension rows are for locating a regression, since they are often
+  sub-second and vary by more than 10% between identical single-shot runs.
 
 Two runs at the same commit on the same machine are a **determinism check**: every row in
 the geometry-identity section should read `same`. Any `differs` row is a nondeterminism to

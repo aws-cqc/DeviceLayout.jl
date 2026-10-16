@@ -1240,6 +1240,8 @@ Render `cs` to `sm`.
     and for each postrendering operation, reporting the operation being run and then the
     resulting entity count, bounding box, and elapsed time. Each operation is logged before it
     runs, so the operation responsible for a failure is the last one logged. Default is `false`.
+    Tooling can instead pass a step reporter object, an internal interface described in
+    `src/solidmodels/postrender.jl` and used by the benchmarks in `benchmark/solidmodel/`.
 
 Available postrendering operations include [`translate!`](@ref), [`extrude_z!`](@ref), [`revolve!`](@ref),
 [`union_geom!`](@ref), [`intersect_geom!`](@ref), [`difference_geom!`](@ref), [`fragment_geom!`](@ref), and [`box_selection`](@ref).
