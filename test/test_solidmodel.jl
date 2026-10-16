@@ -1920,6 +1920,22 @@
         )
         @test !SolidModels.hasgroup(sm2, "unused", 2)
 
+        # A layer referenced only by a post-fragment operation is still rendered
+        sm4 = SolidModel("test_skip_post_fragment", overwrite=true)
+        render!(
+            sm4,
+            cs;
+            skip_unused_layers=true,
+            post_fragment_ops=[(
+                "kept",
+                (sm, g) -> SolidModels.dimtags(sm[g, 2]),
+                ("unused",)
+            )]
+        )
+        @test SolidModels.hasgroup(sm4, "unused", 2)
+        @test SolidModels.hasgroup(sm4, "kept", 2)
+        @test !SolidModels.hasgroup(sm4, "used", 2)
+
         # Indexed layers: "port_1" kept when base layer "port" is referenced
         cs3 = CoordinateSystem("test_skip_indexed", nm)
         place!(cs3, Rectangle(Point(0μm, 0μm), Point(1μm, 1μm)), SemanticMeta(:metal))
@@ -2332,6 +2348,10 @@ end
     @testset "exclude_groups is a membership difference" begin
         @test Set(Int(t) for (_, t) in exclude_groups(sm, "vacuum", "chip", 3)) ==
               Set(Int.(v[3:4]))
+        # Any string type works, alone or in a collection.
+        @test Set(
+            Int(t) for (_, t) in exclude_groups(sm, "vacuum", split("chip", ","), 3)
+        ) == Set(Int.(v[3:4]))
         # Absent excluded groups are skipped, with an info message so typos are visible.
         res = @test_logs (:info, r"\(missing, 3\) is not a physical group") exclude_groups(
             sm,
@@ -2375,5 +2395,286 @@ end
         @test !SolidModels.hasgroup(sm, "annotation", 3)
         @test (3, v[4]) in gmsh.model.getEntities(3)
         @test tagset("vacuum") == Set(Int.(v[3:4]))
+    end
+end
+
+@testitem "fragment_near! bounding-box-pruned fragmentation" setup =
+    [CommonTestSetup, QuietGmshSetup] begin
+    using DeviceLayout.SolidModels
+    import DeviceLayout.SolidModels:
+        SolidModel, dimtags, gmsh, fragment_near!, _fragment_three_pass!, GmshNative
+    using Unitful: μm
+
+    # A fake "package": two pads (tops at z=10) with a chip resting on them, plus two far-away
+    # boxes the chip never touches. Mirrors a package+chip stitch at (tiny) scale.
+    function build_package(nm)
+        sm = SolidModel(nm; overwrite=true)
+        gmsh.model.set_current(nm)
+        occ = gmsh.model.occ
+        pa = occ.addBox(-40, -40, 0, 30, 30, 10)
+        pb = occ.addBox(10, 10, 0, 30, 30, 10)
+        ch = occ.addBox(-40, -40, 10, 80, 80, 20)   # rests on both pad tops (z=10)
+        f1 = occ.addBox(500, 500, 0, 10, 10, 10)
+        f2 = occ.addBox(-500, -500, 0, 10, 10, 10)
+        occ.synchronize()
+        sm["pad_a"] = [(Int32(3), Int32(pa))]
+        sm["pad_b"] = [(Int32(3), Int32(pb))]
+        sm["chip"]  = [(Int32(3), Int32(ch))]
+        sm["far1"]  = [(Int32(3), Int32(f1))]
+        sm["far2"]  = [(Int32(3), Int32(f2))]
+        return sm
+    end
+    boundary_tags(dts) =
+        Set(abs(t) for (d, t) in gmsh.model.getBoundary(dts, false, false, false))
+    faceset(sm, grp) = boundary_tags(dimtags(sm[grp, 3]))
+    shared(sm, a, b) = length(intersect(faceset(sm, a), faceset(sm, b)))
+    vtags(sm, grp) = Set(t for (d, t) in dimtags(sm[grp, 3]))
+    # Faces on no volume boundary: orphans left by fragmentation, meshed as detached triangles.
+    function orphan_faces(sm)
+        gmsh.model.set_current(SolidModels.name(sm))
+        vf = boundary_tags(gmsh.model.getEntities(3))
+        return [t for (_, t) in gmsh.model.getEntities(2) if !(t in vf)]
+    end
+    function nentities(sm, dim)
+        gmsh.model.set_current(SolidModels.name(sm))
+        return length(gmsh.model.getEntities(dim))
+    end
+    # Tag the chip's bottom (z=10) face before fragmenting, like a boundary-condition
+    # surface.
+    function tag_chip_bottom!(sm)
+        ch = only(dimtags(sm["chip", 3]))
+        function at_z10(dt)
+            bb = gmsh.model.getBoundingBox(dt[1], abs(dt[2]))   # (xmin, ymin, zmin, xmax, ymax, zmax)
+            return bb[3] ≈ 10.0 && bb[6] ≈ 10.0
+        end
+        faces =
+            [(d, abs(t)) for (d, t) in gmsh.model.getBoundary([ch], false, false, false)]
+        sm["chip_bottom"] = filter(at_z10, faces)
+        return nothing
+    end
+    @testset "fragments with neighbors, leaves the rest untouched" begin
+        sm = build_package("tf_pruned")
+        far1_before, far2_before = vtags(sm, "far1"), vtags(sm, "far2")
+        fragment_near!(sm, "chip")
+        @test shared(sm, "chip", "pad_a") == 1      # conformal interface formed
+        @test shared(sm, "chip", "pad_b") == 1
+        @test shared(sm, "chip", "far1") == 0       # never touched the far boxes
+        @test vtags(sm, "far1") == far1_before      # far entities not re-fragmented
+        @test vtags(sm, "far2") == far2_before
+        gmsh.model.set_current("tf_pruned")
+        gmsh.model.mesh.generate(3)
+        _, et, _ = gmsh.model.mesh.getElements(3)
+        @test sum(length, et) > 0
+        @test minimum(gmsh.model.mesh.getElementQualities(reduce(vcat, et))) > 0.1
+    end
+
+    @testset "targeted matches global: no orphan entities, dim-2 groups land on real faces" begin
+        smg = build_package("tf_global")
+        tag_chip_bottom!(smg)
+        _fragment_three_pass!(smg)                  # global reference
+        @test shared(smg, "chip", "pad_a") == 1
+        @test shared(smg, "chip", "pad_b") == 1
+        @test isempty(orphan_faces(smg))
+        nf_global, nc_global = nentities(smg, 2), nentities(smg, 1)
+
+        smt = build_package("tf_auto_cmp")
+        tag_chip_bottom!(smt)
+        fragment_near!(smt, "chip"; warn=false)
+        # Same entity counts as the global pass and nothing floating.
+        @test nentities(smt, 2) == nf_global
+        @test nentities(smt, 1) == nc_global
+        @test isempty(orphan_faces(smt))
+        # The pre-tagged bottom face was split into three pieces (pad_a contact, pad_b
+        # contact, remainder), every one of which is a genuine boundary face of the chip.
+        cb = Set(t for (_, t) in dimtags(smt["chip_bottom", 2]))
+        @test length(cb) == 3
+        @test cb ⊆ faceset(smt, "chip")
+    end
+
+    @testset "free-standing sheet inside the region is fragmented too" begin
+        # A zero-thickness sheet (like a lumped port) in the chip bottom plane, on no volume.
+        function with_sheet(nm)
+            sm = build_package(nm)
+            gmsh.model.set_current(nm)
+            sheet = gmsh.model.occ.addRectangle(-40, -40, 10, 80, 80)
+            gmsh.model.occ.synchronize()
+            sm["sheet"] = [(Int32(2), Int32(sheet))]
+            return sm
+        end
+        smg = with_sheet("tf_sheet_global")
+        _fragment_three_pass!(smg)
+        n_global = length(dimtags(smg["sheet", 2]))
+        @test n_global == 3
+
+        smt = with_sheet("tf_sheet_targeted")
+        fragment_near!(smt, "chip"; warn=false)
+        sheet_faces = Set(t for (_, t) in dimtags(smt["sheet", 2]))
+        @test length(sheet_faces) == n_global
+        @test sheet_faces ⊆ faceset(smt, "chip")   # every piece is now a chip boundary face
+        @test isempty(orphan_faces(smt))
+    end
+
+    @testset "a sheet is a fragment partner even with no other volume nearby" begin
+        # One box and a sheet lying on its bottom face, nothing else. The sheet is the only
+        # neighbour, so a check that looks for volumes alone would skip the fragment.
+        sm = SolidModel("tf_sheet_only"; overwrite=true)
+        gmsh.model.set_current("tf_sheet_only")
+        box = gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
+        sheet = gmsh.model.occ.addRectangle(2, 2, 0, 4, 4)
+        gmsh.model.occ.synchronize()
+        sm["chip"] = [(Int32(3), Int32(box))]
+        sm["sheet"] = [(Int32(2), Int32(sheet))]
+        @test sheet ∉ faceset(sm, "chip")         # detached before the fragment
+        @test_logs fragment_near!(sm, "chip")     # no "nothing to fragment" warning
+        sheet_faces = Set(t for (_, t) in dimtags(sm["sheet", 2]))
+        @test length(sheet_faces) == 1
+        @test sheet_faces ⊆ faceset(sm, "chip")   # imprinted onto the box's bottom face
+        @test isempty(orphan_faces(sm))
+    end
+
+    # A 1D physical group on an edge of `vol_group`, via volume → faces → curves
+    # (getBoundary recursive=true would jump straight to points).
+    function tag_edge!(sm, vol_group, edge_group)
+        pa = [(Int32(3), only(vtags(sm, vol_group)))]
+        faces = gmsh.model.getBoundary(pa, false, false, false)
+        curves = gmsh.model.getBoundary(faces, false, false, false)
+        sm[edge_group] = [(Int32(1), abs(first(curves)[2]))]
+        return nothing
+    end
+
+    @testset "lower-dim groups: far preserved, neighborhood no worse than global" begin
+        # (a) A 1D group far from the box (on far1) is left exactly untouched.
+        sm = build_package("tf_faredge")
+        tag_edge!(sm, "far1", "far_edge")
+        before = Set(t for (d, t) in dimtags(sm["far_edge", 1]))
+        fragment_near!(sm, "chip")
+        @test Set(t for (d, t) in dimtags(sm["far_edge", 1])) == before
+
+        # (b) For an edge inside the fragmented neighborhood, targeted is no worse than
+        # global. Fragmentation can retag/drop a dim-1 group on a fragmented boundary under
+        # either path.
+        # `dimtags` queries gmsh's current model, so read each result before building the next.
+        sg = build_package("tf_edge_global")
+        tag_edge!(sg, "pad_a", "edge_grp")
+        _fragment_three_pass!(sg)
+        n_global = length(dimtags(sg["edge_grp", 1]))
+        st = build_package("tf_edge_targeted")
+        tag_edge!(st, "pad_a", "edge_grp")
+        fragment_near!(st, "chip")
+        @test length(dimtags(st["edge_grp", 1])) == n_global
+    end
+
+    @testset "groups on a fragmented volume's boundary outside the region" begin
+        # A small box on the middle of a slab's top face. The slab is fragmented (its top
+        # face is imprinted), but its other faces and all of its edges lie outside the
+        # region.
+        function slab_and_top(nm)
+            sm = SolidModel(nm; overwrite=true)
+            gmsh.model.set_current(nm)
+            slab = gmsh.model.occ.addBox(0, 0, 0, 100, 100, 10)
+            top = gmsh.model.occ.addBox(40, 40, 10, 20, 20, 5)
+            gmsh.model.occ.synchronize()
+            sm["slab"] = [(Int32(3), Int32(slab))]
+            sm["top"] = [(Int32(3), Int32(top))]
+            faces = gmsh.model.getBoundary([(3, slab)], false, false, false)
+            sm["slab_faces"] = [(d, abs(t)) for (d, t) in faces]
+            curves = gmsh.model.getBoundary(faces, false, false, false)
+            sm["slab_edges"] = unique([(d, abs(t)) for (d, t) in curves])
+            return sm
+        end
+        sg = slab_and_top("tf_slab_global")
+        _fragment_three_pass!(sg)
+        n_edges_global = length(dimtags(sg["slab_edges", 1]))
+        @test n_edges_global == 12
+
+        st = slab_and_top("tf_slab_targeted")
+        fragment_near!(st, "top")
+        # Fails if the slab's faces outside the region are not submitted with the slab.
+        @test Set(dimtags(st["slab_faces", 2])) == Set((2, t) for t in faceset(st, "slab"))
+        # Fails if the operands are not in the order the global pass uses.
+        @test length(dimtags(st["slab_edges", 1])) == n_edges_global
+        @test shared(st, "slab", "top") == 1
+    end
+
+    @testset "several parts in one call, one box per volume" begin
+        # A second part resting on far1, and an overlapping pair between the two parts. A single
+        # box around both parts would take in the pair and fragment it; one box per volume
+        # leaves it as it was, like everything else outside the region.
+        sm = build_package("tf_multi")
+        gmsh.model.set_current("tf_multi")
+        part = gmsh.model.occ.addBox(500, 500, 10, 10, 10, 5)
+        m1 = gmsh.model.occ.addBox(200, 200, 0, 10, 10, 10)
+        m2 = gmsh.model.occ.addBox(205, 200, 0, 10, 10, 10)
+        gmsh.model.occ.synchronize()
+        sm["part"] = [(Int32(3), Int32(part))]
+        sm["m1"] = [(Int32(3), Int32(m1))]
+        sm["m2"] = [(Int32(3), Int32(m2))]
+        far2_before = vtags(sm, "far2")
+        res = fragment_near!(sm, ["chip", "part"])
+        @test Set(res) == Set(vcat(dimtags(sm["chip", 3]), dimtags(sm["part", 3])))
+        @test shared(sm, "chip", "pad_a") == 1
+        @test shared(sm, "chip", "pad_b") == 1
+        @test shared(sm, "part", "far1") == 1
+        @test shared(sm, "m1", "m2") == 0          # outside every part's box: not fragmented
+        @test vtags(sm, "far2") == far2_before
+    end
+
+    @testset "an entity enclosed by the object is fragmented" begin
+        # Boxes around the object's faces alone would miss `inner`, which touches none of them.
+        sm = SolidModel("tf_enclosed"; overwrite=true)
+        gmsh.model.set_current("tf_enclosed")
+        inner = gmsh.model.occ.addBox(10, 10, 10, 10, 10, 10)
+        outer = gmsh.model.occ.addBox(0, 0, 0, 30, 30, 30)
+        gmsh.model.occ.synchronize()
+        sm["inner"] = [(Int32(3), Int32(inner))]
+        sm["outer"] = [(Int32(3), Int32(outer))]
+        fragment_near!(sm, "outer")
+        @test shared(sm, "outer", "inner") == 6
+        gmsh.model.mesh.generate(3)
+        _, et, _ = gmsh.model.mesh.getElements(3)
+        @test minimum(gmsh.model.mesh.getElementQualities(reduce(vcat, et))) > 0.1
+    end
+
+    @testset "validation and API" begin
+        sm = build_package("tf_valid")
+        # Missing group must error (not silently fall back to a global fragment).
+        @test_throws ArgumentError fragment_near!(sm, "nope")
+        @test_throws ArgumentError fragment_near!(sm, ["chip", "nope"])
+        @test_throws ArgumentError fragment_near!(sm, String[])
+        # Non-OpenCascade kernel is rejected.
+        smn = SolidModel("tf_native", GmshNative(); overwrite=true)
+        @test_throws ArgumentError fragment_near!(smn, "chip")
+        # Symbol group names are accepted and behave like the String form.
+        sm2 = build_package("tf_symbol")
+        @test fragment_near!(sm2, :chip) == dimtags(sm2["chip", 3])
+        # A SubString is one name, not a list of characters.
+        sm4 = build_package("tf_substring")
+        @test fragment_near!(sm4, split("chip,x", ",")[1]) == dimtags(sm4["chip", 3])
+        # Targeted selection is the default.
+        sm3 = build_package("tf_auto")
+        far_before = vtags(sm3, "far1")
+        fragment_near!(sm3, "chip"; warn=false)
+        @test shared(sm3, "chip", "pad_a") == 1
+        @test shared(sm3, "chip", "pad_b") == 1
+        @test vtags(sm3, "far1") == far_before
+
+        gmsh.model.set_current("tf_valid")
+        @test_throws ArgumentError fragment_near!(sm, "chip"; delta=-1μm)
+        # A group whose entities were consumed is caught rather than returning [].
+        gmsh.model.occ.remove(dimtags(sm["chip", 3]))
+        gmsh.model.occ.synchronize()
+        @test_throws ArgumentError fragment_near!(sm, "chip")
+    end
+
+    @testset "nothing else in the region warns and is a no-op" begin
+        sm = SolidModel("tf_isolated"; overwrite=true)
+        gmsh.model.set_current("tf_isolated")
+        vol = gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
+        gmsh.model.occ.synchronize()
+        sm["chip"] = [(Int32(3), Int32(vol))]
+        before = dimtags(sm["chip", 3])
+        @test (@test_logs (:warn,) fragment_near!(sm, "chip")) == before
+        @test (@test_logs fragment_near!(sm, "chip"; warn=false)) == before
+        @test dimtags(sm["chip", 3]) == before
     end
 end
