@@ -236,6 +236,66 @@
         gmsh.option.setNumber("General.Verbosity", 0)
         render_conformal!(sm, cs)
         @test hasgroup(sm, "l1", 2)
+        tag = only(SolidModels.entitytags(sm["l1", 2]))
+        @test gmsh.model.occ.getMass(2, tag) ≈ 100^2 - 40^2
+        @test gmsh.model.isInside(2, tag, [50.0, 50.0, 0.0]) == 0
+        gmsh.finalize()
+    end
+
+    @testset "render_conformal! subtracts curved and straight holes" begin
+        # `add_plane_surface` subtracts a hole only if its loop winds like the exterior,
+        # while a `CurvilinearRegion` stores its holes clockwise
+        region = only(
+            DeviceLayout.difference2d_curved(
+                centered(Rectangle(200μm, 200μm)),
+                [
+                    centered(Rectangle(50μm, 50μm)) + Point(40μm, 0μm),
+                    DeviceLayout.Polygons.Circle(Point(-40.0μm, 0.0μm), 20μm)
+                ]
+            )
+        )
+        expected = 200^2 - 50^2 - π * 20^2
+        cs = CoordinateSystem("curved_holes", nm)
+        place!(cs, region, :l1)
+        sm = SolidModel("curved_holes"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
+        render_conformal!(sm, cs)
+        tag = only(SolidModels.entitytags(sm["l1", 2]))
+        @test gmsh.model.occ.getMass(2, tag) ≈ expected rtol = 1e-6
+        @test gmsh.model.isInside(2, tag, [40.0, 0.0, 0.0]) == 0
+        @test gmsh.model.isInside(2, tag, [-40.0, 0.0, 0.0]) == 0
+        @test gmsh.model.isInside(2, tag, [0.0, 80.0, 0.0]) == 1
+        # Extruding it gives the volume of the face without its holes
+        out = SolidModels.extrude_z!(sm, "l1", 10μm)
+        SolidModels._synchronize!(sm)
+        volume = sum(gmsh.model.occ.getMass(d, t) for (d, t) in out if d == 3)
+        @test volume ≈ 10 * expected rtol = 1e-6
+        gmsh.finalize()
+
+        # The same face built by hand, as in the `add_conformal_loop!` docstring
+        sm = SolidModel("curved_holes_by_hand"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
+        k, ctx, points_cache =
+            kernel(sm), ConformalRenderContext(), SolidModels.PointsCache()
+        outer = add_conformal_loop!(ctx, region.exterior, k, 0.0μm; points_cache)
+        holes = [
+            add_conformal_loop!(ctx, h, k, 0.0μm; points_cache, reverse=true) for
+            h in region.holes
+        ]
+        tag = k.add_plane_surface([outer; holes...])
+        k.synchronize()
+        @test gmsh.model.occ.getMass(2, tag) ≈ expected rtol = 1e-6
+        gmsh.finalize()
+
+        # A region built with a clockwise exterior is normalized and renders the same face
+        cw_exterior = DeviceLayout.Curvilinear._reverse(region.exterior)
+        cs = CoordinateSystem("curved_holes_cw", nm)
+        place!(cs, CurvilinearRegion(cw_exterior, region.holes), :l1)
+        sm = SolidModel("curved_holes_cw"; overwrite=true)
+        gmsh.option.setNumber("General.Verbosity", 0)
+        render_conformal!(sm, cs)
+        tag = only(SolidModels.entitytags(sm["l1", 2]))
+        @test gmsh.model.occ.getMass(2, tag) ≈ expected rtol = 1e-6
         gmsh.finalize()
     end
 

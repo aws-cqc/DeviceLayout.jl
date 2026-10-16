@@ -569,6 +569,28 @@ end
     @test Polygons.orientation(to_polygons(cr_curved.holes[1])) == -1 # normalized
     @test isapprox(total_area(cr_curved), (100^2)μm^2 - π * (15μm)^2; rtol=1e-3)
 
+    # The exterior is normalized to counterclockwise likewise, so a region built with a
+    # clockwise exterior keeps its area (to_polygons used to return no polygon for it).
+    ext_cw = CurvilinearPolygon(reverse(points(ext)))
+    @test Polygons.orientation(to_polygons(ext_cw)) == -1 # clockwise as built
+    cr_cw = CurvilinearRegion(ext_cw, [hole_ccw])
+    @test Polygons.orientation(to_polygons(cr_cw.exterior)) == 1 # normalized
+    @test isapprox(total_area(cr_cw), (100^2 - 40^2)μm^2; rtol=1e-9)
+
+    # A curved clockwise exterior: a circle of radius 50μm traversed backwards
+    e1 = Point(50.0μm, 0.0μm)
+    e2 = Point(-50.0μm, 0.0μm)
+    circ_ext = CurvilinearPolygon(
+        [e1, e2],
+        [Paths.Turn(π, 50.0μm, p0=e1, α0=π / 2), Paths.Turn(π, 50.0μm, p0=e2, α0=-π / 2)],
+        [1, 2]
+    )
+    circ_ext_cw = Curvilinear._reverse(circ_ext)
+    @test Polygons.orientation(to_polygons(circ_ext_cw)) == -1 # clockwise as built
+    cr_circ = CurvilinearRegion(circ_ext_cw, [hole_ccw])
+    @test Polygons.orientation(to_polygons(cr_circ.exterior)) == 1 # normalized
+    @test isapprox(total_area(cr_circ), π * (50μm)^2 - (40μm)^2; rtol=1e-3)
+
     # Curves on normalized holes survive curve recovery (holes discretize as stored).
     rec = union2d_curved(cr_curved)
     @test sum(sum(length(h.curves) for h in r.holes; init=0) for r in rec) == 2

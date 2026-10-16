@@ -72,6 +72,17 @@ The format of this changelog is based on
   - `flatten` and `flatten!` place the contents of a structure referenced by an
     `ArrayReference` at every array element. Previously, references inside that structure
     were placed only at the first element.
+  - `render_conformal!` built faces with holes that OpenCASCADE treated as including the
+    holes: their area and extruded volume added the holes instead of subtracting them, and
+    points inside a hole counted as inside the face. `add_plane_surface` subtracts a hole
+    only if its loop winds like the exterior, but a `CurvilinearRegion` stores its holes
+    clockwise, opposite its counterclockwise exterior. The holes are now reversed, and
+    `add_conformal_loop!` takes `reverse=true` for building such hole loops by hand. Its
+    docstring example now does that, and passes a `SolidModels.PointsCache` instead of an
+    `RTree`, which threw a `MethodError`.
+  - `CurvilinearRegion` now normalizes its exterior to counterclockwise on construction, as
+    it does its holes to clockwise. A region built with a clockwise exterior and holes lost
+    its area: `to_polygons` returned no polygon for it.
   - When OpenCASCADE's fragment history reports an entity as deleted with no successor while
     the result holds a geometrically identical entity under a new tag, `SolidModel`
     fragmentation now matches the two by bounding box, so the entity keeps its physical groups
