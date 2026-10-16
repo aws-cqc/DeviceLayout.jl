@@ -29,9 +29,10 @@ The format of this changelog is based on
 
   - `SolidModels.connected_components` (and therefore `check_port_connectivity`) now always
     connects faces through curves embedded in another face's interior, such as contacts made
-    via bridges with 2D feet. This uses gmsh's embedded-entity topology. Callers that relied on the default
-    not merging air bridges now get fewer, larger components. This costs a few milliseconds
-    even on large models, where the former geometric search took about a minute on DemoQPU17.
+    via bridges with 2D feet. This uses gmsh's embedded-entity topology. Callers that relied
+    on the default not merging air bridges now get fewer, larger components. This costs a few
+    milliseconds even on large models, where the former geometric search took about a minute
+    on DemoQPU17.
   - Finding path intersections (`Intersect.intersect!`, `prepared_intersections`, and
     `SchematicDrivenLayout.crossovers!`) uses a sort-and-sweep over line segments instead of
     enumerating every pair of segments that overlap in x. Results are unchanged, but

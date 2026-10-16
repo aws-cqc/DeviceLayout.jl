@@ -1110,7 +1110,6 @@ For `dim == 2`, faces are also connected when a curve embedded in one face's int
 another face in the group. A typical case is two ground planes connected by an airbridge
 with 2D "feet": this function detects that they all form one connected component.
 
-
 Returns a `Vector{Vector{Tuple{Int32, Int32}}}` where each inner vector contains the entity dimtags
 of one connected component.
 
@@ -1255,7 +1254,7 @@ classify them algorithmically but the results are generally not electrically mea
   - `dim=2`: dimension of port and metal groups. `3` is appropriate for volumetric lumped
     ports in a 3D model; `2` would be used for surfaces.
 
-Airbridge style contacts (curves embedded in the interior of a face, like the bridge feet 
+Airbridge style contacts (curves embedded in the interior of a face, like the bridge feet
 landing on a ground plane) are detected automatically.
 
 # Algorithm
