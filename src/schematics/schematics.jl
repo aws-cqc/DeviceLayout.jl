@@ -723,9 +723,11 @@ function Logging.handle_message(
 end
 # The per-sink check `TeeLogger` applies: the sink's own `shouldlog` does not check its
 # minimum level (e.g. `ConsoleLogger` only checks `maxlog`), so a sink with a higher minimum
-# than the other would otherwise receive messages below it.
+# than the other would otherwise receive messages below it. `env_override_minlevel` is what
+# lets `JULIA_DEBUG` surface messages below a sink's minimum level.
 _sink_takes(sink, level, _module, group, id) =
-    min_enabled_level(sink) <= level && shouldlog(sink, level, _module, group, id)
+    (min_enabled_level(sink) <= level && shouldlog(sink, level, _module, group, id)) ||
+    Base.CoreLogging.env_override_minlevel(group, _module)
 # Otherwise just pass to internal TeeLogger
 Logging.shouldlog(logger::SchematicLogger, level, _module, group, id) =
     shouldlog(logger.logger, level, _module, group, id)
