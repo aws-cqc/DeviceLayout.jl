@@ -24,6 +24,17 @@ The format of this changelog is based on
     OpenCASCADE can reject when rendering to a `SolidModel`, into simple regions. Pieces are
     classified by winding, so keyholed islands and holes are kept. Run it after boolean
     operations and `split_t_junctions!`.
+  - `render!(::SolidModel, ...)` accepts `verbose=true` (also usable as a `SolidModelTarget`
+    rendering option), which logs each physical group created while rendering and each
+    postrendering operation, along with the resulting entity count, bounding box, and elapsed
+    time. Operations are logged before they run, so the operation responsible for a failure is
+    the last one logged. (#266)
+  - Single-shot SolidModel rendering and meshing benchmarks in `benchmark/solidmodel/` for the
+    single-transmon and DemoQPU17 workloads, with a comparison script and a manual
+    `Benchmark SolidModel` GitHub workflow. The examples expose their schematic construction
+    for reuse: `examples/SingleTransmon/schematic.jl` defines `single_transmon_schematic`
+    (included by `SingleTransmon.jl`), and `examples/DemoQPU17/solidmodel.jl` wraps its setup
+    in `qpu17_solidmodel_setup` instead of running it at include time.
 
 ### Changed
 
@@ -37,6 +48,9 @@ The format of this changelog is based on
     it is applied, so transforming an entity computes `cos`/`sin` once rather than once per
     point. Results are unchanged; `flatten` of the DemoQPU17 example's artwork takes about
     40 ms instead of 66 ms. Constructing a `ScaledIsometry` costs about 55 ns more.
+  - Messages logged to the console while planning, building, or rendering a `Schematic` no
+    longer carry a `stage` keyword, so the console no longer prints `└ stage = ...` beneath
+    each one. The stage still prefixes each line of the schematic's log file.
 
 ### Deprecated
 

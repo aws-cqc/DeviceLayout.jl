@@ -166,3 +166,17 @@ end
     @test length(metal_comp_tags[2]) == 2 # Transmon island + junction top lead
     @test length(metal_comp_tags[3]) == 4 # Ground plane + bottom lead + TL ends
 end
+
+@testitem "Single Transmon example schematic" setup = [CommonTestSetup, QuietGmshSetup] begin
+    # Unlike the rest of the example, `schematic.jl` depends only on DeviceLayout, so it can be
+    # tested here; the SolidModel benchmarks also include it
+    using .SchematicDrivenLayout
+    include("../examples/SingleTransmon/schematic.jl")
+    floorplan, target = single_transmon_schematic(; log_dir=nothing)
+    sm = SolidModel("single_transmon_schematic", overwrite=true)
+    render!(sm, floorplan, target)
+    @test length(SolidModels.dimtags(sm["substrate", 3])) == 1
+    @test length(SolidModels.dimtags(sm["port_1", 2])) == 1
+    @test length(SolidModels.dimtags(sm["port_2", 2])) == 1
+    @test length(SolidModels.dimtags(sm["lumped_element", 2])) == 1
+end

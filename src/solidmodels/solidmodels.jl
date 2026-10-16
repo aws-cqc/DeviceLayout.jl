@@ -1,6 +1,7 @@
 module SolidModels
 
 import Gmsh: gmsh, gmsh.model.occ
+import Printf: @sprintf
 export gmsh, populate_size_fields!
 
 # Explicit callback dictionary, to overcome closure limitation on apple silicon.
