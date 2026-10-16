@@ -896,7 +896,7 @@ function render_conformal!(
             points_cache=points_cache,
             kwargs...
         ),
-        (fragment!)=fragment_backstop ? _fragment_three_pass! : (_; kwargs...) -> nothing,
+        (fragment!)=fragment_backstop ? _fragment_three_pass! : (_sm; kwargs...) -> nothing, # _sm unused but _ breaks <1.12
         kwargs...
     )
 end
