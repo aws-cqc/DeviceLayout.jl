@@ -24,6 +24,16 @@ The format of this changelog is based on
     OpenCASCADE can reject when rendering to a `SolidModel`, into simple regions. Pieces are
     classified by winding, so keyholed islands and holes are kept. Run it after boolean
     operations and `split_t_junctions!`.
+  - `render_conformal!(sm, sch, target::SolidModelTarget)` renders a schematic like
+    `render!(sm, sch, target)`, but through the conformal render, which resolves shared
+    boundaries with an edge cache instead of a fragment pass. Its 2D groups are formed
+    before emission by the target's new `prerender_ops`: curve-preserving `union2d_curved!`
+    and `difference2d_curved!` operations, authored like `postrender_ops`. It renders 2D
+    geometry only; see `examples/DemoQPU17/solidmodel_conformal.jl`. `SolidModelTarget`
+    gains a `prerender_ops` keyword and a `prerenderer` field, added last, and the
+    `ExamplePDK` single-chip target defines `prerender_ops`.
+    `SolidModels.render_conformal_groups!` emits named groups of regions through the edge
+    cache.
 
 ### Changed
 

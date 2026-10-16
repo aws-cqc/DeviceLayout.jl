@@ -99,6 +99,32 @@ level attribute will default to level 1.
 
 The "substrate surface" z-height for a given `SemanticMeta` is calculated based on its level together with technology `chip_thicknesses` and `flipchip_gaps`. For non-levelwise layers, height and thickness are always measured along the global positive z axis, as explained above. For layers in `levelwise_layers`, positive height or extrusion thickness is always away from the substrate.
 
+## Conformal rendering
+
+[`render_conformal!`](@ref SolidModels.render_conformal!) is an alternative render strategy. Instead of reconciling coincident edges with the global fragment pass ([step 5](#5.-Fragment-and-cleanup)), it deduplicates shared edges through a per-render cache, so adjacent faces resolve a shared boundary to a single kernel curve. Curves stay exact kernel arcs. It has a geometry-level method, `render_conformal!(sm, cs::AbstractCoordinateSystem; ...)`, and a schematic-level method, the counterpart of `render!(sm, sch, target)`:
+
+```julia
+render_conformal!(sm, schematic, target)
+```
+
+The schematic-level method uses the [`SolidModelTarget`](@ref SchematicDrivenLayout.SolidModelTarget)'s layers, levels, indices, rendering options and physical-group names as `render!` does. Because each group is emitted once, through the edge cache, the 2D groups are formed before emission, by the target's **`prerender_ops`** rather than its `postrender_ops`:
+
+```julia
+prerender_ops = [
+    ("metal_negative", union2d_curved!, ("metal_negative",)),
+    ("metal", difference2d_curved!, ("writeable_area", "metal_negative")),
+    ("metal", union2d_curved!, ("metal", "metal_positive")),
+    ("metal", difference2d_curved!, ("metal", "port"))
+]
+```
+
+These operations, [`union2d_curved!`](@ref SchematicDrivenLayout.union2d_curved!) and [`difference2d_curved!`](@ref SchematicDrivenLayout.difference2d_curved!), are authored like the `union_geom!` and `difference_geom!` postrender operations, with the same dimension arguments, vectors of group names, and `remove_object` / `remove_tool` options, but act on 2D region groups, with Clipper booleans that recover curves. After them, shared boundaries are noded with [`split_t_junctions!`](@ref), self-touching contours are split with [`split_pinches`](@ref), and the groups are emitted with [`render_conformal_groups!`](@ref SolidModels.render_conformal_groups!).
+
+!!! note "Scope"
+    `render_conformal!(sm, sch, target)` renders 2D geometry: the target's `retained_physical_groups` of dimension 2, such as the metal, ports and lumped elements, each in the plane at its layer's height. It doesn't run the target's `postrender_ops` or 3D operations (extrusions, `bounding_layers` intersections, bridges), and it skips 1D elements such as wave ports. Mesh sizes are sampled and the mesh-size callback is installed as in `render!`.
+
+See the [conformal rendering API](@ref api-solidmodels) for the full set of functions and preconditions.
+
 ## Meshing
 
 Entities can carry mesh sizing information with them when rendered to a `SolidModel`. Many

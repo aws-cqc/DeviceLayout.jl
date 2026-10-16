@@ -299,6 +299,31 @@
         gmsh.finalize()
     end
 
+    @testset "render_conformal_groups! merges keys by name, into its own model" begin
+        square(x) = CurvilinearRegion(
+            CurvilinearPolygon(points(centered(Rectangle(10μm, 10μm)) + Point(x, 0μm)))
+        )
+        groups = Dict(
+            SemanticMeta(:a; index=1) => [square(0μm)],
+            SemanticMeta(:a; index=2) => [square(10μm)],
+            SemanticMeta(:b) => [square(30μm)]
+        )
+        sm = SolidModel("groups"; overwrite=true)
+        other = SolidModel("groups_other"; overwrite=true) # now gmsh's current model
+        gmsh.option.setNumber("General.Verbosity", 0)
+        SolidModels.render_conformal_groups!(sm, groups)
+        # Both `a` keys map to the layer name `a`; the two `a` squares share an edge
+        @test length(SolidModels.entitytags(sm["a", 2])) == 2
+        @test length(SolidModels.entitytags(sm["b", 2])) == 1
+        @test length(gmsh.model.getEntities(1)) == 4 + 3 + 4
+        # A second call adds to the existing group
+        SolidModels.render_conformal_groups!(sm, Dict(SemanticMeta(:b) => [square(50μm)]))
+        @test length(SolidModels.entitytags(sm["b", 2])) == 2
+        gmsh.model.set_current(SolidModels.name(other))
+        @test isempty(gmsh.model.getEntities(2))
+        gmsh.finalize()
+    end
+
     @testset "render_conformal! preserves shared vertex identity" begin
         # Two adjacent rectangles → the shared edge should resolve to a single
         # OCC edge tag. If dedup works, the total edge count is < 8 (would be
@@ -752,5 +777,408 @@
         @test length(gmsh.model.occ.getEntities(2)) == 3
         @test length(gmsh.model.occ.getEntities(1)) == 9
         gmsh.finalize()
+    end
+end
+
+@testitem "render_conformal!(sm, sch, target)" setup = [CommonTestSetup, QuietGmshSetup] begin
+    using .SchematicDrivenLayout
+    using DeviceLayout: Point, Rectangle, centered, coordinatetype, LineSegment
+    using DeviceLayout: CurvilinearRegion, to_polygons
+    using DeviceLayout.Polygons: Circle, signed_area
+    using DeviceLayout.SolidModels: gmsh, hasgroup, entitytags
+    const SDL = SchematicDrivenLayout
+
+    tech = ProcessTechnology((;), (; thickness=(; chip_area=525μm)))
+    function schematic_of(cs)
+        g = SchematicGraph("test")
+        add_node!(g, BasicComponent(cs))
+        sch = plan(g; log_dir=nothing)
+        check!(sch)
+        return sch
+    end
+    um2(a) = ustrip(μm^2, a)
+    area2d(regs) =
+        sum(regs; init=0.0) do r
+            return abs(um2(signed_area(to_polygons(r.exterior)))) -
+                   sum(h -> abs(um2(signed_area(to_polygons(h)))), r.holes; init=0.0)
+        end
+    occ_area(sm, name) = sum(t -> gmsh.model.occ.getMass(2, t), entitytags(sm[name, 2]))
+
+    # A writeable ground area with a circle cut from it (curved feature), and a
+    # fabrication-only `not_simulated` square that must be dropped from the simulation model.
+    # `prerender_ops` form `metal = writeable_area − metal_negative`.
+    function conformal_target_schematic()
+        cs = CoordinateSystem("test")
+        place!(cs, centered(Rectangle(200μm, 200μm)), :writeable_area)
+        place!(cs, Circle(Point(0.0μm, 0.0μm), 40μm), :metal_negative)
+        place!(
+            cs,
+            not_simulated(centered(Rectangle(20μm, 20μm)) + Point(70μm, 70μm)),
+            :metal_negative
+        )
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            prerender_ops=[(
+                "metal",
+                difference2d_curved!,
+                ("writeable_area", "metal_negative")
+            )],
+            retained_physical_groups=[("metal", 2)]
+        )
+        return schematic_of(cs), target
+    end
+
+    @testset "forms metal group with curve-preserving prerender_ops" begin
+        sch, target = conformal_target_schematic()
+        sm = SolidModel("conformal_target"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            @test_nowarn render_conformal!(sm, sch, target)
+            # One surface: the ground with one hole, which OpenCASCADE subtracts
+            @test hasgroup(sm, "metal", 2)
+            @test length(entitytags(sm["metal", 2])) == 1
+            @test occ_area(sm, "metal") ≈ 200^2 - π * 40^2 rtol = 1e-6
+            # 2D scope: no 3D volumes built here
+            @test isempty(gmsh.model.getEntities(3))
+            # The circular cut stays a native arc
+            @test any(
+                ((d, t),) -> gmsh.model.getType(d, t) == "Circle",
+                gmsh.model.getEntities(1)
+            )
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "renders into its own model when another is current" begin
+        sch, target = conformal_target_schematic()
+        sm = SolidModel("conformal_own"; overwrite=true)
+        other = SolidModel("conformal_other"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm, sch, target)
+            gmsh.model.set_current(SolidModels.name(sm))
+            @test length(gmsh.model.getEntities(2)) == 1
+            gmsh.model.set_current(SolidModels.name(other))
+            @test isempty(gmsh.model.getEntities(2))
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "drops fabrication-only (not_simulated) fill" begin
+        sch, target = conformal_target_schematic()
+        sm = SolidModel("conformal_nosim"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm, sch, target)
+            # Had the fill been kept, it would cut a second hole: the metal surface has
+            # just the outer loop and the circular hole
+            tags = entitytags(sm["metal", 2])
+            @test length(tags) == 1
+            @test sum(length(gmsh.model.occ.getCurveLoops(t)[1]) for t in tags) == 2
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "SolidModelTarget carries prerender_ops through the constructor" begin
+        target = SolidModelTarget(
+            tech;
+            prerender_ops=[("metal", union2d_curved!, ("metal_negative",))]
+        )
+        @test length(target.prerenderer) == 1
+        @test target.prerenderer[1][1] == "metal"
+        @test isempty(target.postrenderer)
+        # The positional form without a `prerenderer` still works
+        positional = SolidModelTarget(tech, [], [], [], [], [], [], [], (;), [])
+        @test isempty(positional.prerenderer)
+        # As with `postrender_ops`, a tuple works, and helpers can add any operation
+        target = SolidModelTarget(tech; prerender_ops=(("metal", union2d_curved!, ("a",)),))
+        push!(target.prerenderer, ("metal", difference2d_curved!, ("metal", ["b", "c"])))
+        @test length(target.prerenderer) == 2
+    end
+
+    @testset "prerender ops: union2d_curved! and difference2d_curved!" begin
+        square(x) = centered(Rectangle(20μm, 20μm)) + Point(x, 0μm)
+        groups() = Dict{String, Any}(
+            "a" => Any[square(0μm), square(10μm)], # overlapping entities
+            "b" => Any[square(30μm)],
+            "c" => Any[centered(Rectangle(4μm, 4μm))]
+        )
+        # A self-union merges a group's overlapping entities
+        @test area2d(union2d_curved!(groups(), "a")) ≈ 600
+        # Dimensions as in `postrender_ops` are accepted; only 2D is supported
+        @test area2d(union2d_curved!(groups(), "a", "b", 2, 2)) ≈ 1000
+        @test_throws ArgumentError union2d_curved!(groups(), "a", "b", 3, 3)
+        # As with `union_geom!`, a single dimension is a self-union that removes the object
+        g = groups()
+        @test area2d(union2d_curved!(g, "a", 2)) ≈ 600
+        @test !haskey(g, "a")
+        @test_throws ArgumentError union2d_curved!(groups(), "a", 3)
+        # A vector of group names stands for their union
+        @test area2d(difference2d_curved!(groups(), ["a", "b"], "c")) ≈ 1000 - 16
+        # A missing tool is logged and the object is used alone, merged into regions
+        @test_logs (:info, r"not a group") match_mode = :any begin
+            @test area2d(difference2d_curved!(groups(), "a", "missing")) ≈ 600
+            @test area2d(union2d_curved!(groups(), "missing", "b")) ≈ 400
+        end
+        @test_logs (:error, r"not a group") match_mode = :any difference2d_curved!(
+            groups(),
+            "missing",
+            "a"
+        )
+        # A missing name in a vector of names is logged too
+        @test_logs (:info, r"typo is not a group") match_mode = :any difference2d_curved!(
+            groups(),
+            "a",
+            ["b", "typo"]
+        )
+        # remove_object / remove_tool delete the inputs after they are read
+        g = groups()
+        @test area2d(
+            difference2d_curved!(g, "a", "c"; remove_object=true, remove_tool=true)
+        ) ≈ 600 - 16
+        @test !haskey(g, "a") && !haskey(g, "c") && haskey(g, "b")
+    end
+
+    @testset "ExamplePDK prerender_ops remove the ports from the metal" begin
+        # As its postrender ops do, the conformal metal excludes the ports
+        groups = Dict{String, Any}(
+            "writeable_area" => Any[centered(Rectangle(100μm, 100μm))],
+            "metal_negative" => Any[centered(Rectangle(20μm, 20μm))],
+            "metal_positive" => Any[centered(Rectangle(4μm, 4μm))],
+            "port" => Any[centered(Rectangle(10μm, 10μm)) + Point(30μm, 30μm)]
+        )
+        target = SchematicDrivenLayout.ExamplePDK.SINGLECHIP_SOLIDMODEL_TARGET
+        SDL._run_prerender_ops!(
+            groups,
+            target.prerenderer;
+            zs_by_group=Dict{String, Vector{Any}}(),
+            boolean_out=Set{String}()
+        )
+        @test area2d(groups["metal"]) ≈ 100^2 - 20^2 + 4^2 - 10^2
+        @test !haskey(groups, "writeable_area") && !haskey(groups, "metal_positive")
+    end
+
+    @testset "render_conformal! emits a retained group no prerender op formed" begin
+        # Such a group is unioned: overlapping elements merge into one surface
+        cs = CoordinateSystem("test")
+        place!(cs, Circle(Point(0.0μm, 0.0μm), 30μm), :metal_negative)
+        place!(cs, Circle(Point(20.0μm, 0.0μm), 30μm), :metal_negative)
+        sch = schematic_of(cs)
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            retained_physical_groups=[("metal_negative", 2)]
+        )
+        sm = SolidModel("conformal_raw"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm, sch, target)
+            @test length(entitytags(sm["metal_negative", 2])) == 1
+            expected = area2d(
+                union2d_curved(
+                    Any[
+                        Circle(Point(0.0μm, 0.0μm), 30μm),
+                        Circle(Point(20.0μm, 0.0μm), 30μm)
+                    ]
+                )
+            )
+            @test occ_area(sm, "metal_negative") ≈ expected rtol = 1e-3
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "render_conformal! emits every group if none is retained" begin
+        cs = CoordinateSystem("test")
+        place!(cs, centered(Rectangle(10μm, 10μm)), :a)
+        place!(cs, centered(Rectangle(10μm, 10μm)) + Point(20μm, 0μm), :b)
+        sch = schematic_of(cs)
+        sm = SolidModel("conformal_all"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm, sch, SolidModelTarget(tech; simulation=true))
+            @test hasgroup(sm, "a", 2) && hasgroup(sm, "b", 2)
+            # As in `render!`, a list without 2D groups keeps none of them
+            sm = SolidModel("conformal_none"; overwrite=true)
+            target = SolidModelTarget(tech; retained_physical_groups=[("substrate", 3)])
+            render_conformal!(sm, sch, target)
+            @test isempty(SolidModels.dimgroupdict(sm, 2))
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "render_conformal! throws for a group at several heights" begin
+        flipchip = SchematicDrivenLayout.ExamplePDK.EXAMPLE_FLIPCHIP_TECHNOLOGY
+        cs = CoordinateSystem("test")
+        place!(cs, centered(Rectangle(10μm, 10μm)), SemanticMeta(:a; level=1))
+        place!(cs, centered(Rectangle(10μm, 10μm)), SemanticMeta(:a; level=2))
+        sch = schematic_of(cs)
+        sm = SolidModel("conformal_levels"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            @test_throws ArgumentError render_conformal!(
+                sm,
+                sch,
+                SolidModelTarget(flipchip)
+            )
+            # A levelwise layer gives each level its own group and plane
+            render_conformal!(sm, sch, SolidModelTarget(flipchip; levelwise_layers=[:a]))
+            @test hasgroup(sm, "a_L1", 2) && hasgroup(sm, "a_L2", 2)
+            # A prerender operation can't combine groups at different heights
+            merged = SolidModelTarget(
+                flipchip;
+                levelwise_layers=[:a],
+                prerender_ops=[("a", union2d_curved!, ("a_L1", "a_L2"))]
+            )
+            sm = SolidModel("conformal_levels_merged"; overwrite=true)
+            @test_throws ArgumentError render_conformal!(sm, sch, merged)
+            # A group at several heights that is neither emitted nor read is fine
+            sm = SolidModel("conformal_levels_unused"; overwrite=true)
+            render_conformal!(
+                sm,
+                sch,
+                SolidModelTarget(flipchip; retained_physical_groups=[("b", 2)])
+            )
+            @test !hasgroup(sm, "a", 2)
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "render_conformal! passes context to render_conformal_groups!" begin
+        sch, target = conformal_target_schematic()
+        sm = SolidModel("conformal_context"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        ctx = SolidModels.ConformalRenderContext()
+        try
+            render_conformal!(sm, sch, target; context=ctx)
+            @test !isempty(ctx.point_coords)
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "_resolve_optional resolves OptionalStyle as render! does" begin
+        using DeviceLayout: StyledEntity, OptionalStyle, NoRender, Plain
+        using DeviceLayout.Polygons: Rounded
+        rect = centered(Rectangle(10μm, 10μm))
+        _ro = SDL._resolve_optional
+
+        # Plain entity passes through unchanged
+        @test _ro(rect) === rect
+        # A true branch with a non-Plain style keeps that style; NoRender drops it
+        opt_rounded = OptionalStyle(Rounded(1μm), NoRender(), :flag, true)(rect)
+        @test _ro(opt_rounded; flag=true).sty isa Rounded
+        @test _ro(opt_rounded; flag=false) === nothing
+        # Without the flag, the style's default applies, as in `to_polygons`
+        @test _ro(OptionalStyle(Plain(), NoRender(), :simulation, true)(rect)) === rect
+        @test _ro(not_simulated(rect)) === rect
+        @test _ro(not_simulated(rect); simulation=true) === nothing
+        # A styled entity recurses and re-wraps its inner entity
+        styled = StyledEntity(rect, Rounded(2μm))
+        @test _ro(styled).sty isa Rounded
+        @test _ro(OptionalStyle(Plain(), NoRender(), :keep, true)(styled); keep=false) ===
+              nothing
+        # An OptionalStyle whose branch is itself an OptionalStyle is resolved too
+        inner = OptionalStyle(NoRender(), Plain(), :b, true)
+        nested = OptionalStyle(inner, Plain(), :a, true)(rect)
+        @test _ro(nested; a=true, b=true) === nothing
+        @test _ro(nested; a=true, b=false) === rect
+    end
+
+    @testset "render_conformal! samples mesh sizes as render! does" begin
+        using DeviceLayout: MeshSized
+        cs = CoordinateSystem("test")
+        place!(cs, centered(Rectangle(200μm, 200μm)), :writeable_area)
+        place!(cs, MeshSized(5μm)(Circle(Point(0.0μm, 0.0μm), 40μm)), :metal_negative)
+        sch = schematic_of(cs)
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            prerender_ops=[(
+                "metal",
+                difference2d_curved!,
+                ("writeable_area", "metal_negative")
+            )],
+            postrender_ops=[(
+                "metal",
+                SolidModels.difference_geom!,
+                ("writeable_area", "metal_negative")
+            )],
+            retained_physical_groups=[("metal", 2)]
+        )
+        try
+            sm = SolidModel("stock_sized"; overwrite=true)
+            SolidModels.set_gmsh_option("General.Verbosity", 0)
+            render!(sm, sch, target)
+            stock = deepcopy(SolidModels.mesh_control_points())
+            render_conformal!(SolidModel("conformal_sized"; overwrite=true), sch, target)
+            @test !isempty(stock)
+            @test SolidModels.mesh_control_points() == stock
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "render_conformal! strict modes, indexed layers and 1D elements" begin
+        # A port on an indexed layer exercises index_layer!, and a 1D element is skipped
+        function port_schematic()
+            cs = CoordinateSystem("test")
+            place!(cs, centered(Rectangle(200μm, 200μm)), :writeable_area)
+            place!(cs, centered(Rectangle(4μm, 4μm)) + Point(60μm, 60μm), :port)
+            sch = schematic_of(cs)
+            # A wave port, added as `ExamplePDK` adds them
+            T = coordinatetype(sch.coordinate_system)
+            line = LineSegment(Point{T}(-90μm, 0μm), Point{T}(-90μm, 20μm))
+            render!(sch.coordinate_system, only_simulated(line), SemanticMeta(:wave_port))
+            return sch
+        end
+        prerender_ops = [("metal", difference2d_curved!, ("writeable_area", "port"))]
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            indexed_layers=[:port],
+            prerender_ops,
+            retained_physical_groups=[("metal", 2), ("port_1", 2), ("wave_port", 2)]
+        )
+        try
+            sm = SolidModel("conformal_strict"; overwrite=true)
+            SolidModels.set_gmsh_option("General.Verbosity", 0)
+            @test_logs (:info, r"skipping the 1D elements of group wave_port") match_mode =
+                :any render_conformal!(sm, port_schematic(), target; strict=:warn)
+            @test hasgroup(sm, "metal", 2) && hasgroup(sm, "port_1", 2)
+            @test !hasgroup(sm, "wave_port", 2)
+
+            # A target with postrender_ops but no prerender_ops warns, which strict=:warn
+            # turns into an error and strict=:no lets through
+            stock_only = SolidModelTarget(
+                tech;
+                postrender_ops=[(
+                    "metal",
+                    SolidModels.difference_geom!,
+                    ("writeable_area", "port")
+                )]
+            )
+            sm = SolidModel("conformal_strict_warn"; overwrite=true)
+            @test_throws ErrorException render_conformal!(
+                sm,
+                port_schematic(),
+                stock_only;
+                strict=:warn
+            )
+            sm = SolidModel("conformal_strict_no"; overwrite=true)
+            render_conformal!(sm, port_schematic(), stock_only; strict=:no)
+            # An unrecognized `strict` value warns and proceeds as though :no
+            sm = SolidModel("conformal_strict_bad"; overwrite=true)
+            render_conformal!(sm, port_schematic(), target; strict=:bogus)
+            @test hasgroup(sm, "metal", 2)
+        finally
+            gmsh.finalize()
+        end
     end
 end
