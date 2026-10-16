@@ -59,6 +59,9 @@ The format of this changelog is based on
     it is applied, so transforming an entity computes `cos`/`sin` once rather than once per
     point. Results are unchanged; `flatten` of the DemoQPU17 example's artwork takes about
     40 ms instead of 66 ms. Constructing a `ScaledIsometry` costs about 55 ns more.
+  - Messages logged to the console while planning, building, or rendering a `Schematic` no
+    longer carry a `stage` keyword, so the console no longer prints `└ stage = ...` beneath
+    each one. The stage still prefixes each line of the schematic's log file.
 
 ### Deprecated
 

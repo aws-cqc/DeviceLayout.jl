@@ -4,6 +4,11 @@ name: Benchmark SolidModel
 # ref in the same job so both run on the same runner, then uploads the JSON results and the
 # markdown comparison as artifacts. See benchmark/solidmodel/README.md.
 on:
+  # TEMPORARY, remove before merging: `workflow_dispatch` can't be triggered for a workflow
+  # that doesn't exist on the default branch yet, so run on this PR instead. A PR run uses
+  # the default inputs, except that it compares the PR against itself (a determinism check),
+  # since main can't run the harness until this lands.
+  pull_request:
   workflow_dispatch:
     inputs:
       base_ref:
@@ -31,8 +36,8 @@ jobs:
     permissions:
       contents: read
     env:
-      WORKLOADS: ${{ inputs.workload == 'both' && 'single_transmon qpu17' || inputs.workload }}
-      OPTIONS: ${{ inputs.options }}
+      WORKLOADS: ${{ inputs.workload == 'both' && 'single_transmon qpu17' || inputs.workload || 'single_transmon' }}
+      OPTIONS: ${{ inputs.options || '--order=1 --scales=1.0' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -50,19 +55,19 @@ jobs:
             julia --project=benchmark benchmark/solidmodel/run_$w.jl $OPTIONS --out=results/$w-head.json 2>&1 | { grep -v '^Info    :' || true; }
           done
       - name: Run base
-        if: ${{ inputs.base_ref != '' }}
+        if: ${{ github.event_name == 'pull_request' || inputs.base_ref != '' }}
         env:
-          BASE_REF: ${{ inputs.base_ref }}
+          BASE_REF: ${{ github.event_name == 'pull_request' && github.sha || inputs.base_ref }}
         run: |
           # The harness (benchmark/solidmodel) stays at head; the package under test and the
           # example workloads it includes move to the base ref.
-          git worktree add ../base "$BASE_REF"
+          git worktree add --detach ../base "$BASE_REF"
           julia --project=benchmark -e 'using Pkg; Pkg.develop(PackageSpec(path="../base")); Pkg.instantiate()'
           for w in $WORKLOADS; do
             julia --project=benchmark benchmark/solidmodel/run_$w.jl $OPTIONS --out=results/$w-base.json 2>&1 | { grep -v '^Info    :' || true; }
           done
       - name: Compare
-        if: ${{ inputs.base_ref != '' }}
+        if: ${{ github.event_name == 'pull_request' || inputs.base_ref != '' }}
         run: |
           status=0
           for w in $WORKLOADS; do

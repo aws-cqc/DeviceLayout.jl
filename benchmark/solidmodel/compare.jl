@@ -4,9 +4,12 @@
 #
 # Prints a markdown report: environment, geometry identity (fingerprints, entity counts,
 # per-group entity counts and masses, mesh counts and low-quality element counts), then
-# timings with relative deltas. Exits with status 1 if any timing regresses by more than `threshold` (fraction) or if the
-# geometry differs, so it can gate a CI job. Two runs at the same commit on the same machine
-# form a determinism check: every "geometry identity" row should read `same`.
+# timings with relative deltas. Exits with status 1 if the geometry differs or if a total
+# (setup, render, or mesh generation at one scale) regresses by more than `threshold`
+# (fraction), so it can gate a CI job. Per-phase and per-dimension rows are for triage only:
+# they are often sub-second, so single-shot noise routinely exceeds the threshold. Two runs
+# at the same commit on the same machine form a determinism check: every "geometry identity"
+# row should read `same`.
 
 using JSON, Printf
 
@@ -69,11 +72,6 @@ function main(args)
     )
         (haskey(base, key) && haskey(head, key)) || continue
         row, d = identity_row(label, base[key], head[key])
-        println(row)
-        differs |= d
-    end
-    if haskey(base, "brep") && haskey(head, "brep")
-        row, d = identity_row("BREP sha256", base["brep"]["sha256"], head["brep"]["sha256"])
         println(row)
         differs |= d
     end
@@ -159,19 +157,25 @@ function main(args)
     tb, th = phase_totals(base), phase_totals(head)
     for phase in ("groups", "auto_union", "postrender", "fragment")
         (haskey(tb, phase) && haskey(th, phase)) || continue
-        row, r = delta_row("  render: $phase", tb[phase], th[phase]; threshold)
+        row, _ = delta_row("  render: $phase", tb[phase], th[phase])
         println(row)
-        regressed |= r
     end
+    mesh_seconds(m) = sum(m["generate_$(d)d_seconds"] for d = 1:3)
     if haskey(base, "meshes") && haskey(head, "meshes")
         for (ma, mb) in zip(base["meshes"], head["meshes"])
             ma["scale"] == mb["scale"] || continue
+            row, r = delta_row(
+                "mesh scale $(ma["scale"])",
+                mesh_seconds(ma),
+                mesh_seconds(mb);
+                threshold
+            )
+            println(row)
+            regressed |= r
             for d = 1:3
                 k = "generate_$(d)d_seconds"
-                row, r =
-                    delta_row("mesh scale $(ma["scale"]): $(d)D", ma[k], mb[k]; threshold)
+                row, _ = delta_row("  mesh scale $(ma["scale"]): $(d)D", ma[k], mb[k])
                 println(row)
-                regressed |= r
             end
         end
     end

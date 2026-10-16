@@ -2396,6 +2396,8 @@ end
         @test (3, v[4]) in gmsh.model.getEntities(3)
         @test tagset("vacuum") == Set(Int.(v[3:4]))
     end
+end
+
 @testitem "SolidModel verbose rendering (#266)" setup = [CommonTestSetup] begin
     using Logging
     cs = CoordinateSystem("verbose", nm)
@@ -2783,8 +2785,16 @@ end
     with_logger(floorplan.logger) do
         @debug "verbose_sch debug message"
     end
+    # ...unless `JULIA_DEBUG` enables them
+    withenv("JULIA_DEBUG" => "all") do
+        with_logger(floorplan.logger) do
+            @debug "verbose_sch JULIA_DEBUG message"
+        end
+    end
     SchematicDrivenLayout.close_logfile(floorplan)
-    @test !any(contains.(string.(getproperty.(console.logs, :message)), "debug message"))
+    console_msgs = string.(getproperty.(console.logs, :message))
+    @test !any(contains.(console_msgs, "verbose_sch debug message"))
+    @test any(contains.(console_msgs, "JULIA_DEBUG message"))
     @test contains(
         read(joinpath(logdir, "verbose_sch.log"), String),
     )
