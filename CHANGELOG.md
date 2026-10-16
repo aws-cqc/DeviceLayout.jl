@@ -27,6 +27,11 @@ The format of this changelog is based on
 
 ### Changed
 
+  - `SolidModels.connected_components` (and therefore `check_port_connectivity`) now always
+    connects faces through curves embedded in another face's interior, such as contacts made
+    via bridges with 2D feet. This uses gmsh's embedded-entity topology. Callers that relied on the default
+    not merging air bridges now get fewer, larger components. This costs a few milliseconds
+    even on large models, where the former geometric search took about a minute on DemoQPU17.
   - Finding path intersections (`Intersect.intersect!`, `prepared_intersections`, and
     `SchematicDrivenLayout.crossovers!`) uses a sort-and-sweep over line segments instead of
     enumerating every pair of segments that overlap in x. Results are unchanged, but
@@ -40,6 +45,9 @@ The format of this changelog is based on
 
 ### Deprecated
 
+  - The `detect_non_boundary_contacts` and `non_boundary_contact_tol` keywords of
+    `SolidModels.connected_components` and `SolidModels.check_port_connectivity` are
+    deprecated and have no effect.
   - DXF export (`save("file.dxf", c, python)`); save to GDS and convert with an external tool
     such as KLayout.
   - `Paths.GeneralStrands`, including `Paths.Strands` with a callable `offset`, `width`, or

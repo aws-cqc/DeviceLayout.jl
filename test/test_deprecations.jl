@@ -35,6 +35,46 @@
         @test_nowarn Rounded(1μm, p0=[Point(1μm, 1μm)], selection_tolerance=1nm)
     end
 
+    @testset "connected_components non-boundary contact keywords" begin
+        sm = SolidModel("deprecations_cc"; overwrite=true)
+        SolidModels.gmsh.model.occ.addRectangle(0, 0, 0, 1, 1)
+        SolidModels.gmsh.model.occ.addRectangle(5, 0, 0, 1, 1)
+        SolidModels.gmsh.model.occ.synchronize()
+        tags = Int32[1, 2]
+        expected = SolidModels.connected_components(2, tags)
+        @test (@test_deprecated SolidModels.connected_components(
+            2,
+            tags;
+            detect_non_boundary_contacts=true
+        )) == expected
+        @test (@test_deprecated SolidModels.connected_components(
+            2,
+            tags;
+            non_boundary_contact_tol=1e-3
+        )) == expected
+    end
+
+    @testset "check_port_connectivity non-boundary contact keywords" begin
+        sm = SolidModel("deprecations_cpc"; overwrite=true)
+        SolidModels.gmsh.model.occ.addRectangle(0, 0, 0, 1, 1)
+        SolidModels.gmsh.model.occ.addRectangle(5, 0, 0, 1, 1)
+        SolidModels.gmsh.model.occ.synchronize()
+        sm["metal"] = [(Int32(2), Int32(1)), (Int32(2), Int32(2))]
+        expected = SolidModels.check_port_connectivity(sm, ["port"], ["metal"])
+        @test (@test_deprecated SolidModels.check_port_connectivity(
+            sm,
+            ["port"],
+            ["metal"];
+            detect_non_boundary_contacts=true
+        )) == expected
+        @test (@test_deprecated SolidModels.check_port_connectivity(
+            sm,
+            ["port"],
+            ["metal"];
+            non_boundary_contact_tol=1e-3
+        )) == expected
+    end
+
     @testset "Ellipse rounded keyword" begin
         e = Ellipse(Point(0μm, 0μm), (2μm, 1μm), 45°)
         sm = SolidModel("deprecations"; overwrite=true)
