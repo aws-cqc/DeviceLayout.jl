@@ -1504,6 +1504,21 @@ end
         junction_gap = 12μm
     end
 
+    # A component-valued parameter named like the subcomponent's namespace
+    @compdef struct PSFlowComponentParamComposite <: CompositeComponent
+        name = "ft"
+        island = ExampleRectangleIsland(name="island", cap_width=30μm)
+    end
+    function SchematicDrivenLayout._build_subcomponents(c::PSFlowComponentParamComposite)
+        ps = parameter_set(c._graph)
+        return (set_parameters(c.island, ps, "components.ft.island"),)
+    end
+    SchematicDrivenLayout._graph!(
+        g::SchematicGraph,
+        ::PSFlowComponentParamComposite,
+        subcomps::NamedTuple
+    ) = add_node!(g, subcomps.island)
+
     # A composite that stores no private `_graph`, like `BasicCompositeComponent`
     struct PSFlowGraphlessComposite <: CompositeComponent
         name::String
@@ -1660,6 +1675,27 @@ end
             @test tr3.junction_gap == 5μm
             @test parameters(components(tr3)[1]).cap_width == 99μm
         end
+    end
+
+    @testset "Component-valued parameter namespace is left to the subcomponent" begin
+        T = PSFlowComponentParamComposite
+        ps = ParameterSet()
+        ps.components.ft.island.cap_length = 600μm
+        for c in (
+            create_component(T, ps, "components.ft"),
+            set_parameters(T(), ps, "components.ft")
+        )
+            island = only(components(c))
+            @test parameters(island).cap_length == 600μm
+            @test parameters(island).cap_width == 30μm
+        end
+
+        g = SchematicGraph("g", ps)
+        add_node!(g, create_component(T, ps, "components.ft"))
+        extracted = extract_parameter_set(g)
+        island = only(components(create_component(T, extracted, "components.ft")))
+        @test parameters(island).cap_length == 600μm
+        @test parameters(island).cap_width == 30μm
     end
 
     @testset "set_parameters on a composite without a `_graph` field" begin

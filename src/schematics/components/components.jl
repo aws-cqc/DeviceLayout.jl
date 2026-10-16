@@ -200,6 +200,8 @@ function _namedtuple_namespaces(
         s = Symbol(k)
         path = prefix * "." * k
         if haskey(base, s)
+            # A component-valued parameter's namespace belongs to that subcomponent
+            base[s] isa AbstractComponent && continue
             push!(kw, s => _namespace_from_value!(paths, v, path, s, base[s]))
         elseif s in parameter_names(T)
             push!(kw, s => _namespace_from_fieldtype!(paths, v, path, s, fieldtype(T, s)))
