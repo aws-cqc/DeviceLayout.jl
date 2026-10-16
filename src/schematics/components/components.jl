@@ -215,8 +215,11 @@ end
 # value's type.
 _namespace_from_value!(paths, d, path, s, value::NamedTuple) =
     _namespace_to_namedtuple!(paths, d, path, value)
-_namespace_from_value!(paths, d, path, s, value::AbstractDict) =
-    _namespace_to_dict!(paths, d, path, keytype(value))
+function _namespace_from_value!(paths, d, path, s, value::AbstractDict)
+    K = keytype(value)
+    # Namespace keys are strings, so an unconstrained key type reads them as `String`
+    return _namespace_to_dict!(paths, d, path, K === Any ? String : K)
+end
 function _namespace_from_value!(paths, d, path, s, value)
     throw(
         ArgumentError(

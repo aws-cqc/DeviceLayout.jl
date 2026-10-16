@@ -819,6 +819,13 @@ end
         ::ExtractionNestedNamedTupleComponent
     ) = cs
 
+    @compdef struct ExtractionAnyDictComponent <: Component
+        name = "ad"
+        meta = Dict()
+    end
+    SchematicDrivenLayout._geometry!(cs::CoordinateSystem, ::ExtractionAnyDictComponent) =
+        cs
+
     @compdef struct ExtractionRequiredComponent <: Component
         name = "req"
         style::NamedTuple
@@ -1137,6 +1144,18 @@ end
         template = ExtractionArrayComponent(; settings=Dict{Symbol, Any}(:gain => 2))
         @test set_parameters(template, ps, "components.route").settings ==
               Dict{Symbol, Any}(:other => 1)
+    end
+
+    @testset "Dict parameter with Any keys round-trips with String keys" begin
+        T = ExtractionAnyDictComponent
+        g = SchematicGraph("g")
+        add_node!(g, T())
+        ps = extract_parameter_set(g)
+        @test isempty(create_component(T, ps, "components.ad").meta)
+        @test isempty(set_parameters(T(), ps, "components.ad").meta)
+        ps.components.ad.meta.k = 1
+        @test create_component(T, ps, "components.ad").meta == Dict("k" => 1)
+        @test set_parameters(T(), ps, "components.ad").meta == Dict("k" => 1)
     end
 
     @testset "Dict nested in a NamedTuple parameter round-trips" begin
