@@ -4,11 +4,6 @@ name: Benchmark SolidModel
 # ref in the same job so both run on the same runner, then uploads the JSON results and the
 # markdown comparison as artifacts. See benchmark/solidmodel/README.md.
 on:
-  # TEMPORARY, remove before merging: `workflow_dispatch` can't be triggered for a workflow
-  # that doesn't exist on the default branch yet, so run on this PR instead. A PR run uses
-  # the default inputs, except that it compares the PR against itself (a determinism check),
-  # since main can't run the harness until this lands.
-  pull_request:
   workflow_dispatch:
     inputs:
       base_ref:
