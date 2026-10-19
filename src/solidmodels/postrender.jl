@@ -1097,25 +1097,18 @@ function apply_precedence(precedence)
 end
 
 """
-    connected_components(dim::Int, tags::Vector{Int32};
-        detect_non_boundary_contacts=false, 
-        non_boundary_contact_tol=0.0)
-    connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2; kwargs...)
-    connected_components(sm::SolidModel, groups, dim=2; kwargs...)
+    connected_components(dim::Int, tags::Vector{Int32})
+    connected_components(sm::SolidModel, group::Union{String, Symbol}, dim=2)
+    connected_components(sm::SolidModel, groups, dim=2)
 
 Find connected components among SolidModel entities at dimension `dim` with the given `tags` or physical group names.
 
 Two entities are connected if they share any boundary entity (dimension `dim - 1`).
 Uses union-find with path compression on the adjacency graph from `gmsh.model.getAdjacencies`.
 
-For `dim == 2`, set `detect_non_boundary_contacts=true` to unite entities that share a "stray"
-1D entity that lies in the interior of a 2D entity without being one of its topological boundary curves. This is
-necessary even after embedding with `fragment` because OpenCascade's `getAdjacencies`
-does not see the connection (a typical case is the foot edge of a "staple" air-bridge leg
-landing on a ground plane). Checking stray 1D entities can be relatively slow if they exist, so
-it may be preferable to add dummy 2D entities that attach to them. Tolerance (in microns)
-for determining whether a 1D entity lies in a 2D entity is controlled
-by the `non_boundary_contact_tol` keyword.
+For `dim == 2`, faces are also connected when a curve embedded in one face's interior bounds
+another face in the group. A typical case is two ground planes connected by an airbridge
+with 2D "feet": this function detects that they all form one connected component.
 
 Returns a `Vector{Vector{Tuple{Int32, Int32}}}` where each inner vector contains the entity dimtags
 of one connected component.
@@ -1125,6 +1118,9 @@ of one connected component.
   - Requires Gmsh model to be synchronized before calling
   - Requires groups to consist of non-overlapping Boolean fragments with shared edges
     (as guaranteed by `render!`)
+  - Contacts through embedded curves require the faces and curves to have been fragmented
+    together (as `render!` does); otherwise gmsh does not record the embedding and the contact
+    is missed
   - Works for any dimension ≥ 1 (uses dim - 1 boundary adjacencies)
   - For dim=3 (volumes): shares boundary surfaces (dim=2)
   - For dim=2 (surfaces): shares boundary curves (dim=1)
@@ -1143,6 +1139,14 @@ function connected_components(
     detect_non_boundary_contacts=false,
     non_boundary_contact_tol=0.0
 )
+    if detect_non_boundary_contacts != false || !iszero(non_boundary_contact_tol)
+        Base.depwarn(
+            "The `detect_non_boundary_contacts` and `non_boundary_contact_tol` keywords are " *
+            "deprecated and have no effect: non-boundary contacts through embedded curves " *
+            "are now always detected. Remove these keywords.",
+            :connected_components
+        )
+    end
     n = length(tags)
     isempty(tags) && return Vector{Tuple{Int32, Int32}}[]
     n == 1 && return [[(Int32(dim), only(tags))]]
@@ -1182,39 +1186,15 @@ function connected_components(
         end
     end
 
-    # Geometric augmentation: connect entities through stray (dim-1) entities that lie
-    # on the interior of another entity's geometry without being its topological boundary.
-    # Only the dim=2 / dim-1=1 case (curve in face) is handled — this catches the
-    # staple-bridge foot landing on an interior of a metal plane. For dim=3, "face inside
-    # volume interior" is not a typical Palace configuration so we skip it.
-    if dim == 2 && detect_non_boundary_contacts
-        bbox_tree = RTree{Float64, 3}(Tuple{Int, Int32})
-        function convertel(enumtag)
-            bbox = gmsh.model.get_bounding_box(dim, enumtag[2])
-            return SpatialIndexing.SpatialElem(
-                SpatialIndexing.Rect((bbox[1:3]...,), (bbox[4:6]...,)),
-                nothing,
-                enumtag
-            )
-        end
-        SpatialIndexing.load!(bbox_tree, enumerate(tags); convertel=convertel)
-
-        for (btag, ps) in boundary_to_parents
-            length(ps) == 1 || continue # Only single-parent edges are problematic
-            owner_idx = ps[1]
-            ebbox = gmsh.model.getBoundingBox(dim - 1, btag)
-            candidates = SpatialIndexing.intersects_with(
-                bbox_tree,
-                SpatialIndexing.Rect((ebbox[1:3]...,), (ebbox[4:6]...,))
-            )
-            for elem in candidates
-                j, ftag = elem.val
-                j == owner_idx && continue
-                find(j) == find(owner_idx) && continue
-                _bbox_contains([elem.mbr.low..., elem.mbr.high...], ebbox, pad=0.0) ||
-                    continue
-                _curve_lies_on_face(btag, ftag; tol=non_boundary_contact_tol) || continue
-                unite(owner_idx, j)
+    # A curve embedded in a face's interior (e.g. an open bridge-leg foot) bounds other faces
+    # without being a boundary of the face it lies in, so boundary sharing alone misses it.
+    if dim == 2
+        for (i, tag) in enumerate(tags)
+            for (embedded_dim, embedded_tag) in gmsh.model.mesh.getEmbedded(dim, tag)
+                embedded_dim == dim - 1 || continue
+                for j in get(boundary_to_parents, embedded_tag, Int[])
+                    unite(i, j)
+                end
             end
         end
     end
@@ -1233,46 +1213,9 @@ function connected_components(
     return collect(values(components))
 end
 
-# Axis-aligned bbox containment test (a contains b). `bbox` is gmsh's (xmin, ymin, zmin, xmax, ymax, zmax).
-function _bbox_contains(a, b; pad::Real=0.0)
-    return (a[1] - pad <= b[1]) &&
-           (b[4] - pad <= a[4]) &&
-           (a[2] - pad <= b[2]) &&
-           (b[5] - pad <= a[5]) &&
-           (a[3] - pad <= b[3]) &&
-           (b[6] - pad <= a[6])
-end
-
-# Sample a 1D entity (curve) at `n_samples` parametric points and test whether the
-# sample lies on the 2D entity (face) within `tol`. Two filters: (1) `getClosestPoint`
-# distance ≤ tol confirms the sample is on the face's underlying surface (an infinite
-# plane for a planar face — does NOT respect trim curves / holes); (2) batched
-# `isInside` in parametric uv-space confirms the sample is on the *trimmed* portion
-# of the face. The parametric form of `isInside` skips an internal world→parametric
-# reprojection, which is the slow part on large CPW-style faces.
-# Default samples only the 2 endpoints (fragmented geometry is expected for checking
-# connectivity, so only endpoints are needed).
-function _curve_lies_on_face(curve_tag::Integer, face_tag::Integer; tol, n_samples::Int=2)
-    tmin, tmax = gmsh.model.getParametrizationBounds(1, curve_tag)
-    isempty(tmin) && return false
-    params = collect(range(Float64(tmin[1]), Float64(tmax[1]); length=n_samples))
-    xyz = gmsh.model.getValue(1, curve_tag, params) # flat [x1,y1,z1,x2,y2,z2,...]
-    tol2 = Float64(tol)^2
-    for k = 1:n_samples
-        p = @view xyz[(3k - 2):(3k)]
-        closest, uv = gmsh.model.getClosestPoint(2, face_tag, p)
-        d2 = (closest[1] - p[1])^2 + (closest[2] - p[2])^2 + (closest[3] - p[3])^2
-        d2 > tol2 && return false
-        gmsh.model.isInside(2, face_tag, uv, true) > 0 || return false
-    end
-    return true
-end
-
 """
-    check_port_connectivity(sm::SolidModel, port_names, metal_groups;
-        dim=2,
-        detect_non_boundary_contacts=false,
-        non_boundary_contact_tol=0.0) -> Dict{String, Symbol}
+    check_port_connectivity(sm::SolidModel, port_names, metal_groups; dim=2) ->
+        Dict{String, Symbol}
 
 Classify each lumped port in `port_names` by whether its two terminals are connected through entities in `metal_groups`.
 
@@ -1310,11 +1253,9 @@ classify them algorithmically but the results are generally not electrically mea
 
   - `dim=2`: dimension of port and metal groups. `3` is appropriate for volumetric lumped
     ports in a 3D model; `2` would be used for surfaces.
-  - `detect_non_boundary_contacts=false`: If `true` and `dim == 2`, then `connected_components`
-    finds non-conformal contacts (1D edges in the interior of 2D surfaces, like the foot edge
-    of a "staple" air-bridge leg landing on a ground plane) and treats them as connections
-  - `non_boundary_contact_tol=0.0`: Tolerance in microns for determining whether a 1D edge
-    lies in a 2D entity
+
+Airbridge style contacts (curves embedded in the interior of a face, like the bridge feet
+landing on a ground plane) are detected automatically.
 
 # Algorithm
 
@@ -1338,18 +1279,20 @@ function check_port_connectivity(
     detect_non_boundary_contacts=false,
     non_boundary_contact_tol=0.0
 )
+    if detect_non_boundary_contacts != false || !iszero(non_boundary_contact_tol)
+        Base.depwarn(
+            "The `detect_non_boundary_contacts` and `non_boundary_contact_tol` keywords are " *
+            "deprecated and have no effect: non-boundary contacts through embedded curves " *
+            "are now always detected. Remove these keywords.",
+            :check_port_connectivity
+        )
+    end
     SolidModels._synchronize!(sm)
 
     # Build connected-components tag → component-index map.
     tag_to_comp = Dict{Int32, Int}()
     if !isempty(metal_groups)
-        comps = connected_components(
-            sm,
-            metal_groups,
-            dim;
-            detect_non_boundary_contacts,
-            non_boundary_contact_tol
-        )
+        comps = connected_components(sm, metal_groups, dim)
         for (ci, comp_dimtags) in enumerate(comps)
             for (_, tag) in comp_dimtags
                 tag_to_comp[tag] = ci
