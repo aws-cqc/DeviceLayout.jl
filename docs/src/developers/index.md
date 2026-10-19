@@ -35,7 +35,7 @@ This project has adopted the [Amazon Open Source Code of Conduct](https://aws.gi
    [breaking](@ref dev-breaking).
 6. Open a pull request, checking it against
    [What a pull request includes](@ref dev-pr-checklist). CI runs formatting, docs, and tests
-   on every supported Julia version; a docs preview link appears once the docs job finishes.
+   on every supported Julia version; a docs preview is deployed once the docs job finishes.
 
 Concrete plans are tracked as
 [GitHub issues](https://github.com/aws-cqc/DeviceLayout.jl/issues); `help wanted` marks
