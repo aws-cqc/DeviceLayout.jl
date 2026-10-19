@@ -1,4 +1,4 @@
-# Data-Driven Design with ParameterSet
+# Parameterizing Designs with ParameterSet
 
 In [Building a Component](building_a_component.md) and [Composite Components](composite_components.md), component parameters were written directly into Julia code. For larger designs — or designs that need to vary between fabrication runs, simulation sweeps, or process nodes — it's useful to move parameters out of the source and into external configuration. `ParameterSet` is a mutable parameter source that holds a nested dictionary (typically loaded from YAML) and feeds values into your components by address.
 
@@ -192,7 +192,7 @@ You can instantiate it from the `ParameterSet` using `create_component`:
 cap = create_component(MyCapacitor, ps, "components.capacitor")
 ```
 
-This resolves `"components.capacitor"` in the parameter set, extracts leaf parameters, and passes them as keyword arguments to the `MyCapacitor` constructor. Parameters not present in the `ParameterSet` keep their defaults.
+This resolves `"components.capacitor"` in the parameter set, extracts leaf parameters, and passes them as keyword arguments to the `MyCapacitor` constructor. Parameters not present in the `ParameterSet` keep their defaults. A nested namespace whose key names a `NamedTuple`-valued parameter (e.g. `ps.components.capacitor.style.trace` for a parameter `style = (; trace=10μm, gap=6μm)`) is read as that `NamedTuple` and merged recursively into its default, so it only needs to list the fields that change.
 
 Consumed parameters are tracked in `ps.accessed`, which is useful for auditing which parameters were actually used:
 
@@ -271,6 +271,14 @@ graph or its attached source.
 Extraction retains scalar parameter leaves and ordinary one-dimensional Julia
 `Array`s. `NamedTuple`s and dictionaries become namespaces. Unsupported custom
 values, including `Point`s and component-valued parameters, are omitted.
+
+A namespace written for a `NamedTuple` parameter is read back by
+`create_component` and `set_parameters`, so the extracted set can be used to
+rebuild the components:
+
+```julia
+cap1 = create_component(MyCapacitor, resolved, "components.cap1")
+```
 
 ## Composite Components with ParameterSet
 
