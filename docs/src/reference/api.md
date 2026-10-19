@@ -299,6 +299,7 @@ See [Shapes](./shapes.md).
     SolidModels.attributes
     SolidModels.to_primitives
     render!(::SolidModel, ::CoordinateSystem; kwargs...)
+    SolidModels.import_solid!
     SolidModels.save(::File, ::SolidModel)
 ```
 
