@@ -24,6 +24,11 @@ The format of this changelog is based on
     OpenCASCADE can reject when rendering to a `SolidModel`, into simple regions. Pieces are
     classified by winding, so keyholed islands and holes are kept. Run it after boolean
     operations and `split_t_junctions!`.
+  - `render!` accepts `post_fragment_ops`, postrender operations executed after the global
+    fragmentation pass.
+  - `SolidModels.fragment_near!` makes one or more dim-3 physical groups (e.g. imported CAD
+    parts) conformal with nearby geometry by fragmenting only the entities that touch the
+    bounding boxes of their volumes, instead of the whole model.
 
 ### Changed
 

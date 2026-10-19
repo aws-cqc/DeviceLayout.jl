@@ -96,6 +96,107 @@ box_selection(::SolidModel, x1, y1, z1, x2, y2, z2; dim=-1, delta=zero(x1)) =
     box_selection(x1, y1, z1, x2, y2, z2; dim=dim, delta=delta) # For use as postrender op
 
 """
+    fragment_near!(sm::SolidModel, object_groups; delta=1e-3 * STP_UNIT, warn=true)
+
+Make the dim-3 physical groups `object_groups` (a name or a collection of names) conformal
+with the geometry near them. Requires an `OpenCascade` kernel.
+
+The region is the union of the bounding boxes of the groups' volumes, each padded
+by `delta`. Every entity of every dimension whose bounding box intersects the region
+(volumes, but also free-standing surfaces and curves such as ports) is submitted to the
+same three-pass fragmentation used by `render!`, together with the full boundary of each
+selected volume. A volume can only overlap entities whose bounding boxes intersect its own,
+so this selects everything the fragmentation can change. Entities outside the region are
+assumed to be conformal already and are not fragmented; those on the boundary of a
+fragmented volume can still be retagged, and as in the global pass, dim-0/1 groups on
+modified boundaries can be dropped.
+
+To fragment around several new parts, list all of their groups in one call. Using one box
+per volume keeps the region close to each part instead of spanning the space between them.
+
+With `warn=true`, a warning is emitted when nothing but the object groups and their own
+boundaries lies in the region.
+
+Returns the updated dimtags of all object groups. As a postrender operation, the result is
+assigned to the destination group, so with several object groups that group receives the
+entities of all of them. Give it a name of its own to keep the object groups separate:
+
+```julia
+post_fragment_ops = [("conformal_parts", fragment_near!, (["die", "wirebond"],))]
+```
+
+!!! note
+
+    `render!` runs its global fragment after `postrender_ops`, so a `fragment_near!` placed
+    there is redone by the global pass. To save work inside `render!`, put the import and
+    the fragment in `post_fragment_ops` instead, or call `fragment_near!` directly on a
+    finished model.
+"""
+function fragment_near!(
+    sm::SolidModel{OpenCascade},
+    object_groups;
+    delta=1e-3 * STP_UNIT,
+    warn=true
+)
+    gmsh.model.set_current(name(sm))
+    # `d` is in STP_UNIT.
+    d = _stp_float(delta)
+    isfinite(d) && d >= 0 ||
+        throw(ArgumentError("fragment_near!: delta must be finite and nonnegative"))
+    groups = _group_names(object_groups)
+    isempty(groups) && throw(ArgumentError("fragment_near!: no object groups given"))
+    for g in groups
+        hasgroup(sm, g, 3) ||
+            throw(ArgumentError("fragment_near!: no dim-3 physical group named \"$g\""))
+        # The group dict can outlive its entities (e.g. consumed by a boolean op).
+        isempty(dimtags(sm[g, 3])) && throw(
+            ArgumentError("fragment_near!: dim-3 physical group \"$g\" has no entities")
+        )
+    end
+    obj = _object_dimtags(sm, groups)
+
+    # One box per volume rather than one around all of them, so that parts far apart do not
+    # pull in everything between them.
+    region = [bounds3d([dt]; delta=d) for dt in obj]
+    # Anything in the region that is not an object or one of its own sub-entities. Any
+    # dimension counts: a free-standing sheet is a valid fragment partner. The fragment
+    # selects its own entities; this only decides whether there is work to do.
+    others = setdiff(
+        filter(dt -> _in_region(region, bounds3d([dt])), gmsh.model.getEntities()),
+        _boundary_closure(obj)
+    )
+    if isempty(others)
+        warn && @warn(
+            "fragment_near!: nothing other than $(join(repr.(groups), ", ")) intersects " *
+            "the region; nothing to fragment. Check `delta` if a neighbour was expected."
+        )
+        return obj
+    end
+
+    _fragment_three_pass!(sm; region=region)
+    return _object_dimtags(sm, groups)
+end
+
+_object_dimtags(sm, groups) = unique(reduce(vcat, (dimtags(sm[g, 3]) for g in groups)))
+
+# `dimtags` plus every entity on their boundaries, down to points. `getBoundary` with
+# `recursive=true` returns points only, so the dimensions are walked one at a time.
+function _boundary_closure(dimtags)
+    closure = Set{Tuple{Int32, Int32}}(dimtags)
+    layer = collect(dimtags)
+    while !isempty(layer) && first(layer)[1] > 0
+        layer = unique([
+            (d, abs(t)) for (d, t) in gmsh.model.getBoundary(layer, false, false, false)
+        ])
+        union!(closure, layer)
+    end
+    return closure
+end
+
+fragment_near!(::SolidModel, object_groups; kwargs...) =
+    throw(ArgumentError("Only OpenCascade kernel supports fragment_near!"))
+
+"""
     translate!(group, dx, dy, dz; copy=true)
     translate!(sm::SolidModel, groupname, dx, dy, dz, groupdim=2; copy=true)
 
@@ -1045,8 +1146,8 @@ the old members in place.
 Has the postrender-operation signature, for use in a list of operations applied after
 fragmentation, for example
 `("vacuum", exclude_groups, ("vacuum", ["substrate", "bump_extrusion"], 3))`.
-Operations in `render!`'s `postrender_ops` run before fragmentation, so this does nothing
-there. See also [`apply_precedence`](@ref).
+In `render!`, pass it in `post_fragment_ops`; `postrender_ops` run before fragmentation, where
+this does nothing. See also [`apply_precedence`](@ref).
 """
 function exclude_groups(sm::SolidModel, group::Union{String, Symbol}, excluded, d=2)
     if !hasgroup(sm, group, d)
@@ -1066,8 +1167,10 @@ function exclude_groups(sm::SolidModel, group::Union{String, Symbol}, excluded, 
     return keep
 end
 
-_group_names(name::Union{String, Symbol}) = (name,)
-_group_names(names) = names
+# A single name or a collection of names, as Strings. A string is one name, not a sequence of
+# characters, and `hasgroup` accepts any string type after conversion.
+_group_names(name::Union{AbstractString, Symbol}) = [String(name)]
+_group_names(names) = [String(name) for name in names]
 
 """
     apply_precedence(precedence)
@@ -1079,8 +1182,9 @@ exclusive by priority.
 entities it shares with any higher-priority group of the same dimension, so every entity ends
 up in exactly one listed group; unlisted groups are unchanged. The result is a vector of
 [`exclude_groups`](@ref) operations, which can be splatted into a list of operations alongside
-others. They must run after fragmentation; before it, overlapping groups share no entities and
-nothing changes. A group that loses all of its entities is removed.
+others. They must run after fragmentation, such as in `render!`'s `post_fragment_ops`; before
+it, overlapping groups share no entities and nothing changes. A group that loses all of its
+entities is removed.
 """
 function apply_precedence(precedence)
     entries = [(string(name), Int(d)) for (name, d) in precedence]
