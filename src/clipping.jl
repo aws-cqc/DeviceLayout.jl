@@ -675,19 +675,6 @@ mutable struct InteriorCutNode{T}
 end
 segment(n::InteriorCutNode) = LineSegment(n.point, n.next.point)
 
-# The node starting the segment of the contour from `node1` that is nearest to `p`, and the
-# distance to it.
-function nearest_segment(node1::InteriorCutNode, p::Point{Int})
-    best, dbest = node1, Inf
-    n = node1
-    while n.next != n
-        d = distance_to_segment(p, n.point, n.next.point)
-        d < dbest && ((best, dbest) = (n, d))
-        n = n.next
-    end
-    return best, dbest
-end
-
 function distance_to_segment(p::Point{Int}, a::Point{Int}, b::Point{Int})
     abx, aby = Int128(b.x) - a.x, Int128(b.y) - a.y
     apx, apy = Int128(p.x) - a.x, Int128(p.y) - a.y
@@ -698,21 +685,17 @@ function distance_to_segment(p::Point{Int}, a::Point{Int}, b::Point{Int})
     return abs(Float64(abx * apy - aby * apx)) / sqrt(Float64(len2))
 end
 
-# Whether moving a point of the segment starting at `node` to `w` makes the segment cross
-# a live segment of the contour or of `hole`. Only proper crossings count: touching is
-# allowed in a keyhole polygon.
-function kink_crosses(itree, hole, node::InteriorCutNode, w::Point{Int})
-    a, b = node.point, node.next.point
-    ylo, yhi = extrema((a.y, b.y, w.y))
-    crosses(c, d) = proper_crossing(a, w, c, d) || proper_crossing(w, b, c, d)
-    for interval in IntervalTrees.intersect(itree, minmax(a.x, b.x))
-        n = IntervalTrees.value(interval)
-        (n === node || (n.prev == n && n.next == n)) && continue
-        c, d = n.point, n.next.point
-        (max(c.y, d.y) < ylo || min(c.y, d.y) > yhi) && continue
-        crosses(c, d) && return true
-    end
-    return any(i -> crosses(hole[i], hole[mod1(i + 1, end)]), eachindex(hole))
+# Whether moving a point of the segment from `a` to `b` to `w`, within half a lattice unit
+# of the segment, may make the polygon self-intersect. A cheap local test: true if a vertex
+# of `hole` or a neighboring vertex `z` or `c` of the contour is within a unit of the
+# segment, which the kink may or may not cross, or if a neighboring segment (`z` to `a`, or
+# `b` to `c`) folds back across the kink at an acute vertex. Finding every vertex near the
+# segment would need a 2D search of the whole contour, so other vertices of the contour and
+# of other holes are not checked.
+function kink_may_cross(hole, z, a, b, c, w)
+    near(v) = distance_to_segment(v, a, b) < 1
+    (near(z) || near(c) || any(near, hole)) && return true
+    return proper_crossing(a, w, b, c) || proper_crossing(w, b, z, a)
 end
 
 function proper_crossing(a::Point{Int}, b::Point{Int}, c::Point{Int}, d::Point{Int})
@@ -739,7 +722,11 @@ Example:
 │       └──┘ │               │ │     ├──┘ │
 └────────────┘               └─┴─────┴────┘
 """
-function interiorcuts(nodeortree::Clipper.PolyNode, outpolys::Vector{Polygon{T}}) where {T}
+function interiorcuts(
+    nodeortree::Clipper.PolyNode,
+    outpolys::Vector{Polygon{T}},
+    userpoint=identity # converts lattice points to user coordinates for messages
+) where {T}
     # Assumes we have first element an enclosing polygon with the rest being holes.
     # We also assume no hole collision.
 
@@ -777,9 +764,10 @@ function interiorcuts(nodeortree::Clipper.PolyNode, outpolys::Vector{Polygon{T}}
         loop_node.prev = last(nodes)
         last(nodes).next = loop_node
 
+        suspect = nothing # first cut attachment that may cause a self-intersection
         for hole in sort(children(enclosing), by=h -> uniqueray(contour(h))[1].p0.y)
             # process all the holes.
-            interiorcuts(hole, outpolys)
+            interiorcuts(hole, outpolys, userpoint)
 
             # Intersect the unique ray with the line segments of the polygon.
             hole_contour = contour(hole)
@@ -810,38 +798,35 @@ function interiorcuts(nodeortree::Clipper.PolyNode, outpolys::Vector{Polygon{T}}
                 end
             end
 
-            if best_intersection_point != minpt
-                # The ray is vertical, so x is exact, but y must be rounded to the lattice,
-                # which puts a kink of up to a unit in the enclosing edge. Rounded inward,
-                # the kink can cross a hole vertex just inside the edge; rounded outward, it
-                # can cross the contour's next edge where that folds back just outside it at
-                # an acute vertex. Either leaves a self-intersecting polygon, so take the
-                # nearer lattice point unless its kink crosses something and the other's
-                # does not. A vertex exactly on the edge gets a zero-length cut, i.e. a
-                # pinch, once duplicate points are dropped below.
-                x = round(Int64, getx(best_intersection_point))
-                y = gety(best_intersection_point)
-                near = round(Int64, y)
-                far = near <= y ? ceil(Int64, y) : floor(Int64, y)
-                w = Point{Int64}(x, near)
-                if far != near && kink_crosses(itree, hole_contour, best_node, w)
-                    w_far = Point{Int64}(x, far)
-                    kink_crosses(itree, hole_contour, best_node, w_far) || (w = w_far)
-                end
-            else
-                # Nothing is below the hole's lowest vertex, so Clipper rounded that vertex to
-                # just outside the enclosing contour (#317). Pinch the hole onto the nearest
-                # edge at the vertex itself: the vertex is outside, so the kink bulges
-                # outward, as above.
-                h = hole_contour[m]
-                best_node, d = nearest_segment(node1, h)
-                if !(d < 1)
-                    @warn "Ray from a hole's lowest vertex met no edge, and vertex is not within a grid \
-                           unit of one. The hole was dropped from its enclosing contour, which has \
-                           $(length(enclosing_contour)) vertices."
-                    continue
-                end
-                w = h
+            if best_intersection_point == minpt
+                # Clipper rounded the hole's lowest vertex to just outside the enclosing
+                # contour (#317). Rather than placing a cut on an edge that may be within
+                # a lattice unit of other vertices, ask the user to fix the input.
+                error(
+                    "Hole with lowest vertex at $(userpoint(hole_contour[m])) could not be \
+                     attached to its enclosing contour by a keyhole cut: rounding to the \
+                     integer grid put the vertex outside the contour. This happens when a \
+                     vertex of one shape lies on (or within a few grid units of) a \
+                     non-axis-aligned edge of another in a clipping operation; move the \
+                     shapes apart or overlap them."
+                )
+            end
+
+            # The ray is vertical, so x is exact, but y is rounded to the lattice, which
+            # puts a kink of up to half a unit in the enclosing edge. A vertex exactly on
+            # the edge gets a zero-length cut, i.e. a pinch, once duplicate points are
+            # dropped below.
+            x = round(Int64, getx(best_intersection_point))
+            y = gety(best_intersection_point)
+            w = Point{Int64}(x, round(Int64, y))
+            if w.y != y && isnothing(suspect)
+                a, b = best_node.point, best_node.next.point
+                # The contour is a list from `node1` to `loop_node`, which repeats `node1`.
+                z = best_node === node1 ? loop_node.prev.point : best_node.prev.point
+                c =
+                    best_node.next === loop_node ? node1.next.point :
+                    best_node.next.next.point
+                kink_may_cross(hole_contour, z, a, b, c, w) && (suspect = w)
             end
 
             # We are going to replace `best_node`
@@ -896,6 +881,11 @@ function interiorcuts(nodeortree::Clipper.PolyNode, outpolys::Vector{Polygon{T}}
             n = n.next
         end
         length(p) > 1 && last(p) == first(p) && pop!(p)
+        isnothing(suspect) || @warn "Keyhole cut at $(userpoint(suspect)) attaches to an \
+            edge that another vertex or edge comes within a grid unit of, so the cut \
+            polygon may self-intersect. This happens when a vertex of one shape lies on (or \
+            within a few grid units of) a non-axis-aligned edge of another in a clipping \
+            operation; move the shapes apart or overlap them."
         push!(outpolys, Polygon(reinterpret(Point{T}, p)))
     end
     return outpolys
