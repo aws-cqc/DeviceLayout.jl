@@ -1306,7 +1306,7 @@ end
 # one of them, rescanned per pass: OCC binds split pieces as new entities while the parent
 # may still reference the original, so walking down from seed volumes would miss them and
 # leave orphans.
-function _fragment_three_pass!(sm::SolidModel; region=nothing)
+function _fragment_three_pass!(sm::SolidModel; region=nothing, reporter=nothing)
     for dims in ([0, 1], [1, 2], [2, 3])
         t_fragment = time_ns()
         _fragment_and_map!(

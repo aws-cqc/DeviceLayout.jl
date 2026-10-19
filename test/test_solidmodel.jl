@@ -2147,7 +2147,7 @@ end
     end
 end
 
-@testitem "Mesh sizing for imported models" setup = [CommonTestSetup] begin
+@testitem "Mesh sizing for imported models" setup = [CommonTestSetup, QuietGmshSetup] begin
     using DeviceLayout.SolidModels
     import DeviceLayout.SolidModels:
         dimtags,
@@ -2398,7 +2398,7 @@ end
     end
 end
 
-@testitem "SolidModel verbose rendering (#266)" setup = [CommonTestSetup] begin
+@testitem "SolidModel verbose rendering (#266)" setup = [CommonTestSetup, QuietGmshSetup] begin
     using Logging
     cs = CoordinateSystem("verbose", nm)
     place!(cs, centered(Rectangle(20μm, 10μm)), :l1)
@@ -2736,6 +2736,7 @@ end
         @test (@test_logs fragment_near!(sm, "chip"; warn=false)) == before
         @test dimtags(sm["chip", 3]) == before
     end
+end
 
 @testitem "SolidModel verbose rendering through a Schematic" setup =
     [CommonTestSetup, QuietGmshSetup] begin
@@ -2795,7 +2796,5 @@ end
     console_msgs = string.(getproperty.(console.logs, :message))
     @test !any(contains.(console_msgs, "verbose_sch debug message"))
     @test any(contains.(console_msgs, "JULIA_DEBUG message"))
-    @test contains(
-        read(joinpath(logdir, "verbose_sch.log"), String),
-    )
+    @test contains(read(joinpath(logdir, "verbose_sch.log"), String))
 end
