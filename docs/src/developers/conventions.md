@@ -47,7 +47,7 @@ produces with `.JuliaFormatter.toml`, which CI enforces (see [Formatting](@ref d
 so formatting is never a review topic. Remaining style decisions can be settled by [SciMLStyle](https://github.com/SciML/SciMLStyle) when it has an applicable rule.
 
 **Mutation.** Functions and methods that mutate any of their arguments have names ending in
-`!`. Mutated arguments come before non-mutated arguments, following SciML's
+`!`. Mutated arguments come before non-mutated arguments, following SciMLStyle's
 [function argument precedence](https://github.com/SciML/SciMLStyle?tab=readme-ov-file#function-argument-precedence).
 
 **Leading underscores.** A name beginning with `_` is not called by users. It is either a
@@ -59,7 +59,7 @@ if they are not public (exported, documented, or part of an interface that users
 
 **Variables.** Names reflect the actual type of the value they hold, not a related
 concept. For example, a `ComponentNode` is `node`, never `comp` (the component it wraps is
-`node.component`); a `Schematic` is `sch` or `floorplan`; a `SchematicGraph` is `g` (avoid `graph`, which is a function exported by `.SchematicDrivenLayout`); a `Cell` is
+`node.component`); a `SchematicGraph` is `g`, not `sch` for `Schematic` (though also avoid `graph`, which is a function exported by `.SchematicDrivenLayout`); a `Cell` is
 `c`, not `cs` (which denotes a `CoordinateSystem`). In a small scope where the type is
 obvious from context or a type annotation (a comprehension, a short loop body, a short function
 with annotated arguments), use very brief names. In a large scope, or where nothing lets a

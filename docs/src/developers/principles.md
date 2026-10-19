@@ -3,8 +3,8 @@
 Development of DeviceLayout.jl is guided by a few principles. They are the tie-breakers when a
 design decision isn't obvious, and they're the standard reviewers will hold a change to.
 
-1. **Target the design cycle:** Prioritize the time designers spend getting from one design to
-   the next. Provide designers with the right abstractions and precise feedback for fast
+1. **Target the design cycle:** Prioritize the time designers spend taking a design from idea
+   to completion. Provide designers with the right abstractions and precise feedback for fast
    iteration. Raw performance improvements are valuable when they relieve bottlenecks in a
    feedback cycle.
 
