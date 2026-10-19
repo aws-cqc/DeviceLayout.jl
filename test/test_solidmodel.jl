@@ -2398,7 +2398,7 @@ end
     end
 end
 
-@testitem "SolidModel verbose rendering (#266)" setup = [CommonTestSetup] begin
+@testitem "SolidModel verbose rendering (#266)" setup = [CommonTestSetup, QuietGmshSetup] begin
     using Logging
     cs = CoordinateSystem("verbose", nm)
     place!(cs, centered(Rectangle(20μm, 10μm)), :l1)
@@ -2817,7 +2817,5 @@ end
     console_msgs = string.(getproperty.(console.logs, :message))
     @test !any(contains.(console_msgs, "verbose_sch debug message"))
     @test any(contains.(console_msgs, "JULIA_DEBUG message"))
-    @test contains(
-        read(joinpath(logdir, "verbose_sch.log"), String),
-    )
+    @test contains(read(joinpath(logdir, "verbose_sch.log"), String))
 end
