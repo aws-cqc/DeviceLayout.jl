@@ -799,23 +799,20 @@ function interiorcuts(
             end
 
             if best_intersection_point == minpt
-                # Clipper rounded the hole's lowest vertex to just outside the enclosing
-                # contour (#317). Rather than placing a cut on an edge that may be within
-                # a lattice unit of other vertices, ask the user to fix the input.
+                # Don't try to repair integer-grid geometry, just throw
                 error(
                     "Hole with lowest vertex at $(userpoint(hole_contour[m])) could not be \
                      attached to its enclosing contour by a keyhole cut: rounding to the \
                      integer grid put the vertex outside the contour. This happens when a \
                      vertex of one shape lies on (or within a few grid units of) a \
-                     non-axis-aligned edge of another in a clipping operation; move the \
+                     non-axis-aligned edge of another in a clipping operation; insert a \
+                     coincident vertex on the edge (see `split_t_junctions!`), move the \
                      shapes apart or overlap them."
                 )
             end
 
             # The ray is vertical, so x is exact, but y is rounded to the lattice, which
-            # puts a kink of up to half a unit in the enclosing edge. A vertex exactly on
-            # the edge gets a zero-length cut, i.e. a pinch, once duplicate points are
-            # dropped below.
+            # puts a kink of up to half a unit in the enclosing edge.
             x = round(Int64, getx(best_intersection_point))
             y = gety(best_intersection_point)
             w = Point{Int64}(x, round(Int64, y))
@@ -885,7 +882,8 @@ function interiorcuts(
             edge that another vertex or edge comes within a grid unit of, so the cut \
             polygon may self-intersect. This happens when a vertex of one shape lies on (or \
             within a few grid units of) a non-axis-aligned edge of another in a clipping \
-            operation; move the shapes apart or overlap them."
+            operation; insert a coincident vertex on the edge (see `split_t_junctions!`), \
+            move the shapes apart or overlap them."
         push!(outpolys, Polygon(reinterpret(Point{T}, p)))
     end
     return outpolys
