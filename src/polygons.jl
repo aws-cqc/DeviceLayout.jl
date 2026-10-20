@@ -486,7 +486,8 @@ function to_polygons(p::ClippedPolygon{T}; kwargs...) where {T}
     pc = clipperize(p)
     S = typeof(pc).parameters[1]
     pci = recast(Clipper.PolyNode{Point{Int64}}, pc.tree)
-    o = interiorcuts(pci, Polygon{S}[])
+    userpoint(p) = unscale(only(reinterpret(Point{S}, [p])), T)
+    o = interiorcuts(pci, Polygon{S}[], userpoint)
     return declipperize.(o, T)
 end
 # Broadcast equivalent
