@@ -698,22 +698,50 @@ function kink_may_cross(hole, z, a, b, c, w)
     return proper_crossing(a, w, b, c) || proper_crossing(w, b, z, a)
 end
 
+# Exact orientation of lattice points (`orientation` overflows Int64 at fm-scale extents):
+# 1 if `p`, `q`, `r` turn counterclockwise, -1 if clockwise, 0 if collinear.
+lattice_orientation(p::Point{Int}, q::Point{Int}, r::Point{Int}) = sign(
+    (Int128(q.x) - p.x) * (Int128(r.y) - p.y) - (Int128(q.y) - p.y) * (Int128(r.x) - p.x)
+)
+
+# Exact orientation of a closed lattice contour: 1 if counterclockwise, -1 if clockwise.
+function lattice_orientation(contour::Vector{Point{Int}})
+    a = sum(eachindex(contour); init=Int128(0)) do i
+        p, q = contour[i], contour[mod1(i + 1, length(contour))]
+        return Int128(p.x) * q.y - Int128(q.x) * p.y
+    end
+    return sign(a)
+end
+
 function proper_crossing(a::Point{Int}, b::Point{Int}, c::Point{Int}, d::Point{Int})
-    orient(p, q, r) = sign(
-        (Int128(q.x) - p.x) * (Int128(r.y) - p.y) -
-        (Int128(q.y) - p.y) * (Int128(r.x) - p.x)
-    )
+    orient = lattice_orientation
     return orient(a, b, c) * orient(a, b, d) < 0 && orient(c, d, a) * orient(c, d, b) < 0
 end
+
+# Why a vertex can end up on or just outside an edge after clipping, and what to do. A
+# matching vertex on the edge is the obvious fix but doesn't help, because Clipper removes
+# collinear vertices.
+const LATTICE_ROUNDING_ADVICE = "Clipper rounds the intersection points it creates to \
+    the integer grid (a femtometer, for non-integer coordinates), and an edge split at a \
+    rounded point no longer passes exactly through points that were on it. This happens \
+    when a vertex of one shape lies on or within a grid unit of a non-axis-aligned edge of \
+    another. Adding a matching vertex to the edge doesn't help, since Clipper removes \
+    collinear vertices; move the shapes apart or overlap them by more than a grid unit."
 
 InteriorCutNode(val::T) where {T} = InteriorCutNode{T}(val)
 
 """
-    interiorcuts(nodeortree::Clipper.PolyNode, outpolys::Vector{Polygon{T}}) where {T}
+    interiorcuts(nodeortree::Clipper.PolyNode, outpolys::Vector{Polygon{T}},
+        userpoint=identity) where {T}
 
 Clipper gives polygons with holes as separate contours. The GDSII format doesn't support
 this. This function makes cuts between the inner/outer contours so that ultimately there
 is just one contour with one or more overlapping edges.
+
+Throws an error if a hole's lowest vertex is outside the polygon, so that no cut from it
+can attach the hole, and warns if rounding a cut's attachment point to the lattice may make
+the polygon self-intersect. `userpoint` converts lattice points to user coordinates for
+these messages. Consecutive repeated points are removed from the output.
 
 Example:
 ┌────────────┐               ┌────────────┐
@@ -765,6 +793,9 @@ function interiorcuts(
         last(nodes).next = loop_node
 
         suspect = nothing # first cut attachment that may cause a self-intersection
+        # Clipper gives holes the opposite orientation to their enclosing contour, so the
+        # interior stays on the same side of every edge as holes are spliced in.
+        interior_side = lattice_orientation(enclosing_contour)
         for hole in sort(children(enclosing), by=h -> uniqueray(contour(h))[1].p0.y)
             # process all the holes.
             interiorcuts(hole, outpolys, userpoint)
@@ -798,16 +829,27 @@ function interiorcuts(
                 end
             end
 
-            if best_intersection_point == minpt
+            # The ray from a vertex inside the polygon meets its first edge from the
+            # interior side. From a vertex outside it (beyond the enclosing contour, or
+            # inside a hole already spliced in), it meets nothing, or an edge from the
+            # exterior side, and a cut there would cross the exterior. The side is
+            # ambiguous when the ray meets a vertex, since the two edges there can
+            # disagree, and zero when the hole touches the edge, so neither is checked.
+            v = hole_contour[m]
+            outside =
+                best_intersection_point == minpt || (
+                    best_intersection_point != best_node.point &&
+                    best_intersection_point != best_node.next.point &&
+                    lattice_orientation(best_node.point, best_node.next.point, v) ==
+                    -interior_side
+                )
+            if outside
                 # Don't try to repair integer-grid geometry, just throw
                 error(
-                    "Hole with lowest vertex at $(userpoint(hole_contour[m])) could not be \
-                     attached to its enclosing contour by a keyhole cut: rounding to the \
-                     integer grid put the vertex outside the contour. This happens when a \
-                     vertex of one shape lies on (or within a few grid units of) a \
-                     non-axis-aligned edge of another in a clipping operation; insert a \
-                     coincident vertex on the edge (see `split_t_junctions!`), move the \
-                     shapes apart or overlap them."
+                    "Hole with lowest vertex at $(userpoint(v)) could not be attached to \
+                     its enclosing contour by a keyhole cut, because the vertex is outside \
+                     the polygon, beyond that contour or inside another hole. \
+                     $LATTICE_ROUNDING_ADVICE"
                 )
             end
 
@@ -879,11 +921,9 @@ function interiorcuts(
         end
         length(p) > 1 && last(p) == first(p) && pop!(p)
         isnothing(suspect) || @warn "Keyhole cut at $(userpoint(suspect)) attaches to an \
-            edge that another vertex or edge comes within a grid unit of, so the cut \
-            polygon may self-intersect. This happens when a vertex of one shape lies on (or \
-            within a few grid units of) a non-axis-aligned edge of another in a clipping \
-            operation; insert a coincident vertex on the edge (see `split_t_junctions!`), \
-            move the shapes apart or overlap them."
+            edge that another vertex or edge comes within a grid unit of, so rounding the \
+            attachment point to the grid may make the cut polygon self-intersect. \
+            $LATTICE_ROUNDING_ADVICE"
         push!(outpolys, Polygon(reinterpret(Point{T}, p)))
     end
     return outpolys

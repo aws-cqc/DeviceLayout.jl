@@ -1082,6 +1082,7 @@ end
     # hole below has a vertex ≈ 0.08 units inside the edge its cut attaches to, or (the
     # fourth case) the contour's next edge folds back 0.0025 units outside that edge at the
     # ray, so the kink may cross something and a warning is given.
+    kink_warning = (:warn, r"may make the cut polygon self-intersect")
     for (outer, hole) in (
         ([(-8, 66), (-79, 32), (86, -37)], [(20, -9), (-2, 16), (-19, 7)]),
         (
@@ -1096,13 +1097,37 @@ end
     )
         cp = difference2d([Polygon(Point{Int}.(outer))], [Polygon(Point{Int}.(hole))])
         @test count(Clipper.ishole, Clipper.children(only(Clipper.children(cp.tree)))) == 1
-        @test_logs (:warn, r"may\s+self-intersect") to_polygons(cp)
+        @test_logs kink_warning to_polygons(cp)
     end
     # A rotated square with holes well inside it has off-lattice cuts that are not flagged.
     sq = Rectangle(10.0, 10.0)
     holes = [Rectangle(1.0, 1.0) + Point(x, y) for x = 1:2:8 for y = 1:2:8]
     cp = difference2d(Rotation(10°)(sq), Rotation(10°).(holes))
     @test_logs to_polygons(cp)
+
+    # The fold-back case above, and its mirror image, where the folding edge precedes the
+    # attachment edge, with the contour starting at each vertex in turn. This covers the
+    # neighbor lookups across the start of the contour, which Clipper's choice of start
+    # vertex otherwise decides.
+    PN = Clipper.PolyNode{Point{Int}}
+    outer = Point{Int}[
+        (0, 0),
+        (101, 1),
+        (-100, -1),
+        (-100, -50),
+        (200, -50),
+        (200, 100),
+        (-50, 100)
+    ]
+    hole = Point{Int}[(50, 5), (45, 12), (60, 15)]
+    mirror(c) = reverse([Point(-p.x, p.y) for p in c])
+    for (o, h) in ((outer, hole), (mirror(outer), mirror(hole))), k in eachindex(o)
+        root = PN(Point{Int}[], false, false, PN[])
+        enclosing = PN(circshift(o, k), false, false, PN[], root)
+        push!(root.children, enclosing)
+        push!(enclosing.children, PN(h, true, false, PN[], enclosing))
+        @test_logs kink_warning Polygons.interiorcuts(root, Polygon{Int}[])
+    end
 end
 
 @testitem "Keyhole cut edge cases" setup = [CommonTestSetup] begin
@@ -1156,6 +1181,48 @@ end
         ] .* 0.37
     )
     @test_throws r"\(4\.81, ?-1\.85\).*could not be\s+attached" to_polygons(xor2d([A], [B]))
+
+    # Clipper rounds both intersections of this hole with the edge from (-22, -98) to
+    # (100, -2) to the hole's lowest vertex (0, -81), 0.31 units below the edge. More of the
+    # enclosing contour is further down, so the ray from that vertex meets it, but from
+    # the exterior side.
+    cp = difference2d(
+        [
+            Polygon(
+                Point{Int}[
+                    (4, 100),
+                    (-55, -84),
+                    (-55, -150),
+                    (100, -150),
+                    (100, -130),
+                    (-40, -130),
+                    (-40, -98),
+                    (-22, -98),
+                    (100, -2),
+                    (100, 9)
+                ]
+            )
+        ],
+        [Polygon(Point{Int}[(0, -81), (1, -67), (-20, -75)])]
+    )
+    @test count(Clipper.ishole, Clipper.children(only(Clipper.children(cp.tree)))) == 1
+    @test_throws r"\(0, ?-81\).*could not be\s+attached" to_polygons(cp)
+
+    # Clipper output where the first hole's lowest vertex (28, 2) is 0.5 units inside the
+    # second hole, below its edge from (27, -3) to (29, 8).
+    PN = Clipper.PolyNode{Point{Int}}
+    root = PN(Point{Int}[], false, false, PN[])
+    outer = Point{Int}[(100, 79), (-6, 46), (-62, -34), (56, -100)]
+    enclosing = PN(outer, false, false, PN[], root)
+    push!(root.children, enclosing)
+    for h in (
+        Point{Int}[(28, 8), (29, 8), (28, 2)],
+        Point{Int}[(26, -29), (26, -22), (27, -3), (29, 8), (53, 3), (46, -34)]
+    )
+        push!(enclosing.children, PN(h, true, false, PN[], enclosing))
+    end
+    out = Polygon{Int}[]
+    @test_throws r"\(28, ?2\).*inside\s+another\s+hole" Polygons.interiorcuts(root, out)
 end
 
 @testitem "Layerwise clipping" setup = [CommonTestSetup] begin
