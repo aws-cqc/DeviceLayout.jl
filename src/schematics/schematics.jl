@@ -688,7 +688,7 @@ function Base.deepcopy_internal(x::SchematicLogger, stackdict::IdDict)
 end
 
 # Overrides required for custom logger
-# Update max level and add stage to kwargs
+# Update max level and add stage to kwargs for the log file
 function Logging.handle_message(
     logger::SchematicLogger,
     level,
@@ -702,8 +702,13 @@ function Logging.handle_message(
 )
     logger.max_level_logged[logger.stage] =
         max(level, get(logger.max_level_logged, logger.stage, Logging.Debug))
-    return handle_message(
-        logger.logger,
+    # Only the log file uses the stage (as a line prefix). Passing it to the console logger
+    # too would print `stage = ...` beneath every message.
+    console, logfile = logger.logger.loggers
+    _sink_takes(console, level, _module, group, id) &&
+        handle_message(console, level, message, _module, group, id, file, line; kwargs...)
+    _sink_takes(logfile, level, _module, group, id) && handle_message(
+        logfile,
         level,
         message,
         _module,
@@ -714,7 +719,15 @@ function Logging.handle_message(
         stage=logger.stage,
         kwargs...
     )
+    return nothing
 end
+# The per-sink check `TeeLogger` applies: the sink's own `shouldlog` does not check its
+# minimum level (e.g. `ConsoleLogger` only checks `maxlog`), so a sink with a higher minimum
+# than the other would otherwise receive messages below it. `env_override_minlevel` is what
+# lets `JULIA_DEBUG` surface messages below a sink's minimum level.
+_sink_takes(sink, level, _module, group, id) =
+    (min_enabled_level(sink) <= level && shouldlog(sink, level, _module, group, id)) ||
+    Base.CoreLogging.env_override_minlevel(group, _module)
 # Otherwise just pass to internal TeeLogger
 Logging.shouldlog(logger::SchematicLogger, level, _module, group, id) =
     shouldlog(logger.logger, level, _module, group, id)

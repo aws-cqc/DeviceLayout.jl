@@ -2147,7 +2147,7 @@ end
     end
 end
 
-@testitem "Mesh sizing for imported models" setup = [CommonTestSetup] begin
+@testitem "Mesh sizing for imported models" setup = [CommonTestSetup, QuietGmshSetup] begin
     using DeviceLayout.SolidModels
     import DeviceLayout.SolidModels:
         dimtags,
@@ -2396,6 +2396,65 @@ end
         @test (3, v[4]) in gmsh.model.getEntities(3)
         @test tagset("vacuum") == Set(Int.(v[3:4]))
     end
+end
+
+@testitem "SolidModel verbose rendering (#266)" setup = [CommonTestSetup, QuietGmshSetup] begin
+    using Logging
+    cs = CoordinateSystem("verbose", nm)
+    place!(cs, centered(Rectangle(20μm, 10μm)), :l1)
+    postrender_ops = [
+        ("ext1", SolidModels.extrude_z!, (:l1, 5μm)),
+        # `get_boundary` (used by every bounded `SolidModelTarget`) is oriented by default,
+        # so it returns signed tags that the kernel only recognizes unsigned
+        ("bnd", SolidModels.get_boundary, ("ext1", 3)),
+        ("missing_ext", SolidModels.extrude_z!, (:nonexistent, 5μm))
+    ]
+    render_verbose(verbose) = begin
+        sm = SolidModel("verbose"; overwrite=true)
+        logs, _ = Test.collect_test_logs(min_level=Logging.Info) do
+            return render!(
+                sm,
+                cs,
+                zmap=(_) -> 0μm,
+                postrender_ops=postrender_ops,
+                verbose=verbose
+            )
+        end
+        return sm, logs
+    end
+
+    sm, logs = render_verbose(true)
+    msgs = string.(getproperty.(logs, :message))
+    # Groups rendered from `cs` are reported with entity count and bounds
+    # (bounds are the OpenCASCADE bounding box, so they aren't tight)
+    @test any(
+        contains.(
+            msgs,
+            "l1: 1 entities (dim 2) in bounds (x1, y1, z1, x2, y2, z2) = (-10.0, -5."
+        )
+    )
+    # Each postrender operation is reported before it runs, then summarized
+    @test any(contains.(msgs, "sm[\"ext1\"] = extrude_z!(sm, :l1, 5 μm)"))
+    # Extrusion returns the volume plus its top and lateral boundary surfaces
+    @test any(contains.(msgs, "ext1: 6 entities (dim 2, 3)"))
+    # An operation with signed tags is summarized without erroring on the bounds query
+    @test any(contains.(msgs, "bnd: 6 entities (dim 2) in bounds"))
+    # An operation with no result is still summarized rather than erroring
+    @test any(contains.(msgs, "missing_ext: 0 entities"))
+    # No message generation failed (`@info` reports those as `Error` records)
+    @test !any(record -> record.level >= Logging.Error, logs)
+    @test any(contains.(msgs, "fragmented dimensions [2, 3]"))
+    @test any(contains.(msgs, "render!: done"))
+    # Elapsed time comes first, in a fixed-width label, so slow steps can be skimmed for
+    @test any(startswith.(msgs, r"\[ +\d+\.\d{3} s\]   l1: "))
+    @test any(occursin.(r"^\[ +\d+\.\d{3} s\] render!: done$", msgs))
+    # Verbose logging doesn't change the geometry
+    @test length(SolidModels.entitytags(sm["ext1", 3])) == 1
+
+    _, quiet_logs = render_verbose(false)
+    quiet_msgs = string.(getproperty.(quiet_logs, :message))
+    @test !any(contains.(quiet_msgs, "render!:"))
+    @test !any(contains.(quiet_msgs, "Executing"))
 end
 
 @testitem "fragment_near! bounding-box-pruned fragmentation" setup =
@@ -2677,4 +2736,68 @@ end
         @test (@test_logs fragment_near!(sm, "chip"; warn=false)) == before
         @test dimtags(sm["chip", 3]) == before
     end
+end
+
+@testitem "SolidModel verbose rendering through a Schematic" setup =
+    [CommonTestSetup, QuietGmshSetup] begin
+    using .SchematicDrivenLayout, Logging
+    # The schematic's logger tees to the `current_logger()` at `plan` time, so the test logger
+    # standing in for the console must be installed before planning.
+    console = TestLogger(min_level=Logging.Info)
+    logdir = mktempdir()
+    g = SchematicGraph("verbose_sch")
+    add_node!(g, Spacer())
+    floorplan = with_logger(console) do
+        return plan(g; log_dir=logdir, log_level=Logging.Debug)
+    end
+    render!(
+        floorplan.coordinate_system,
+        centered(Rectangle(20μm, 10μm)),
+        SemanticMeta(:simulated_area)
+    )
+    check!(floorplan)
+    tech = ProcessTechnology(
+        (; simulated_area=GDSMeta(2)),
+        (; height=(; simulated_area=-1μm), thickness=(; simulated_area=2μm))
+    )
+    target = SchematicDrivenLayout.SolidModelTarget(
+        tech;
+        bounding_layers=[:simulated_area],
+        postrender_ops=[("bnd", SolidModels.get_boundary, ("simulated_area_extrusion", 3))],
+        solidmodel=true,
+        simulation=true
+    )
+    sm = SolidModel("verbose_sch"; overwrite=true)
+    with_logger(console) do
+        return render!(sm, floorplan, target; verbose=true)
+    end
+    msgs = string.(getproperty.(console.logs, :message))
+    @test any(
+        contains.(msgs, "sm[\"bnd\"] = get_boundary(sm, \"simulated_area_extrusion\", 3)")
+    )
+    @test any(occursin.(r"^\[ +\d+\.\d{3} s\] render!: done$", msgs))
+    # The rendering stage is a line prefix in the log file only, not a keyword on the console
+    @test !any(log -> haskey(log.kwargs, :stage), console.logs)
+    logfile = read(joinpath(logdir, "verbose_sch.log"), String)
+    @test occursin(r"render_solidmodel \| \[Info\] \[ +[\d.]+ s\] render!: done", logfile)
+
+    # Debug messages below the console's level go to the log file only
+    SchematicDrivenLayout.reopen_logfile(floorplan, :debug_check)
+    with_logger(floorplan.logger) do
+        @debug "verbose_sch debug message"
+    end
+    # ...unless `JULIA_DEBUG` enables them
+    withenv("JULIA_DEBUG" => "all") do
+        with_logger(floorplan.logger) do
+            @debug "verbose_sch JULIA_DEBUG message"
+        end
+    end
+    SchematicDrivenLayout.close_logfile(floorplan)
+    console_msgs = string.(getproperty.(console.logs, :message))
+    @test !any(contains.(console_msgs, "verbose_sch debug message"))
+    @test any(contains.(console_msgs, "JULIA_DEBUG message"))
+    @test contains(
+        read(joinpath(logdir, "verbose_sch.log"), String),
+        "debug_check | [Debug] verbose_sch debug message"
+    )
 end
