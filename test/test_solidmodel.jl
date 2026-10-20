@@ -2796,5 +2796,8 @@ end
     console_msgs = string.(getproperty.(console.logs, :message))
     @test !any(contains.(console_msgs, "verbose_sch debug message"))
     @test any(contains.(console_msgs, "JULIA_DEBUG message"))
-    @test contains(read(joinpath(logdir, "verbose_sch.log"), String))
+    @test contains(
+        read(joinpath(logdir, "verbose_sch.log"), String),
+        "debug_check | [Debug] verbose_sch debug message"
+    )
 end
