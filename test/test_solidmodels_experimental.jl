@@ -74,6 +74,20 @@
     @test stack.layers[:substrate] isa SourceLayer{typeof(1.0nm)}
     @test SolidModelsExperimental.layer_z(:substrate, stack) == 10μm
 
+    # Offset tuples with differing element types are accepted and promoted
+    int_float_layer = SourceLayer(NULL; level=1 => 2, offset=(10μm, -5.4μm))
+    @test int_float_layer.offset == 10μm
+    @test int_float_layer.destination_offset == -5.4μm
+    @test typeof(int_float_layer.offset) == typeof(int_float_layer.destination_offset)
+    int_layer = SourceLayer(NULL; level=1 => 2, offset=(10μm, -5μm))
+    @test int_layer.offset == 10μm
+    @test int_layer.destination_offset == -5μm
+    @test SourceLayer(NULL; level=1 => 2, offset=(10μm, -5.4nm)).destination_offset ==
+          -5.4nm
+    @test_throws TypeError SourceLayer(NULL; level=1 => 2, offset=(1μm, "a"))
+    @test_throws TypeError SourceLayer(NULL; level=1 => 2, offset=(1μm, 2μm, 3μm))
+    @test_throws TypeError SourceLayer(NULL; level=1 => 2, offset=(1μm, 2), thickness=0μm)
+
     @test_throws ArgumentError SourceLayer(NULL; level=1 => 2, thickness=1μm)
     @test_throws ArgumentError SourceLayer(NULL; level=1, offset=(1μm, 2μm))
     shifted_span_stack = SourceStack(
