@@ -29,18 +29,19 @@ The format of this changelog is based on
   - `SolidModels.fragment_near!` makes one or more dim-3 physical groups (e.g. imported CAD
     parts) conformal with nearby geometry by fragmenting only the entities that touch the
     bounding boxes of their volumes, instead of the whole model.
-  - `SolidModels.import_solid!` imports an external CAD solid (STEP, BREP, IGES, or Gmsh
-    `.xao`) into a `SolidModel`, positioned by an in-plane `ScaledIsometry`, a `z` offset, and
-    an optional uniform `scale`, and registers it as a physical group. A `.xao` file's own
+  - `SolidModels.import_solid!` imports an external CAD solid (STEP, BREP, or Gmsh `.xao`)
+    into a `SolidModel`, positioned by an in-plane `ScaledIsometry`, a `z` offset, and an
+    optional uniform `scale`, and registers it as a physical group. A `.xao` file's own
     physical groups are registered too, renamed through `group_map`, and never collide with
     groups already in the model. Requires the `OpenCascade` kernel. Can also be used as a
     postrender operation.
   - `SolidModelComponent` (exported from `SchematicDrivenLayout`) places an imported CAD solid
     in a schematic. It emits no 2D geometry; during solid-model rendering it contributes an
     `import_solid!` operation at its solved transform and the z of its layer. `hooks` supplies
-    named mate points, defaulting to a `compass` at the CAD origin. `group_map` is forwarded
-    to `import_solid!`, and `fragment` selects how the part is made conformal: `:global`
-    (default) imports it before the global fragmentation pass, `:near` imports it
+    named mate points, defaulting to a `compass` at the CAD origin. The solid's physical
+    group is named after its node id, and a `.xao` file's own groups are prefixed with it.
+    `fragment` selects how the part is made conformal:
+    `:global` (default) imports it before the global fragmentation pass, `:near` imports it
     afterwards and runs `fragment_near!` on it, and `:none` imports it as is.
   - `render!(sm, sch, target)` accepts `post_fragment_ops`, as a keyword or in the target's
     rendering options, and runs them after the components' own operations.

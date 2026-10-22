@@ -110,6 +110,50 @@
         @test c[3] ≈ 8.0 atol = 1e-6
     end
 
+    # A box and a cylinder in a STEP and a BREP file, to check surface types after
+    # placement.
+    gmsh.model.add("authoring_mixed")
+    gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
+    gmsh.model.occ.addCylinder(20, 0, 0, 0, 0, 10, 3)
+    gmsh.model.occ.synchronize()
+    step = joinpath(tdir, "mixed.step")
+    brep_mixed = joinpath(tdir, "mixed.brep")
+    gmsh.write(step)
+    gmsh.write(brep_mixed)
+    gmsh.model.remove()
+    function surface_types(sm)
+        gmsh.model.set_current(SolidModels.name(sm))
+        return Set(gmsh.model.getType(2, t) for (_, t) in gmsh.model.getEntities(2))
+    end
+
+    @testset "STEP import with placement and scale" begin
+        s6 = SolidModel("import_step"; overwrite=true)
+        place = ScaledIsometry(Point(100μm, 50μm), 90°, false, 1.0)
+        new = import_solid!(s6, step; transform=place, z=20μm, scale=2.0, groupname="part")
+        @test length(new) == 2 && unique(first.(new)) == Int32[3]
+        vols = sort([gmsh.model.occ.getMass(d, t) for (d, t) in new])
+        @test vols[1] ≈ 2^3 * π * 3^2 * 10 atol = 1e-3   # cylinder r=3, h=10, scaled by 2
+        @test vols[2] ≈ 2^3 * 1000 atol = 1e-3
+        # The box centroid (5, 5, 5) scales to (10, 10, 10), then `place` and the lift
+        # apply.
+        box = only(dt for dt in new if gmsh.model.occ.getMass(dt...) ≈ 8000)
+        c = gmsh.model.occ.getCenterOfMass(box...)
+        expected = place(Point(10μm, 10μm))
+        @test c[1] ≈ ustrip(μm, getx(expected)) atol = 1e-6
+        @test c[2] ≈ ustrip(μm, gety(expected)) atol = 1e-6
+        @test c[3] ≈ 30.0 atol = 1e-6
+    end
+
+    @testset "rotation, translation, and scale keep analytic surfaces" begin
+        place = ScaledIsometry(Point(7μm, -3μm), 33°, false, 1.0)
+        for (nm, file) in
+            (("import_analytic_step", step), ("import_analytic_brep", brep_mixed))
+            sa = SolidModel(nm; overwrite=true)
+            import_solid!(sa, file; transform=place, z=4μm, scale=1000.0, groupname="part")
+            @test surface_types(sa) == Set(["Plane", "Cylinder"])
+        end
+    end
+
     @testset "input validation" begin
         # Missing file is rejected up front.
         @test_throws ArgumentError import_solid!(
@@ -157,7 +201,7 @@ end
         gmsh.model.occ.synchronize()
         sm["existing"] = [(3, c)]                # dim-3 tag 1, same as `left` in the file
         new = import_solid!(sm, xao; groupname="part")
-        @test unique(first.(new)) == Int32[3]    # highest_dim_only keeps the two solids
+        @test unique(first.(new)) == Int32[3]    # only the two solids, not their boundary
         @test length(new) == 2
         @test length(dimtags(sm["existing", 3])) == 1
         @test length(dimtags(sm["left", 3])) == 1
@@ -199,18 +243,28 @@ end
         @test c[1] ≈ ustrip(μm, getx(expected)) atol = 1e-6
         @test c[2] ≈ ustrip(μm, gety(expected)) atol = 1e-6
         @test c[3] ≈ 30.0 atol = 1e-6                                # 5·2 + 20 lift
+        # The face group moved with the solids: its faces are still on their boundary, at the
+        # placed top (z = 10·2 + 20).
+        bdry = Set(
+            abs(t) for (_, t) in gmsh.model.getBoundary(
+                vcat(dimtags(sm["left_pkg", 3]), dimtags(sm["right_pkg", 3])),
+                false,
+                false,
+                false
+            )
+        )
+        @test length(dimtags(sm["top_pkg", 2])) == 2
+        @test Set(t for (_, t) in dimtags(sm["top_pkg", 2])) ⊆ bdry
+        for (_, t) in dimtags(sm["top_pkg", 2])
+            bb = gmsh.model.getBoundingBox(2, t)
+            @test bb[3] ≈ 40.0 atol = 1e-3
+            @test bb[6] ≈ 40.0 atol = 1e-3
+        end
 
         sd = SolidModel("xao_discard"; overwrite=true)
         import_solid!(sd, xao; group_map=nothing)
         @test isempty(dimgroupdict(sd, 2))
         @test collect(keys(dimgroupdict(sd, 3))) == ["imported"]
-    end
-
-    @testset "highest_dim_only=false returns and groups every dimension" begin
-        sm = SolidModel("xao_alldims"; overwrite=true)
-        new = import_solid!(sm, xao; highest_dim_only=false, groupname="all")
-        @test Set(first.(new)) == Set(Int32[0, 1, 2, 3])
-        @test hasgroup(sm, "all", 2) && hasgroup(sm, "all", 3)
     end
 end
 
@@ -353,7 +407,7 @@ end
     reset_uniquename!()
     g = SchematicGraph("smc")
     smc = SolidModelComponent(brep, SemanticMeta(:chip_outline); name="cad")
-    add_node!(g, smc)
+    cad_id = add_node!(g, smc).id
     sch = plan(g; log_dir=nothing)
     check!(sch)
 
@@ -363,8 +417,8 @@ end
     @test_nowarn render!(sm, sch, target)
 
     @testset "component imported as its own physical group" begin
-        @test hasgroup(sm, "cad_1", 3)
-        vol = sum(gmsh.model.occ.getMass(d, t) for (d, t) in dimtags(sm["cad_1", 3]))
+        @test hasgroup(sm, cad_id, 3)                # named after the node id
+        vol = sum(gmsh.model.occ.getMass(d, t) for (d, t) in dimtags(sm[cad_id, 3]))
         @test vol ≈ 1000.0 atol = 1e-6
     end
 
@@ -446,7 +500,8 @@ end
     # extrudes into a substrate directly beneath it. The render fragment pass should fuse them.
     reset_uniquename!()
     g = SchematicGraph("smcf")
-    add_node!(g, SolidModelComponent(brep, SemanticMeta(:chip_outline); name="cad"))
+    cad_id =
+        add_node!(g, SolidModelComponent(brep, SemanticMeta(:chip_outline); name="cad")).id
     floorplan = plan(g; log_dir=nothing)
     render!(
         floorplan.coordinate_system,
@@ -477,10 +532,10 @@ end
     )
 
     @testset "component + substrate present and conformal" begin
-        @test hasgroup(sm, "cad_1", 3)                       # imported CAD group
+        @test hasgroup(sm, cad_id, 3)                        # imported CAD group
         @test hasgroup(sm, "chip_outline_L1_extrusion", 3)   # extruded substrate
         # The cube rests on the substrate top → the fragment pass makes a shared interface face.
-        @test !isempty(intersect(faceset("cad_1"), faceset("chip_outline_L1_extrusion")))
+        @test !isempty(intersect(faceset(cad_id), faceset("chip_outline_L1_extrusion")))
     end
 
     @testset "meshes" begin
@@ -491,7 +546,7 @@ end
     end
 end
 
-@testitem "SolidModelComponent fragment modes and group_map" setup =
+@testitem "SolidModelComponent fragment modes and file groups" setup =
     [CommonTestSetup, QuietGmshSetup] begin
     using .SchematicDrivenLayout
     import DeviceLayout.SchematicDrivenLayout: SolidModelComponent
@@ -527,15 +582,9 @@ end
     function build(fragment)
         reset_uniquename!()
         g = SchematicGraph("smcm_$fragment")
-        add_node!(
+        node = add_node!(
             g,
-            SolidModelComponent(
-                xao,
-                SemanticMeta(:chip_outline);
-                name="cad",
-                fragment,
-                group_map=n -> "cad_" * n
-            )
+            SolidModelComponent(xao, SemanticMeta(:chip_outline); name="cad", fragment)
         )
         fp = plan(g; log_dir=nothing)
         render!(
@@ -546,32 +595,32 @@ end
         check!(fp)
         sm = SolidModel("smcm_$fragment"; overwrite=true)
         render!(sm, fp, target)
-        return sm
+        return sm, node.id
     end
     faceset(sm, grp) = Set(
         abs(t) for
         (_, t) in gmsh.model.getBoundary(dimtags(sm[grp, 3]), false, false, false)
     )
-    shared(sm) = intersect(faceset(sm, "cad_1"), faceset(sm, "chip_outline_L1_extrusion"))
+    shared(sm, id) = intersect(faceset(sm, id), faceset(sm, "chip_outline_L1_extrusion"))
 
     @testset ":near fragments locally and keeps mapped file groups" begin
-        sm = build(:near)
-        @test hasgroup(sm, "cad_1", 3)
-        @test hasgroup(sm, "cad_cube", 3)        # file group, renamed by group_map
-        @test hasgroup(sm, "cad_lid", 2)
-        @test length(shared(sm)) == 1            # one shared interface face
-        @test length(dimtags(sm["cad_lid", 2])) == 1
+        sm, id = build(:near)
+        @test hasgroup(sm, id, 3)
+        @test hasgroup(sm, "$(id)_cube", 3)      # file group, prefixed with the node id
+        @test hasgroup(sm, "$(id)_lid", 2)
+        @test length(shared(sm, id)) == 1        # one shared interface face
+        @test length(dimtags(sm["$(id)_lid", 2])) == 1
     end
 
     @testset ":none imports after the pass and leaves the part unfused" begin
-        sm = build(:none)
-        @test hasgroup(sm, "cad_cube", 3)
-        @test isempty(shared(sm))                # touching, but no shared entity
+        sm, id = build(:none)
+        @test hasgroup(sm, "$(id)_cube", 3)
+        @test isempty(shared(sm, id))            # touching, but no shared entity
     end
 
     @testset ":global still fuses through the global pass" begin
-        sm = build(:global)
-        @test length(shared(sm)) == 1
+        sm, id = build(:global)
+        @test length(shared(sm, id)) == 1
     end
 
     @test_throws ArgumentError SolidModelComponent(
@@ -596,6 +645,88 @@ end
             target
         )
     end
+end
+
+@testitem "SolidModelComponent placed in several nodes" setup =
+    [CommonTestSetup, QuietGmshSetup] begin
+    using .SchematicDrivenLayout
+    import DeviceLayout.SchematicDrivenLayout: SolidModelComponent, Spacer, component, nodes
+    import DeviceLayout.SolidModels: gmsh, dimtags, hasgroup
+    using DeviceLayout: SemanticMeta, GDSMeta, Point
+
+    # A connector-like part as .xao with its own groups: a 10 μm cube "body" and its top
+    # face "pin".
+    _tmp = SolidModel("smcn_author"; overwrite=true)
+    gmsh.model.set_current("smcn_author")
+    b = gmsh.model.occ.addBox(-5, -5, 0, 10, 10, 10)
+    gmsh.model.occ.synchronize()
+    _tmp["body"] = [(3, b)]
+    _tmp["pin"] =
+        [(2, t) for (_, t) in gmsh.model.getEntitiesInBoundingBox(-6, -6, 9, 6, 6, 11, 2)]
+    xao = joinpath(tdir, "smcn_connector.xao")
+    DeviceLayout.save(xao, _tmp)
+    gmsh.model.remove()
+
+    # The same component in three nodes: at both ends of one spacer and at the far end of a
+    # second spacer attached to the first.
+    reset_uniquename!()
+    conn = SolidModelComponent(xao, SemanticMeta(:conn); name="conn")
+    g = SchematicGraph("smcn")
+    sp1 = add_node!(g, Spacer(; p1=Point(100μm, 0μm)))
+    sp2 = fuse!(g, sp1 => :p1_east, Spacer(; p1=Point(100μm, 0μm)) => :p0_west)
+    ids = [
+        fuse!(g, sp1 => :p0_west, conn => :east).id,
+        fuse!(g, sp1 => :p1_east, conn => :west).id,
+        fuse!(g, sp2 => :p1_east, conn => :west).id
+    ]
+    sch = plan(g; log_dir=nothing)
+    check!(sch)
+    tech = ProcessTechnology((; conn=GDSMeta()), (; height=(; conn=0μm)))
+    sm = SolidModel("smcn"; overwrite=true)
+    render!(sm, sch, SolidModelTarget(tech))
+
+    @test allunique(ids)
+    for id in ids
+        # One solid named after the node, and the file's groups prefixed with the node id.
+        @test hasgroup(sm, id, 3)
+        @test length(dimtags(sm[id, 3])) == 1
+        @test hasgroup(sm, "$(id)_body", 3)
+        @test hasgroup(sm, "$(id)_pin", 2)
+        @test length(dimtags(sm["$(id)_pin", 2])) == 1
+        @test dimtags(sm["$(id)_body", 3]) == dimtags(sm[id, 3])
+    end
+    # Each node got its own solid, at its own position.
+    vols = [only(dimtags(sm[id, 3])) for id in ids]
+    @test allunique(vols)
+    xs = [gmsh.model.occ.getCenterOfMass(v...)[1] for v in vols]
+    @test sort(round.(xs)) == [0.0, 100.0, 200.0]   # the cube is centred on its hook point
+
+    # Inside a composite, the node id is prefixed with the parent's id, so two instances of
+    # the same composite still give distinct groups.
+    reset_uniquename!()
+    inner = SchematicGraph("inner")
+    sp = add_node!(inner, Spacer(; p1=Point(10μm, 0μm)))
+    fuse!(inner, sp => :p1_east, conn => :west)
+    comp = BasicCompositeComponent(inner)
+    gc = SchematicGraph("smcn_composite")
+    s0 = add_node!(gc, Spacer(; p1=Point(100μm, 0μm)))
+    parents = [
+        fuse!(gc, s0 => :p0_west, comp => :_1_p0_west).id,
+        fuse!(gc, s0 => :p1_east, comp => :_1_p0_west).id
+    ]
+    schc = plan(gc; log_dir=nothing)
+    check!(schc)
+    smc = SolidModel("smcn_composite"; overwrite=true)
+    render!(smc, schc, SolidModelTarget(tech))
+    child = only(n.id for n in nodes(inner) if component(n) isa SolidModelComponent)
+    cids = ["$(p).$(child)" for p in parents]
+    @test allunique(cids)
+    for id in cids
+        @test hasgroup(smc, id, 3)
+        @test hasgroup(smc, "$(id)_body", 3)
+    end
+    cvols = [only(dimtags(smc[id, 3])) for id in cids]
+    @test allunique(cvols)
 end
 
 @testitem "SolidModelComponent placement: rotation and layer z" setup =
@@ -742,7 +873,7 @@ end
             SemanticMeta(:vacuum)
         )
         check!(sch)
-        return sch, "cad_$(only(find_components(SolidModelComponent, sch)))"
+        return sch, sch.graph[only(find_components(SolidModelComponent, sch))].id
     end
     precedence(cad_group) = apply_precedence([(cad_group, 3), ("vacuum_extrusion", 3)])
 

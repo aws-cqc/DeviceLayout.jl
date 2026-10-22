@@ -139,12 +139,14 @@ end
 """
     SolidModelRenderContext
 
-Context for generating SolidModel operations for one placed component.
+Context for generating SolidModel operations for one placed component: the render target,
+the component's solved global transformation, and its node `id`. Inside a composite
+component, `id` is prefixed with the parent ids, joined by `.` as in `add_graph!`.
 """
-struct SolidModelRenderContext{TT, TF, TP}
+struct SolidModelRenderContext{TT, TF}
     target::TT
     transformation::TF
-    path::TP
+    id::String
 end
 
 """
@@ -157,10 +159,13 @@ solidmodel_ops(::AbstractComponent, ::SolidModelRenderContext) = []
 """
     SolidModelComponent{T} <: AbstractComponent{T}
     SolidModelComponent(filename, meta; name=uniquename("solid"), scale=1.0, hooks=compass(),
-                        group_map=identity, fragment=:global, parameters=(;))
+                        fragment=:global, parameters=(;))
 
 An external CAD solid imported into a `SolidModel` at its solved schematic transform and
 the z of layer `meta`.
+
+The level of `meta` only enters the z-height calculation. Unlike rendered layers, a part on
+an even level is not mirrored to face the other way.
 
 It emits no 2D geometry and instead contributes an [`SolidModels.import_solid!`](@ref)
 operation during solid-model rendering. `scale` applies a uniform scale, such as for unit
@@ -168,8 +173,9 @@ conversion.
 
 `hooks` supplies named mate points and defaults to a [`compass`](@ref) at the CAD origin.
 
-`group_map` renames physical groups carried by the file (a `.xao`), see
-[`SolidModels.import_solid!`](@ref).
+The imported solid lands in a physical group named after its node `id`. Physical groups
+carried by the file (a `.xao`) are registered as `"<id>_<name>"`, so the same component
+placed in several nodes gives distinct group names that trace back to the schematic.
 
 `fragment` selects how the part is made conformal with the rest of the model:
 
@@ -208,11 +214,10 @@ height.
 """
 @compdef struct SolidModelComponent{T} <: AbstractComponent{T}
     name::String = "solid"
-    filename::String = ""
+    filename::String
     meta::SemanticMeta = SemanticMeta(:solid)
     scale::Float64 = 1.0
     hooks::NamedTuple = compass(p0=zero(Point{T}))
-    group_map = identity
     fragment::Symbol = :global
     parameters::NamedTuple = (;)
 end
@@ -237,7 +242,6 @@ function SolidModelComponent(
     name::String=uniquename("solid"),
     scale=1.0,
     hooks::Union{Nothing, NamedTuple}=nothing,
-    group_map=identity,
     fragment::Symbol=:global,
     parameters::NamedTuple=(;)
 )
@@ -250,7 +254,6 @@ function SolidModelComponent(
         meta,
         scale=Float64(scale),
         hooks=hks,
-        group_map,
         fragment,
         parameters
     )
@@ -269,17 +272,16 @@ solidmodel_fragment(c::SolidModelComponent) = c.fragment
 hooks(c::SolidModelComponent) = c.hooks
 
 function solidmodel_ops(c::SolidModelComponent, ctx::SolidModelRenderContext)
-    dest = string(name(c), "_", join(ctx.path, "_"))
     z = layer_z(ctx.target.technology, c.meta)
     return [(
-        dest,
+        ctx.id,
         SolidModels.import_solid!,
         (c.filename,),
         :transform => ctx.transformation,
         :z => z,
         :scale => c.scale,
         :groupname => nothing,
-        :group_map => c.group_map
+        :group_map => nm -> string(ctx.id, "_", nm)
     )]
 end
 
@@ -298,9 +300,10 @@ function component_solidmodel_ops(sch::Schematic, target::Target)
     near_ops = []
     for idx in find_components(AbstractComponent, sch)
         path = idx isa Tuple ? idx : (idx,)
-        node = getpath(sch.graph, path...)[end]
-        ctx = SolidModelRenderContext(target, transformation(sch, path), path)
-        c = component(node)
+        nodes = getpath(sch.graph, path...)
+        id = join((n.id for n in nodes), ".")
+        ctx = SolidModelRenderContext(target, transformation(sch, path), id)
+        c = component(nodes[end])
         ops = solidmodel_ops(c, ctx)
         mode = _check_fragment_mode(solidmodel_fragment(c))
         if mode == :global
