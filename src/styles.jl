@@ -11,6 +11,12 @@ any entity type it can be applied to. As a fallback, it can implement
 `to_polygons(::Polygon, ::MyStyle; kwargs...)`, in which case entities will be converted to
 polygons before applying the style.
 
+A style should implement `styled_loop` and `to_curvilinear` methods to allow rounding and curve
+recovery with nested styles.
+
+A style should implement `transform(::MyStyle, f)` if it holds information in a local coordinate
+frame (like `WithDirection` does).
+
 Unless implemented by the style, `lowerleft` and `upperright` (and hence `bounds`)
 of a styled entity will use the underlying entity's bounds. Similarly, `footprint` and
 `halo` will fall back to using the underlying entity. Exceptions include the `NoRender`
