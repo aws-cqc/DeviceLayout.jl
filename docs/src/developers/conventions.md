@@ -35,8 +35,21 @@ failure. Warn when a designer should know a result may not be what they expect, 
 otherwise. Throw an error rather than guess at what the user intended
 (see [Design Principles](@ref dev-principles)).
 
-**Global state.** Avoid adding global state. Where it is unavoidable, add it to the list in
-[Global state](@ref dev-global-state).
+**Global state.** Avoid adding global state, but be aware that it is used in a few places:
+
+- `__init__` creates the global Clipper handles (`_clip`, `_coffset`) and registers FileIO
+  formats. `precompile.jl` duplicates both because `__init__` has not run during precompilation.
+  Clipper is not thread-safe through these handles.
+- `SolidModels` wraps a single global Gmsh session. Tests that touch it use the
+  `QuietGmshSetup` snippet to initialize it and silence output.
+- `MESHSIZE_PARAMS` (`solidmodels/solidmodels.jl`) holds the global mesh scale and default
+  grading as well as the mesh-size control points and their KD-trees. `render!` clears
+  the control points, but the scalar settings persist across models until changed.
+- The `uniquename` counter, the `Memoization` cache for B-spline tangent optimization, and the
+  PolyText font caches are process-global.
+- Some warnings are shown once per session (for example, `recover_curves` warns once per entity
+  type about lost curves). Test items share a process, so a test asserting such a warning
+  depends on nothing earlier having triggered it.
 
 ## Style
 
@@ -52,8 +65,7 @@ so formatting is never a review topic. Remaining style decisions can be settled 
 
 **Leading underscores.** A name beginning with `_` is not called by users. It is either a
 private helper or an interface method that users implement but don't call, like `_geometry!`,
-`_graph!`, `_build_subcomponents`, and `_route_leg!` (see
-[Extension points](@ref dev-extension-points)). New private helpers within a source file should
+`_graph!`, `_build_subcomponents`, and `_route_leg!`. New private helpers within a source file should
 begin with `_`. New methods used across source files should not use a leading underscore, even
 if they are not public (exported, documented, or part of an interface that users implement).
 
