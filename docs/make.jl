@@ -86,7 +86,6 @@ makedocs(
         "Developer Guide" => [
             "Overview" => "developers/index.md",
             "Design Principles" => "developers/principles.md",
-            "Architecture" => "developers/architecture.md",
             "Conventions" => "developers/conventions.md",
             "Contributing" => "developers/contributing.md",
             "Versioning Policy" => "developers/versioning.md",
