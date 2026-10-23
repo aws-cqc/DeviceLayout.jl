@@ -136,6 +136,147 @@ function intersection_ops(t::SolidModelTarget, sch::Schematic)
     ]
 end
 
+"""
+    SolidModelComponent{T} <: AbstractComponent{T}
+    SolidModelComponent(filename, meta; name=uniquename("solid"), scale=1.0, hooks=compass(),
+                        parameters=(;))
+
+An external CAD solid imported into a `SolidModel` at its solved schematic transform and
+the z of layer `meta`.
+
+The level of `meta` only enters the z-height calculation. Unlike rendered layers, a part on
+an even level is not mirrored to face the other way.
+
+It emits no 2D geometry and instead contributes an [`SolidModels.import_solid!`](@ref)
+operation during solid-model rendering. `scale` applies a uniform scale, such as for unit
+conversion.
+
+`hooks` supplies named mate points and defaults to a [`compass`](@ref) at the CAD origin.
+
+The imported solid lands in a physical group named after its node `id`. Physical groups
+carried by the file (a `.xao`) are registered as `"<id>_<name>"`, so the same component
+placed in several nodes gives distinct group names that trace back to the schematic.
+
+The `component_fragment` option of `render!(sm, sch, target)` selects when the parts are
+imported and made conformal with the rest of the model.
+
+Requires a `SolidModelTarget` using the OpenCascade kernel.
+
+# Example
+
+```julia
+using DeviceLayout, DeviceLayout.SchematicDrivenLayout
+using Unitful: μm, °
+
+chip = SolidModelComponent(
+    "chip.step",
+    SemanticMeta(:chip);
+    hooks=(; mount=PointHook(10μm, 0μm, 180°))
+)
+
+g = SchematicGraph("demo")
+anchor = add_node!(g, Spacer(; p1=Point(100μm, 0μm)))
+fuse!(g, anchor => :p1_east, chip => :mount)
+
+sch = plan(g)
+check!(sch)
+```
+
+Rendering `sch` with a `SolidModelTarget` imports `chip.step` at the solved pose and layer
+height.
+"""
+@compdef struct SolidModelComponent{T} <: AbstractComponent{T}
+    name::String = "solid"
+    filename::String
+    meta::SemanticMeta = SemanticMeta(:solid)
+    scale::Float64 = 1.0
+    hooks::NamedTuple = compass(p0=zero(Point{T}))
+    parameters::NamedTuple = (;)
+end
+
+function SolidModelComponent(
+    filename::String,
+    meta::SemanticMeta;
+    name::String=uniquename("solid"),
+    scale=1.0,
+    hooks::Union{Nothing, NamedTuple}=nothing,
+    parameters::NamedTuple=(;)
+)
+    T = typeof(1.0UPREFERRED)
+    hks = isnothing(hooks) ? compass(p0=zero(Point{T})) : hooks
+    return SolidModelComponent{T}(;
+        name,
+        filename,
+        meta,
+        scale=Float64(scale),
+        hooks=hks,
+        parameters
+    )
+end
+
+hooks(c::SolidModelComponent) = c.hooks
+
+# The `import_solid!` operation for `c` placed in node `id` with global transformation `tr`.
+function _import_op(c::SolidModelComponent, id::String, tr, target::Target)
+    return (
+        id,
+        SolidModels.import_solid!,
+        (c.filename,),
+        :transform => tr,
+        :z => layer_z(target.technology, c.meta),
+        :scale => c.scale,
+        :groupname => nothing,
+        :group_map => nm -> string(id, "_", nm)
+    )
+end
+
+# `fragment_near!` over every imported part at once. Fragmentation updates the parts' own
+# groups, and returning no entities leaves the destination group untouched, so one call
+# does not merge the parts into a single group.
+function _fragment_components!(sm::SolidModels.SolidModel, ids)
+    SolidModels.fragment_near!(sm, ids)
+    return []
+end
+
+const _COMPONENT_FRAGMENT_MODES = (:global, :near)
+
+"""
+    component_solidmodel_ops(sch::Schematic, target::Target; fragment=:global)
+        -> (; postrender, post_fragment)
+
+Collect the import operations of the `SolidModelComponent`s in `sch` at their solved global
+transforms, split by when they run. With `fragment=:global` they all go in `postrender`.
+With `fragment=:near` they go in `post_fragment`, followed by one
+[`SolidModels.fragment_near!`](@ref) over all of them, so every part is in place before any
+is fragmented.
+"""
+function component_solidmodel_ops(sch::Schematic, target::Target; fragment=:global)
+    fragment in _COMPONENT_FRAGMENT_MODES || throw(
+        ArgumentError(
+            "component_fragment must be one of $(_COMPONENT_FRAGMENT_MODES), got $(repr(fragment))"
+        )
+    )
+    ops = map(find_components(SolidModelComponent, sch)) do idx
+        # A component inside a composite is found by its path of node indices; its id is
+        # the node ids along that path joined by "." as in `add_graph!`.
+        path = idx isa Tuple ? idx : (idx,)
+        nodes = getpath(sch.graph, path...)
+        id = join((n.id for n in nodes), ".")
+        return _import_op(component(nodes[end]), id, transformation(sch, path), target)
+    end
+    (fragment == :global || isempty(ops)) && return (; postrender=ops, post_fragment=[])
+    ids = first.(ops)
+    near = (first(ids), _fragment_components!, (ids,))
+    return (; postrender=[], post_fragment=vcat(ops, [near]))
+end
+
+# Keyword arguments that `render!(sm, sch, target)` consumes itself rather than passing on.
+_without_schematic_options(kw) = (;
+    (
+        k => v for (k, v) in pairs(kw) if !(k in (:post_fragment_ops, :component_fragment))
+    )...
+)
+
 bounding_layers(t::SolidModelTarget) = t.bounding_layers
 
 wave_port_layers(t::SolidModelTarget) = t.wave_port_layers
@@ -238,6 +379,27 @@ pipelines, where warnings may require human review.
 
 Additional keyword arguments may be used for certain entity types for controlling
 how geometry entities are converted to primitives and added to `sm`.
+
+`component_fragment` and `post_fragment_ops` may be given as keywords or in the target's
+rendering options.
+
+`component_fragment` selects how [`SolidModelComponent`](@ref) parts are made conformal
+with the rest of the model:
+
+  - `:global` (default) imports them before the global fragmentation pass, which fragments
+    everything with everything. Like other postrender geometry, they are clipped to the
+    target's `bounding_layers`.
+  - `:near` imports them after that pass and runs one [`SolidModels.fragment_near!`](@ref)
+    over all of them, which fragments only the entities near the parts. This is faster for
+    a large model, at the cost of the caveats listed for `fragment_near!`. The parts are not
+    clipped to `bounding_layers`, so faces of a part extending past the bounding volume are
+    not in the `"exterior_boundary"` group.
+
+`post_fragment_ops` run after the components' operations, so that for example
+[`SolidModels.apply_precedence`](@ref) sees the imported parts already conformal.
+
+A large part that is already conformal inside can be imported faster by hand: an [`SolidModels.import_solid!`](@ref) in `post_fragment_ops`, followed by a
+`fragment_near!` of the parts that touch it rather than of the large part itself.
 """
 function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, kwargs...)
     sch.checked[] || error(
@@ -251,8 +413,29 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
     # Extrusions
     # Target specific actions
     # Intersections with rendered volume
-    postrender_ops =
-        vcat(extrusion_ops(target, sch), target.postrenderer, intersection_ops(target, sch))
+    # Import component solids before target operations that may reference or intersect them.
+    component_ops = component_solidmodel_ops(
+        sch,
+        target;
+        fragment=get(
+            kwargs,
+            :component_fragment,
+            get(target.rendering_options, :component_fragment, :global)
+        )
+    )
+    postrender_ops = vcat(
+        extrusion_ops(target, sch),
+        component_ops.postrender,
+        target.postrenderer,
+        intersection_ops(target, sch)
+    )
+    # Components' operations come first, so that user operations (e.g. `apply_precedence`)
+    # see the imported parts already fragmented with the model.
+    post_fragment_ops = vcat(
+        component_ops.post_fragment,
+        get(target.rendering_options, :post_fragment_ops, []),
+        get(kwargs, :post_fragment_ops, [])
+    )
     reopen_logfile(sch, :render_solidmodel)
     with_logger(sch.logger) do
         return render!(
@@ -260,10 +443,11 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
             sch.coordinate_system;
             zmap=Base.Fix1(layer_z, target),
             postrender_ops=postrender_ops,
+            post_fragment_ops=post_fragment_ops,
             map_meta=_map_meta_fn(target),
             retained_physical_groups=target.retained_physical_groups,
-            kwargs...,
-            target.rendering_options...
+            _without_schematic_options(kwargs)...,
+            _without_schematic_options(target.rendering_options)...
         )
     end
     close_logfile(sch)
