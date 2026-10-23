@@ -11,7 +11,7 @@ Some rules are particularly consequential:
 **Units and coordinate types.** Almost all geometry is parameterized by a coordinate type
 `T <: Coordinate = Union{Real, Length}`. Code must work for unitless `Float64` (interpreted as
 microns), for `Unitful` lengths, and (in some places) for `Int`. Functions that take more than
-one unitful coordinate should work when they have different units. Use `zero(T)`, `oneunit(T)`,
+one unitful coordinate should work when they have different types. Use `zero(T)`, `oneunit(T)`,
 `DeviceLayout.onenanometer(T)`, `DeviceLayout.onemicron(T)`, and `ustrip(unit, x)` rather than
 assuming a unit.
 
@@ -27,7 +27,7 @@ Auto-generated names are not part of the public API (see
 [What counts as breaking?](@ref dev-breaking)).
 
 **Fallbacks.** A fallback that dispatches on an abstract type must be correct for
-every subtype that could ever reach it, including ones that don't exist yet. If you can't guarantee that, throw instead. A plausible-looking fallback gives a new subtype silently wrong answers rather than a MethodError.
+every subtype that could ever reach it, including ones that don't exist yet. If you can't guarantee that, throw instead. A fallback used as a common default gives a new subtype silently wrong answers rather than a MethodError.
 
 **Logging.** Use `@warn`/`@info` from `Logging`, never `println`, for anything a user should see. Many tests
 assert on logs (see [Writing tests](@ref dev-writing-tests)), so a stray warning can be a test

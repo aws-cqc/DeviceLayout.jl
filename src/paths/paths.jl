@@ -137,6 +137,22 @@ Any style that applies to segments which have non-zero path length. For most sty
 segment length dictate the abruptness of the transition (hence, stretching the style).
 Concrete types inheriting from `ContinuousStyle{true}` should have a length field as the
 last field of their structure.
+
+A `ContinuousStyle` must implement
+
+```julia
+extent
+width
+translate
+reverse
+pin
+Curvilinear.pathtopolys(::BaseContinuousSegment, ::MyStyle)
+```
+
+If it only produces straight edges on a `Straight` segment, add it to `Curvilinear.LinearStyle`
+and implement a fast `to_polygons(::Straight, ::MyStyle)`.
+
+If the style should carry mesh sizing information, implement `SolidModels.meshsize`.
 """
 abstract type ContinuousStyle{CanStretch} <: Style end
 
@@ -152,15 +168,32 @@ include("contstyles/interface.jl")
 """
     abstract type Segment{T<:Coordinate} end
 
-Path segment in the plane. All Segment objects should have the implement the following
-methods:
+Path segment in the plane.
 
-  - `pathlength`
-  - `p0`
-  - `α0`
-  - `setp0!`
-  - `setα0!`
-  - `α1`
+All Segment objects must implement `pathlength`, `setp0!`, and `setα0!`.
+
+A `ContinuousSegment` must implement `Curvilinear.pathtopolys(::MySegment, ::Style)`
+for any style it should work with, either by working as a `Curvilinear.BaseContinuousSegment`
+with `Paths.offset` or by resolving to a `BaseContinuousSegment`.
+
+A `ContinuousSegment` must also implement a callable `(seg::MySegment)(t)`
+for `t ∈ [0, pathlength]`; methods may use `ForwardDiff` on `seg(t)` so it should
+be differentiable.
+
+For performance, it should also implement any of
+
+```julia
+p0
+p1
+α0
+α1
+direction
+curvatureradius
+```
+
+when they can be calculated more efficiently than using `seg(t)` and `ForwardDiff`.
+
+A `DiscreteSegment` must implement `p0`, `p1`, `α0`, `α1`, `line_segments`, and `to_polygons`.
 """
 abstract type Segment{T <: Coordinate} end
 @inline Base.eltype(::Segment{T}) where {T} = T

@@ -85,17 +85,6 @@ the TestEnv routes for iteration on those versions.
 CI runs the full suite on every released Julia minor from 1.10 upward. Pre-release Julia is
 allowed to fail but failures should be investigated.
 
-### Anatomy of the suite
-
-| File | Covers |
-|---|---|
-| `runtests.jl` | `CommonTestSetup` snippet (imports; unit constants like `μm2nm` for mixed-preference tests; `is_sliver`, `with_test_logger`, `quiet_test_output`, `check_g1_continuity`, `check_line_arc_fillets`), `QuietGmshSetup` snippet, runner. |
-| `tests.jl` | The original monolithic file: points, polygons, transformations, cells, paths, backends. New tests usually go in a topical file instead. |
-| `test_<topic>.jl` | One file per subsystem: `test_clipping.jl`, `test_render.jl`, `test_routes.jl`, `test_schematicdriven.jl`, `test_solidmodel.jl`, `test_parameter_set.jl`, ... |
-| `test_examples.jl` | The "ExamplePDK" item runs `examples/DemoQPU17` end to end and checks the artwork against a geometry fingerprint. The "Single Transmon" item rebuilds the `examples/SingleTransmon` schematic from ExamplePDK components and checks the rendered `SolidModel`'s physical groups; the example script itself needs Palace and other packages and is not run in CI. |
-| `test_aqua.jl` | [Aqua](https://github.com/JuliaTesting/Aqua.jl): compat entries for all deps, no type piracy (except one deliberate `ForwardDiff` method), no stale deps, no undefined exports, no method ambiguities. |
-| `*.gds`, `test_ezdxf.py` | Fixtures: malformed GDS files for reader robustness, and a Python helper for the DXF round-trip. |
-
 ### [Writing tests](@id dev-writing-tests)
 
 - Put new tests in the topical `test_<topic>.jl` file, or create one. Use `@testitem` with the shared setup snippet:
@@ -106,8 +95,8 @@ allowed to fail but failures should be investigated.
   `with_expected_info`, or `quiet_test_output` from the snippet to require that expected
   warnings appear and no others do, or `@test_logs` directly. Unexpected warnings in a
   test are failures, not noise. The log should be quiet when tests are passing.
-- **Unitful and unitless.** If the code under test is generic in the coordinate type, test at
-  least one `Length` type and `Float64`. The snippet's `μm2nm`, `μm2μm`, etc. let you test
+- **Unitful and unitless.** If the code under test is generic in the coordinate type, test
+  `Length` types as well as `Float64`. The snippet's `μm2nm`, `μm2μm`, etc. let you test
   mixed-preference arithmetic without changing the compile-time preference.
   
   !!! warning "Test environment units"
@@ -119,11 +108,6 @@ allowed to fail but failures should be investigated.
 - **Geometry comparisons** should use `isapprox` with an explicit `atol`, or compare
   invariants (area, perimeter, vertex count, `is_sliver`) rather than raw vertex lists, unless
   the vertex list is the contract.
-- **Fingerprints.** `Cells.geometry_fingerprint` gives a SHA-256 of a cell's flattened,
-  canonically ordered geometry. Use it for "nothing changed" regression tests on large
-  outputs. When a rendering change is intentional, update the expected hash and say so in the
-  PR. The QPU17 fingerprint test is gated to Julia ≥ 1.12 because Julia 1.10 and 1.11 give
-  different hashes.
 - Files written during tests go under `tdir` (a `mktempdir()` from the snippet).
 
 ## [Formatting](@id dev-formatting)
@@ -234,9 +218,11 @@ checks pass and a maintainer has approved.
 ### [Reviewing](@id dev-review)
 
 Reviewers check the items above in [What a pull request includes](@ref dev-pr-checklist).
-They also review contributions not just on their own terms
-but in terms of the package's overall direction, design, and code health. Some questions
-for reviewers are listed below.
+They also review contributions not just on their own terms but in terms of the package's
+overall direction, design, and code health. Some typical questions a maintainer will ask
+are listed below, but contributors using agents are encouraged to use their own
+review instructions to avoid tunnel vision on criteria mentioned here and increase the
+diversity of approaches used for review.
 
 **Premise:**
 
