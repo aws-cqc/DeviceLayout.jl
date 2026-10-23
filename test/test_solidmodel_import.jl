@@ -549,9 +549,9 @@ end
 @testitem "SolidModelComponent fragment modes and file groups" setup =
     [CommonTestSetup, QuietGmshSetup] begin
     using .SchematicDrivenLayout
-    import DeviceLayout.SchematicDrivenLayout: SolidModelComponent
+    import DeviceLayout.SchematicDrivenLayout: SolidModelComponent, Spacer
     import DeviceLayout.SolidModels: gmsh, dimtags, hasgroup, dimgroupdict
-    using DeviceLayout: SemanticMeta, GDSMeta, Rectangle, centered
+    using DeviceLayout: SemanticMeta, GDSMeta, Rectangle, centered, Point
 
     # External CAD as .xao so it carries a face group: a 40 μm cube resting on z = 0, with its
     # top face in a group named "lid".
@@ -578,14 +578,17 @@ end
         substrate_layers=[:chip_outline]
     )
 
-    # Substrate extruded downward from a chip-outline rectangle, cube resting on its top plane.
-    function build(fragment)
+    # Substrate extruded downward from a chip-outline rectangle, with `n` cubes resting on its
+    # top plane side by side.
+    function build(fragment; n=1, target=target)
         reset_uniquename!()
         g = SchematicGraph("smcm_$fragment")
-        node = add_node!(
-            g,
-            SolidModelComponent(xao, SemanticMeta(:chip_outline); name="cad", fragment)
-        )
+        # Cube centres at the spacer's ends, 60 μm apart, leaving a 20 μm gap between cubes.
+        sp = add_node!(g, Spacer(; p1=Point(60μm, 0μm)))
+        cube() = SolidModelComponent(xao, SemanticMeta(:chip_outline); name="cad")
+        ends = [sp => :p0_west, sp => :p1_east][1:n]
+        mates = [:east, :west]
+        ids = [fuse!(g, e, cube() => m).id for (e, m) in zip(ends, mates)]
         fp = plan(g; log_dir=nothing)
         render!(
             fp.coordinate_system,
@@ -594,17 +597,18 @@ end
         )
         check!(fp)
         sm = SolidModel("smcm_$fragment"; overwrite=true)
-        render!(sm, fp, target)
-        return sm, node.id
+        kw = isnothing(fragment) ? (;) : (; component_fragment=fragment)
+        render!(sm, fp, target; kw...)
+        return sm, ids
     end
     faceset(sm, grp) = Set(
         abs(t) for
         (_, t) in gmsh.model.getBoundary(dimtags(sm[grp, 3]), false, false, false)
     )
-    shared(sm, id) = intersect(faceset(sm, id), faceset(sm, "chip_outline_L1_extrusion"))
+    shared(sm, a, b="chip_outline_L1_extrusion") = intersect(faceset(sm, a), faceset(sm, b))
 
     @testset ":near fragments locally and keeps mapped file groups" begin
-        sm, id = build(:near)
+        sm, (id,) = build(:near)
         @test hasgroup(sm, id, 3)
         @test hasgroup(sm, "$(id)_cube", 3)      # file group, prefixed with the node id
         @test hasgroup(sm, "$(id)_lid", 2)
@@ -612,39 +616,39 @@ end
         @test length(dimtags(sm["$(id)_lid", 2])) == 1
     end
 
-    @testset ":none imports after the pass and leaves the part unfused" begin
-        sm, id = build(:none)
-        @test hasgroup(sm, "$(id)_cube", 3)
-        @test isempty(shared(sm, id))            # touching, but no shared entity
+    @testset ":global fuses through the global pass, and is the default" begin
+        for fragment in (:global, nothing)
+            sm, (id,) = build(fragment)
+            @test length(shared(sm, id)) == 1
+        end
     end
 
-    @testset ":global still fuses through the global pass" begin
-        sm, id = build(:global)
+    @testset ":near fragments all parts in one call, keeping their groups apart" begin
+        sm, ids = build(:near; n=2)
+        @test length(ids) == 2
+        for id in ids
+            @test length(dimtags(sm[id, 3])) == 1
+            @test length(shared(sm, id)) == 1
+        end
+        # No group beyond the parts' own and their file groups.
+        @test Set(keys(dimgroupdict(sm, 3))) ==
+              Set(["chip_outline_L1_extrusion"; ids; ids .* "_cube"])
+    end
+
+    @testset "mode from the target's rendering options" begin
+        sm, (id,) = build(
+            nothing;
+            target=SolidModelTarget(
+                tech;
+                levelwise_layers=[:chip_outline],
+                substrate_layers=[:chip_outline],
+                component_fragment=:near
+            )
+        )
         @test length(shared(sm, id)) == 1
     end
 
-    @test_throws ArgumentError SolidModelComponent(
-        xao,
-        SemanticMeta(:x);
-        fragment=:sideways
-    )
-
-    @testset "an invalid mode set through the keyword constructor is caught at render" begin
-        # The @compdef keyword constructor does not validate `fragment`, so the check has to
-        # happen where the mode is consumed.
-        bad = SolidModelComponent{typeof(1.0μm)}(;
-            filename=xao,
-            meta=SemanticMeta(:chip_outline),
-            fragment=:sideways
-        )
-        g = SchematicGraph("smcm_bad")
-        add_node!(g, bad)
-        fp = plan(g; log_dir=nothing)
-        @test_throws ArgumentError SchematicDrivenLayout.component_solidmodel_ops(
-            fp,
-            target
-        )
-    end
+    @test_throws ArgumentError build(:sideways)
 end
 
 @testitem "SolidModelComponent placed in several nodes" setup =
@@ -856,14 +860,14 @@ end
         (; vacuum=GDSMeta(), cad=GDSMeta(2)),
         (; height=(; vacuum=-50μm, cad=0μm), thickness=(; vacuum=100μm))
     )
-    function planned(fragment)
+    function planned()
         reset_uniquename!()
         g = SchematicGraph("smcv")
         sp = add_node!(g, Spacer(; p1=Point(10μm, 0μm)))
         fuse!(
             g,
             sp => :p1_east,
-            SolidModelComponent(brep, SemanticMeta(:cad); name="cad", fragment) => :west
+            SolidModelComponent(brep, SemanticMeta(:cad); name="cad") => :west
         )
         sch = plan(g; log_dir=nothing)
         check!(sch)
@@ -907,7 +911,7 @@ end
     end
 
     @testset "global fragment, precedence from the target" begin
-        sch, cad_group = planned(:global)
+        sch, cad_group = planned()
         target = SolidModelTarget(tech; post_fragment_ops=precedence(cad_group))
         sm = SolidModel("smcv"; overwrite=true)
         @test_nowarn render!(sm, sch, target)
@@ -917,12 +921,13 @@ end
     @testset "near fragment, precedence from the call" begin
         # The import and `fragment_near!` are themselves post-fragment operations, so this
         # fails if the user's operations replace the component's instead of following them.
-        sch, cad_group = planned(:near)
+        sch, cad_group = planned()
         sm = SolidModel("smcv_near"; overwrite=true)
         @test_nowarn render!(
             sm,
             sch,
             SolidModelTarget(tech);
+            component_fragment=:near,
             post_fragment_ops=precedence(cad_group)
         )
         check_model(sm, cad_group)

@@ -40,11 +40,11 @@ The format of this changelog is based on
     `import_solid!` operation at its solved transform and the z of its layer. `hooks` supplies
     named mate points, defaulting to a `compass` at the CAD origin. The solid's physical
     group is named after its node id, and a `.xao` file's own groups are prefixed with it.
-    `fragment` selects how the part is made conformal:
-    `:global` (default) imports it before the global fragmentation pass, `:near` imports it
-    afterwards and runs `fragment_near!` on it, and `:none` imports it as is.
-  - `render!(sm, sch, target)` accepts `post_fragment_ops`, as a keyword or in the target's
-    rendering options, and runs them after the components' own operations.
+  - `render!(sm, sch, target)` accepts `component_fragment` and `post_fragment_ops`, as
+    keywords or in the target's rendering options. `component_fragment=:global` (default)
+    imports `SolidModelComponent` parts before the global fragmentation pass;
+    `component_fragment=:near` imports them afterwards and runs one `fragment_near!` over
+    all of them. `post_fragment_ops` run after the components' own operations.
 
 ### Changed
 
