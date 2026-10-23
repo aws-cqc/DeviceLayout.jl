@@ -1,7 +1,6 @@
 # [Design Principles](@id dev-principles)
 
-Development of DeviceLayout.jl is guided by a few principles. They are the tie-breakers when a
-design decision isn't obvious, and they're the standard reviewers will hold a change to.
+Development of DeviceLayout.jl is guided by a few principles. Triage, roadmapping, and review use them as tie-breakers when the right decision isn't obvious.
 
 1. **Target the design cycle:** Prioritize the time designers spend taking a design from idea
    to completion. Provide designers with the right abstractions and precise feedback for fast
@@ -69,5 +68,3 @@ to handle complex rounding (including filleting of corners where arcs meet lines
 even when the final goal is plain polygons. A canonical geometry form based on
 `Vector{CurvilinearRegion}` [has been proposed](https://github.com/aws-cqc/DeviceLayout.jl/issues/293)
 for an eventual v2.
-
-The [Architecture](@ref dev-architecture) page describes how this architecture is laid out in the source.
