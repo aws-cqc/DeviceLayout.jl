@@ -276,8 +276,9 @@ function Polygons.signed_area(e::CurvilinearPolygon{T}) where {T}
 end
 
 # Twice the signed area enclosed by curve `c` followed by its chord back to its start.
-# Circular segment: r²(α - sin α) / 2 has the sign of α, which is positive for a left turn
-_chord_area2(c::Paths.Turn) = c.r^2 * (uconvert(NoUnits, c.α) - sin(c.α))
+# Circular segment: r²(α - sin α) / 2 has the sign of α, which is positive for a left turn.
+# A negative radius sweeps the other way (as in `discretize_curve`), so it flips the sign.
+_chord_area2(c::Paths.Turn) = c.r * abs(c.r) * (uconvert(NoUnits, c.α) - sin(c.α))
 # Regions of paths along arcs are bounded by constant offsets of the arcs, which are arcs
 _chord_area2(c::Paths.ConstantOffset{T, Paths.Turn{T}}) where {T} =
     _chord_area2(Paths.Turn(c))
@@ -332,18 +333,18 @@ function _turning_angle(b::Paths.BSpline)
     for k = 1:(length(ts) - 1), j = 1:8
         t0 = ts[k] + (j - 1) * (ts[k + 1] - ts[k]) / 8
         t1 = ts[k] + j * (ts[k + 1] - ts[k]) / 8
-        θ += _turning_angle(g, t0, t1, g(t0), g(t1), 0)
+        θ += _unwrapped_angle(g, t0, t1, g(t0), g(t1), 0)
     end
     return θ
 end
 
-function _turning_angle(g, t0, t1, g0, g1, depth)
+function _unwrapped_angle(g, t0, t1, g0, g1, depth)
     c = getx(g0) * getx(g1) + gety(g0) * gety(g1)
     (c > zero(c) || depth == 16) && return atan(_cross(g0, g1), c)
     tm = (t0 + t1) / 2
     gm = g(tm)
-    return _turning_angle(g, t0, tm, g0, gm, depth + 1) +
-           _turning_angle(g, tm, t1, gm, g1, depth + 1)
+    return _unwrapped_angle(g, t0, tm, g0, gm, depth + 1) +
+           _unwrapped_angle(g, tm, t1, gm, g1, depth + 1)
 end
 
 function _chord_area2(c::Paths.Segment{T}) where {T}
