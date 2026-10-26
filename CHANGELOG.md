@@ -24,8 +24,16 @@ The format of this changelog is based on
     OpenCASCADE can reject when rendering to a `SolidModel`, into simple regions. Pieces are
     classified by winding, so keyholed islands and holes are kept. Run it after boolean
     operations and `split_t_junctions!`.
+  - `Polygons.orientation(::CurvilinearPolygon)` returns the winding of a curved contour from
+    its signed area. Arcs, `BSpline`s, and constant offsets of either (as in path regions)
+    contribute their exact area against their chords, so the contour is not discretized; other
+    curves are discretized.
 
 ### Changed
+
+  - `CurvilinearRegion` reads the winding of its exterior and holes from their exact signed
+    area instead of discretizing them, so constructing a region with a circular exterior and
+    a circular hole takes about 6 µs instead of 120 µs.
 
   - Finding path intersections (`Intersect.intersect!`, `prepared_intersections`, and
     `SchematicDrivenLayout.crossovers!`) uses a sort-and-sweep over line segments instead of
