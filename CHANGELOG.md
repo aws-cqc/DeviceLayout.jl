@@ -56,6 +56,13 @@ The format of this changelog is based on
     on the default not merging air bridges now get fewer, larger components. This costs a few
     milliseconds even on large models, where the former geometric search took about a minute
     on DemoQPU17.
+  - `Polygons.orientation(::CurvilinearPolygon)` returns the winding of a curved contour from
+    its signed area. Arcs, `BSpline`s, and constant offsets of either (as in path regions)
+    contribute their exact area against their chords, so the contour is not discretized; other
+    curves are discretized.
+  - `CurvilinearRegion` reads the winding of its exterior and holes from their exact signed
+    area instead of discretizing them, so constructing a region with a circular exterior and
+    a circular hole takes about 6 µs instead of 120 µs.
   - Finding path intersections (`Intersect.intersect!`, `prepared_intersections`, and
     `SchematicDrivenLayout.crossovers!`) uses a sort-and-sweep over line segments instead of
     enumerating every pair of segments that overlap in x. Results are unchanged, but

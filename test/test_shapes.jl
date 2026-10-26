@@ -556,7 +556,7 @@ end
 
     # A curved (counterclockwise) hole: half-disk pair forming a circle of radius 15μm.
     # Its winding is invisible from the two vertices alone — normalization must read it
-    # from the discretized loop.
+    # from the curves.
     h1 = Point(15.0μm, 0.0μm)
     h2 = Point(-15.0μm, 0.0μm)
     circ_hole = CurvilinearPolygon(
@@ -595,6 +595,123 @@ end
     rec = union2d_curved(cr_curved)
     @test sum(sum(length(h.curves) for h in r.holes; init=0) for r in rec) == 2
     @test isempty(to_polygons(xor2d(rec, cr_curved)))
+end
+
+@testitem "CurvilinearPolygon orientation" setup = [CommonTestSetup] begin
+    # Straight edges only: same as the polygon
+    sq = CurvilinearPolygon(points(convert(Polygon, centered(Rectangle(100μm, 40μm)))))
+    @test Polygons.signed_area(sq) ≈ (100 * 40)μm^2
+    @test Polygons.orientation(sq) == 1
+    @test Polygons.orientation(Curvilinear._reverse(sq)) == -1
+
+    # Arcs contribute their circular segments exactly, far from the origin too
+    circ = CurvilinearPolygon(Circle(Point(1.0e5μm, -3.0e4μm), 20.0μm))
+    @test Polygons.signed_area(circ) ≈ π * (20μm)^2 rtol = 1e-12
+    @test Polygons.signed_area(Curvilinear._reverse(circ)) ≈ -π * (20μm)^2 rtol = 1e-12
+    @test Polygons.orientation(circ) == 1
+    @test Polygons.orientation(Curvilinear._reverse(circ)) == -1
+
+    # Two vertices closed by two arcs: no winding at the vertices alone
+    r = 5μm * sqrt(2)
+    lens = CurvilinearPolygon(
+        [Point(0.0μm, 0.0μm), Point(10.0μm, 0.0μm)],
+        [
+            Paths.Turn(90.0°, r, Point(0.0μm, 0.0μm), -45.0°),
+            Paths.Turn(90.0°, r, Point(10.0μm, 0.0μm), 135.0°)
+        ],
+        [1, 2]
+    )
+    @test Polygons.signed_area(lens) ≈ r^2 * (π / 2 - 1) # two circular segments
+    @test Polygons.orientation(lens) == 1
+    @test Polygons.orientation(Curvilinear._reverse(lens)) == -1
+
+    # A BSpline closed by its chord is integrated exactly, also after a split (which keeps
+    # the parent's knots)
+    dense_area(b) = Polygons.signed_area(Polygon(b.r.(range(0, 1, length=100_001))))
+    pa = Path(Point(0.0μm, 0.0μm))
+    bspline!(pa, [Point(50.0μm, 30.0μm), Point(100.0μm, 0.0μm)], 0°, Paths.Trace(1μm))
+    bs = pa[1].seg
+    bsl = CurvilinearPolygon([bs.p0, bs.p1], [bs], [1])
+    @test Polygons.signed_area(bsl) ≈ dense_area(bs) rtol = 1e-9
+    bs1 = last(Paths._split(bs, pathlength(bs) / 3)) # has a knot inside (0, 1)
+    bsl1 = CurvilinearPolygon([bs1.p0, bs1.p1], [bs1], [1])
+    @test Polygons.signed_area(bsl1) ≈ dense_area(bs1) rtol = 1e-9
+    @test Polygons.signed_area(Curvilinear._reverse(bsl)) ≈ -Polygons.signed_area(bsl)
+    @test Polygons.orientation(bsl) == 1
+    @test Polygons.orientation(Curvilinear._reverse(bsl)) == -1
+
+    # A constant offset of an arc is an arc: a disk of radius 8μm made of an offset half-turn
+    # and a plain half-turn, with the offset to either side of the turn's center
+    # (past the center, the offset arc is traversed on the far side, so the closing arc
+    # starts heading the other way)
+    function offset_disk(d; α1=270.0°)
+        off = Paths.offset(Paths.Turn(180.0°, 10.0μm, Point(10.0μm, 0.0μm), 90.0°), d)
+        q0, q1 = off(0.0μm), off(pathlength(off))
+        return CurvilinearPolygon(
+            [q0, q1],
+            [off, Paths.Turn(180.0°, 8.0μm, q1, α1)],
+            [1, 2]
+        )
+    end
+    disk = offset_disk(2.0μm)
+    @test disk.curves[1] isa Paths.ConstantOffset{<:Any, <:Paths.Turn}
+    @test Polygons.signed_area(disk) ≈ π * (8μm)^2 rtol = 1e-12
+    @test Polygons.signed_area(Curvilinear._reverse(disk)) ≈ -π * (8μm)^2 rtol = 1e-12
+    @test Polygons.signed_area(offset_disk(18.0μm; α1=90.0°)) ≈ π * (8μm)^2 rtol = 1e-12
+
+    # Constant offsets of a spline (path regions) are exact too, also where the offset is wider
+    # than the radius of curvature (so the offset curve has cusps) and where the tangent
+    # turns by more than 360°. Reference: each offset spline sampled at 20001 points.
+    function dense_offset_area(cl)
+        pts = Point{eltype(cl.p[1])}[]
+        curve_at = Dict(zip(cl.curve_start_idx, cl.curves))
+        for (k, p) in enumerate(cl.p)
+            push!(pts, p)
+            haskey(curve_at, k) || continue
+            ts = range(0, 1, length=20_001)[2:(end - 1)]
+            append!(pts, DeviceLayout._offset_bspline_point.(Ref(curve_at[k]), ts))
+        end
+        return Polygons.signed_area(Polygon(pts))
+    end
+    for (pts, α, sty) in [
+        ([Point(40.0μm, 40.0μm), Point(0.0μm, 80.0μm)], 180.0°, Paths.CPW(10μm, 6μm)),
+        (
+            [
+                Point(100.0μm, 50.0μm),
+                Point(50.0μm, 100.0μm),
+                Point(-20.0μm, 50.0μm),
+                Point(40.0μm, -20.0μm)
+            ],
+            90.0°,
+            Paths.CPW(4μm, 3μm)
+        )
+    ]
+        pa = Path(Point(0.0μm, 0.0μm))
+        bspline!(pa, pts, α, sty)
+        length(pts) > 2 && @test Curvilinear._turning_angle(pa[1].seg) ≈ 5π / 2
+        for cl in pathtopolys(pa[1])
+            @test all(c -> c isa Paths.ConstantOffset{<:Any, <:Paths.BSpline}, cl.curves)
+            @test Polygons.signed_area(cl) ≈ dense_offset_area(cl) rtol = 1e-6
+            @test Polygons.orientation(cl) == 1
+            @test Polygons.orientation(Curvilinear._reverse(cl)) == -1
+        end
+    end
+
+    # Other curves fall back to their discretization: the same disk with a general offset
+    gdisk = offset_disk(t -> 2.0μm)
+    @test gdisk.curves[1] isa Paths.GeneralOffset
+    @test Polygons.signed_area(gdisk) ≈ π * (8μm)^2 rtol = 1e-3
+    @test Polygons.orientation(Curvilinear._reverse(gdisk)) == -1
+
+    # Unitless coordinates
+    ucirc = CurvilinearPolygon(Circle(Point(0.0, 0.0), 2.0))
+    @test Polygons.signed_area(ucirc) ≈ 4π
+    @test Polygons.orientation(Curvilinear._reverse(ucirc)) == -1
+
+    # Zero-area loops count as counterclockwise and pass through region normalization
+    flat = CurvilinearPolygon([Point(0.0μm, 0.0μm), Point(1.0μm, 0.0μm)])
+    @test Polygons.orientation(flat) == 1
+    @test CurvilinearRegion(sq, [flat]).holes[1].p == flat.p
 end
 
 @testitem "Ellipses" setup = [CommonTestSetup] begin
