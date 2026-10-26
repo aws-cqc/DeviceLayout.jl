@@ -624,6 +624,19 @@ end
     @test Polygons.signed_area(lens) ≈ r^2 * (π / 2 - 1) # two circular segments
     @test Polygons.orientation(lens) == 1
     @test Polygons.orientation(Curvilinear._reverse(lens)) == -1
+    # The same lens mirrored, with negative radii: each arc sweeps opposite its angle
+    lens_neg = CurvilinearPolygon(
+        [Point(0.0μm, 0.0μm), Point(10.0μm, 0.0μm)],
+        [
+            Paths.Turn(90.0°, -r, Point(0.0μm, 0.0μm), 45.0°),
+            Paths.Turn(90.0°, -r, Point(10.0μm, 0.0μm), -135.0°)
+        ],
+        [1, 2]
+    )
+    @test Polygons.signed_area(lens_neg) ≈ -r^2 * (π / 2 - 1)
+    @test Polygons.orientation(lens_neg) ==
+          Polygons.orientation(to_polygons(lens_neg)) ==
+          -1
 
     # A BSpline closed by its chord is integrated exactly, also after a split (which keeps
     # the parent's knots)
@@ -686,10 +699,10 @@ end
             Paths.CPW(4μm, 3μm)
         )
     ]
-        pa = Path(Point(0.0μm, 0.0μm))
-        bspline!(pa, pts, α, sty)
-        length(pts) > 2 && @test Curvilinear._turning_angle(pa[1].seg) ≈ 5π / 2
-        for cl in pathtopolys(pa[1])
+        ps = Path(Point(0.0μm, 0.0μm))
+        bspline!(ps, pts, α, sty)
+        length(pts) > 2 && @test Curvilinear._turning_angle(ps[1].seg) ≈ 5π / 2
+        for cl in pathtopolys(ps[1])
             @test all(c -> c isa Paths.ConstantOffset{<:Any, <:Paths.BSpline}, cl.curves)
             @test Polygons.signed_area(cl) ≈ dense_offset_area(cl) rtol = 1e-6
             @test Polygons.orientation(cl) == 1
