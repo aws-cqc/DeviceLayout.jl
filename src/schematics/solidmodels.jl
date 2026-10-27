@@ -144,8 +144,18 @@ end
 An external CAD solid imported into a `SolidModel` at its solved schematic transform and
 the z of layer `meta`.
 
+!!! warning "Experimental API"
+
+    `SolidModelComponent` and [`SolidModels.import_solid!`](@ref) are experimental and may
+    change in minor versions as they are stress tested and harmonized with the experimental
+    solid-model pipeline. The names of the generated physical groups are the most likely to
+    change. `SolidModelComponent` is not exported.
+
 The level of `meta` only enters the z-height calculation. Unlike rendered layers, a part on
 an even level is not mirrored to face the other way.
+
+Like rendered geometry, the part is skipped if its layer is in the target's
+`ignored_layers` or is the `NORENDER_META` layer.
 
 It emits no 2D geometry and instead contributes an [`SolidModels.import_solid!`](@ref)
 operation during solid-model rendering. `scale` applies a uniform scale, such as for unit
@@ -168,7 +178,7 @@ Requires a `SolidModelTarget` using the OpenCascade kernel.
 using DeviceLayout, DeviceLayout.SchematicDrivenLayout
 using Unitful: μm, °
 
-chip = SolidModelComponent(
+chip = SchematicDrivenLayout.SolidModelComponent(
     "chip.step",
     SemanticMeta(:chip);
     hooks=(; mount=PointHook(10μm, 0μm, 180°))
@@ -261,9 +271,12 @@ function component_solidmodel_ops(sch::Schematic, target::Target; fragment=:glob
         # the node ids along that path joined by "." as in `add_graph!`.
         path = idx isa Tuple ? idx : (idx,)
         nodes = getpath(sch.graph, path...)
+        c = component(nodes[end])
+        _isignored(target, c.meta) && return nothing
         id = join((n.id for n in nodes), ".")
-        return _import_op(component(nodes[end]), id, transformation(sch, path), target)
+        return _import_op(c, id, transformation(sch, path), target)
     end
+    ops = filter(!isnothing, ops)
     (fragment == :global || isempty(ops)) && return (; postrender=ops, post_fragment=[])
     ids = first.(ops)
     near = (first(ids), _fragment_components!, (ids,))
@@ -338,15 +351,16 @@ indexed_layers(target) = target.indexed_layers
 
 layer_z(t::Target, m::DeviceLayout.Meta) = layer_z(t.technology, m)
 
+# Whether geometry on `m`'s layer is left out of a `SolidModel` rendered with `target`.
+_isignored(target::SolidModelTarget, m::DeviceLayout.Meta) =
+    layer(m) == layer(DeviceLayout.NORENDER_META) || layer(m) in target.ignored_layers
+
 function _map_meta_fn(target::SolidModelTarget)
     # By default, target maps a layer to layername (string)
     # Append -L$(level) and/or _$(index) if appropriate
     return m -> begin
-        # Skip rendering if this is the NORENDER_META layer
-        (layer(m) == layer(DeviceLayout.NORENDER_META)) && return nothing
-
-        # Skip rendering if layer is in ignored_layers
-        (layer(m) in target.ignored_layers) && return nothing
+        # Skip rendering if this is the NORENDER_META layer or in ignored_layers
+        _isignored(target, m) && return nothing
 
         name = layername(m)
         if layer(m) in levelwise_layers(target)
@@ -383,8 +397,9 @@ how geometry entities are converted to primitives and added to `sm`.
 `component_fragment` and `post_fragment_ops` may be given as keywords or in the target's
 rendering options.
 
-`component_fragment` selects how [`SolidModelComponent`](@ref) parts are made conformal
-with the rest of the model:
+`component_fragment` selects how
+[`SolidModelComponent`](@ref SchematicDrivenLayout.SolidModelComponent) parts are made
+conformal with the rest of the model:
 
   - `:global` (default) imports them before the global fragmentation pass, which fragments
     everything with everything. Like other postrender geometry, they are clipped to the

@@ -35,7 +35,7 @@ The format of this changelog is based on
     physical groups are registered too, renamed through `group_map`, and never collide with
     groups already in the model. Requires the `OpenCascade` kernel. Can also be used as a
     postrender operation.
-  - `SolidModelComponent` (exported from `SchematicDrivenLayout`) places an imported CAD solid
+  - `SchematicDrivenLayout.SolidModelComponent` (not exported) places an imported CAD solid
     in a schematic. It emits no 2D geometry; during solid-model rendering it contributes an
     `import_solid!` operation at its solved transform and the z of its layer. `hooks` supplies
     named mate points, defaulting to a `compass` at the CAD origin. The solid's physical
@@ -45,6 +45,8 @@ The format of this changelog is based on
     imports `SolidModelComponent` parts before the global fragmentation pass;
     `component_fragment=:near` imports them afterwards and runs one `fragment_near!` over
     all of them. `post_fragment_ops` run after the components' own operations.
+  - `import_solid!` and `SolidModelComponent` are experimental: their API, including the
+    names of generated physical groups, may change in minor versions.
 
 ### Changed
 

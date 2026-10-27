@@ -23,6 +23,12 @@
 Import an external CAD solid from `filename` into `sm` and position it with an affine
 placement.
 
+!!! warning "Experimental API"
+
+    `import_solid!` and `SchematicDrivenLayout.SolidModelComponent` are experimental and may
+    change in minor versions as they are stress tested and harmonized with the experimental
+    solid-model pipeline.
+
 The file is read by the OpenCASCADE kernel (STEP `.stp`/`.step`, BREP `.brep`, or a Gmsh
 `.xao` archive), so `sm` must use the `OpenCascade` kernel. Other formats the reader
 accepts, such as IGES, typically hold surfaces rather than solids and import as such. The
@@ -100,6 +106,10 @@ function import_solid!(
             return gmsh.model.occ.importShapes(filename, true, format)
         end
     end
+
+    # OCC can read an empty or corrupt BREP without an error and import nothing.
+    isempty(new_dimtags) &&
+        throw(ArgumentError("import_solid!: no entities imported from $(repr(filename))"))
 
     # Reposition the freshly imported entities in place (OCC-kernel operations, so no
     # synchronize is needed until we assign the physical group below).

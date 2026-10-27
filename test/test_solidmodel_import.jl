@@ -933,3 +933,51 @@ end
         check_model(sm, cad_group)
     end
 end
+
+@testitem "import_solid! rejects a file with no entities" setup =
+    [CommonTestSetup, QuietGmshSetup] begin
+    import DeviceLayout.SolidModels: import_solid!
+    # OCC reads these without an error but imports nothing.
+    for (fname, contents) in (("empty.brep", ""), ("garbage.brep", "not a brep\n"))
+        f = joinpath(tdir, fname)
+        write(f, contents)
+        sm = SolidModel("isnone"; overwrite=true)
+        @test_throws ArgumentError import_solid!(sm, f)
+    end
+end
+
+@testitem "SolidModelComponent on an ignored layer is skipped" setup =
+    [CommonTestSetup, QuietGmshSetup] begin
+    using .SchematicDrivenLayout
+    import DeviceLayout.SchematicDrivenLayout: SolidModelComponent
+    import DeviceLayout.SolidModels: gmsh, hasgroup
+    using DeviceLayout: SemanticMeta, GDSMeta
+
+    @test !(:SolidModelComponent in names(SchematicDrivenLayout))   # not exported
+
+    gmsh.model.add("smci_author")
+    gmsh.model.occ.addBox(-20, -20, 0, 40, 40, 40)
+    gmsh.model.occ.synchronize()
+    brep = joinpath(tdir, "smci_cube.brep")
+    gmsh.write(brep)
+    gmsh.model.remove()
+
+    tech = ProcessTechnology(
+        (; cad=GDSMeta(), kept=GDSMeta(1)),
+        (; height=(; cad=0μm, kept=0μm))
+    )
+    for (meta, target, kept) in (
+        (SemanticMeta(:cad), SolidModelTarget(tech; ignored_layers=[:cad]), false),
+        (DeviceLayout.NORENDER_META, SolidModelTarget(tech), false),
+        (SemanticMeta(:kept), SolidModelTarget(tech; ignored_layers=[:cad]), true)
+    )
+        reset_uniquename!()
+        g = SchematicGraph("smci")
+        id = add_node!(g, SolidModelComponent(brep, meta; name="cad")).id
+        sch = plan(g; log_dir=nothing)
+        check!(sch)
+        sm = SolidModel("smci"; overwrite=true)
+        render!(sm, sch, target)
+        @test hasgroup(sm, id, 3) == kept
+    end
+end

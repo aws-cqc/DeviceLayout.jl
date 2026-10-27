@@ -69,13 +69,7 @@ import ..Paths: setα0p0!, setp0!, Route, RouteRule, route!
 import ..CoordinateSystems: append_coordsys!
 
 export Component,
-    BasicComponent,
-    ComponentNode,
-    GDSComponent,
-    RouteComponent,
-    SolidModelComponent,
-    Spacer,
-    WeatherVane
+    BasicComponent, ComponentNode, GDSComponent, RouteComponent, Spacer, WeatherVane
 export PLAN_SKIPS_EDGE
 export Schematic, SchematicGraph, BasicCompositeComponent, CompositeComponent
 export @component,

@@ -2677,4 +2677,21 @@ end
         @test (@test_logs fragment_near!(sm, "chip"; warn=false)) == before
         @test dimtags(sm["chip", 3]) == before
     end
+
+    @testset "objects touching only each other are fragmented" begin
+        sm = SolidModel("tf_pair"; overwrite=true)
+        gmsh.model.set_current("tf_pair")
+        a = gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
+        b = gmsh.model.occ.addBox(10, 0, 0, 10, 10, 10)
+        gmsh.model.occ.synchronize()
+        sm["a"] = [(Int32(3), Int32(a))]
+        sm["b"] = [(Int32(3), Int32(b))]
+        faces(g) = Set(
+            abs(t) for
+            (_, t) in gmsh.model.getBoundary(dimtags(sm[g, 3]), false, false, false)
+        )
+        @test isempty(intersect(faces("a"), faces("b")))
+        @test_logs fragment_near!(sm, ["a", "b"])   # no "nothing to fragment" warning
+        @test length(intersect(faces("a"), faces("b"))) == 1
+    end
 end
