@@ -132,6 +132,14 @@ semantics but no user-facing PG identity semantics: after rendering, deduplicati
 resolution may split a layer into several PGs, and functional identity is applied by
 terminal, ground, tag, and port locators.
 
+Terminal selection builds the connected components of the 2D `METAL` layers and attaches
+`Terminal` and `Ground` locators to them, so extruded metal takes part only once it is
+`Hollow`ed. If the model has no 2D metal, `render!` logs an error, so the render fails
+unless `strict=:no`. Pass
+`select_terminals=false` to skip terminal selection, `select_tagged_surfaces=false` to skip
+`Tag` locators, or `select_ports=false` to skip port locators; the corresponding metadata
+sections are then empty.
+
 Generated destinations need not appear in `SourceStack`, but every referenced source must
 exist in the compiler registry when the operation is reached. Typed constructors reject
 malformed operations before compilation, while unavailable source layers and existing

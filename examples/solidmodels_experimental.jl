@@ -31,7 +31,7 @@ stack = SourceStack(
 target = SolidModelTarget(stack)
 
 solid_model = SolidModel("solidmodels_experimental"; overwrite=true)
-metadata = render!(solid_model, schematic, target)
+metadata = render!(solid_model, schematic, target; select_terminals=false)
 open(joinpath(build_dir, "sm_metadata.json"), "w") do io
     return JSON.print(io, metadata, 4)
 end

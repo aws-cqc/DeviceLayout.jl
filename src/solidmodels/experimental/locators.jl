@@ -102,15 +102,22 @@ function select!(
     sm::SolidModel,
     registry::LayerRegistry,
     stack::SourceStack,
-    locators::Vector{ResolvedLocator}
+    locators::Vector{ResolvedLocator};
+    select_terminals::Bool=true,
+    select_tagged_surfaces::Bool=true,
+    select_ports::Bool=true
 )
     bbox_cache = Dict{Int32, NTuple{6, Float64}}()
     selections = Selection[]
     for rl in locators
-        rl.meta isa Union{Tag, Port} || continue
-        push!(selections, _select_surface!(sm, registry, rl, bbox_cache))
+        (select_tagged_surfaces && rl.meta isa Tag || select_ports && rl.meta isa Port) ||
+            continue
+        selection = _select_surface!(sm, registry, rl, bbox_cache)
+        isnothing(selection) || push!(selections, selection)
     end
-    return append!(selections, _select_ccs!(sm, registry, stack, locators, bbox_cache))
+    select_terminals &&
+        append!(selections, _select_ccs!(sm, registry, stack, locators, bbox_cache))
+    return selections
 end
 
 function _entity_rtree(entity_tags, bbox_cache::Dict{Int32, NTuple{6, Float64}})
@@ -192,9 +199,14 @@ function _layer_entity_tags(sm::SolidModel, registry::LayerRegistry, layer::Symb
     return tags
 end
 
+_disable_selection_hint(::Tag) =
+    "Set `select_tagged_surfaces=false` if no tagged surface selections are desired."
+_disable_selection_hint(::Port) =
+    "Set `select_ports=false` if no port selections are desired."
+
 # Select the finalized entities on the locator's layer that contain it and add them as a PG
-# under that layer. The entities also belong to a layer PG, so deduplication will isolate them
-# to their own sub-PG and remove this one
+# under that layer, or log an error and return `nothing`. The entities also belong to a layer
+# PG, so deduplication will isolate them to their own sub-PG and remove this one
 function _select_surface!(
     sm::SolidModel,
     registry::LayerRegistry,
@@ -203,14 +215,17 @@ function _select_surface!(
 )
     lm = rl.meta
     tags = _layer_entity_tags(sm, registry, lm.layer)
-    isempty(tags) &&
-        throw(ArgumentError("locator with metadata $lm references an unrealized 2D layer"))
+    if isempty(tags)
+        @error "Locator with metadata $lm references layer :$(lm.layer), which is not a " *
+               "2D layer in the model. $(_disable_selection_hint(lm))"
+        return nothing
+    end
     entity_tags = _selected_entity_tags(lm, rl, _entity_rtree(tags, bbox_cache))
-    isempty(entity_tags) && throw(
-        ArgumentError(
-            "locator with metadata $lm failed to select any entities in layer $(lm.layer)"
-        )
-    )
+    if isempty(entity_tags)
+        @error "Locator with metadata $lm at $(rl.r) did not select any entity on layer " *
+               ":$(lm.layer). $(_disable_selection_hint(lm))"
+        return nothing
+    end
     pg_name = "__" * bytes2hex(sha1(repr(lm)))[1:16]
     sm[pg_name] = [(Int32(2), t) for t in entity_tags]
     push!(registry[lm.layer].pgs, pg_name)
@@ -233,7 +248,12 @@ function _select_ccs!(
         (source_layer.material == METAL && state.dim == 2) || continue
         append!(metal_pg_names, state.pgs)
     end
-    isempty(metal_pg_names) && return Selection[]
+    if isempty(metal_pg_names)
+        @error "Terminal selection requires 2D METAL layers, but the model has none. " *
+               "Set `select_terminals=false` if the model has no 2D metal or no " *
+               "terminal selections are desired."
+        return Selection[]
+    end
 
     ccs = SolidModels.connected_components(sm, metal_pg_names)
     cc_names = ["METAL_CC__" * pghash(cc) for cc in ccs]

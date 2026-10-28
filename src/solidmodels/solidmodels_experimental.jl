@@ -88,6 +88,9 @@ end
         sch::Schematic,
         target::SolidModelTarget;
         strict=:error,
+        select_terminals=true,
+        select_tagged_surfaces=true,
+        select_ports=true,
         kwargs...
     ) -> Dict{String, Any}
 
@@ -96,12 +99,21 @@ and return schema-version `1.0.0` metadata. Set `strict=:error` to fail on logge
 `strict=:warn` to fail on warnings or errors, or `strict=:no` to continue after recoverable
 diagnostics. This method performs no metadata or model artifact I/O; write the returned
 dictionary explicitly when persistence is desired.
+
+`select_terminals=false` skips building metal connected components and resolving `Terminal`
+and `Ground` locators, leaving the `terminals` metadata empty. Terminal selection otherwise
+requires 2D `METAL` layers and logs an error if there are none.
+`select_tagged_surfaces=false` and `select_ports=false` similarly skip resolving `Tag` and
+port locators, leaving the `tagged` and `ports` metadata empty.
 """
 function render!(
     sm::SolidModel,
     sch::Schematic,
     target::SolidModelTarget;
     strict=:error,
+    select_terminals::Bool=true,
+    select_tagged_surfaces::Bool=true,
+    select_ports::Bool=true,
     kwargs...
 )
     sch.checked[] || error("cannot render an unchecked Schematic. Run check!(sch) first.")
@@ -161,7 +173,15 @@ function render!(
             hollow!(sm, registry)
             realize_interfaces!(sm, deferred_interfaces)
             sync_registry!(sm, registry)
-            selections = select!(sm, registry, target.stack, locators)
+            selections = select!(
+                sm,
+                registry,
+                target.stack,
+                locators;
+                select_terminals,
+                select_tagged_surfaces,
+                select_ports
+            )
 
             # Partition entities by exact PG membership so each belongs to one PG. Locator
             # selection PGs and metal connected components overlap 2D layer PGs, so this
