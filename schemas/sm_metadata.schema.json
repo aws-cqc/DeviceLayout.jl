@@ -115,7 +115,7 @@
     "port": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "index", "type", "layer", "direction", "pgs"],
+      "required": ["name", "type", "layer", "pgs"],
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "index": { "type": "integer", "minimum": 1 },
@@ -128,7 +128,21 @@
           "maxItems": 3
         },
         "pgs": { "$ref": "#/definitions/string_array" }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "LumpedPort" } } },
+          "then": { "required": ["index", "direction"] },
+          "else": {
+            "not": {
+              "anyOf": [
+                { "required": ["index"] },
+                { "required": ["direction"] }
+              ]
+            }
+          }
+        }
+      ]
     },
     "terminal": {
       "type": "object",

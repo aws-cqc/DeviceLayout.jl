@@ -337,11 +337,20 @@ struct _LoweredFuse{N} <: BooleanOp
     remove_sources::Bool
 end
 
-function initial_registry(metas::Set{<:LayerRef}, stack::SourceStack)
-    registry = LayerRegistry()
-    for meta in metas
+# Seed the registry with the artwork layers of `flat`: line segments render as 1D curves and
+# every other entity as 2D surfaces.
+function initial_registry(flat, stack::SourceStack)
+    layer_dims = Dict{Symbol, Int}()
+    for (entity, meta) in zip(elements(flat), element_metadata(flat))
+        meta isa LayerRef || continue
         sourcelayer(meta, stack).solidmodel || continue
-        registry[meta.layer] = LayerState([string(meta.layer)], 2)
+        dim = DeviceLayout.unstyled(entity) isa DeviceLayout.LineSegment ? 1 : 2
+        get!(layer_dims, meta.layer, dim) == dim ||
+            throw(ArgumentError("layer :$(meta.layer) mixes LineSegments with 2D entities"))
+    end
+    registry = LayerRegistry()
+    for (layer_name, dim) in layer_dims
+        registry[layer_name] = LayerState([string(layer_name)], dim)
     end
     return registry
 end

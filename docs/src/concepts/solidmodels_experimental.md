@@ -43,8 +43,9 @@ place!(coordinate_system, Locator(0μm, 0μm), Terminal(:metal, "island"))
 ```
 
 A `Locator` marks a single point; locator resolution only uses that point, so no bounding
-shape is needed. `LumpedPort` and `WavePort` locators must sit inside directed port
-geometry. The required `WithDirection` style belongs to that port geometry, not the locator.
+shape is needed. `LumpedPort` locators must sit inside directed port geometry; `WavePort`
+locators don't carry a direction. The required `WithDirection` style belongs to that port geometry,
+not the locator.
 Its angle is transformed through placement rotations and reflections and serialized as
 `[cos(theta), sin(theta), 0.0]`.
 

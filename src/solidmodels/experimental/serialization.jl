@@ -133,10 +133,12 @@ function _serialize!(sections, rl::ResolvedLocator, lm::Port, pgs::Vector{String
         "name" => lm.name,
         "type" => string(nameof(typeof(lm))),
         "layer" => string(lm.layer),
-        "direction" => rl.direction,
         "pgs" => pgs
     )
-    lm isa LumpedPort && (port_entry["index"] = lm.index)
+    if lm isa LumpedPort
+        port_entry["index"] = lm.index
+        port_entry["direction"] = rl.direction
+    end
     sections.ports[key] = port_entry
     return sections
 end

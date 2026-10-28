@@ -24,7 +24,8 @@ DeviceLayout.to_polygons(::Locator{T}) where {T} = DeviceLayout.Polygon{T}[]
 # ─── Resolution against flat geometry ────────────────────────────────────────
 
 # A locator resolved against the flat geometry: its position in model units at its layer's
-# z and, for ports, the direction of the `WithDirection`-styled layer entity containing it.
+# z and, for lumped ports, the direction of the `WithDirection`-styled layer entity containing
+# it.
 struct ResolvedLocator
     r::NTuple{3, Float64}
     meta::LocatorMeta
@@ -59,7 +60,7 @@ function resolve_locators(flat, stack::SourceStack)
             throw(ArgumentError("duplicate locators with metadata $lm"))
         p = coords(loc)
         r = _stp_float.((getx(p), gety(p), layer_z(lm.layer, stack)))
-        direction = lm isa Port ? _port_direction(lm, p, directed) : nothing
+        direction = _port_direction(lm, p, directed)
         push!(locators, ResolvedLocator(r, lm, direction))
     end
     return locators
@@ -67,7 +68,7 @@ end
 
 # Return the direction of the single `WithDirection`-styled entity on the port's layer that
 # contains `p`, as a unit vector.
-function _port_direction(lm::Port, p, directed)
+function _port_direction(lm::LumpedPort, p, directed)
     matches = filter(directed) do (entity, layer, _)
         layer == lm.layer || return false
         box = bounds(entity)
@@ -84,6 +85,7 @@ function _port_direction(lm::Port, p, directed)
     turns = Float64(ustrip(°, matches[1][3])) / 180
     return Float64[cospi(turns), sinpi(turns), 0.0]
 end
+_port_direction(::LocatorMeta, p, directed) = nothing
 
 # ─── Selection of finalized entities ─────────────────────────────────────────
 
@@ -126,32 +128,57 @@ function _entity_rtree(entity_tags, bbox_cache::Dict{Int32, NTuple{6, Float64}})
     return tree
 end
 
-# Return the tag of the coplanar entity in the tree containing the locator, or 0 if none.
-function _containing_entity_tag(rl::ResolvedLocator, entity_rtree; tol=_stp_float(1nm))
+# Return the tags of the entities a locator selects in the tree: the single coplanar entity at
+# the locator's z that contains it, or none.
+function _selected_entity_tags(
+    ::LocatorMeta,
+    rl::ResolvedLocator,
+    entity_rtree;
+    tol=_stp_float(1nm)
+)
     x, y, z = rl.r
     query = SpatialIndexing.Rect((x - tol, y - tol, z - tol), (x + tol, y + tol, z + tol))
-    candidates = SpatialIndexing.intersects_with(entity_rtree, query)
-    found_tag = Int32(0)
-    count = 0
-    for candidate in candidates
-        tag = candidate.val
+    found = Int32[]
+    for candidate in SpatialIndexing.intersects_with(entity_rtree, query)
         zmin = candidate.mbr.low[3]
         zmax = candidate.mbr.high[3]
         coplanar = (abs(zmax - zmin) < tol && abs(zmin - z) < tol)
         coplanar || continue
-        inside_count = SolidModels.gmsh.model.isInside(2, Int(tag), [x, y, z])
-        if inside_count > 0
-            count += 1
-            found_tag = tag
-        end
+        tag = candidate.val
+        SolidModels.gmsh.model.isInside(2, Int(tag), [x, y, z]) > 0 && push!(found, tag)
     end
-    if count > 1
+    if length(found) > 1
         error(
             "locator $(rl.meta) at $(rl.r) matched " *
-            "$count entities; expected exactly 1 on a fragmented plane"
+            "$(length(found)) entities; expected exactly 1 on a fragmented plane"
         )
     end
-    return found_tag
+    return found
+end
+
+# A wave port is a vertical (xz- or yz-plane) boundary patch, which fragmentation splits along
+# the planes it crosses: select every vertical piece whose footprint contains the locator's
+# (x, y), whatever its z.
+function _selected_entity_tags(
+    ::WavePort,
+    rl::ResolvedLocator,
+    entity_rtree;
+    tol=_stp_float(1nm)
+)
+    x, y, _ = rl.r
+    query = SpatialIndexing.Rect((x - tol, y - tol, -Inf), (x + tol, y + tol, Inf))
+    found = Int32[]
+    for candidate in SpatialIndexing.intersects_with(entity_rtree, query)
+        xmin, ymin, zmin = candidate.mbr.low
+        xmax, ymax, zmax = candidate.mbr.high
+        vertical = (abs(xmax - xmin) < tol || abs(ymax - ymin) < tol)
+        vertical || continue
+        tag = candidate.val
+        # Probe each piece's interior: the locator itself sits on the patch's bottom edge.
+        probe = [x, y, (zmin + zmax) / 2]
+        SolidModels.gmsh.model.isInside(2, Int(tag), probe) > 0 && push!(found, tag)
+    end
+    return found
 end
 
 function _layer_entity_tags(sm::SolidModel, registry::LayerRegistry, layer::Symbol)
@@ -165,9 +192,9 @@ function _layer_entity_tags(sm::SolidModel, registry::LayerRegistry, layer::Symb
     return tags
 end
 
-# Select the single finalized entity on the locator's layer that contains it and add it as a
-# PG under that layer. The entity also belongs to a layer PG, so deduplication will isolate it
-# to its own sub-PG and remove this one
+# Select the finalized entities on the locator's layer that contain it and add them as a PG
+# under that layer. The entities also belong to a layer PG, so deduplication will isolate them
+# to their own sub-PG and remove this one
 function _select_surface!(
     sm::SolidModel,
     registry::LayerRegistry,
@@ -178,16 +205,16 @@ function _select_surface!(
     tags = _layer_entity_tags(sm, registry, lm.layer)
     isempty(tags) &&
         throw(ArgumentError("locator with metadata $lm references an unrealized 2D layer"))
-    entity_tag = _containing_entity_tag(rl, _entity_rtree(tags, bbox_cache))
-    iszero(entity_tag) && throw(
+    entity_tags = _selected_entity_tags(lm, rl, _entity_rtree(tags, bbox_cache))
+    isempty(entity_tags) && throw(
         ArgumentError(
             "locator with metadata $lm failed to select any entities in layer $(lm.layer)"
         )
     )
     pg_name = "__" * bytes2hex(sha1(repr(lm)))[1:16]
-    sm[pg_name] = [(Int32(2), entity_tag)]
+    sm[pg_name] = [(Int32(2), t) for t in entity_tags]
     push!(registry[lm.layer].pgs, pg_name)
-    return Selection([entity_tag], [rl])
+    return Selection(entity_tags, [rl])
 end
 
 # Select every connected component of the METAL source layers as a PG under `:METAL_CC` and
@@ -220,11 +247,11 @@ function _select_ccs!(
     entity_rtree = _entity_rtree(keys(tag_to_cc), bbox_cache)
     for rl in locators
         rl.meta isa Union{Terminal, Ground} || continue
-        entity_tag = _containing_entity_tag(rl, entity_rtree)
-        if iszero(entity_tag)
+        entity_tags = _selected_entity_tags(rl.meta, rl, entity_rtree)
+        if isempty(entity_tags)
             @error "$(rl.meta) at $(rl.r) did not match any metal connected component"
         else
-            push!(selections[tag_to_cc[entity_tag]].locators, rl)
+            push!(selections[tag_to_cc[only(entity_tags)]].locators, rl)
         end
     end
     for (cc_name, sel) in zip(cc_names, selections)

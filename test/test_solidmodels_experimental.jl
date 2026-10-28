@@ -31,7 +31,7 @@
     @test layer(ground) == :metal
     @test (layer(tag), name(tag)) == (:surface, "junction")
     @test (layer(lumped), name(lumped), layerindex(lumped)) == (:ports, "drive", 2)
-    @test (layer(wave), name(wave), layerindex(wave)) == (:ports, "readout", 1)
+    @test (layer(wave), name(wave)) == (:ports, "readout")
     @test SolidModelsExperimental._qualified(wave, "q1") == WavePort(:ports, "q1.readout")
     @test SolidModelsExperimental._qualified(lumped, "q1") ==
           LumpedPort(:ports, "q1.drive"; index=2)
@@ -156,8 +156,7 @@ end
     missing_cs = CoordinateSystem("missing", μm)
     place!(missing_cs, Rectangle(1μm, 1μm), LayerRef(:unknown))
     @test_throws ArgumentError render!(Cell("missing", μm), missing_cs, stack)
-    layer_refs = Set{LayerRef}(meta for meta in element_metadata(cs) if meta isa LayerRef)
-    registry = SolidModelsExperimental.initial_registry(layer_refs, stack)
+    registry = SolidModelsExperimental.initial_registry(cs, stack)
     @test !haskey(registry, :art_only)
     @test haskey(registry, :second)
 end
@@ -1574,6 +1573,7 @@ end
         SourceStack,
         Tag,
         Terminal,
+        WavePort,
         exterior_boundaries
     using FileIO: save
     import JSON
@@ -1592,6 +1592,12 @@ end
         coupler_length = 80μm
         coupler_width = 10μm
         coupler_spacing = 30μm
+        cpw_trace = 10μm
+        cpw_gap = 6μm
+        drive_y = 60μm
+        drive_clearance = 5μm
+        drive_length = 150μm
+        cpw_overhang = 1μm
     end
 
     function DeviceLayout.hooks(tr::MockTransmon)
@@ -1615,7 +1621,13 @@ end
             port_width,
             coupler_length,
             coupler_width,
-            coupler_spacing
+            coupler_spacing,
+            cpw_trace,
+            cpw_gap,
+            drive_y,
+            drive_clearance,
+            drive_length,
+            cpw_overhang
         ) = parameters(tr)
 
         # Negative: gap surrounding the island
@@ -1661,6 +1673,31 @@ end
         place!(cs, WithDirection(π / 2)(port_rect), LayerRef(:PORTS))
         place!(cs, Locator(center(bounds(port_rect))), LumpedPort(:PORTS, "jj"))
 
+        # Drive CPW approaching the island from the left, fed by a wave port at its far end.
+        # The open end stops `drive_clearance` short of the island's ground cutout.
+        cutout_left = -(island_width / 2 + island_ground_gap)
+        trace_end = cutout_left - drive_clearance - cpw_gap
+        trace_start = trace_end - drive_length
+        # The gaps overhang the chip edge (at `trace_start`): gaps ending exactly on the chip
+        # outline make OCC fail to fix the fragmented wires.
+        drive = Path(Point(trace_start - cpw_overhang, drive_y); α0=0°)
+        straight!(drive, drive_length + cpw_overhang, Paths.CPW(cpw_trace, cpw_gap))
+        terminate!(drive)
+        place!(cs, drive, LayerRef(:METAL_NEG))
+        place!(
+            cs,
+            Locator(Point((trace_start + trace_end) / 2, drive_y)),
+            Terminal(:METAL_POS, "drive")
+        )
+        # Wave ports are boundary segments extruded through the cross section of the CPW.
+        wave_port_half_width = 3 * (cpw_trace / 2 + cpw_gap)
+        wave_port_segment = LineSegment(
+            Point(trace_start, drive_y - wave_port_half_width),
+            Point(trace_start, drive_y + wave_port_half_width)
+        )
+        place!(cs, wave_port_segment, LayerRef(:WAVE_PORTS_L1))
+        place!(cs, Locator(Point(trace_start, drive_y)), WavePort(:WAVE_PORTS_L1, "drive"))
+
         # Capacitive coupler islands (east and west)
         cutout_half_width = island_width / 2 + island_ground_gap
         for (sign, hook_name) in ((1, "coupler_east"), (-1, "coupler_west"))
@@ -1705,6 +1742,13 @@ end
             :METAL_POS => SourceLayer(METAL; level=1, gds_meta=GDSMeta(11, 0)),
             :CHIP_OUTLINE => SourceLayer(NULL; level=1, gds_meta=GDSMeta(20, 0)),
             :PORTS => SourceLayer(NULL; level=1, gds_meta=GDSMeta(30, 0)),
+            :WAVE_PORTS_L1 => SourceLayer(
+                NULL;
+                level=1,
+                offset=-50μm,
+                thickness=100μm,
+                gds_meta=nothing
+            ),
             :BOUNDING_VOLUME => SourceLayer(
                 NULL;
                 level=0 => 1,
@@ -1717,6 +1761,7 @@ end
         ops = [
             Extrude(:SUBSTRATE_BOTTOM),
             Extrude(:BOUNDING_VOLUME),
+            Extrude(:WAVE_PORTS_L1),
             Cut(:METAL_POS, :CHIP_OUTLINE, :METAL_NEG),
             Remove(:CHIP_OUTLINE),
             Cut(:CUTOUT, :METAL_NEG, :PORTS),
@@ -1734,12 +1779,12 @@ end
 
         target = SolidModelTarget(stack, ops)
 
-        # Build schematic with two MockTransmons fused via coupler hooks.
-        # The coupler arms meet at the fuse point, creating a galvanic connection
-        # between the two coupler_east and coupler_west locators
+        # Build schematic with two MockTransmons fused via their east coupler hooks, which
+        # rotates q2 by 180° so that each drive CPW reaches its own side of the chip. The
+        # coupler arms meet at the fuse point, connecting the two coupler_east locators.
         sg = SchematicGraph("e2e_test")
         q1 = add_node!(sg, MockTransmon(; name="q1"))
-        fuse!(sg, q1 => :right, MockTransmon(; name="q2") => :left)
+        fuse!(sg, q1 => :right, MockTransmon(; name="q2") => :right)
         schematic = plan(sg; log_dir=nothing) |> check!
         coordinate_system = schematic.coordinate_system
         planned_port_directions = Dict{String, Vector{Float64}}()
@@ -1749,13 +1794,24 @@ end
                 DeviceLayout.transformation(ref)
             )
             turns = Float64(ustrip(°, direction)) / 180
-            planned_port_directions[node.id] = Float64[cospi(turns), sinpi(turns), 0.0]
+            planned_port_directions["$(node.id).jj"] =
+                Float64[cospi(turns), sinpi(turns), 0.0]
         end
 
         # Global placements (chip-level geometry, centered on component bounding box)
         chip_size = 1000μm
         chip_center = center(bounds(coordinate_system))
-        chip = centered(Rectangle(chip_size, chip_size), on_pt=chip_center)
+        # The chip spans the layout in x, less the CPW overhang, so that the drive CPWs and
+        # their wave ports start on its boundary.
+        layout_bounds = bounds(coordinate_system)
+        cpw_overhang = parameters(MockTransmon()).cpw_overhang
+        chip = Rectangle(
+            Point(lowerleft(layout_bounds).x + cpw_overhang, chip_center.y - chip_size / 2),
+            Point(
+                upperright(layout_bounds).x - cpw_overhang,
+                chip_center.y + chip_size / 2
+            )
+        )
         place!(coordinate_system, chip, LayerRef(:CHIP_OUTLINE))
         place!(coordinate_system, chip, LayerRef(:SUBSTRATE_BOTTOM))
         place!(coordinate_system, chip, LayerRef(:BOUNDING_VOLUME))
@@ -1837,8 +1893,8 @@ end
                 @test !isempty(cc_info["pgs"])
             end
 
-            # Terminals: 2 islands + 1 fused coupler pair
-            @test length(terminals) == 3
+            # Terminals: 2 islands + 1 fused coupler pair + 2 drive CPW traces
+            @test length(terminals) == 5
             for (_, cc_info) in terminals
                 @test !isempty(cc_info["pgs"])
             end
@@ -1860,27 +1916,58 @@ end
             end
             @test length(island_ccs) == 2
 
-            # Node fusion: q1.coupler_east meets q2.coupler_west at the fuse point
+            # Each drive CPW trace is its own terminal CC
+            drive_locators = [
+                cc_info["locators"] for cc_info in values(terminals) if
+                any(endswith(".drive"), cc_info["locators"])
+            ]
+            @test sort(drive_locators) == [["q1.drive"], ["q2.drive"]]
+
+            # Node fusion: q1.coupler_east meets q2.coupler_east at the fuse point
             fused_pair = filter(collect(terminals)) do (_, cc_info)
                 locs = cc_info["locators"]
-                return any(==("q1.coupler_east"), locs) && any(==("q2.coupler_west"), locs)
+                return any(==("q1.coupler_east"), locs) && any(==("q2.coupler_east"), locs)
             end
             @test length(fused_pair) == 1
         end
 
         @testset "Port locator metadata" begin
             ports = solid_model_metadata["ports"]
-            @test length(ports) == 2
+            @test length(ports) == 4
             for (port_name, port_data) in ports
-                @test endswith(port_name, ".jj")
-                @test port_data["type"] == "LumpedPort"
-                @test port_data["layer"] == "PORTS"
                 @test !isempty(port_data["pgs"])
-                node_id = first(split(port_name, "."))
-                @test port_data["direction"] ≈ planned_port_directions[node_id]
+                if endswith(port_name, ".jj")
+                    @test port_data["type"] == "LumpedPort"
+                    @test port_data["layer"] == "PORTS"
+                    @test port_data["index"] == 1
+                    @test port_data["direction"] ≈ planned_port_directions[port_name]
+                else
+                    @test endswith(port_name, ".drive")
+                    @test port_data["type"] == "WavePort"
+                    @test port_data["layer"] == "WAVE_PORTS_L1"
+                    @test !haskey(port_data, "index")
+                    @test !haskey(port_data, "direction")
+                    # The selection is the whole vertical patch on the chip boundary, in all
+                    # the pieces fragmentation splits it into.
+                    patch_bboxes = [
+                        SolidModels.gmsh.model.getBoundingBox(2, tag) for
+                        pg in port_data["pgs"] for
+                        tag in SolidModels.entitytags(solid_model[pg, 2])
+                    ]
+                    @test all(bbox -> bbox[1] ≈ bbox[4], patch_bboxes)
+                    @test any(
+                        x -> all(bbox -> bbox[1] ≈ x, patch_bboxes),
+                        ustrip.(μm, (lowerleft(chip).x, upperright(chip).x))
+                    )
+                    @test minimum(bbox[3] for bbox in patch_bboxes) ≈ -50
+                    @test maximum(bbox[6] for bbox in patch_bboxes) ≈ 50
+                end
             end
             port_pg_sets = [Set(port["pgs"]) for port in values(ports)]
-            @test isempty(intersect(port_pg_sets...))
+            @test all(
+                isdisjoint(port_pg_sets[i], port_pg_sets[j]) for
+                i in eachindex(port_pg_sets) for j = (i + 1):lastindex(port_pg_sets)
+            )
         end
 
         @testset "Metadata ↔ SolidModel PG consistency" begin
