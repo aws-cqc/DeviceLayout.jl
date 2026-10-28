@@ -949,7 +949,9 @@ end
         schematic = plan(sg; log_dir=nothing) |> check!
         sm = SolidModel(name; overwrite=true)
         SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
-        metadata = render!(sm, schematic, SolidModelTarget(stack, ops))
+        # These fixtures have no 2D metal to select terminals on.
+        metadata =
+            render!(sm, schematic, SolidModelTarget(stack, ops); select_terminals=false)
         return (; sm, metadata)
     end
 
@@ -1414,20 +1416,25 @@ end
     @test SolidModels.entitytags(sm[selection_pg, 2]) == [Int32(first_tag)]
     @test length(registry[:b].pgs) == 1
 
-    # Unrealized layers and points outside every entity of the layer are errors.
+    # Unrealized layers and points outside every entity of the layer log errors and select
+    # nothing.
     unrealized = SolidModelsExperimental.ResolvedLocator((5.0, 5.0, 0.0), Tag(:c, "tag"))
-    @test_throws ArgumentError SolidModelsExperimental._select_surface!(
-        sm,
-        registry,
-        unrealized,
-        bbox_cache
+    @test isnothing(
+        @test_logs (:error,) SolidModelsExperimental._select_surface!(
+            sm,
+            registry,
+            unrealized,
+            bbox_cache
+        )
     )
     outside = SolidModelsExperimental.ResolvedLocator((50.0, 50.0, 0.0), Tag(:a, "out"))
-    @test_throws ArgumentError SolidModelsExperimental._select_surface!(
-        sm,
-        registry,
-        outside,
-        bbox_cache
+    @test isnothing(
+        @test_logs (:error,) SolidModelsExperimental._select_surface!(
+            sm,
+            registry,
+            outside,
+            bbox_cache
+        )
     )
 end
 
@@ -1563,6 +1570,63 @@ end
         target;
         strict=:no
     ) isa Dict
+end
+
+@testitem "Selection opt-outs" begin
+    using DeviceLayout
+    using DeviceLayout.SchematicDrivenLayout
+    using DeviceLayout.SolidModels
+    using DeviceLayout.SolidModelsExperimental:
+        Extrude,
+        Ground,
+        LayerRef,
+        Locator,
+        LumpedPort,
+        METAL,
+        NULL,
+        SolidModelTarget,
+        SourceLayer,
+        SourceStack,
+        Tag
+    import DeviceLayout: μm
+
+    cs = CoordinateSystem("selection_opt_outs", μm)
+    place!(cs, Rectangle(10μm, 10μm), LayerRef(:metal))
+    place!(cs, Locator(5μm, 5μm), Ground(:metal))
+    place!(cs, Rectangle(10μm, 10μm) + Point(20μm, 0μm), LayerRef(:pad))
+    place!(cs, Locator(25μm, 5μm), Tag(:pad, "pad"))
+    port_geometry = WithDirection(90°)(Rectangle(Point(40μm, 0μm), Point(45μm, 10μm)))
+    place!(cs, port_geometry, LayerRef(:port))
+    place!(cs, Locator(center(bounds(port_geometry))), LumpedPort(:port, "drive"))
+    sg = SchematicGraph("selection_opt_outs")
+    add_node!(sg, BasicComponent(cs); base_id="q1")
+    schematic = plan(sg; log_dir=nothing) |> check!
+    stack = SourceStack(
+        :metal => SourceLayer(METAL; level=1, thickness=1μm),
+        :pad => SourceLayer(NULL; level=1),
+        :port => SourceLayer(NULL; level=1);
+        levels=(1 => 0μm,)
+    )
+    # Extruding the metal without `Hollow` leaves no 2D metal to select terminals on.
+    target = SolidModelTarget(stack, [Extrude(:metal)])
+    SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
+    render(name; kwargs...) =
+        render!(SolidModel(name; overwrite=true), schematic, target; kwargs...)
+
+    @test_throws ErrorException render("selection_default")
+    @test isempty(render("selection_nonstrict"; strict=:no)["terminals"])
+    metadata = render("selection_no_terminals"; select_terminals=false)
+    @test isempty(metadata["terminals"])
+    @test haskey(metadata["tagged"], "q1.pad")
+    @test haskey(metadata["ports"], "q1.drive")
+    metadata = render(
+        "selection_no_selections";
+        select_terminals=false,
+        select_tagged_surfaces=false,
+        select_ports=false
+    )
+    @test isempty(metadata["tagged"])
+    @test isempty(metadata["ports"])
 end
 
 @testitem "SolidModel end-to-end" begin
