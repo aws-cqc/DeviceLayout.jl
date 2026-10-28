@@ -13,7 +13,7 @@ We aim to be clear and consistent about what counts as a breaking change:
 
 - Backward-incompatible changes to the public API are breaking. The public API is what is
   exported or in [API documentation](@ref reference-index), including the interfaces users
-  implement for their own subtypes.
+  implement for their own subtypes. Interfaces documented as "experimental" are not included.
 - Adding a required method to an abstract type, or changing what an interface method like
   `_geometry!` or `_route_leg!` receives or must return, is breaking.
 - Changing the return type of a public function (e.g. scalar → vector) is breaking.
@@ -26,6 +26,7 @@ We aim to be clear and consistent about what counts as a breaking change:
 
 Not breaking:
 
+- Changes to any "experimental" API are not breaking.
 - Changing silently incorrect behavior to match documented behavior is not breaking.
 - Changes to `ExamplePDK` are never breaking.
 - Changes to curve discretization within the default or a specified tolerance are not

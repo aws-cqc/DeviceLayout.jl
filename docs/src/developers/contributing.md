@@ -235,7 +235,7 @@ diversity of approaches used for review.
 - Do the changes fit the existing design?
 - Do the changes reveal deficiencies in the existing design (e.g. simple behavior change requires complex code changes)?
 - Do the changes lock in one-way decisions?
-- Do the changes follow the [design principles](@id dev-principles)?
+- Do the changes follow the [design principles](@ref dev-principles)?
 
 **Clarity:**
 
