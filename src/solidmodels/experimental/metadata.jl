@@ -73,7 +73,10 @@ abstract type Port <: LocatorMeta end
 """
     WavePort(layer, name)
 
-Metadata for locators selecting a named wave-port surface.
+Metadata for locators selecting a named wave-port surface. Wave ports are rectangular patches on
+the simulation boundary: place a boundary `LineSegment` on a source layer below the port and
+`Extrude` it up through the cross section, with the locator on the segment. Every piece of the
+resulting patch through the locator's (x, y) is selected.
 """
 struct WavePort <: Port
     layer::Symbol

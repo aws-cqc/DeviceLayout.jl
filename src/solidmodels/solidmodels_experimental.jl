@@ -135,9 +135,7 @@ function render!(
             # The flat geometry is the canonical stream of placed annotations.
             locators = resolve_locators(flat, target.stack)
             # Seed compiler state with the physical groups produced directly by artwork.
-            layer_refs =
-                Set{LayerRef}(m for m in element_metadata(flat) if m isa LayerRef)
-            registry = initial_registry(layer_refs, target.stack)
+            registry = initial_registry(flat, target.stack)
             # Compile layer operations and defer interface discovery until after fragmentation.
             pg_operations, registry, deferred_interfaces =
                 compile_ops(target.ops, target.stack, registry)
