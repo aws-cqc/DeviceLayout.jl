@@ -1519,6 +1519,7 @@ end
     using DeviceLayout.SolidModels
     using DeviceLayout.SolidModelsExperimental:
         LayerRef, METAL, SolidModelTarget, SourceLayer, SourceStack
+    using DeviceLayout.SchematicDrivenLayout: AbstractComponent
 
     cs = CoordinateSystem{Float64}("warning_surface")
     place!(cs, Rectangle(10.0, 10.0), LayerRef(:metal))
@@ -1542,6 +1543,22 @@ end
     )
     @test render!(
         SolidModel("nonstrict_warning"; overwrite=true),
+        schematic,
+        target;
+        strict=:no
+    ) isa Dict
+
+    # A component whose geometry throws is logged and rendered empty instead of escaping.
+    @compdef struct FailingComponent <: AbstractComponent{Float64}
+        name = "failing"
+    end
+    SchematicDrivenLayout._geometry!(::CoordinateSystem, ::FailingComponent) =
+        error("geometry failure")
+    SchematicDrivenLayout.hooks(::FailingComponent) = (; origin=PointHook(0.0, 0.0, 0.0))
+    add_node!(sg, FailingComponent())
+    schematic = plan(sg; log_dir=mktempdir()) |> check!
+    @test render!(
+        SolidModel("failed_geometry"; overwrite=true),
         schematic,
         target;
         strict=:no

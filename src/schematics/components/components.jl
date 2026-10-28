@@ -637,7 +637,8 @@ function geometry(comp::AbstractComponent)
             cs
         end
     catch err
-        isnothing(context) && rethrow()
+        # Never recover from Ctrl-C, so an interrupted render actually stops.
+        (isnothing(context) || err isa InterruptException) && rethrow()
         # Use the context-provided callback to log the failure.
         context.on_error(comp, err, catch_backtrace())
         # Clear any partially built component cache, then cache an empty CoordinateSystem
