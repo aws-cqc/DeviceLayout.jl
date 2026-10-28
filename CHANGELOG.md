@@ -29,6 +29,24 @@ The format of this changelog is based on
   - `SolidModels.fragment_near!` makes one or more dim-3 physical groups (e.g. imported CAD
     parts) conformal with nearby geometry by fragmenting only the entities that touch the
     bounding boxes of their volumes, instead of the whole model.
+  - `SolidModels.import_solid!` imports an external CAD solid (STEP, BREP, or Gmsh `.xao`)
+    into a `SolidModel`, positioned by an in-plane `ScaledIsometry`, a `z` offset, and an
+    optional uniform `scale`, and registers it as a physical group. A `.xao` file's own
+    physical groups are registered too, renamed through `group_map`, and never collide with
+    groups already in the model. Requires the `OpenCascade` kernel. Can also be used as a
+    postrender operation.
+  - `SchematicDrivenLayout.SolidModelComponent` (not exported) places an imported CAD solid
+    in a schematic. It emits no 2D geometry; during solid-model rendering it contributes an
+    `import_solid!` operation at its solved transform and the z of its layer. `hooks` supplies
+    named mate points, defaulting to a `compass` at the CAD origin. The solid's physical
+    group is named after its node id, and a `.xao` file's own groups are prefixed with it.
+  - `render!(sm, sch, target)` accepts `component_fragment` and `post_fragment_ops`, as
+    keywords or in the target's rendering options. `component_fragment=:global` (default)
+    imports `SolidModelComponent` parts before the global fragmentation pass;
+    `component_fragment=:near` imports them afterwards and runs one `fragment_near!` over
+    all of them. `post_fragment_ops` run after the components' own operations.
+  - `import_solid!` and `SolidModelComponent` are experimental: their API, including the
+    names of generated physical groups, may change in minor versions.
 
 ### Changed
 
@@ -261,7 +279,7 @@ The format of this changelog is based on
     capping width-only output at 288 pixels high. If neither is supplied, the maximum dimension is capped at 4 inches. Reference bounding boxes render again, and GDS layers
     above 255 receive palette colors instead of all falling back to black.
   - Path termination and `SimpleNoRender` halos now use constant-offset edges instead of the generic
-    functional-offset fallback. The rendered discretization of these halos on curves may change but 
+    functional-offset fallback. The rendered discretization of these halos on curves may change but
     will be geometrically equivalent within tolerance.
   - `SolidModels.revolve!` now accepts unitful axis points and directions, converting point
     coordinates to the solid-model unit and direction components to a common unit. Unitless

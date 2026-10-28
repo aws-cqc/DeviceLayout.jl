@@ -114,8 +114,9 @@ modified boundaries can be dropped.
 To fragment around several new parts, list all of their groups in one call. Using one box
 per volume keeps the region close to each part instead of spanning the space between them.
 
-With `warn=true`, a warning is emitted when nothing but the object groups and their own
-boundaries lies in the region.
+If nothing but the object volumes and their own boundaries lies in the region, and no two
+object volumes have touching boxes, there is nothing to fragment and the call returns early,
+with a warning if `warn=true`.
 
 Returns the updated dimtags of all object groups. As a postrender operation, the result is
 assigned to the destination group, so with several object groups that group receives the
@@ -165,7 +166,9 @@ function fragment_near!(
         filter(dt -> _in_region(region, bounds3d([dt])), gmsh.model.getEntities()),
         _boundary_closure(obj)
     )
-    if isempty(others)
+    # Object volumes whose boxes touch may need fragmenting with each other even when
+    # nothing else is nearby.
+    if isempty(others) && !_any_boxes_touch(region)
         warn && @warn(
             "fragment_near!: nothing other than $(join(repr.(groups), ", ")) intersects " *
             "the region; nothing to fragment. Check `delta` if a neighbour was expected."
@@ -176,6 +179,11 @@ function fragment_near!(
     _fragment_three_pass!(sm; region=region)
     return _object_dimtags(sm, groups)
 end
+
+_any_boxes_touch(boxes) = any(
+    _boxes_touch(boxes[i], boxes[j]) for i in eachindex(boxes) for
+    j = (i + 1):lastindex(boxes)
+)
 
 _object_dimtags(sm, groups) = unique(reduce(vcat, (dimtags(sm[g, 3]) for g in groups)))
 
