@@ -29,7 +29,7 @@ jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.version == 'pre' }}
+    continue-on-error: ${{ matrix.version == '1.14' }}
     timeout-minutes: 60
     permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
       actions: write
@@ -42,12 +42,16 @@ jobs:
           - '1.11'
           - '1.12'
           - '1.13'
-          - 'pre'
+          - '1.14'
         os:
           - ubuntu-latest
         arch:
           - x64
     needs: [julia-format]
+    env:
+      # julia-buildpkg exported this; without it Pkg uses the package server's lagging
+      # registry snapshot, so a just-registered dependency version may not resolve.
+      JULIA_PKG_SERVER_REGISTRY_PREFERENCE: eager
     steps:
       - uses: actions/checkout@v6
       - run: |
@@ -60,17 +64,21 @@ jobs:
       - run: |
           pip install -r requirements.txt
           export PYTHON=$(which python3)
-      - uses: julia-actions/setup-julia@v3
+      - uses: julia-actions/install-juliaup@v3
         with:
-          version: ${{ matrix.version }}
-          arch: ${{ matrix.arch }}
+          channel: ${{ matrix.version }}~${{ matrix.arch }}
       - uses: julia-actions/cache@v3
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
-      - uses: julia-actions/julia-processcoverage@v1
+      # Runs test items in parallel worker processes, each in a Pkg.test-style sandbox
+      # built from [extras]/[targets], so no julia-buildpkg step is needed.
+      - uses: julia-actions/julia-run-testitems@v2
         with:
-          directories: src
+          juliaup-channel: ${{ matrix.version }}~${{ matrix.arch }}
+          # Well above the slowest item; a timeout attaches a backtrace dump to the item
+          testitem-timeout: 1200
+          # juliati collects coverage only on Julia 1.11+
+          coverage-lcov-path: ${{ matrix.version != '1.10' && 'lcov.info' || '' }}
       - uses: codecov/codecov-action@v6
+        if: matrix.version != '1.10'
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
