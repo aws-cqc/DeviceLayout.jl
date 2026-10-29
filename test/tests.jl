@@ -368,6 +368,26 @@ end
     @test !(Polygons.intersects(Point(2, 2), ls))
     @test !(Polygons.intersects(Point(2, 0), ls))
     @test Polygons.intersects(Point(1, 1), ls)
+
+    # A ray through a segment endpoint hits it exactly, so the hit is within the segment's
+    # bounds. Normalizing the direction in floating point put this one at y = -43 - 1 ulp.
+    r = Polygons.Ray(Point(-20, 10), Point(-20, 9))
+    seg = Polygons.LineSegment(Point(-20, -43), Point(-1, -22))
+    @test Polygons.intersection(r, seg) == (true, Point(-20, -43))
+    # Rays through an endpoint of integer segments, in several directions, at coordinate
+    # scales up to that of femtometer-grid coordinates from `clipperize`.
+    dirs = Point.([(0, -1), (1, -2), (3, -1)])
+    as = [Point(x, y) for x = -3:2:3 for y = -2:3:4]
+    bs = [Point(x, y) for x = -11:3:11 for y = -10:4:10]
+    misses = []
+    for sc in (1, 10^6, 10^12), d in dirs, k in (1, 7), a0 in as, b0 in bs
+        u, a, b = sc * d, sc * a0, sc * b0
+        (b - a).x * u.y == (b - a).y * u.x && continue # parallel
+        p0 = a - k * u
+        hit = Polygons.intersection(Polygons.Ray(p0, p0 + u), Polygons.LineSegment(a, b))
+        hit == (true, a) || push!(misses, (p0, u, b))
+    end
+    @test isempty(misses)
 end
 
 @testitem "Cell methods" setup = [CommonTestSetup] begin

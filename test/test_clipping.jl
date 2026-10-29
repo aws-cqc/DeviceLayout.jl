@@ -1149,6 +1149,27 @@ end
     @test no_repeats(poly)
     @test abs(Polygons.area(poly)) == tree_area(cp)
 
+    # The cut from the hole's lowest vertex (-20, 10) passes exactly through the outer
+    # vertex (-20, -43), where two sloped edges meet.
+    cp = difference2d(
+        [
+            Polygon(
+                Point{Int}[
+                    (-40, 13),
+                    (-40, -12),
+                    (-20, -43),
+                    (-1, -22),
+                    (22, 38),
+                    (-2, 40)
+                ]
+            )
+        ],
+        [Polygon(Point{Int}[(-14, 26), (-20, 10), (-5, 11), (-1, 13)])]
+    )
+    poly = only(to_polygons(cp))
+    @test no_repeats(poly)
+    @test abs(Polygons.area(poly)) == tree_area(cp) == 2770.5
+
     # A hole touching its enclosing contour at its lowest vertex is pinched there, with no
     # zero-length cut.
     cp = difference2d(

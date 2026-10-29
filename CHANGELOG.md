@@ -136,6 +136,10 @@ The format of this changelog is based on
     of one shape lies on or very near a non-axis-aligned edge of another, and the warning
     also when a contour folds back on itself at an acute vertex. Consecutive repeated points
     (from a cut landing on a vertex, or a hole touching its enclosing contour) are removed.
+  - The intersection of a ray with a segment that it meets exactly at an endpoint is found
+    for integer coordinates. Floating-point rounding could put the computed point just
+    outside the segment, so `to_polygons(::ClippedPolygon)` dropped a hole whose lowest
+    vertex was directly above a vertex of its enclosing contour.
   - `Intersect.AirBridge` crossings give the CPW open termination after the bridge
     `initial=true`, so its trace-corner vertices sit on the side facing the following segment
     and are shared with that segment's gap polygons instead of leaving T-junctions.

@@ -1411,6 +1411,21 @@ function intersection(A::Line{T}, B::Line{T}, checkparallel=true) where {T}
         u = A.p1 - A.p0
         v = B.p1 - B.p0
         w = A.p0 - B.p0
+        if T <: Integer
+            # Exact integer dot products, then one division. Normalizing `vp` in floating
+            # point (as below) rounds the parameter, so a hit exactly at a segment endpoint
+            # can fail the exact `in_bounds` check in `intersection(::Ray, ::LineSegment)`.
+            # An integer quotient is computed exactly, at any coordinate scale.
+            vx, vy = -Int128(v.y), Int128(v.x)
+            num = -(vx * w.x + vy * w.y)
+            den = vx * u.x + vy * u.y
+            i = if iszero(den) || !iszero(rem(num, den))
+                float(num) / float(den)
+            else
+                float(div(num, den))
+            end
+            return true, A.p0 + i * u
+        end
         vp = Point{float(T)}(-v.y, v.x)     # need float or hit overflow
 
         vp = vp / max(abs(vp.x), abs(vp.y))   # scale this, since its magnitude cancels out
