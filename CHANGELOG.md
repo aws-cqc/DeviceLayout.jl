@@ -127,6 +127,22 @@ The format of this changelog is based on
     tolerance of 1 nm for floating-point coordinates instead of a quarter femtometer, which
     gave on the order of 10⁵ vertices per rounded corner. The new `atol` keyword sets the
     tolerance; integer coordinates keep Clipper's default of a quarter grid unit.
+  - `to_polygons(::ClippedPolygon)` throws an error when Clipper has rounded a hole's lowest
+    vertex to just outside the polygon (beyond its enclosing contour, or inside another
+    hole), instead of silently dropping the hole (#317) or attaching it with a cut through
+    the exterior. This can only happen when a vertex of one shape lies on or very near a
+    non-axis-aligned edge of another.
+  - `to_polygons(::ClippedPolygon)` warns when rounding a keyhole cut's attachment point to
+    the grid may make the cut polygon self-intersect: when the hole or a neighboring vertex
+    comes within a grid unit of the edge the cut attaches to, or a neighboring edge folds
+    back across it at an acute vertex.
+  - `to_polygons(::ClippedPolygon)` removes consecutive repeated points, left by a keyhole
+    cut landing on a vertex or a hole touching its enclosing contour. Some rendered polygons
+    have fewer vertices as a result, with the same shape.
+  - The intersection of a ray with a segment that it meets exactly at an endpoint is found
+    for integer coordinates. Floating-point rounding could put the computed point just
+    outside the segment, so `to_polygons(::ClippedPolygon)` dropped a hole whose lowest
+    vertex was directly above a vertex of its enclosing contour.
   - `Intersect.AirBridge` crossings give the CPW open termination after the bridge
     `initial=true`, so its trace-corner vertices sit on the side facing the following segment
     and are shared with that segment's gap polygons instead of leaving T-junctions.

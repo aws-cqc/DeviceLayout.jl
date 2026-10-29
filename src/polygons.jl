@@ -486,7 +486,8 @@ function to_polygons(p::ClippedPolygon{T}; kwargs...) where {T}
     pc = clipperize(p)
     S = typeof(pc).parameters[1]
     pci = recast(Clipper.PolyNode{Point{Int64}}, pc.tree)
-    o = interiorcuts(pci, Polygon{S}[])
+    userpoint(p) = unscale(only(reinterpret(Point{S}, [p])), T)
+    o = interiorcuts(pci, Polygon{S}[], userpoint)
     return declipperize.(o, T)
 end
 # Broadcast equivalent
@@ -1243,6 +1244,12 @@ Return 1 if the path `p1`--`p2`--`p3` is going counter-clockwise (increasing ang
 function orientation(p1::Point, p2::Point, p3::Point)
     return sign((p3.y - p2.y) * (p2.x - p1.x) - (p2.y - p1.y) * (p3.x - p2.x))
 end
+# Exact for integer coordinates: in their own type, the products overflow `Int64` for the
+# femtometer-grid coordinates from `clipperize` once points are a few microns apart.
+function orientation(p1::Point{T}, p2::Point{T}, p3::Point{T}) where {T <: Integer}
+    x1, y1, x2, y2, x3, y3 = widen.((p1.x, p1.y, p2.x, p2.y, p3.x, p3.y))
+    return T(sign((y3 - y2) * (x2 - x1) - (y2 - y1) * (x3 - x2)))
+end
 
 isparallel(A::D1, B::D1) = Δy(A) * Δx(B) == Δy(B) * Δx(A)
 isdegenerate(A::D1, B::D1) =
@@ -1410,6 +1417,21 @@ function intersection(A::Line{T}, B::Line{T}, checkparallel=true) where {T}
         u = A.p1 - A.p0
         v = B.p1 - B.p0
         w = A.p0 - B.p0
+        if T <: Integer
+            # Exact integer dot products, then one division. Normalizing `vp` in floating
+            # point (as below) rounds the parameter, so a hit exactly at a segment endpoint
+            # can fail the exact `in_bounds` check in `intersection(::Ray, ::LineSegment)`.
+            # An integer quotient is computed exactly, at any coordinate scale.
+            vx, vy = -Int128(v.y), Int128(v.x)
+            num = -(vx * w.x + vy * w.y)
+            den = vx * u.x + vy * u.y
+            i = if iszero(den) || !iszero(rem(num, den))
+                float(num) / float(den)
+            else
+                float(div(num, den))
+            end
+            return true, A.p0 + i * u
+        end
         vp = Point{float(T)}(-v.y, v.x)     # need float or hit overflow
 
         vp = vp / max(abs(vp.x), abs(vp.y))   # scale this, since its magnitude cancels out

@@ -1076,6 +1076,179 @@ end
     end
 end
 
+@testitem "Keyhole cut attachment" setup = [CommonTestSetup] begin
+    # The cut from a hole's lowest vertex meets the enclosing contour off-lattice, and
+    # rounding its attachment to the nearest lattice point puts a kink in that edge. Each
+    # hole below has a vertex ≈ 0.08 units inside the edge its cut attaches to, or (the
+    # fourth case) the contour's next edge folds back 0.0025 units outside that edge at the
+    # ray, so the kink may cross something and a warning is given.
+    kink_warning = (:warn, r"may make the cut polygon self-intersect")
+    for (outer, hole) in (
+        ([(-8, 66), (-79, 32), (86, -37)], [(20, -9), (-2, 16), (-19, 7)]),
+        (
+            [(49, 70), (45, 72), (-28, 70), (-18, -26)],
+            [(-5, -7), (14, 20), (13, 20), (-8, 19)]
+        ),
+        ([(31, 44), (-89, 3), (-29, -45)], [(-9, -14), (10, 13), (-27, 1)]),
+        (
+            [(0, 0), (101, 1), (-100, -1), (-100, -50), (200, -50), (200, 100), (-50, 100)],
+            [(50, 5), (60, 15), (45, 12)]
+        )
+    )
+        cp = difference2d([Polygon(Point{Int}.(outer))], [Polygon(Point{Int}.(hole))])
+        @test count(Clipper.ishole, Clipper.children(only(Clipper.children(cp.tree)))) == 1
+        @test_logs kink_warning to_polygons(cp)
+    end
+    # A rotated square with holes well inside it has off-lattice cuts that are not flagged.
+    sq = Rectangle(10.0, 10.0)
+    holes = [Rectangle(1.0, 1.0) + Point(x, y) for x = 1:2:8 for y = 1:2:8]
+    cp = difference2d(Rotation(10°)(sq), Rotation(10°).(holes))
+    @test_logs to_polygons(cp)
+
+    # The fold-back case above, and its mirror image, where the folding edge precedes the
+    # attachment edge, with the contour starting at each vertex in turn. This covers the
+    # neighbor lookups across the start of the contour, which Clipper's choice of start
+    # vertex otherwise decides.
+    PN = Clipper.PolyNode{Point{Int}}
+    outer = Point{Int}[
+        (0, 0),
+        (101, 1),
+        (-100, -1),
+        (-100, -50),
+        (200, -50),
+        (200, 100),
+        (-50, 100)
+    ]
+    hole = Point{Int}[(50, 5), (45, 12), (60, 15)]
+    mirror(c) = reverse([Point(-p.x, p.y) for p in c])
+    for (o, h) in ((outer, hole), (mirror(outer), mirror(hole))), k in eachindex(o)
+        root = PN(Point{Int}[], false, false, PN[])
+        enclosing = PN(circshift(o, k), false, false, PN[], root)
+        push!(root.children, enclosing)
+        push!(enclosing.children, PN(h, true, false, PN[], enclosing))
+        @test_logs kink_warning Polygons.interiorcuts(root, Polygon{Int}[])
+    end
+end
+
+@testitem "Keyhole cut edge cases" setup = [CommonTestSetup] begin
+    # Area of the region the tree describes, outer contours minus their holes.
+    function tree_area(cp)
+        a(n) = abs(Polygons.area(Polygon(Clipper.contour(n))))
+        return sum(Clipper.children(cp.tree)) do n
+            return a(n) - sum(a, Clipper.children(n); init=0.0)
+        end
+    end
+    no_repeats(p) = all(i -> p.p[i] != p.p[mod1(i + 1, end)], eachindex(p.p))
+
+    # The cut from the hole's lowest vertex lands on a vertex of a step in the outer contour.
+    cp = difference2d(
+        [Polygon(Point{Int}[(0, 0), (10, 0), (10, 5), (20, 5), (20, 30), (0, 30)])],
+        [Polygon(Point{Int}[(10, 10), (15, 10), (15, 15), (10, 15)])]
+    )
+    poly = only(to_polygons(cp))
+    @test no_repeats(poly)
+    @test abs(Polygons.area(poly)) == tree_area(cp)
+
+    # The cut from the hole's lowest vertex (-20, 10) passes exactly through the outer
+    # vertex (-20, -43), where two sloped edges meet.
+    cp = difference2d(
+        [
+            Polygon(
+                Point{Int}[
+                    (-40, 13),
+                    (-40, -12),
+                    (-20, -43),
+                    (-1, -22),
+                    (22, 38),
+                    (-2, 40)
+                ]
+            )
+        ],
+        [Polygon(Point{Int}[(-14, 26), (-20, 10), (-5, 11), (-1, 13)])]
+    )
+    poly = only(to_polygons(cp))
+    @test no_repeats(poly)
+    @test abs(Polygons.area(poly)) == tree_area(cp) == 2770.5
+
+    # A hole touching its enclosing contour at its lowest vertex is pinched there, with no
+    # zero-length cut.
+    cp = difference2d(
+        [Polygon(Point{Int}[(0, 0), (20, 0), (20, 20), (0, 20)])],
+        [Polygon(Point{Int}[(10, 0), (15, 5), (10, 10), (5, 5)])]
+    )
+    poly = only(to_polygons(cp))
+    @test no_repeats(poly)
+    @test count(==(Point(10, 0)), poly.p) == 2
+    @test abs(Polygons.area(poly)) == tree_area(cp)
+
+    # Clipper rounds this hole's lowest vertex to 0.08 units below its enclosing contour, so
+    # nothing is below it to attach to (#317), which is an error rather than a dropped hole.
+    A = Polygon(
+        Point{Float64}[(-2, 5), (-16, 11), (-12, -4), (-11, -9), (19, -4), (17, -3)] .*
+        0.37
+    )
+    B = Polygon(
+        Point{Float64}[
+            (14, 10),
+            (21, 14),
+            (11, 12),
+            (18, 20),
+            (-1, 12),
+            (-2, 4),
+            (5, -5),
+            (6, -11),
+            (8, 2),
+            (13, -5)
+        ] .* 0.37
+    )
+    @test_throws r"\(4\.81, ?-1\.85\).*could not be\s+attached" to_polygons(xor2d([A], [B]))
+    # The vertex is reported in the polygon's own units.
+    Aμ, Bμ = Polygon(points(A) .* μm), Polygon(points(B) .* μm)
+    @test_throws r"\(4\.81 μm, ?-1\.85 μm\)" to_polygons(xor2d([Aμ], [Bμ]))
+
+    # Clipper rounds both intersections of this hole with the edge from (-22, -98) to
+    # (100, -2) to the hole's lowest vertex (0, -81), 0.31 units below the edge. More of the
+    # enclosing contour is further down, so the ray from that vertex meets it, but from
+    # the exterior side.
+    cp = difference2d(
+        [
+            Polygon(
+                Point{Int}[
+                    (4, 100),
+                    (-55, -84),
+                    (-55, -150),
+                    (100, -150),
+                    (100, -130),
+                    (-40, -130),
+                    (-40, -98),
+                    (-22, -98),
+                    (100, -2),
+                    (100, 9)
+                ]
+            )
+        ],
+        [Polygon(Point{Int}[(0, -81), (1, -67), (-20, -75)])]
+    )
+    @test count(Clipper.ishole, Clipper.children(only(Clipper.children(cp.tree)))) == 1
+    @test_throws r"\(0, ?-81\).*could not be\s+attached" to_polygons(cp)
+
+    # Clipper output where the first hole's lowest vertex (28, 2) is 0.5 units inside the
+    # second hole, below its edge from (27, -3) to (29, 8).
+    PN = Clipper.PolyNode{Point{Int}}
+    root = PN(Point{Int}[], false, false, PN[])
+    outer = Point{Int}[(100, 79), (-6, 46), (-62, -34), (56, -100)]
+    enclosing = PN(outer, false, false, PN[], root)
+    push!(root.children, enclosing)
+    for h in (
+        Point{Int}[(28, 8), (29, 8), (28, 2)],
+        Point{Int}[(26, -29), (26, -22), (27, -3), (29, 8), (53, 3), (46, -34)]
+    )
+        push!(enclosing.children, PN(h, true, false, PN[], enclosing))
+    end
+    out = Polygon{Int}[]
+    @test_throws r"\(28, ?2\).*inside\s+another\s+hole" Polygons.interiorcuts(root, out)
+end
+
 @testitem "Layerwise clipping" setup = [CommonTestSetup] begin
     c1 = CoordinateSystem("test1")
     c2 = CoordinateSystem("test2")
