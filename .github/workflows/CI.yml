@@ -76,9 +76,9 @@ jobs:
           # Well above the slowest item; a timeout attaches a backtrace dump to the item
           testitem-timeout: 1200
           # juliati collects coverage only on Julia 1.11+
-          coverage-lcov-path: ${{ matrix.version != '1.10' && 'lcov.info' || '' }}
+          coverage-lcov-path: ${{ matrix.version == '1.13' && 'lcov.info' || '' }}
       - uses: codecov/codecov-action@v6
-        if: matrix.version != '1.10'
+        if: matrix.version == '1.13'
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
