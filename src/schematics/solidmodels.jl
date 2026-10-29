@@ -373,24 +373,6 @@ function _map_meta_fn(target::SolidModelTarget)
     end
 end
 
-function check_render_strict(sch::Schematic, strict)
-    if strict == :error
-        max_level_logged(sch, :render_solidmodel) >= Logging.Error && error(
-            "encountered errors while rendering. See $(sch.logger.logname) for details. " *
-            "Render with `strict=:no` to continue anyway (not recommended except for debugging)."
-        )
-    elseif strict == :warn
-        max_level_logged(sch, :render_solidmodel) >= Logging.Warn && error(
-            "encountered warnings while rendering. See $(sch.logger.logname) for details. " *
-            "Render with `strict=:error` to allow warnings while still failing on errors."
-        )
-    elseif strict != :no
-        @warn "keyword `strict` in `render!` should be `:error`, `:warn`, or `:no` " *
-              "(got `:$strict`). Proceeding as though `strict=:no` were used."
-    end
-    return nothing
-end
-
 """
     render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, kwargs...)
 
@@ -488,5 +470,5 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
     finally
         close_logfile(sch)
     end
-    return check_render_strict(sch, strict)
+    return check_render_strict(sch, strict, :render_solidmodel)
 end
