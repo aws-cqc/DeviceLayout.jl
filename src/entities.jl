@@ -43,6 +43,10 @@ from `lowerleft` and `upperright`. By default, `halo` is derived from `footprint
 New subtypes may also implement any application functions required for valid styles.
 Not all styles need be valid for any given entity type.
 
+To be placed in a coordinate system with a different coordinate type, a subtype must
+implement `convert(::Type{GeometryEntity{T}}, ::MyEntity)`, typically by converting to
+`MyEntity{T}`.
+
 If the subtype should carry mesh sizing information, implement `SolidModels.meshsize`.
 """
 abstract type GeometryEntity{T} <: AbstractGeometry{T} end

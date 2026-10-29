@@ -37,18 +37,21 @@ otherwise. Throw an error rather than guess at what the user intended
 
 **Global state.** Avoid adding global state, but be aware that it is used in a few places:
 
-- `__init__` creates the global Clipper handles (`_clip`, `_coffset`) and registers FileIO
-  formats. `precompile.jl` duplicates both because `__init__` has not run during precompilation.
-  Clipper is not thread-safe through these handles.
-- `SolidModels` wraps a single global Gmsh session. Tests that touch it use the
+- `__init__` creates the global Clipper handle (`_clip`) and registers FileIO formats.
+  `precompile.jl` duplicates both because `__init__` has not run during precompilation.
+  Clipping through `_clip` is not thread-safe.
+- `SolidModels` wraps a single global Gmsh session, and the mesh-size callback installed by
+  `render!` or `set_mesh_size_callback!` is global to it. Tests that touch it use the
   `QuietGmshSetup` snippet to initialize it and silence output.
-- `MESHSIZE_PARAMS` (`solidmodels/solidmodels.jl`) holds the global mesh scale and default
-  grading as well as the mesh-size control points and their KD-trees. `render!` clears
-  the control points, but the scalar settings persist across models until changed.
+- `MESHSIZE_PARAMS` (`solidmodels/solidmodels.jl`) holds global scalar mesh settings (scale,
+  order, default grading, `respect_lc`) as well as the mesh-size control points and their
+  KD-trees. `render!` clears the control points, but the scalar settings persist across models
+  until changed.
 - The `uniquename` counter, the `Memoization` cache for B-spline tangent optimization, and the
   PolyText font caches are process-global.
-- Some warnings are shown once per session (for example, `recover_curves` warns once per entity
-  type about lost curves). Test items share a process, so a test asserting such a warning
+- Some warnings are shown once per session: deprecation warnings with `maxlog=1` (see
+  [Deprecations](@ref dev-deprecations)), and `recover_curves` warns once per entity type
+  about lost curves. Test items share a process, so a test asserting such a warning
   depends on nothing earlier having triggered it.
 
 ## Style

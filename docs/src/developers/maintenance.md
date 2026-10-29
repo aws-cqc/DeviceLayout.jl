@@ -16,7 +16,10 @@ recurring chores. The versioning policy these procedures apply is in
    - `CHANGELOG.md`: rename `## Unreleased` to `## X.Y.Z (YYYY-MM-DD)`, add a fresh empty
      `## Unreleased` above it, and fill in anything missing.
    - `CITATION.cff` (the source of truth for the author list): add anyone who made a
-     significant contribution since the last release, if not already listed.
+     significant contribution since the last release, if not already listed. If you add
+     anyone, also set `version` to `X.Y.Z` and `date-released` to the release date: these
+     describe the Zenodo version created in step 6 and are kept in sync with it, so leave
+     them alone when the authors don't change.
 4. Merge once checks pass.
 5. On the GitHub page for the resulting commit on `main` (click the commit message on the repo
    front page), comment `@JuliaRegistrator register`
@@ -35,8 +38,9 @@ recurring chores. The versioning policy these procedures apply is in
    - Download the tagged source as a `.zip` (green "Code" button on the release).
    - At [the Zenodo record](https://doi.org/10.5281/zenodo.19849069), choose "New version" (you
      need to be granted access to the record by an existing owner).
-   - Upload the `.zip`, set the publication date to today and the version to `X.Y.Z`
-     (no `v` prefix), add new contributors as authors, preview, and publish.
+   - Upload the `.zip`, set the publication date to `date-released` and the version to
+     `X.Y.Z` (no `v` prefix) as in `CITATION.cff`, add new contributors as authors, preview,
+     and publish.
 7. Announce in the appropriate channels. On the Julia Discourse forum, reply to the
    [existing 1.x release thread](https://discourse.julialang.org/t/ann-devicelayout-jl-cad-for-quantum-integrated-circuits-and-more/126502/3)
    rather than starting a new one.

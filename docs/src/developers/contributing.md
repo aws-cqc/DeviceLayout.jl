@@ -24,9 +24,9 @@ Optional pieces:
 - **Revise** in your default environment (`] add Revise`), which can be imported before
   a package under development to automatically reload changed code without restarting Julia.
 - **VS Code Julia extension** if you want the Testing sidebar (see below).
-- **Python + ezdxf** for the DXF backend and its test: `pip install -r requirements.txt`.
-  The test calls `python3` from `PATH`; without ezdxf, the DXF testset in the "Backends" test
-  item fails. Everything else works without Python.
+- **Python + ezdxf** for the deprecated DXF export and its test: `pip install -r requirements.txt`.
+  The test calls `python3` from `PATH`; without ezdxf, the "DXF export" testset in the
+  "Deprecations" test item fails. Everything else works without Python.
 
 Reviewers who just want to try a branch can `] add DeviceLayout#branch-name` for a branch on
 the main repository, or `] add https://github.com/<user>/DeviceLayout.jl#branch-name` for a
@@ -81,6 +81,10 @@ filter that matches test-item names against `ARGS`.
 On Julia versions before 1.13, `Pkg.test()` runs with `--check-bounds=yes`, so it can't reuse
 the precompile cache from development and recompiles DeviceLayout and its dependencies. Prefer
 the TestEnv routes for iteration on those versions.
+
+`Pkg.test()` also runs with `--depwarn=yes`, which the TestEnv routes do not. Without it,
+`Base.depwarn` is silent and `@test_deprecated` checks nothing, so the "Deprecations" test
+item only fully tests those deprecations under `Pkg.test()`.
 
 CI runs the full suite on every released Julia minor from 1.10 upward. Pre-release Julia is
 allowed to fail but failures should be investigated.

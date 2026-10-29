@@ -76,4 +76,7 @@ change lands with an entry under `## Unreleased` in one of `### Added`, `### Cha
 `### Deprecated`, `### Removed`, `### Fixed`. Entries are written for users: name the public
 symbols, say what changed and why it matters, and link the issue or PR when there is one.
 Tolerance-level geometry changes are called out explicitly. On the `v2.0.0-dev` branch,
-breaking changes go under `### Breaking` in a `## 2.0.0 (upcoming)` section.
+changes for 2.0 go in a `## 2.0.0 (upcoming)` section above `## Unreleased`: flipped defaults
+and other breaking behavior changes under `### Breaking`, removed API under `### Removed`
+(naming the version it was deprecated in and its replacement), and anything else under the
+usual headings.
