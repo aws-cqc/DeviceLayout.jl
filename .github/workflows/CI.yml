@@ -42,6 +42,7 @@ jobs:
           - '1.11'
           - '1.12'
           - '1.13'
+          # Pre-release minor, keep continue-on-error above pointing at it.
           - '1.14'
         os:
           - ubuntu-latest

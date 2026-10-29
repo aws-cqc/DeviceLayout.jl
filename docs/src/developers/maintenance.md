@@ -107,14 +107,15 @@ For anyone setting up a similar repository, or debugging why a step didn't fire:
 ### Julia version matrix
 
 The `test` matrix in `.github/workflows/CI.yml` lists every supported Julia minor version
-explicitly, plus `'pre'` whenever a new minor is in pre-release.
+explicitly, including the pre-release one. The `continue-on-error` expression in the same
+file must name that same number.
 
-- When a new minor Julia is released, replace `'pre'` with that version. Then add that job to
-  the branch protection rule as a required check; the job may need to run once on `main`
-  before GitHub offers it in the rule's list.
-- When the next minor enters pre-release (usually some weeks after a release), add `'pre'`
-  back. It runs with `continue-on-error`, so it can't block merges, but failures should be
-  looked at: they are early warning of upstream changes.
+- When the pre-release minor is released, set `continue-on-error` to `false`,
+  then add that job to the branch protection rule as a required
+  check. The job may need to run once on `main` before GitHub offers it in the rule's list.
+- When the next minor enters pre-release (usually some weeks after a release), add its number
+  to the matrix and point `continue-on-error` at it. That job can't block merges, but failures
+  should be looked at: they are early warning of upstream changes.
 - `julia = "1.10"` in `[compat]` is the lower bound. Raising it isn't breaking under SemVer
   (the resolver won't offer the new version to older Julia), but it needs at least a minor
   release rather than a patch, and a changelog note.
