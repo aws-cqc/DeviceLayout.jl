@@ -1155,9 +1155,7 @@ abstract type D1{T} <: GeometryEntity{T} end
 
 ab(p0, p1) = Point(gety(p1) - gety(p0), getx(p0) - getx(p1))
 
-to_polygons(::D1{T}) where {T} = Polygon{T}[]
-
-transform(d1::T, f::Transformation) where {T <: D1} = T(f(d1.p0), f(d1.p1))
+to_polygons(::D1{T}; kwargs...) where {T} = Polygon{T}[]
 
 """
     LineSegment{T} <: D1{T}
@@ -1176,6 +1174,12 @@ struct LineSegment{T} <: D1{T}
     end
 end
 LineSegment(p0::Point{S}, p1::Point{T}) where {S, T} = LineSegment(promote(p0, p1)...)
+transform(l::LineSegment, f::Transformation) = LineSegment(f(l.p0), f(l.p1))
+convert(::Type{GeometryEntity{T}}, l::LineSegment) where {T} =
+    LineSegment(convert(Point{T}, l.p0), convert(Point{T}, l.p1))
+
+lowerleft(l::LineSegment) = Point(l.p0.x, min(l.p0.y, l.p1.y))
+upperright(l::LineSegment) = Point(l.p1.x, max(l.p0.y, l.p1.y))
 
 struct LineSegmentView{T} <: AbstractVector{T}
     v::Vector{Point{T}}
@@ -1199,6 +1203,9 @@ struct Ray{T} <: D1{T}
     p1::Point{T}
 end
 Ray(p0::Point{S}, p1::Point{T}) where {S, T} = Ray(promote(p0, p1)...)
+transform(r::Ray, f::Transformation) = Ray(f(r.p0), f(r.p1))
+convert(::Type{GeometryEntity{T}}, r::Ray) where {T} =
+    Ray(convert(Point{T}, r.p0), convert(Point{T}, r.p1))
 
 struct Line{T} <: D1{T}
     p0::Point{T}
@@ -1206,6 +1213,8 @@ struct Line{T} <: D1{T}
 end
 Line(p0::Point{S}, p1::Point{T}) where {S, T} = Line(promote(p0, p1)...)
 Line(seg::LineSegment) = Line(seg.p0, seg.p1)
+transform(l::Line, f::Transformation) = Line(f(l.p0), f(l.p1))
+convert(::Type{GeometryEntity{T}}, l::Line) where {T} = convert(Line{T}, l)
 
 Base.promote_rule(::Type{Line{S}}, ::Type{Line{T}}) where {S, T} = Line{promote_type(S, T)}
 Base.convert(::Type{Line{S}}, L::Line) where {S} = Line{S}(L.p0, L.p1)

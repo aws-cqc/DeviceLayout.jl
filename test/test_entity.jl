@@ -79,6 +79,31 @@
         @test !isproper(bounds(opt_plus))
     end
 
+    @testset "1D entities" begin
+        seg = LineSegment(Point(1.0μm, 5.0μm), Point(1.0μm, 2.0μm))
+        expected_bounds = Rectangle(Point(1.0μm, 2.0μm), Point(1.0μm, 5.0μm))
+        @test bounds(seg) == expected_bounds
+        @test bounds(WithDirection(0°)(seg)) == expected_bounds
+
+        # Placing converts to the coordinate system's type, and references transform it
+        child = CoordinateSystem("segment_child", nm)
+        place!(child, seg, GDSMeta())
+        @test only(elements(child)) isa LineSegment{coordinatetype(child)}
+        parent = CoordinateSystem("segment_parent", nm)
+        addref!(parent, child, Point(10.0μm, 0.0μm); rot=90°)
+        flat_seg = only(elements(flatten(parent)))
+        @test flat_seg.p0 ≈ Point(5.0μm, 1.0μm)
+        @test flat_seg.p1 ≈ Point(8.0μm, 1.0μm)
+
+        for D1Type in (Polygons.Ray, Polygons.Line)
+            d1 = D1Type(Point(0μm, 0μm), Point(1μm, 0μm))
+            rotated = rotate(d1, 90°)
+            @test rotated isa D1Type
+            @test rotated.p1 ≈ Point(0μm, 1μm)
+            @test convert(GeometryEntity{typeof(1.0nm)}, d1) isa D1Type{typeof(1.0nm)}
+        end
+    end
+
     @testset "Path Nodes" begin
         # Create a halo of a path
         pa = Path(0nm, 0nm)

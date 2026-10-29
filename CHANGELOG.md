@@ -94,6 +94,10 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - `LineSegment`s can be placed in coordinate systems of a different coordinate type and
+    transformed through references, which previously threw a `MethodError`, and their
+    `bounds` (and `lowerleft`/`upperright`) now give their extent instead of a zero
+    rectangle at the origin.
   - `flatten` and `flatten!` with finite `max_copy` no longer duplicate geometry when a
     reference kept for exceeding `max_copy` has references of its own. The contents of a
     kept reference stay inside it instead of also being flattened or kept at the top level.
