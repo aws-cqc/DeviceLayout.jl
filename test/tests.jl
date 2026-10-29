@@ -41,6 +41,9 @@
             Point(1.0, 1.0),
             Point(2.0, 2.0)
         ) == 1.0
+        # Exact for integers whose products overflow, like femtometer-grid coordinates 1 cm apart
+        @test DeviceLayout.orientation(Point(0, 0), Point(10^13, 0), Point(0, 10^13)) == 1
+        @test DeviceLayout.orientation(Point(0, 0), Point(0, 10^13), Point(10^13, 0)) == -1
     end
 
     @testset "> Point array arithmetic" begin

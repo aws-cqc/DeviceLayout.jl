@@ -130,12 +130,15 @@ The format of this changelog is based on
   - `to_polygons(::ClippedPolygon)` throws an error when Clipper has rounded a hole's lowest
     vertex to just outside the polygon (beyond its enclosing contour, or inside another
     hole), instead of silently dropping the hole (#317) or attaching it with a cut through
-    the exterior. It warns when a keyhole cut attaches to an edge that the hole or a
-    neighboring vertex comes within a grid unit of, since rounding the attachment to the
-    grid may then make the cut polygon self-intersect. The error happens only when a vertex
-    of one shape lies on or very near a non-axis-aligned edge of another, and the warning
-    also when a contour folds back on itself at an acute vertex. Consecutive repeated points
-    (from a cut landing on a vertex, or a hole touching its enclosing contour) are removed.
+    the exterior. This can only happen when a vertex of one shape lies on or very near a
+    non-axis-aligned edge of another.
+  - `to_polygons(::ClippedPolygon)` warns when rounding a keyhole cut's attachment point to
+    the grid may make the cut polygon self-intersect: when the hole or a neighboring vertex
+    comes within a grid unit of the edge the cut attaches to, or a neighboring edge folds
+    back across it at an acute vertex.
+  - `to_polygons(::ClippedPolygon)` removes consecutive repeated points, left by a keyhole
+    cut landing on a vertex or a hole touching its enclosing contour. Some rendered polygons
+    have fewer vertices as a result, with the same shape.
   - The intersection of a ray with a segment that it meets exactly at an endpoint is found
     for integer coordinates. Floating-point rounding could put the computed point just
     outside the segment, so `to_polygons(::ClippedPolygon)` dropped a hole whose lowest

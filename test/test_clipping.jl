@@ -1202,6 +1202,9 @@ end
         ] .* 0.37
     )
     @test_throws r"\(4\.81, ?-1\.85\).*could not be\s+attached" to_polygons(xor2d([A], [B]))
+    # The vertex is reported in the polygon's own units.
+    Aμ, Bμ = Polygon(points(A) .* μm), Polygon(points(B) .* μm)
+    @test_throws r"\(4\.81 μm, ?-1\.85 μm\)" to_polygons(xor2d([Aμ], [Bμ]))
 
     # Clipper rounds both intersections of this hole with the edge from (-22, -98) to
     # (100, -2) to the hole's lowest vertex (0, -81), 0.31 units below the edge. More of the

@@ -1244,6 +1244,12 @@ Return 1 if the path `p1`--`p2`--`p3` is going counter-clockwise (increasing ang
 function orientation(p1::Point, p2::Point, p3::Point)
     return sign((p3.y - p2.y) * (p2.x - p1.x) - (p2.y - p1.y) * (p3.x - p2.x))
 end
+# Exact for integer coordinates: in their own type, the products overflow `Int64` for the
+# femtometer-grid coordinates from `clipperize` once points are a few microns apart.
+function orientation(p1::Point{T}, p2::Point{T}, p3::Point{T}) where {T <: Integer}
+    x1, y1, x2, y2, x3, y3 = widen.((p1.x, p1.y, p2.x, p2.y, p3.x, p3.y))
+    return T(sign((y3 - y2) * (x2 - x1) - (y2 - y1) * (x3 - x2)))
+end
 
 isparallel(A::D1, B::D1) = Δy(A) * Δx(B) == Δy(B) * Δx(A)
 isdegenerate(A::D1, B::D1) =

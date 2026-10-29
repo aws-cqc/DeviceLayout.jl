@@ -675,7 +675,7 @@ mutable struct InteriorCutNode{T}
 end
 segment(n::InteriorCutNode) = LineSegment(n.point, n.next.point)
 
-function distance_to_segment(p::Point{Int}, a::Point{Int}, b::Point{Int})
+function _distance_to_segment(p::Point{Int}, a::Point{Int}, b::Point{Int})
     abx, aby = Int128(b.x) - a.x, Int128(b.y) - a.y
     apx, apy = Int128(p.x) - a.x, Int128(p.y) - a.y
     len2 = abx^2 + aby^2
@@ -692,30 +692,15 @@ end
 # `b` to `c`) folds back across the kink at an acute vertex. Finding every vertex near the
 # segment would need a 2D search of the whole contour, so other vertices of the contour and
 # of other holes are not checked.
-function kink_may_cross(hole, z, a, b, c, w)
-    near(v) = distance_to_segment(v, a, b) < 1
+function _kink_may_cross(hole, z, a, b, c, w)
+    near(v) = _distance_to_segment(v, a, b) < 1
     (near(z) || near(c) || any(near, hole)) && return true
-    return proper_crossing(a, w, b, c) || proper_crossing(w, b, z, a)
+    return _proper_crossing(a, w, b, c) || _proper_crossing(w, b, z, a)
 end
 
-# Exact orientation of lattice points (`orientation` overflows Int64 at fm-scale extents):
-# 1 if `p`, `q`, `r` turn counterclockwise, -1 if clockwise, 0 if collinear.
-lattice_orientation(p::Point{Int}, q::Point{Int}, r::Point{Int}) = sign(
-    (Int128(q.x) - p.x) * (Int128(r.y) - p.y) - (Int128(q.y) - p.y) * (Int128(r.x) - p.x)
-)
-
-# Exact orientation of a closed lattice contour: 1 if counterclockwise, -1 if clockwise.
-function lattice_orientation(contour::Vector{Point{Int}})
-    a = sum(eachindex(contour); init=Int128(0)) do i
-        p, q = contour[i], contour[mod1(i + 1, length(contour))]
-        return Int128(p.x) * q.y - Int128(q.x) * p.y
-    end
-    return sign(a)
-end
-
-function proper_crossing(a::Point{Int}, b::Point{Int}, c::Point{Int}, d::Point{Int})
-    orient = lattice_orientation
-    return orient(a, b, c) * orient(a, b, d) < 0 && orient(c, d, a) * orient(c, d, b) < 0
+function _proper_crossing(a::Point{Int}, b::Point{Int}, c::Point{Int}, d::Point{Int})
+    return orientation(a, b, c) * orientation(a, b, d) < 0 &&
+           orientation(c, d, a) * orientation(c, d, b) < 0
 end
 
 # Why a vertex can end up on or just outside an edge after clipping, and what to do. A
@@ -753,7 +738,7 @@ Example:
 function interiorcuts(
     nodeortree::Clipper.PolyNode,
     outpolys::Vector{Polygon{T}},
-    userpoint=identity # converts lattice points to user coordinates for messages
+    userpoint=identity
 ) where {T}
     # Assumes we have first element an enclosing polygon with the rest being holes.
     # We also assume no hole collision.
@@ -795,7 +780,7 @@ function interiorcuts(
         suspect = nothing # first cut attachment that may cause a self-intersection
         # Clipper gives holes the opposite orientation to their enclosing contour, so the
         # interior stays on the same side of every edge as holes are spliced in.
-        interior_side = lattice_orientation(enclosing_contour)
+        interior_side = orientation(Polygon(enclosing_contour))
         for hole in sort(children(enclosing), by=h -> uniqueray(contour(h))[1].p0.y)
             # process all the holes.
             interiorcuts(hole, outpolys, userpoint)
@@ -840,8 +825,7 @@ function interiorcuts(
                 best_intersection_point == minpt || (
                     best_intersection_point != best_node.point &&
                     best_intersection_point != best_node.next.point &&
-                    lattice_orientation(best_node.point, best_node.next.point, v) ==
-                    -interior_side
+                    orientation(best_node.point, best_node.next.point, v) == -interior_side
                 )
             if outside
                 # Don't try to repair integer-grid geometry, just throw
@@ -865,7 +849,7 @@ function interiorcuts(
                 c =
                     best_node.next === loop_node ? node1.next.point :
                     best_node.next.next.point
-                kink_may_cross(hole_contour, z, a, b, c, w) && (suspect = w)
+                _kink_may_cross(hole_contour, z, a, b, c, w) && (suspect = w)
             end
 
             # We are going to replace `best_node`
