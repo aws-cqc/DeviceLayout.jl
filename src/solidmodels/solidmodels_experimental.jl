@@ -201,7 +201,7 @@ function render!(
             )
         end
         # Apply strictness only after all render and finalization warnings are logged.
-        check_render_strict(sch, strict)
+        check_render_strict(sch, strict, stage)
         return metadata
     finally
         close_logfile(sch)
