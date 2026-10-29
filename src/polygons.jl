@@ -1155,7 +1155,7 @@ abstract type D1{T} <: GeometryEntity{T} end
 
 ab(p0, p1) = Point(gety(p1) - gety(p0), getx(p0) - getx(p1))
 
-to_polygons(::D1{T}) where {T} = Polygon{T}[]
+to_polygons(::D1{T}; kwargs...) where {T} = Polygon{T}[]
 
 """
     LineSegment{T} <: D1{T}
