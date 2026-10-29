@@ -333,6 +333,8 @@ end
         @test Cut(:dest, :metal, [:tool]).tools == (:tool,)
         @test_throws MethodError Cut(:bad, :metal, :first_tool, :second_tool)
         @test_throws ArgumentError Cut(:bad, :metal, Symbol[])
+        @test_throws ArgumentError Cut(:bad, :metal, :metal)
+        @test_throws ArgumentError Cut(:bad, :metal, (:voids, :metal))
         @test_throws ArgumentError compile_ops(
             [Cut(:new_layer, :missing, :metal)],
             stack,
@@ -357,47 +359,37 @@ end
         @test only(ops)[1] == "voids"
         @test only(ops)[3] == ("metal", ["voids"], 2, 2)
 
-        # Adjacent removals of the object or of all tools are absorbed into the OCC call.
+        # Removal flags consume the object or all tools in the OCC call.
         ops, reg, _ =
-            compile_ops([Cut(:cut, :metal, :voids), Remove(:metal)], stack, registry)
+            compile_ops([Cut(:cut, :metal, :voids; remove_object=true)], stack, registry)
         @test (:remove_object => true) in only(ops)
         @test !haskey(reg, :metal)
         ops, reg, _ =
-            compile_ops([Cut(:cut, :metal, :voids), Remove(:voids)], stack, registry)
+            compile_ops([Cut(:cut, :metal, :voids; remove_tool=true)], stack, registry)
         @test (:remove_tool => true) in only(ops)
         @test !haskey(reg, :voids)
         ops, reg, _ =
-            compile_ops([Cut(:metal, :metal, :voids), Remove(:voids)], stack, registry)
+            compile_ops([Cut(:metal, :metal, :voids; remove_tool=true)], stack, registry)
         @test (:remove_object => false) in only(ops)
         @test (:remove_tool => true) in only(ops)
         @test haskey(reg, :metal) && !haskey(reg, :voids)
-
-        # Partial tool removal cannot be represented by OCC's all-tools removal flag.
         ops, reg, _ = compile_ops(
-            [Cut(:cut, :metal, (:voids, :shell)), Remove(:voids)],
+            [Cut(:cut, :metal, (:voids, :shell); remove_tool=true)],
             stack,
             registry
         )
-        @test (:remove_tool => false) in lowered(ops, SolidModels.difference_geom!)
-        @test any(op -> op[2] == SolidModels.remove_group!, ops)
-        @test !haskey(reg, :voids) && haskey(reg, :shell)
+        @test (:remove_tool => true) in only(ops)
+        @test !haskey(reg, :voids) && !haskey(reg, :shell)
 
-        # Removing the destination means removing the result, so it is not absorbed.
-        ops, reg, _ =
-            compile_ops([Cut(:metal, :metal, :voids), Remove(:metal)], stack, registry)
-        @test (:remove_object => false) in lowered(ops, SolidModels.difference_geom!)
-        @test any(op -> op[2] == SolidModels.remove_group!, ops)
-        @test !haskey(reg, :metal)
-
-        # A non-adjacent removal remains a separate operation.
-        ops, reg, _ = compile_ops(
-            [Cut(:cut, :metal, :voids), GetBoundary(:edge, :metal), Remove(:metal)],
-            stack,
-            registry
-        )
-        @test (:remove_object => false) in lowered(ops, SolidModels.difference_geom!)
-        @test any(op -> op[2] == SolidModels.remove_group!, ops)
-        @test !haskey(reg, :metal)
+        # Flags naming an input that the destination replaces are ignored, with a warning.
+        cut = @test_logs (:warn,) Cut(:metal, :metal, :voids; remove_object=true)
+        ops, reg, _ = compile_ops([cut], stack, registry)
+        @test (:remove_object => false) in only(ops)
+        @test haskey(reg, :metal)
+        cut = @test_logs (:warn,) Cut(:voids, :metal, :voids; remove_tool=true)
+        ops, reg, _ = compile_ops([cut], stack, registry)
+        @test (:remove_tool => false) in only(ops)
+        @test haskey(reg, :voids)
 
         # A destination must be new or one of the inputs.
         cut = Cut(:cut, :metal, :voids)
@@ -565,7 +557,7 @@ end
 
         # One source into a new destination heals it there and preserves it unless removed.
         ops, reg, _ =
-            compile_ops([Fuse(:clean, (:metal,)), Remove(:metal)], stack, registry)
+            compile_ops([Fuse(:clean, (:metal,); remove_sources=true)], stack, registry)
         @test only(ops)[1:3] == ("clean", SolidModels.union_geom!, (["metal"], 2))
         @test (:remove_object => true) in only(ops)
         @test !haskey(reg, :metal)
@@ -594,22 +586,27 @@ end
         @test ops[2][3] == (["combined", "shell"], 2)
         @test haskey(reg, :combined) && haskey(reg, :all)
 
-        # Removal is folded in only when every non-destination source is removed.
+        # The removal flag consumes every source other than the destination.
         ops, reg, _ = compile_ops(
-            [Fuse(:combined, (:metal, :voids)), Remove(:metal)],
-            stack,
-            registry
-        )
-        @test (:remove_object => false) in lowered(ops, SolidModels.union_geom!)
-        @test any(op -> op[2] == SolidModels.remove_group!, ops)
-        @test !haskey(reg, :metal) && haskey(reg, :voids)
-        ops, reg, _ = compile_ops(
-            [Fuse(:combined, (:metal, :voids)), Remove(:metal), Remove(:voids)],
+            [Fuse(:combined, (:metal, :voids); remove_sources=true)],
             stack,
             registry
         )
         @test (:remove_object => true) in only(ops)
         @test !haskey(reg, :metal) && !haskey(reg, :voids)
+        ops, reg, _ = compile_ops(
+            [Fuse(:metal, (:metal, :voids); remove_sources=true)],
+            stack,
+            registry
+        )
+        @test (:remove_object => true) in only(ops)
+        @test haskey(reg, :metal) && !haskey(reg, :voids)
+
+        # Healing in place always consumes the layer, so the flag is ignored with a warning.
+        heal = @test_logs (:warn,) Fuse(:metal; remove_sources=true)
+        ops, reg, _ = compile_ops([heal], stack, registry)
+        @test (:remove_object => true) in only(ops)
+        @test only(reg[:metal].pgs) == "metal"
 
         # Sources must be dimensionally homogeneous.
         reg = deepcopy(registry)
@@ -672,25 +669,35 @@ end
         @test (:remove_tool => true) in only(ops)
         @test haskey(reg, :metal)
 
-        # Input lifetime is controlled by adjacent Remove operations.
-        ops, reg, _ =
-            compile_ops([intersect, Remove(:metal), Remove(:voids)], stack, registry)
+        # Removal flags consume the inputs in the OCC call.
+        ops, reg, _ = compile_ops(
+            [
+                Intersect(
+                    :intersection,
+                    :metal,
+                    :voids;
+                    remove_object=true,
+                    remove_tool=true
+                )
+            ],
+            stack,
+            registry
+        )
         @test (:remove_object => true) in only(ops)
         @test (:remove_tool => true) in only(ops)
         @test !haskey(reg, :metal) && !haskey(reg, :voids)
-        ops, reg, _ = compile_ops([intersect, Remove(:voids)], stack, registry)
+        ops, reg, _ = compile_ops(
+            [Intersect(:intersection, :metal, :voids; remove_tool=true)],
+            stack,
+            registry
+        )
         @test (:remove_object => false) in only(ops)
         @test (:remove_tool => true) in only(ops)
         @test haskey(reg, :metal) && !haskey(reg, :voids)
 
-        # A removal naming an aliased destination applies to the result and is not absorbed.
-        ops, reg, _ = compile_ops(
-            [Intersect(:metal, :metal, :voids), Remove(:metal)],
-            stack,
-            registry
-        )
-        @test any(op -> op[2] == SolidModels.remove_group!, ops)
-        @test !haskey(reg, :metal)
+        # Flags naming an input that the destination replaces are ignored, with a warning.
+        @test_logs (:warn,) Intersect(:metal, :metal, :voids; remove_object=true)
+        @test_logs (:warn,) Intersect(:voids, :metal, :voids; remove_tool=true)
 
         # An empty OCC result leaves an unrealized layer that `sync_registry!` empties.
         sm = SolidModel("intersect_empty"; overwrite=true)
@@ -1017,7 +1024,7 @@ end
             ),
             (
                 "cut_remove",
-                [Cut(:result, :a, :b), Remove(:a)],
+                [Cut(:result, :a, :b; remove_object=true)],
                 2.0,
                 [0.0, 0.0, 0.0, 1.0, 2.0, 0.0],
                 Set(["b", "result"])
@@ -1843,10 +1850,8 @@ end
             Extrude(:SUBSTRATE_BOTTOM),
             Extrude(:BOUNDING_VOLUME),
             Extrude(:WAVE_PORTS_L1),
-            Cut(:METAL_POS, :CHIP_OUTLINE, :METAL_NEG),
-            Remove(:CHIP_OUTLINE),
-            Cut(:CUTOUT, :METAL_NEG, :PORTS),
-            Remove(:METAL_NEG),
+            Cut(:METAL_POS, :CHIP_OUTLINE, :METAL_NEG; remove_object=true),
+            Cut(:CUTOUT, :METAL_NEG, :PORTS; remove_object=true),
             Fuse(:METAL_POS),
             Cut(:VACUUM, :BOUNDING_VOLUME, :SUBSTRATE_BOTTOM),
             RestrictTo(:BOUNDING_VOLUME),

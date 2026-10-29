@@ -112,14 +112,14 @@ The public operation types are:
 |:--|:--|
 | `Extrude(source)`, `Extrude(source, dz)`, `Extrude(source; to_level, offset)`, or `Extrude(destination, source, …)` | Extrude a 1D or 2D layer along z. A source-stack layer is built to its declared thickness or level span; an explicit `dz` or target level is required for generated layers and must agree with the declaration otherwise. The one-layer forms operate in place; 3D sources are rejected. |
 | `Hollow(layer)` | Replace a 3D layer by its boundary shell and remove the enclosed volume from the model after fragmentation, so the interior is absent from the mesh regardless of which other volumes it overlaps. Shells are `GetBoundary(:x, :x); Extrude(:x)`. |
-| `Cut(destination, object, tools)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector. Follow it with `Remove` to remove inputs. |
-| `Fuse(source)` or `Fuse(destination, sources)` | Union one or more source layers; the one-layer form heals a layer in place. Other sources remain unless removed explicitly later. |
-| `SolidModelsExperimental.Intersect(destination, object, tool)` | Compute the OCC intersection of two layers. Follow it with `Remove` to consume either input layer. |
+| `Cut(destination, object, tools; remove_object, remove_tool)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector, and the object must not be one of the tools. Set `remove_object` or `remove_tool` to consume the object or all tools. |
+| `Fuse(source)` or `Fuse(destination, sources; remove_sources)` | Union one or more source layers; the one-layer form heals a layer in place. Set `remove_sources` to consume the sources other than the destination. |
+| `SolidModelsExperimental.Intersect(destination, object, tool; remove_object, remove_tool)` | Compute the OCC intersection of two layers. Set `remove_object` or `remove_tool` to consume either input layer. |
 | `GetInterface(destination, object, tool)` | Resolve a deferred interface after fragmentation. The destination must be new, and the inputs' PG identities must remain available through deferred execution. |
 | `RestrictTo(volume)` | Restrict the model to a 3D bounding-volume layer. |
 | `GetBoundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries into a new destination or replace the source in place. |
 | `Translate(source, dx, dy, dz)` or `Translate(destination, source, dx, dy, dz)` | Translate a layer. The one-layer form moves it in place; a distinct destination receives a copy and the source is preserved. |
-| `Remove(source; remove_entities)` | Remove a layer, or do nothing if it is absent. |
+| `Remove(source; remove_entities)` | Remove a layer, or do nothing if it is absent. To consume a boolean's inputs, use its removal flags instead: geometry that passes through a boolean unchanged keeps its entities, so a later `Remove` of an input also removes them from the result. |
 | `Revolve(source, origin, axis, angle)` or `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. The one-layer form operates in place. Three-dimensional sources are rejected. |
 | `SetPeriodic(first, second)` | Pair two distinct 2D periodic layers. |
 

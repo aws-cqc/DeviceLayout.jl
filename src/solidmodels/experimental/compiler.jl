@@ -56,65 +56,117 @@ Extrude(source::Symbol; kwargs...) = Extrude(source, source; kwargs...)
 Extrude(source::Symbol, dz::Coordinate) = Extrude(source, source, dz)
 
 """
-    Cut(destination, object, tools)
+    Cut(destination, object, tools; remove_object=false, remove_tool=false)
 
 Subtract one tool layer, or a grouped tuple or vector of tool layers, from `object`. The
-destination must be new or one of the inputs. Non-destination inputs remain available unless
-consumed by adjacent [`Remove`](@ref) operations.
+destination must be new or one of the inputs, and `object` must not be one of the tools.
+
+Inputs other than the destination are preserved unless `remove_object=true` (consume the
+object) or `remove_tool=true` (consume every tool) is set. Removal happens in the same OCC
+operation, so geometry that passes through the cut unchanged stays in the destination. A
+destination that is the object or one of the tools replaces that input, and the
+corresponding flag is ignored.
 """
 struct Cut{N} <: BooleanOp
     destination::Symbol
     object::Symbol
     tools::NTuple{N, Symbol}
-    function Cut{N}(destination, object, tools) where {N}
+    remove_object::Bool
+    remove_tool::Bool
+    function Cut{N}(destination, object, tools, remove_object, remove_tool) where {N}
         iszero(N) && throw(ArgumentError("Cut requires at least one tool layer"))
-        return new{N}(destination, object, tools)
+        # Subtracting a layer from itself always leaves nothing.
+        object in tools && throw(ArgumentError("Cut object must not be one of its tools"))
+        remove_object &&
+            destination == object &&
+            @warn "Cut(:$destination, :$object, ...): `remove_object=true` is ignored " *
+                  "because the object is replaced in place."
+        remove_tool &&
+            destination in tools &&
+            @warn "Cut(:$destination, :$object, ...): `remove_tool=true` is ignored " *
+                  "because a tool is replaced in place."
+        return new{N}(destination, object, tools, remove_object, remove_tool)
     end
 end
-Cut(dest::Symbol, object::Symbol, tools::NTuple{N, Symbol}) where {N} =
-    Cut{N}(dest, object, tools)
-Cut(dest::Symbol, object::Symbol, tool::Symbol) = Cut(dest, object, (tool,))
-Cut(dest::Symbol, object::Symbol, tools::AbstractVector{Symbol}) =
-    Cut(dest, object, Tuple(tools))
+Cut(
+    dest::Symbol,
+    object::Symbol,
+    tools::NTuple{N, Symbol};
+    remove_object::Bool=false,
+    remove_tool::Bool=false
+) where {N} = Cut{N}(dest, object, tools, remove_object, remove_tool)
+Cut(dest::Symbol, object::Symbol, tool::Symbol; kwargs...) =
+    Cut(dest, object, (tool,); kwargs...)
+Cut(dest::Symbol, object::Symbol, tools::AbstractVector{Symbol}; kwargs...) =
+    Cut(dest, object, Tuple(tools); kwargs...)
 
 """
     Fuse(source)
-    Fuse(destination, sources)
+    Fuse(destination, sources; remove_sources=false)
 
 Union one or more source layers into `destination`. Group multiple sources in a tuple or
 vector; the one-layer form heals a layer in place, merging its own overlapping or coincident
-geometry. The destination must be new or one of the sources. Out-of-place sources remain
-available unless consumed by adjacent [`Remove`](@ref) operations.
+geometry. The destination must be new or one of the sources.
+
+Sources other than the destination are preserved unless `remove_sources=true` is set, which
+consumes all of them in the same OCC operation. Healing a layer in place always consumes it,
+so the flag is ignored there.
 """
 struct Fuse{N} <: BooleanOp
     destination::Symbol
     sources::NTuple{N, Symbol}
-    function Fuse{N}(destination, sources) where {N}
+    remove_sources::Bool
+    function Fuse{N}(destination, sources, remove_sources) where {N}
         iszero(N) && throw(ArgumentError("Fuse requires at least one source layer"))
         allunique(sources) || throw(ArgumentError("Fuse source layers must be unique"))
-        return new{N}(destination, sources)
+        remove_sources &&
+            sources == (destination,) &&
+            @warn "Fuse(:$destination): `remove_sources=true` is ignored because healing " *
+                  "a layer in place always consumes it."
+        return new{N}(destination, sources, remove_sources)
     end
 end
-Fuse(dest::Symbol, sources::NTuple{N, Symbol}) where {N} = Fuse{N}(dest, sources)
-Fuse(dest::Symbol, sources::AbstractVector{Symbol}) = Fuse(dest, Tuple(sources))
-Fuse(source::Symbol) = Fuse(source, (source,))
+Fuse(dest::Symbol, sources::NTuple{N, Symbol}; remove_sources::Bool=false) where {N} =
+    Fuse{N}(dest, sources, remove_sources)
+Fuse(dest::Symbol, sources::AbstractVector{Symbol}; kwargs...) =
+    Fuse(dest, Tuple(sources); kwargs...)
+Fuse(source::Symbol; kwargs...) = Fuse(source, (source,); kwargs...)
 
 """
-    Intersect(destination, object, tool)
+    Intersect(destination, object, tool; remove_object=false, remove_tool=false)
 
 Compute the intersection of `object` and `tool`. The destination dimension is the lower
-input dimension. The destination must be new or one of the inputs; in-place operation
-consumes the replaced OCC input, and other inputs remain available unless consumed by
-adjacent [`Remove`](@ref) operations. Object and tool layers must be distinct.
+input dimension. The destination must be new or one of the inputs. Object and tool layers
+must be distinct.
+
+Inputs other than the destination are preserved unless `remove_object=true` or
+`remove_tool=true` is set, which consumes that input in the same OCC operation. An input that
+is the destination is always consumed, so its flag is ignored.
 """
 struct Intersect <: BooleanOp
     destination::Symbol
     object::Symbol
     tool::Symbol
-    function Intersect(destination::Symbol, object::Symbol, tool::Symbol)
+    remove_object::Bool
+    remove_tool::Bool
+    function Intersect(
+        destination::Symbol,
+        object::Symbol,
+        tool::Symbol;
+        remove_object::Bool=false,
+        remove_tool::Bool=false
+    )
         object == tool &&
             throw(ArgumentError("Intersect requires distinct object and tool layers"))
-        return new(destination, object, tool)
+        remove_object &&
+            destination == object &&
+            @warn "Intersect(:$destination, :$object, :$tool): `remove_object=true` is " *
+                  "ignored because the object is replaced in place and always consumed."
+        remove_tool &&
+            destination == tool &&
+            @warn "Intersect(:$destination, :$object, :$tool): `remove_tool=true` is " *
+                  "ignored because the tool is replaced in place and always consumed."
+        return new(destination, object, tool, remove_object, remove_tool)
     end
 end
 
@@ -250,6 +302,11 @@ Translate(source::Symbol, dx::Coordinate, dy::Coordinate, dz::Coordinate) =
 
 Remove a layer from the model, or do nothing if it is absent. Preserve its geometric
 entities and remove only its physical groups when `remove_entities=false`.
+
+To consume the inputs of a [`Cut`](@ref), [`Fuse`](@ref), or [`Intersect`](@ref), use their
+removal flags rather than a later `Remove`: geometry that passes through a boolean unchanged
+keeps its entities, which then belong to both the input and the result, so removing the
+input's entities also removes them from the result.
 """
 struct Remove <: LayerOp
     source::Symbol
@@ -311,30 +368,6 @@ struct SetPeriodic <: LayerOp
             throw(ArgumentError("SetPeriodic requires distinct first and second layers"))
         return new(first, second)
     end
-end
-
-# ─── Lowered operations ──────────────────────────────────────────────────────
-
-struct _LoweredIntersect <: BooleanOp
-    destination::Symbol
-    object::Symbol
-    tool::Symbol
-    remove_object::Bool
-    remove_tool::Bool
-end
-
-struct _LoweredCut{N} <: BooleanOp
-    destination::Symbol
-    object::Symbol
-    tools::NTuple{N, Symbol}
-    remove_object::Bool
-    remove_tool::Bool
-end
-
-struct _LoweredFuse{N} <: BooleanOp
-    destination::Symbol
-    sources::NTuple{N, Symbol}
-    remove_sources::Bool
 end
 
 # Seed the registry with the artwork layers of `flat`: line segments render as 1D curves and
@@ -510,87 +543,6 @@ source_layers(op::Remove) = (op.source,)
 source_layers(op::Revolve) = (op.source,)
 source_layers(op::SetPeriodic) = (op.first, op.second)
 
-source_layers(op::_LoweredCut) = (op.object, op.tools...)
-source_layers(op::_LoweredIntersect) = (op.object, op.tool)
-source_layers(op::_LoweredFuse) = op.sources
-
-function _lower_with_removals(op::Intersect, removals::Vector{Remove})
-    absorb_object =
-        op.object != op.destination &&
-        any(r -> r.source == op.object && r.remove_entities, removals)
-    absorb_tool =
-        op.tool != op.destination &&
-        any(r -> r.source == op.tool && r.remove_entities, removals)
-    remove_object = op.destination == op.object || absorb_object
-    remove_tool = op.destination == op.tool || absorb_tool
-    absorbed = Set{Symbol}()
-    absorb_object && push!(absorbed, op.object)
-    absorb_tool && push!(absorbed, op.tool)
-    return _LoweredIntersect(
-        op.destination,
-        op.object,
-        op.tool,
-        remove_object,
-        remove_tool
-    ),
-    absorbed
-end
-
-function _lower_with_removals(op::Cut, removals::Vector{Remove})
-    ambiguous = op.object in op.tools
-    remove_object =
-        !ambiguous &&
-        op.object != op.destination &&
-        any(r -> r.source == op.object && r.remove_entities, removals)
-    remove_tool =
-        !ambiguous &&
-        op.destination ∉ op.tools &&
-        all(tool -> any(r -> r.source == tool && r.remove_entities, removals), op.tools)
-    absorbed = Set{Symbol}()
-    remove_object && push!(absorbed, op.object)
-    remove_tool && union!(absorbed, op.tools)
-    return _LoweredCut(op.destination, op.object, op.tools, remove_object, remove_tool),
-    absorbed
-end
-
-function _lower_with_removals(op::Fuse, removals::Vector{Remove})
-    removable = filter(source -> source != op.destination, op.sources)
-    remove_sources = all(
-        source -> any(r -> r.source == source && r.remove_entities, removals),
-        removable
-    )
-    absorbed = remove_sources ? Set{Symbol}(removable) : Set{Symbol}()
-    return _LoweredFuse(op.destination, op.sources, remove_sources), absorbed
-end
-
-function _absorb_removals(ops::AbstractVector{<:LayerOp})
-    result = LayerOp[]
-    i = firstindex(ops)
-    while i <= lastindex(ops)
-        op = ops[i]
-        if !(op isa Union{Cut, Intersect, Fuse})
-            push!(result, op)
-            i += 1
-            continue
-        end
-
-        j = i + 1
-        removals = Remove[]
-        while j <= lastindex(ops) && ops[j] isa Remove
-            push!(removals, ops[j])
-            j += 1
-        end
-
-        lowered, absorbed = _lower_with_removals(op, removals)
-        push!(result, lowered)
-        for removal in removals
-            removal.remove_entities && removal.source in absorbed || push!(result, removal)
-        end
-        i = j
-    end
-    return result
-end
-
 _validate_source_layers(::Remove, ::LayerRegistry) = nothing
 
 function _validate_source_layers(op::LayerOp, registry::LayerRegistry)
@@ -629,7 +581,7 @@ function compile_ops(
     registry::LayerRegistry
 )
     cmp = _CompilerState(Tuple[], deepcopy(registry), DeferredInterface[], stack)
-    for op in _absorb_removals(ops)
+    for op in ops
         _validate_source_layers(op, cmp.reg)
         _compile!(cmp, op)
         _check_deferred_inputs_registered(cmp)
@@ -801,7 +753,10 @@ function hollow!(sm::SolidModel, registry::LayerRegistry)
     return nothing
 end
 
-function _compile!(cmp::_CompilerState, op::_LoweredCut)
+function _compile!(cmp::_CompilerState, op::Cut)
+    # A flag naming an input that the destination replaces is ignored (see the docstring).
+    remove_object = op.remove_object && op.destination != op.object
+    remove_tool = op.remove_tool && op.destination ∉ op.tools
     dim = cmp.reg[op.object].dim
     object_pg = _pg(cmp, op.object)
     tool_pgs = [_pg(cmp, tool) for tool in op.tools]
@@ -812,20 +767,18 @@ function _compile!(cmp::_CompilerState, op::_LoweredCut)
             string(op.destination),
             SolidModels.difference_geom!,
             (object_pg, tool_pgs, dim, dim),
-            :remove_object => op.remove_object,
-            :remove_tool => op.remove_tool
+            :remove_object => remove_object,
+            :remove_tool => remove_tool
         )
     )
-    if op.remove_tool
-        for tool in op.tools
-            tool != op.destination && delete!(cmp.reg, tool)
-        end
-    end
-    op.remove_object && op.destination != op.object && delete!(cmp.reg, op.object)
+    remove_tool && foreach(tool -> delete!(cmp.reg, tool), op.tools)
+    remove_object && delete!(cmp.reg, op.object)
     return nothing
 end
 
-function _compile!(cmp::_CompilerState, op::_LoweredFuse)
+function _compile!(cmp::_CompilerState, op::Fuse)
+    # Healing a layer in place always consumes it.
+    remove_sources = op.remove_sources || op.sources == (op.destination,)
     dims = unique([cmp.reg[source].dim for source in op.sources])
     length(dims) == 1 ||
         throw(ArgumentError("Fuse source layers must have equal dimensions"))
@@ -838,10 +791,10 @@ function _compile!(cmp::_CompilerState, op::_LoweredFuse)
             string(op.destination),
             SolidModels.union_geom!,
             (source_pgs, dim),
-            :remove_object => op.remove_sources
+            :remove_object => remove_sources
         )
     )
-    if op.remove_sources
+    if remove_sources
         for source in op.sources
             source != op.destination && delete!(cmp.reg, source)
         end
@@ -849,7 +802,10 @@ function _compile!(cmp::_CompilerState, op::_LoweredFuse)
     return nothing
 end
 
-function _compile!(cmp::_CompilerState, op::_LoweredIntersect)
+function _compile!(cmp::_CompilerState, op::Intersect)
+    # OCC always consumes an input that the destination replaces.
+    remove_object = op.remove_object || op.destination == op.object
+    remove_tool = op.remove_tool || op.destination == op.tool
     obj_dim = cmp.reg[op.object].dim
     tool_dim = cmp.reg[op.tool].dim
     push!(
@@ -858,8 +814,8 @@ function _compile!(cmp::_CompilerState, op::_LoweredIntersect)
             string(op.destination),
             SolidModels.intersect_geom!,
             (_pg(cmp, op.object), _pg(cmp, op.tool), obj_dim, tool_dim),
-            :remove_object => op.remove_object,
-            :remove_tool => op.remove_tool
+            :remove_object => remove_object,
+            :remove_tool => remove_tool
         )
     )
     if op.destination in (op.object, op.tool)
@@ -867,8 +823,8 @@ function _compile!(cmp::_CompilerState, op::_LoweredIntersect)
     else
         _create!(cmp, op.destination, min(obj_dim, tool_dim))
     end
-    op.remove_object && op.object != op.destination && delete!(cmp.reg, op.object)
-    op.remove_tool && op.tool != op.destination && delete!(cmp.reg, op.tool)
+    remove_object && op.object != op.destination && delete!(cmp.reg, op.object)
+    remove_tool && op.tool != op.destination && delete!(cmp.reg, op.tool)
     return nothing
 end
 
