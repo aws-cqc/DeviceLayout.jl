@@ -165,11 +165,24 @@ crowded, and those offset to the outside become sparse. `fence!` places attachme
 at given distances outside the edges of the path's style, and spaces them evenly along each
 row.
 
-```julia
-via = CoordinateSystem("via")
-render!(via, Circle(5μm), GDSMeta(1))
-# Rows 10 μm outside each edge of the path, with vias every 40 μm along each row
-fence!(pa, sref(via), 10μm, 40μm)
+```@example 1
+pa = Path(μm)
+straight!(pa, 60μm, Paths.CPW(10μm, 6μm))
+turn!(pa, 90°, 50μm)
+straight!(pa, 60μm)
+via = CoordinateSystem("via", nm)
+render!(via, Circle(3μm), GDSMeta(1))
+# Rows 8 μm outside each edge of the path, with vias every 20 μm along each row
+fence!(pa, sref(via), 8μm, 20μm)
+
+c = Cell("fence", nm)
+render!(c, pa, GDSMeta(0))
+save("fence.svg", flatten(c); background=:white);
+nothing; # hide
+```
+
+```@raw html
+<img src="../fence.svg" style="width:4in;"/>
 ```
 
 ## Intersections

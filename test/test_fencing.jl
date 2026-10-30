@@ -90,6 +90,29 @@ end
 
         @test_throws ArgumentError fence!(pa, sref(cs0), 4.0, 25.0; side=:top)
         @test_throws ArgumentError fence!(pa, sref(cs0), 4.0, -25.0)
+        pa = Path{Float64}()
+        straight!(pa, 100.0, Paths.Trace(2.0))
+        @test_throws r"nonnegative" fence!(pa, sref(cs0), [4.0, -1.0], 25.0)
+        @test !(pa[1].sty isa Paths.DecoratedStyle)
+    end
+
+    @testset "Change of extent" begin
+        cs = post_cs()
+        function two_styles()
+            p = Path(μm)
+            straight!(p, 30μm, Paths.CPW(10μm, 6μm))
+            straight!(p, 30μm, Paths.CPW(30μm, 10μm))
+            return p
+        end
+        # The row jumps from 16 μm to 30 μm from the centerline, and the spacing is measured
+        # along the row on either side of the jump
+        @test fence!(two_styles(), sref(cs), 5μm, 20μm; side=:left) ≈
+              [Point(0μm, 16μm), Point(20μm, 16μm), Point(40μm, 30μm), Point(60μm, 30μm)]
+        # A window starting where the first node ends starts on the second node's row
+        pa = two_styles()
+        @test fence!(pa, sref(cs), 5μm, 20μm; side=:left, start=30μm) ≈
+              [Point(30μm, 30μm), Point(50μm, 30μm)]
+        @test !(pa[1].sty isa Paths.DecoratedStyle)
     end
 
     @testset "Turns" begin
@@ -201,6 +224,36 @@ end
         @test_throws ArgumentError fence!(pa, sref(cs), 10μm, 20μm)
         @test_throws r"Node 2 .* generic `Paths.Taper\(\)`" fence!(pa, sref(cs), 10μm, 20μm)
         @test !any(n -> n.sty isa Paths.DecoratedStyle, Paths.nodes(pa))
+    end
+
+    @testset "Corners and offset segments" begin
+        cs = post_cs()
+        # Rows on the inside of a corner would overlap the path's metal and each other
+        pa = Path(μm)
+        straight!(pa, 50μm, Paths.Trace(10μm))
+        corner!(pa, 90°, Paths.SimpleTraceCorner())
+        straight!(pa, 50μm)
+        icorner = findfirst(n -> n.seg isa Paths.Corner, Paths.nodes(pa))
+        @test_throws Regex("Node $icorner .* `Paths.Corner`") fence!(
+            pa,
+            sref(cs),
+            5μm,
+            13μm;
+            side=:left
+        )
+        @test !any(n -> n.sty isa Paths.DecoratedStyle, Paths.nodes(pa))
+
+        # Offset segments are parameterized by the pathlength of the curve they offset
+        pa = Path(μm)
+        turn!(pa, 90°, 100μm, Paths.CPW(10μm, 6μm))
+        pa[1].seg = Paths.offset(pa[1].seg, 30μm)
+        @test_throws r"Node 1 .* offset segment" fence!(pa, sref(cs), 10μm, 20μm)
+        pa = Path(μm)
+        straight!(pa, 20μm, Paths.CPW(10μm, 6μm))
+        turn!(pa, 90°, 100μm)
+        pa[2].seg = Paths.offset(pa[2].seg, 30μm)
+        simplify!(pa)
+        @test_throws r"Node 1 .* offset segment" fence!(pa, sref(cs), 10μm, 20μm)
     end
 
     @testset "Reversal" begin

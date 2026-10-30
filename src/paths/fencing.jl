@@ -4,12 +4,12 @@
 
 Attach `post` alongside `pa` in rows ("fences"), spaced by `pitch` along each row.
 
-Each element of `offsets` (a single `Coordinate` or a collection of them) is the distance of
-a row outward from the edge of the rendered path, as given by the extent of its style.
-`side` may be `:left`, `:right`, or `:both`. Each offset gives one row on each selected side.
-Because rows follow the extent, a row jumps sideways wherever the extent changes abruptly,
-as at a change of style between segments. The spacing across such a jump is measured along
-the row on either side of it, not across the gap.
+Each element of `offsets` (a single `Coordinate` or a collection of them) is the nonnegative
+distance of a row outward from the edge of the rendered path, as given by the extent of its
+style. `side` may be `:left`, `:right`, or `:both`. Each offset gives one row on each
+selected side. Because rows follow the extent, a row jumps sideways wherever the extent
+changes abruptly, as at a change of style between segments. The spacing across such a jump
+is measured along the row on either side of it, not across the gap.
 
 `pitch` is measured along the row itself rather than along the path. This is the difference
 from attaching at regularly spaced positions with [`attach!`](@ref): on curves, a row on the
@@ -18,8 +18,8 @@ a result, rows on opposite sides of a curved path do not stay abreast of each ot
 
 Each row has its first post at `start` and continues up to `stop`, both measured as
 pathlength along `pa`. `margin` keeps posts at least that far from both ends of `pa`. The
-spacing carries over from one path segment to the next. `Corner`s have no length and get no
-posts.
+spacing carries over from one path segment to the next. A row that starts exactly where one
+segment ends has its first post on the next segment's row.
 
 If a row on the inside of a turn would lie at or past the turn's center of curvature, it has
 no length there. No posts are placed on it there, and a warning is issued.
@@ -31,11 +31,21 @@ reflected in the attachments. The referenced structure is shared. Also as with `
 posts are positioned by pathlength. Their positions are not recomputed if `pa` is modified
 later.
 
-Returns the points on the rows where posts were attached, in the coordinate system of `pa`.
+Returns the points on the rows where posts were attached, in the coordinate system of `pa`:
+for each offset in turn, the points of its left row and then of its right row, each in order
+of pathlength.
 
-Throws an `ArgumentError` if `pa` has a node with a generic [`Paths.Taper`](@ref) style. Its
-extent depends on its neighbors, so replace it with an explicit `Paths.TaperTrace` or
-`Paths.TaperCPW` first.
+Throws an `ArgumentError` if `pa` has a node that `fence!` does not support:
+
+  - A generic [`Paths.Taper`](@ref) style. Its extent depends on its neighbors, so replace it
+    with an explicit `Paths.TaperTrace` or `Paths.TaperCPW` first.
+  - A `Paths.Corner`. Rows on the inside of a sharp corner would overlap the path and each
+    other, so use [`turn!`](@ref) with a radius larger than each row's distance from the
+    centerline instead.
+  - An offset segment, which is parameterized by the pathlength of the curve it offsets
+    rather than by its own.
+
+Every segment of `pa` must implement `Paths.curvatureradius`.
 """
 function fence!(
     pa::Path{T},
@@ -51,15 +61,8 @@ function fence!(
         throw(ArgumentError("`side` must be `:left`, `:right`, or `:both`; got `:$side`."))
     pitch > zero(pitch) || throw(ArgumentError("`pitch` must be positive; got $pitch."))
     for (i, node) in enumerate(nodes(pa))
-        undecorated(style(node)) isa Taper && throw(
-            ArgumentError(
-                """
-                Node $i of path "$(name(pa))" has a generic `Paths.Taper()` style, which \
-                `fence!` does not support. Replace it with an explicit \
-                `Paths.TaperTrace` or `Paths.TaperCPW`, such as \
-                `Paths.TaperCPW(style_before, style_after)`."""
-            )
-        )
+        reason = _fence_unsupported(segment(node), undecorated(style(node)))
+        isnothing(reason) || throw(ArgumentError("Node $i of path \"$(name(pa))\" $reason"))
     end
     pitch = convert(T, pitch)
     post = convert(GeometryReference{T}, post)
@@ -67,6 +70,13 @@ function fence!(
     s1 = convert(T, min(stop, pathlength(pa) - margin))
     sides = side == :left ? (1,) : side == :right ? (-1,) : (1, -1)
     rows = [(convert(T, o), σ) for o in offsets for σ in sides]
+    for (o, _) in rows
+        o >= zero(T) || throw(
+            ArgumentError(
+                "Fence offsets must be nonnegative distances from the edge; got $o."
+            )
+        )
+    end
     # `attach!` replaces nodes of `pa` and reconciles it, so find every row's posts before
     # attaching any, rather than while `_fence_row` iterates over the nodes
     row_posts = [_fence_row(pa, o, σ, pitch, s0, s1) for (o, σ) in rows]
@@ -83,6 +93,27 @@ function fence!(
     return points
 end
 
+# Why `fence!` can't place rows along a node with segment `seg` and undecorated style `sty`,
+# or `nothing` if it can
+function _fence_unsupported(seg, sty)
+    sty isa Taper && return """
+        has a generic `Paths.Taper()` style, which `fence!` does not support. Replace it \
+        with an explicit `Paths.TaperTrace` or `Paths.TaperCPW`, such as \
+        `Paths.TaperCPW(style_before, style_after)`."""
+    seg isa Corner && return """
+        is a `Paths.Corner`, which `fence!` does not support: rows on the inside of a sharp \
+        corner would overlap the path and each other. Use `turn!` with a radius larger than \
+        each row's distance from the centerline instead."""
+    # `_row_speed` assumes each segment is parameterized by its own pathlength
+    if seg isa OffsetSegment ||
+       (seg isa CompoundSegment && any(s -> s isa OffsetSegment, seg.segments))
+        return """
+            has an offset segment, which `fence!` does not support: it is parameterized by \
+            the pathlength of the curve it offsets rather than by its own."""
+    end
+    return nothing
+end
+
 # Posts for one row at distance `o` outside the extent edge on side `σ` (+1 left, -1 right),
 # as (node index, pathlength within node, row point) with uniform spacing along the row.
 function _fence_row(pa::Path{T}, o::T, σ, pitch::T, s0::T, s1::T) where {T}
@@ -96,7 +127,8 @@ function _fence_row(pa::Path{T}, o::T, σ, pitch::T, s0::T, s1::T) where {T}
         len = pathlength(seg)
         a, b = max(s0 - l0, zero(T)), min(s1 - l0, len)
         l0 += len
-        (iszero(len) || a > b) && continue
+        # A window starting exactly at the end of a node starts on the next node's row
+        (iszero(len) || a > b || (a == len && i < length(pa))) && continue
         ℓ = t -> extent(sty, t) + o
         degenerate = Ref(false)
         v = t -> _row_speed(seg, ℓ, σ, t, degenerate)
