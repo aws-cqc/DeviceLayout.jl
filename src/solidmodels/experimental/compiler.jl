@@ -64,8 +64,9 @@ destination must be new or one of the inputs, and `object` must not be one of th
 Inputs other than the destination are preserved unless `remove_object=true` (consume the
 object) or `remove_tool=true` (consume every tool) is set. Removal happens in the same OCC
 operation, so geometry that passes through the cut unchanged stays in the destination. A
-destination that is the object or one of the tools replaces that input, and the
-corresponding flag is ignored.
+destination that is the object or the only tool replaces and consumes that input, so the
+corresponding flag is ignored. OCC consumes all tools or none, so a destination that is one
+of several tools requires `remove_tool=true`.
 """
 struct Cut{N} <: BooleanOp
     destination::Symbol
@@ -77,12 +78,20 @@ struct Cut{N} <: BooleanOp
         iszero(N) && throw(ArgumentError("Cut requires at least one tool layer"))
         # Subtracting a layer from itself always leaves nothing.
         object in tools && throw(ArgumentError("Cut object must not be one of its tools"))
+        if N > 1 && destination in tools && !remove_tool
+            throw(
+                ArgumentError(
+                    "Cut(:$destination, :$object, ...): replacing one of several tools " *
+                    "consumes all of them; set `remove_tool=true` or use a new destination"
+                )
+            )
+        end
         remove_object &&
             destination == object &&
             @warn "Cut(:$destination, :$object, ...): `remove_object=true` is ignored " *
                   "because the object is replaced in place."
         remove_tool &&
-            destination in tools &&
+            tools == (destination,) &&
             @warn "Cut(:$destination, :$object, ...): `remove_tool=true` is ignored " *
                   "because a tool is replaced in place."
         return new{N}(destination, object, tools, remove_object, remove_tool)
@@ -110,7 +119,8 @@ geometry. The destination must be new or one of the sources.
 
 Sources other than the destination are preserved unless `remove_sources=true` is set, which
 consumes all of them in the same OCC operation. Healing a layer in place always consumes it,
-so the flag is ignored there.
+so the flag is ignored there. OCC consumes all sources or none, so a destination among
+several sources requires `remove_sources=true`.
 """
 struct Fuse{N} <: BooleanOp
     destination::Symbol
@@ -119,6 +129,15 @@ struct Fuse{N} <: BooleanOp
     function Fuse{N}(destination, sources, remove_sources) where {N}
         iszero(N) && throw(ArgumentError("Fuse requires at least one source layer"))
         allunique(sources) || throw(ArgumentError("Fuse source layers must be unique"))
+        N > 1 &&
+            destination in sources &&
+            !remove_sources &&
+            throw(
+                ArgumentError(
+                    "Fuse(:$destination, ...): replacing one of several sources consumes " *
+                    "all of them; set `remove_sources=true` or use a new destination"
+                )
+            )
         remove_sources &&
             sources == (destination,) &&
             @warn "Fuse(:$destination): `remove_sources=true` is ignored because healing " *
@@ -754,9 +773,9 @@ function hollow!(sm::SolidModel, registry::LayerRegistry)
 end
 
 function _compile!(cmp::_CompilerState, op::Cut)
-    # A flag naming an input that the destination replaces is ignored (see the docstring).
-    remove_object = op.remove_object && op.destination != op.object
-    remove_tool = op.remove_tool && op.destination ∉ op.tools
+    # A replaced input must be consumed, or its original entities stay behind ungrouped.
+    remove_object = op.remove_object || op.destination == op.object
+    remove_tool = op.remove_tool || op.destination in op.tools
     dim = cmp.reg[op.object].dim
     object_pg = _pg(cmp, op.object)
     tool_pgs = [_pg(cmp, tool) for tool in op.tools]
@@ -771,8 +790,9 @@ function _compile!(cmp::_CompilerState, op::Cut)
             :remove_tool => remove_tool
         )
     )
-    remove_tool && foreach(tool -> delete!(cmp.reg, tool), op.tools)
-    remove_object && delete!(cmp.reg, op.object)
+    remove_tool &&
+        foreach(tool -> tool != op.destination && delete!(cmp.reg, tool), op.tools)
+    remove_object && op.object != op.destination && delete!(cmp.reg, op.object)
     return nothing
 end
 

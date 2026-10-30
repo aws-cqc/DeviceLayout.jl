@@ -351,13 +351,30 @@ end
         @test only(reg[:cut].pgs) == "cut"
         @test haskey(reg, :metal) && haskey(reg, :voids)
 
-        # In place, the result replaces the object or the tool it is named after.
+        # In place, the result replaces the object or the tool it is named after, and OCC
+        # consumes the replaced input so that none of its original entities stay behind.
         ops, reg, _ = compile_ops([Cut(:metal, :metal, :voids)], stack, registry)
         @test only(ops)[1] == "metal"
+        @test (:remove_object => true) in only(ops)
+        @test (:remove_tool => false) in only(ops)
         @test haskey(reg, :metal) && haskey(reg, :voids)
         ops, reg, _ = compile_ops([Cut(:voids, :metal, :voids)], stack, registry)
         @test only(ops)[1] == "voids"
         @test only(ops)[3] == ("metal", ["voids"], 2, 2)
+        @test (:remove_object => false) in only(ops)
+        @test (:remove_tool => true) in only(ops)
+        @test haskey(reg, :metal) && haskey(reg, :voids)
+
+        # OCC consumes all tools or none, so replacing one of several needs `remove_tool`.
+        @test_throws ArgumentError Cut(:voids, :metal, (:voids, :shell))
+        ops, reg, _ = compile_ops(
+            [Cut(:voids, :metal, (:voids, :shell); remove_object=true, remove_tool=true)],
+            stack,
+            registry
+        )
+        @test (:remove_object => true) in only(ops)
+        @test (:remove_tool => true) in only(ops)
+        @test !haskey(reg, :metal) && !haskey(reg, :shell) && haskey(reg, :voids)
 
         # Removal flags consume the object or all tools in the OCC call.
         ops, reg, _ =
@@ -370,7 +387,7 @@ end
         @test !haskey(reg, :voids)
         ops, reg, _ =
             compile_ops([Cut(:metal, :metal, :voids; remove_tool=true)], stack, registry)
-        @test (:remove_object => false) in only(ops)
+        @test (:remove_object => true) in only(ops)
         @test (:remove_tool => true) in only(ops)
         @test haskey(reg, :metal) && !haskey(reg, :voids)
         ops, reg, _ = compile_ops(
@@ -381,14 +398,14 @@ end
         @test (:remove_tool => true) in only(ops)
         @test !haskey(reg, :voids) && !haskey(reg, :shell)
 
-        # Flags naming an input that the destination replaces are ignored, with a warning.
+        # Flags naming an input that the destination replaces are redundant, with a warning.
         cut = @test_logs (:warn,) Cut(:metal, :metal, :voids; remove_object=true)
         ops, reg, _ = compile_ops([cut], stack, registry)
-        @test (:remove_object => false) in only(ops)
+        @test (:remove_object => true) in only(ops)
         @test haskey(reg, :metal)
         cut = @test_logs (:warn,) Cut(:voids, :metal, :voids; remove_tool=true)
         ops, reg, _ = compile_ops([cut], stack, registry)
-        @test (:remove_tool => false) in only(ops)
+        @test (:remove_tool => true) in only(ops)
         @test haskey(reg, :voids)
 
         # A destination must be new or one of the inputs.
@@ -562,11 +579,9 @@ end
         @test (:remove_object => true) in only(ops)
         @test !haskey(reg, :metal)
 
-        # Including the destination among the sources replaces its geometry.
-        ops, reg, _ = compile_ops([Fuse(:metal, (:metal, :voids))], stack, registry)
-        @test only(ops)[1] == "metal"
-        @test only(reg[:metal].pgs) == "metal"
-        @test haskey(reg, :voids)
+        # OCC consumes all sources or none, so replacing one of several needs
+        # `remove_sources` (exercised below).
+        @test_throws ArgumentError Fuse(:metal, (:metal, :voids))
 
         # A destination must be new or one of the sources.
         fuse = Fuse(:combined, (:metal, :voids))
@@ -1043,6 +1058,54 @@ end
                 @test layer_measure(result, :a) ≈ 4.0 atol = 1e-8
             end
             @test layer_measure(result, :b) ≈ 4.0 atol = 1e-8
+        end
+    end
+
+    @testset "In-place Booleans consume the replaced input" begin
+        # Ungrouped entities left by an in-place Boolean still take part in fragmentation
+        # and split their neighbours, so none may exist when the model is fragmented.
+        ungrouped = Tuple{Int32, Int32}[]
+        function record_ungrouped!(sm; kwargs...)
+            for dim = 2:3, (_, tag) in SolidModels.gmsh.model.getEntities(dim)
+                isempty(SolidModels.gmsh.model.getPhysicalGroupsForEntity(dim, tag)) &&
+                    push!(ungrouped, (dim, tag))
+            end
+            return SolidModels._fragment_three_pass!(sm; kwargs...)
+        end
+        cases = [
+            ("object", [Cut(:a, :a, :b)], Dict(:a => 2.0, :b => 4.0, :c => 0.5)),
+            ("tool", [Cut(:b, :a, :b)], Dict(:a => 4.0, :b => 2.0, :c => 0.5)),
+            (
+                "tools",
+                [Cut(:b, :a, (:b, :c); remove_tool=true)],
+                Dict(:a => 4.0, :b => 1.5)
+            ),
+            ("fuse", [Fuse(:a, (:a, :b); remove_sources=true)], Dict(:a => 6.0, :c => 0.5)),
+            ("heal", [Fuse(:a)], Dict(:a => 4.0, :b => 4.0, :c => 0.5))
+        ]
+        for (name, ops, areas) in cases
+            empty!(ungrouped)
+            cs = CoordinateSystem("in_place_$name", μm)
+            place!(cs, _rectangle(0.0, 0.0, 2.0, 2.0), LayerRef(:a))
+            place!(cs, _rectangle(1.0, 0.0, 3.0, 2.0), LayerRef(:b))
+            place!(cs, _rectangle(0.0, 1.0, 0.5, 2.0), LayerRef(:c))
+            sg = SchematicGraph("in_place_$name")
+            add_node!(sg, BasicComponent(cs); base_id="fixture")
+            schematic = plan(sg; log_dir=nothing) |> check!
+            sm = SolidModel("in_place_$name"; overwrite=true)
+            SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
+            metadata = render!(
+                sm,
+                schematic,
+                SolidModelTarget(flat_stack(:a, :b, :c), ops);
+                select_terminals=false,
+                (fragment!)=record_ungrouped!
+            )
+            @test isempty(ungrouped)
+            result = (; sm, metadata)
+            for (layer, area) in areas
+                @test layer_measure(result, layer) ≈ area atol = 1e-8
+            end
         end
     end
 
