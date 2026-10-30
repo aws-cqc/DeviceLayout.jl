@@ -18,8 +18,9 @@ a result, rows on opposite sides of a curved path do not stay abreast of each ot
 
 Each row has its first post at `start` and continues up to `stop`, both measured as
 pathlength along `pa`. `margin` keeps posts at least that far from both ends of `pa`. The
-spacing carries over from one path segment to the next. A row that starts exactly where one
-segment ends has its first post on the next segment's row.
+spacing carries over from one path segment to the next. A post that falls exactly where one
+segment ends, including the first post of a row that starts there, goes on the next
+segment's row.
 
 If a row on the inside of a turn would lie at or past the turn's center of curvature, it has
 no length there. No posts are placed on it there, and a warning is issued.
@@ -33,9 +34,11 @@ later.
 
 Returns the points on the rows where posts were attached, in the coordinate system of `pa`:
 for each offset in turn, the points of its left row and then of its right row, each in order
-of pathlength.
+of pathlength. The return value is experimental: it may change in a minor release, for
+example to records that also give each post's row and node.
 
-Throws an `ArgumentError` if `pa` has a node that `fence!` does not support:
+Throws an `ArgumentError` if `pa` has a node anywhere along it that `fence!` does not
+support, even outside the window from `start` to `stop`:
 
   - A generic [`Paths.Taper`](@ref) style. Its extent depends on its neighbors, so replace it
     with an explicit `Paths.TaperTrace` or `Paths.TaperCPW` first.
@@ -105,14 +108,17 @@ function _fence_unsupported(seg, sty)
         corner would overlap the path and each other. Use `turn!` with a radius larger than \
         each row's distance from the centerline instead."""
     # `_row_speed` assumes each segment is parameterized by its own pathlength
-    if seg isa OffsetSegment ||
-       (seg isa CompoundSegment && any(s -> s isa OffsetSegment, seg.segments))
+    if _has_offset(seg)
         return """
             has an offset segment, which `fence!` does not support: it is parameterized by \
             the pathlength of the curve it offsets rather than by its own."""
     end
     return nothing
 end
+
+# `simplify!` can nest compound segments, so look through every level
+_has_offset(seg) = seg isa OffsetSegment
+_has_offset(seg::CompoundSegment) = any(_has_offset, seg.segments)
 
 # Posts for one row at distance `o` outside the extent edge on side `σ` (+1 left, -1 right),
 # as (node index, pathlength within node, row point) with uniform spacing along the row.
@@ -122,13 +128,16 @@ function _fence_row(pa::Path{T}, o::T, σ, pitch::T, s0::T, s1::T) where {T}
     tol = sqrt(eps(Float64)) * pitch
     need = zero(T) # Length along the row still to go before the next post
     l0 = zero(T) # Pathlength of `pa` before the current node
+    # Last node with a row; zero-length nodes have none
+    i_last = something(findlast(n -> !iszero(pathlength(segment(n))), nodes(pa)), 0)
     for (i, node) in enumerate(nodes(pa))
         seg, sty = segment(node), style(node)
         len = pathlength(seg)
         a, b = max(s0 - l0, zero(T)), min(s1 - l0, len)
         l0 += len
-        # A window starting exactly at the end of a node starts on the next node's row
-        (iszero(len) || a > b || (a == len && i < length(pa))) && continue
+        # A window starting exactly at the end of a node starts on the next node's row, as
+        # in a `CompoundStyle`, so that `simplify!` doesn't move posts
+        (iszero(len) || a > b || (a == len && i < i_last)) && continue
         ℓ = t -> extent(sty, t) + o
         degenerate = Ref(false)
         v = t -> _row_speed(seg, ℓ, σ, t, degenerate)
@@ -137,6 +146,11 @@ function _fence_row(pa::Path{T}, o::T, σ, pitch::T, s0::T, s1::T) where {T}
             s_next, traveled = _advance_along_row(v, s, b, need, tol)
             if isnothing(s_next)
                 need -= traveled
+                break
+            end
+            # Likewise, a post due exactly at the end of a node goes on the next node's row
+            if s_next == len && i < i_last
+                need = zero(T)
                 break
             end
             dir = direction(seg, s_next)

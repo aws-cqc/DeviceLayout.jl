@@ -113,6 +113,29 @@ end
         @test fence!(pa, sref(cs), 5μm, 20μm; side=:left, start=30μm) ≈
               [Point(30μm, 30μm), Point(50μm, 30μm)]
         @test !(pa[1].sty isa Paths.DecoratedStyle)
+        # So does a post due where the first node ends, with or without `simplify!`
+        function long_styles()
+            p = Path(μm)
+            straight!(p, 60μm, Paths.CPW(10μm, 6μm))
+            straight!(p, 60μm, Paths.CPW(30μm, 10μm))
+            return p
+        end
+        expected =
+            [Point(x, y) for (x, y) in zip((0:20:120)μm, [16, 16, 16, 30, 30, 30, 30]μm)]
+        for simplified in (false, true)
+            pa = long_styles()
+            simplified && simplify!(pa)
+            @test fence!(pa, sref(cs), 5μm, 20μm; side=:left) ≈ expected
+            c = Cell(uniquename("c"), nm)
+            render!(c, pa, GDSMeta())
+            @test same_points(origin.(c.refs), expected)
+        end
+        # ... unless only zero-length nodes follow
+        pa = Path(μm)
+        straight!(pa, 40μm, Paths.CPW(10μm, 6μm))
+        straight!(pa, 0μm)
+        @test fence!(pa, sref(cs), 5μm, 20μm; side=:left) ≈
+              [Point(x, 16μm) for x in (0:20:40)μm]
     end
 
     @testset "Turns" begin
@@ -253,6 +276,10 @@ end
         turn!(pa, 90°, 100μm)
         pa[2].seg = Paths.offset(pa[2].seg, 30μm)
         simplify!(pa)
+        @test_throws r"Node 1 .* offset segment" fence!(pa, sref(cs), 10μm, 20μm)
+        # `simplify!` again nests the compound segment in another
+        simplify!(pa)
+        @test only(pa[1].seg.segments) isa Paths.CompoundSegment
         @test_throws r"Node 1 .* offset segment" fence!(pa, sref(cs), 10μm, 20μm)
     end
 
