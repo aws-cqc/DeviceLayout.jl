@@ -795,7 +795,14 @@ end
 function close_logfile(sch::Schematic)
     tee = sch.logger.logger
     l = tee.loggers[2]
-    return !(l isa Base.NullLogger) && close(l.logger.stream) # MinLevelLogger->FormatLogger
+    # Cleanup may run after another stage has already closed the stream. Treat that case
+    # as success so an InvalidStateException does not mask an earlier workflow failure.
+    try
+        return !(l isa Base.NullLogger) && close(l.logger.stream) # MinLevelLogger->FormatLogger
+    catch e
+        e isa InvalidStateException || rethrow()
+        return nothing
+    end
 end
 
 function reopen_logfile(sch::Schematic, stage)
@@ -1690,20 +1697,33 @@ function render!(
         "Cannot render an unchecked Schematic. Run check!(sch::Schematic), or override by setting sch.checked[] = true (not recommended!)"
     )
     reopen_logfile(sch, :render)
-    with_logger(sch.logger) do
-        return render!(cs, sch.coordinate_system; _maps(target)..., kwargs...)
+    try
+        with_logger(sch.logger) do
+            with_geometry_resolution_context() do
+                return render!(cs, sch.coordinate_system; _maps(target)..., kwargs...)
+            end
+        end
+    finally
+        close_logfile(sch)
     end
-    close_logfile(sch)
+    check_render_strict(sch, strict, :render)
+    return cs
+end
+
+function check_render_strict(sch::Schematic, strict, stage::Symbol)
     if strict == :error
-        max_level_logged(sch, :render) >= Logging.Error && error(
-            "Encountered errors while rendering. See $(sch.logger.logname) for details. Render with `strict=:no` to continue anyway (not recommended except for debugging)."
+        max_level_logged(sch, stage) >= Logging.Error && error(
+            "encountered errors while rendering. See $(sch.logger.logname) for details. " *
+            "Render with `strict=:no` to continue anyway (not recommended except for debugging)."
         )
     elseif strict == :warn
-        max_level_logged(sch, :render) >= Logging.Warn && error(
-            "Encountered warnings while rendering. See $(sch.logger.logname) for details. Render with `strict=:error` to continue anyway."
+        max_level_logged(sch, stage) >= Logging.Warn && error(
+            "encountered warnings while rendering. See $(sch.logger.logname) for details. " *
+            "Render with `strict=:error` to allow warnings while still failing on errors."
         )
     elseif strict != :no
-        @warn "Keyword `strict` in `render!` should be `:error`, `:warn`, or `:no` (got `:$strict`). Proceeding as though `strict=:no` were used."
+        @warn "keyword `strict` in `render!` should be `:error`, `:warn`, or `:no` " *
+              "(got `:$strict`). Proceeding as though `strict=:no` were used."
     end
-    return cs
+    return nothing
 end

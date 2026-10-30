@@ -216,11 +216,11 @@ function flatten(
 ) where {S, T <: GeometryStructure{S}}
     cflat = coordsys_type(c)(name)
     if depth == 0
-        append_coordsys!(cflat, c; addrefs=true, metadata_filter=metadata_filter)
+        append_coordsys!(cflat, c; addrefs=true, metadata_filter)
         return cflat
     end
     # append the top-level elements
-    append_coordsys!(cflat, c; addrefs=false, metadata_filter=metadata_filter)
+    append_coordsys!(cflat, c; addrefs=false, metadata_filter)
     keep = if isinf(max_copy)
         Returns(false)
     else
@@ -230,7 +230,7 @@ function flatten(
     flatrefs, keptrefs, deeprefs = flatten_refs(c; depth=depth, keep=keep)
     append!(cflat.refs, deeprefs)
     append!(cflat.refs, keptrefs)
-    append_coordsys!.(cflat, flatrefs; addrefs=false, metadata_filter=metadata_filter)
+    append_coordsys!.(cflat, flatrefs; addrefs=false, metadata_filter)
     return cflat
 end
 
