@@ -156,6 +156,22 @@ if we want to refer to references inside that attachment: `aaa["bbb",2]["ccc"]`.
 manner, it is easy to find the right `CellReference` to use with
 [`transformation(::DeviceLayout.GeometryStructure, ::StructureReference)`](@ref).
 
+### Fences
+
+To attach structures like vias periodically alongside a path, use [`fence!`](@ref). If you
+attach them with `attach!` at regularly spaced positions instead, the attachments are
+evenly spaced along the path itself, so attachments offset to the inside of a curve become
+crowded, and those offset to the outside become sparse. `fence!` places attachments in rows
+at given distances outside the edges of the path's style, and spaces them evenly along each
+row.
+
+```julia
+via = CoordinateSystem("via")
+render!(via, Circle(5μm), GDSMeta(1))
+# Rows 10 μm outside each edge of the path, with vias every 40 μm along each row
+fence!(pa, sref(via), 10μm, 40μm)
+```
+
 ## Intersections
 
 How to do the right thing when paths intersect is often tedious. [`Intersect.intersect!`](@ref)
