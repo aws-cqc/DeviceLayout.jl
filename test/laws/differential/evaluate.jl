@@ -131,6 +131,18 @@ function run_case(c::DiffCase)
     end
 end
 
+# DeviceLayout binds `libcclipper` itself when it carries its own Clipper wrapper; a
+# Clipper.jl backend is identified by the versions of the loaded packages instead.
+function kernel_library()
+    isdefined(DeviceLayout, :libcclipper) && return string(DeviceLayout.libcclipper)
+    names = ("Clipper", "cclipper2_jll", "Clipper2_jll")
+    ids = filter(id -> id.name in names, collect(keys(Base.loaded_modules)))
+    return join(
+        sort(["$(id.name) $(pkgversion(Base.loaded_modules[id]))" for id in ids]),
+        ", "
+    )
+end
+
 function main(args)
     length(args) == 2 || error("usage: evaluate.jl <rundir> <label>")
     rundir, label = args
@@ -147,7 +159,7 @@ function main(args)
             "worktree" => worktree,
             "git_head" => git_head(worktree),
             "devicelayout_version" => string(pkgversion(DeviceLayout)),
-            "kernel_library" => string(DeviceLayout.libcclipper),
+            "kernel_library" => kernel_library(),
             "julia_version" => string(VERSION),
             "started" => string(Base.Libc.strftime("%Y-%m-%dT%H:%M:%S", time())),
             "cases" => length(cases),

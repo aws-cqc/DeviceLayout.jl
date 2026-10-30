@@ -82,24 +82,24 @@
         @test first(region_within(x, xor2d([B], [A]), 1))
     end
 
-    # L5 — `to_polygons` silently drops a hole whose cut ray misses its parent.
-    # Found by: B11 on kernel output (2026-09-09). Class: DeviceLayout bug, kernel-
+    # L5 — `to_polygons` cannot cut a hole whose lowest vertex lies outside its parent.
+    # Found by: B11 on kernel output (2026-09-09). Class: DeviceLayout, kernel-
     # independent. `interiorcuts` shoots a ray downward from the hole's lowest vertex
     # and joins the hole at the first parent edge it hits; when that vertex lies outside
-    # the parent (L4) no edge is hit and the hole is skipped without warning, filling it
-    # in. Here the xor of two triangles has a hole of area 156 out of 379.5; the keyhole
-    # output has area 535.5 — the union. The fm-lattice case reproduces on random
+    # the parent (L4) no edge is hit. Until #350 the hole was skipped without warning,
+    # filling it in; `to_polygons` now throws instead. Here the xor of two triangles has
+    # a hole of area 156 out of 379.5. The fm-lattice case reproduces on random
     # stars at μm scale (`(-2,5),(-16,11),(-12,-4),(-11,-9),(19,-4),(17,-3)` xor
     # `(14,10),(21,14),(11,12),(18,20),(-1,12),(-2,4),(5,-5),(6,-11),(8,2),(13,-5)`,
-    # both × 0.37, hole area 1.13 μm² lost). The `interiorcuts` fallback belongs in DL.
-    @testset "> L5 interiorcuts drops a hole with no downward ray hit" begin
+    # both × 0.37, hole area 1.13 μm²). Throwing is #350's chosen behavior, so this entry
+    # pins it rather than marking it broken.
+    @testset "> L5 interiorcuts throws on a hole with no downward ray hit" begin
         A = Polygon(Point{Int}[(14, 2), (7, 7), (-1, 4), (-1, -15), (1, -14), (14, -3)])
         B = Polygon(Point{Int}[(16, 6), (8, 16), (4, 11), (7, 20), (-18, 4), (7, -9)])
         x = xor2d([A], [B])
         @test count(Clipper.ishole, tree_nodes(x)) == 1
         @test region_area_exact(togrid(x)) == 759 // 2
-        @test_broken region_area_exact(togrid(to_polygons(x))) == 759 // 2
-        @test_broken first(region_within(togrid(to_polygons(x)), togrid(x), 1))
+        @test_throws ErrorException to_polygons(x)
         # Moving B's offending vertex one unit up puts the hole inside its parent, and
         # the cut succeeds.
         B2 = Polygon(Point{Int}[(16, 6), (8, 16), (4, 11), (7, 20), (-18, 4), (7, -8)])
@@ -128,23 +128,23 @@
         xf = xor2d([Af], [Bf])
         @test count(Clipper.ishole, tree_nodes(xf)) == 1
         @test_broken valid_output(xf; weak=true, nested=true)
-        @test_broken first(region_within(togrid(to_polygons(xf)), togrid(xf), 1))
+        @test_throws ErrorException to_polygons(xf)
     end
 
-    # L6 — Keyhole output has repeated consecutive vertices when a hole touches its
+    # L6 — Keyhole output had repeated consecutive vertices when a hole touches its
     # parent. Found by: B11 inspection on rectilinear pairs (2026-09-09). Class: DL
     # output hygiene, kernel-independent. When the hole's lowest vertex lies on a parent
-    # edge the cut has zero length, and `interiorcuts` emits the cut vertex up to three
-    # times in a row. The region is right; the polygon has zero-length edges. Recorded
-    # as the aspiration for `to_polygons` output validity.
-    @testset "> L6 zero-length keyhole cut" begin
+    # edge the cut has zero length, and `interiorcuts` emitted the cut vertex up to three
+    # times in a row. Fixed by #350, which drops consecutive repeated points; kept as a
+    # regression.
+    @testset "> L6 zero-length keyhole cut (fixed)" begin
         A = Polygon(Point{Int}[(0, 0), (3, 0), (3, 2), (0, 2)])
         B = Polygon(Point{Int}[(-12, 1), (1, 1), (1, 3), (-12, 3)])
         x = xor2d([A], [B])
         @test count(Clipper.ishole, tree_nodes(x)) == 1
         p = only(to_polygons(x))
         @test first(region_within(togrid([p]), togrid(x), 0))
-        @test_broken all(i -> p.p[i] != p.p[mod1(i + 1, end)], eachindex(p.p))
+        @test all(i -> p.p[i] != p.p[mod1(i + 1, end)], eachindex(p.p))
         # A strictly interior hole can also have a sub-lattice cut: rounding the
         # parent intersection lands on the hole vertex. Construct the tree directly
         # so changes to the clipping kernel cannot bypass this DL regression.
@@ -153,17 +153,35 @@
         cp = holed_tree(outer, [hole])
         @test contour_contained(togrid(hole), togrid(outer); strict=true)
         out = togrid(to_polygons(cp))
-        @test valid_keyholes(cp, out)
-        @test_broken all(v -> is_simple_exact(v; weak=true), out)
+        @test valid_keyholes(out)
+        @test all(v -> is_simple_exact(v; weak=true), out)
         # The attachment can also coincide with an existing parent vertex even when
-        # the hole has ample clearance: the parent endpoint is emitted twice.
+        # the hole has ample clearance: the parent endpoint was emitted twice.
         outer = Polygon(Point{Int}[(20, 0), (-4, 20), (0, -20)])
         hole = Polygon(Point{Int}[(4, 0), (-1, 4), (0, -4)])
         cp = holed_tree(outer, [hole])
         @test valid_output(cp; nested=true)
         out = togrid(to_polygons(cp))
-        @test valid_keyholes(cp, out)
-        @test_broken all(v -> is_simple_exact(v; weak=true), out)
+        @test valid_keyholes(out)
+        @test all(v -> is_simple_exact(v; weak=true), out)
+    end
+
+    # L11 — A keyhole cut rounded onto the lattice can make the keyhole polygon
+    # self-intersect. Found by: B11 at 5000 examples (2026-09-21, both kernels; the tree
+    # is built directly). Class: DL, kernel-independent. The hole's lowest vertex (20,-9)
+    # lies 0.4 above the parent edge (-79,32)–(86,-37), so on the lattice the cut has
+    # zero length, and the pinch lifts that edge through the hole vertex (-19,7), which
+    # was 0.09 above it. `interiorcuts` warns. In a sample of 5000 valid B11 trees,
+    # 226 warned, 6 of those gave invalid output, and none gave invalid output unwarned.
+    @testset "> L11 keyhole pinch crosses a nearby hole vertex" begin
+        outer = Polygon(Point{Int}[(-8, 66), (-79, 32), (86, -37)])
+        hole = Polygon(Point{Int}[(20, -9), (-2, 16), (-19, 7)])
+        cp = holed_tree(outer, [hole])
+        @test valid_output(cp; nested=true)
+        out, warned = keyholes_warned(cp)
+        @test warned
+        @test first(region_within(out, togrid(cp), 1))
+        @test_broken valid_keyholes(out)
     end
 
     # L7 — Small offsets leave the input vertex on the output boundary at a sharp
