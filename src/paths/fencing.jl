@@ -7,6 +7,9 @@ Attach `post` alongside `pa` in rows ("fences"), spaced by `pitch` along each ro
 Each element of `offsets` (a single `Coordinate` or a collection of them) is the distance of
 a row outward from the edge of the rendered path, as given by the extent of its style.
 `side` may be `:left`, `:right`, or `:both`. Each offset gives one row on each selected side.
+Because rows follow the extent, a row jumps sideways wherever the extent changes abruptly,
+as at a change of style between segments. The spacing across such a jump is measured along
+the row on either side of it, not across the gap.
 
 `pitch` is measured along the row itself rather than along the path. This is the difference
 from attaching at regularly spaced positions with [`attach!`](@ref): on curves, a row on the
@@ -23,11 +26,16 @@ no length there. No posts are placed on it there, and a warning is issued.
 
 As with `attach!`, the origin of `post` is relative to a coordinate system that rotates with
 the path. Here, that coordinate system's origin is on the row. Each row attaches its own copy of
-`post`, so later changes to `post` are not reflected in the attachments. Also as with `attach!`,
+the reference `post`, so later changes to the reference itself, such as its origin, are not
+reflected in the attachments. The referenced structure is shared. Also as with `attach!`,
 posts are positioned by pathlength. Their positions are not recomputed if `pa` is modified
 later.
 
 Returns the points on the rows where posts were attached, in the coordinate system of `pa`.
+
+Throws an `ArgumentError` if `pa` has a node with a generic [`Paths.Taper`](@ref) style. Its
+extent depends on its neighbors, so replace it with an explicit `Paths.TaperTrace` or
+`Paths.TaperCPW` first.
 """
 function fence!(
     pa::Path{T},
@@ -42,13 +50,25 @@ function fence!(
     side in (:left, :right, :both) ||
         throw(ArgumentError("`side` must be `:left`, `:right`, or `:both`; got `:$side`."))
     pitch > zero(pitch) || throw(ArgumentError("`pitch` must be positive; got $pitch."))
+    for (i, node) in enumerate(nodes(pa))
+        undecorated(style(node)) isa Taper && throw(
+            ArgumentError(
+                """
+                Node $i of path "$(name(pa))" has a generic `Paths.Taper()` style, which \
+                `fence!` does not support. Replace it with an explicit \
+                `Paths.TaperTrace` or `Paths.TaperCPW`, such as \
+                `Paths.TaperCPW(style_before, style_after)`."""
+            )
+        )
+    end
     pitch = convert(T, pitch)
     post = convert(GeometryReference{T}, post)
     s0 = convert(T, max(start, margin))
     s1 = convert(T, min(stop, pathlength(pa) - margin))
     sides = side == :left ? (1,) : side == :right ? (-1,) : (1, -1)
     rows = [(convert(T, o), σ) for o in offsets for σ in sides]
-    # Compute every row before attaching anything, so that no row sees another's attachments
+    # `attach!` replaces nodes of `pa` and reconciles it, so find every row's posts before
+    # attaching any, rather than while `_fence_row` iterates over the nodes
     row_posts = [_fence_row(pa, o, σ, pitch, s0, s1) for (o, σ) in rows]
 
     points = Point{T}[]
@@ -118,7 +138,13 @@ end
 # Pathlength in [s, b] after which the row has advanced by `need` beyond the row point at `s`,
 # along with `need`; or `nothing` and the distance traveled along the row up to `b`
 function _advance_along_row(v, s, b, need, tol)
-    need <= tol && return s, need
+    if need <= tol
+        v(s) > 0 && return s, need
+        # The row doesn't exist at `s`, so the post goes where it begins (within `3tol`
+        # along it), and the row stays without posts if it doesn't begin before `b`
+        x, _ = _advance_along_row(v, s, b, 2tol, tol)
+        return x, isnothing(x) ? zero(need) : need
+    end
     # Bracket the solution locally, so the cost per post doesn't grow with segment length
     h = need
     hi, total = s, zero(need)

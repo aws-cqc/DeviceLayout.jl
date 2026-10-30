@@ -65,6 +65,11 @@ end
         straight!(pa, 100μm, Paths.CPW(10μm, 6μm))
         @test getx.(fence!(pa, sref(cs), 10μm, 20μm; side=:left, margin=15μm)) ≈
               [15, 35, 55, 75]μm
+        # Lengths in other units than the path's
+        pa = Path(μm)
+        straight!(pa, 100μm, Paths.CPW(10μm, 6μm))
+        @test fence!(pa, sref(cs), 10000nm, 20000nm; side=:left, margin=15000nm) ≈
+              [Point(x, 21μm) for x in (15:20:75)μm]
         pa = Path(μm)
         straight!(pa, 100μm, Paths.CPW(10μm, 6μm))
         @test getx.(fence!(pa, sref(cs), 10μm, 20μm; side=:right, start=30μm, stop=70μm)) ≈
@@ -167,6 +172,35 @@ end
         @test !(pa[2].sty isa Paths.DecoratedStyle)
         @test length(pa[1].sty.ts) == 3 && !isempty(pa[3].sty.ts)
         @test length(pts) == length(refs(pa))
+
+        # A row that starts degenerate gets its first post where it begins, on the straight.
+        # The row is 56 μm from the centerline, at (-6 μm, 50 μm) where the turn ends.
+        for start in (0μm, 60μm)
+            pa = Path(μm)
+            turn!(pa, 90°, 50μm, Paths.CPW(10μm, 6μm))
+            straight!(pa, 50μm)
+            pts = @test_logs (:warn, r"center of curvature of node\(s\) \[1\]") fence!(
+                pa,
+                sref(cs),
+                45μm,
+                20μm;
+                side=:left,
+                start
+            )
+            @test !(pa[1].sty isa Paths.DecoratedStyle)
+            @test pts ≈ [Point(-6μm, y) for y in (50:20:90)μm]
+        end
+    end
+
+    @testset "Generic tapers" begin
+        cs = post_cs()
+        pa = Path(μm)
+        straight!(pa, 20μm, Paths.CPW(10μm, 6μm))
+        straight!(pa, 20μm, Paths.Taper())
+        straight!(pa, 20μm, Paths.CPW(20μm, 10μm))
+        @test_throws ArgumentError fence!(pa, sref(cs), 10μm, 20μm)
+        @test_throws r"Node 2 .* generic `Paths.Taper\(\)`" fence!(pa, sref(cs), 10μm, 20μm)
+        @test !any(n -> n.sty isa Paths.DecoratedStyle, Paths.nodes(pa))
     end
 
     @testset "Reversal" begin
