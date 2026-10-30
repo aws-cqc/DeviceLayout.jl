@@ -59,15 +59,10 @@ outer/hole pair directly rather than waiting for unrelated stars to happen to pr
 a hole. It tests both that tree and integer/float kernel trees derived from it.
 B8 checks winding as well as hole flags, simplicity, and optional nesting.
 
-B11 checks keyhole output validity with the narrow L6 exception: repeated consecutive
-vertices are permitted only where the exact nearest downward-ray attachment coincides
-with a parent vertex or rounds onto the lowest hole vertex (a zero-length cut).
-The exception is granted only for a single-outer/single-hole tree. With siblings the
-attachment search changes after earlier cuts; with multiple components, coordinates
-alone cannot identify the owner of an exception. Exemptions fail closed in both cases.
-All other zero edges, wrong winding, and proper crossings fail. Fixed-tree ledger
-reproducers demand that even those duplicate cut endpoints disappear, independently
-of whether a clipping-kernel change stops generating the affected tree.
+B11 checks that keyhole output is weakly simple, counterclockwise, and free of
+zero-length edges, including at cut endpoints (ledger L6, fixed by #350). Trees with a
+hole outside its parent are rejected as B11 inputs; `to_polygons` throws on them
+(ledger L5).
 
 ## Differential runs
 

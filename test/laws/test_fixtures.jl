@@ -114,4 +114,10 @@ end
     @test offset_class(g(3, 5), A, -3, 1) == :band    # dist 3
     @test offset_class(g(1, 5), A, -3, 1) == :out
     @test offset_class(g(12, 5), A, -3, 1) == :out
+    # δ ≤ tol: the band reaches across ∂A by tol − |δ|.
+    @test offset_class(g(10, 5), A, 1, 2) == :band    # on ∂A, 1 from the offset
+    @test offset_class(g(9, 5), A, 1, 2) == :band     # 1 inside, ≥ 2 from the offset
+    @test offset_class(g(8, 5), A, 1, 2) == :in
+    @test offset_class(g(11, 5), A, -1, 2) == :band
+    @test offset_class(g(12, 5), A, -1, 2) == :out
 end

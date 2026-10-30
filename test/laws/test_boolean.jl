@@ -388,14 +388,16 @@ end
     [:geomlaws] begin
     # `to_polygons(::ClippedPolygon)` cuts each hole into its parent along a ray from
     # the hole's lowest vertex (`interiorcuts`). The cut point is rounded to the
-    # lattice, so the keyhole polygons agree with the tree within one unit. Trees whose
-    # holes are not nested in their parents (ledger L4) are rejected here: that is B8's
-    # finding, and on such trees the cut silently fails (ledger L5).
+    # lattice, so the keyhole polygons agree with the tree within one unit. The rounded
+    # cut can make a keyhole polygon self-intersect; `to_polygons` then warns, and the
+    # law accepts that output only with the warning (ledger L11). Trees whose holes are
+    # not nested in their parents (ledger L4) are rejected here: that is B8's finding,
+    # and on such trees `to_polygons` throws (ledger L5).
     @lawcheck function keyhole_built(cp=int_holed_polygon)
-        out = togrid(to_polygons(cp))
+        out, warned = keyholes_warned(cp)
         event!("tree", togrid(cp))
         event!("keyhole", out)
-        return valid_keyholes(cp, out) && first(region_within(out, togrid(cp), 1))
+        return (warned || valid_keyholes(out)) && first(region_within(out, togrid(cp), 1))
     end
     # The direct tree guarantees a hole without conditioning on a rare overlap of
     # unrelated stars. Clipping its outer/hole contours still exercises kernel trees.
@@ -411,10 +413,11 @@ end
             # Integer clipping may erase a thin hole (L1). B11 needs a hole to cut;
             # budget enforcement prevents this precondition from starving the check.
             any(Clipper.ishole, tree_nodes(c)) || reject!()
-            out = togrid(to_polygons(c))
+            out, warned = keyholes_warned(c)
             event!("tree", togrid(c))
             event!("keyhole", out)
-            return valid_keyholes(c, out) && first(region_within(out, togrid(c), 1))
+            return (warned || valid_keyholes(out)) &&
+                   first(region_within(out, togrid(c), 1))
         end
     end
 end

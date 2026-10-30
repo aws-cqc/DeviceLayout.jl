@@ -386,48 +386,49 @@ function valid_output(cp::ClippedPolygon; weak=true, nested=false)
     return walk(cp.tree, false)
 end
 
-# L6 permits only duplicate cut endpoints: a parent vertex hit by the downward
-# ray, or the lowest hole vertex when a sub-lattice cut rounds to zero length.
-# Every other zero edge, wrong winding, and proper crossing remains a failure.
-# The ledger separately demands no zero edges at either kind of attachment.
-# Exemptions are limited to a single outer/single hole tree. Earlier sibling cuts
-# alter the attachment search, and shared coordinates cannot identify which output
-# component owns an exemption; fail closed outside this unambiguous domain.
-function valid_keyholes(cp::ClippedPolygon, out::GridRegion)
-    short_cuts = GridPt[]
-    nodes = tree_nodes(cp)
-    for n in nodes
-        length(nodes) == 2 || break
-        Clipper.ishole(n) || continue
-        hole, parent = togrid.(Clipper.contour(n)), togrid.(Clipper.contour(n.parent))
-        q = first(sort(hole; by=p -> (p[2], p[1])))
-        cut = downward_attachment(q, parent)
-        isnothing(cut) && return false
-        (cut == q || cut in parent) && push!(short_cuts, cut)
-    end
+# Keyhole polygons are weakly simple (each cut is traversed in both directions),
+# counterclockwise, and free of zero-length edges, including at cut endpoints.
+function valid_keyholes(out::GridRegion)
     for v in out
         for i in eachindex(v)
-            v[i] == v[mod1(i + 1, end)] && !(v[i] in short_cuts) && return false
+            v[i] == v[mod1(i + 1, end)] && return false
         end
-        clean = dedupe_contour(v)
-        is_simple_exact(clean; weak=true) && signed_area2_exact(clean) > 0 || return false
+        is_simple_exact(v; weak=true) && signed_area2_exact(v) > 0 || return false
     end
     return true
 end
 
+# Keyhole polygons of a tree, and whether `to_polygons` warned while cutting them.
+# `interiorcuts` warns when rounding a cut's attachment point to the lattice may make the
+# keyhole polygon self-intersect, so invalid output is acceptable only with a warning.
+function keyholes_warned(cp::ClippedPolygon)
+    logs, out = Test.collect_test_logs(; min_level=Base.CoreLogging.Warn) do
+        return togrid(to_polygons(cp))
+    end
+    return out, !isempty(logs)
+end
+
 # Exact point-to-region distance oracle for the offset laws: 0 inside, else the
 # distance to the boundary, compared against δ ± tol without floating point.
-# Returns :in, :out, or :band.
+# Returns :in, :out, or :band; :band means possibly within `tol` of the exact offset
+# boundary. A point of A is at least δ + dist(q, ∂A) from the boundary of a positive
+# offset, so when δ ≤ tol the band reaches into A (and symmetrically out of A for
+# erosion).
 function offset_class(q::GridPt, A::GridRegion, δ::Integer, tol::Integer)
     inside = point_in_region_exact(q, A)
     if δ >= 0
-        ismissing(inside) && return :in
-        inside && return :in
+        if ismissing(inside) || inside
+            δ <= tol && within_boundary_distance_exact(q, A, tol - δ) && return :band
+            return :in
+        end
         within_boundary_distance_exact(q, A, δ - tol) && return :in
         within_boundary_distance_exact(q, A, δ + tol) && return :band
         return :out
     else
-        (ismissing(inside) || !inside) && return :out
+        if ismissing(inside) || !inside
+            -δ <= tol && within_boundary_distance_exact(q, A, tol + δ) && return :band
+            return :out
+        end
         within_boundary_distance_exact(q, A, -δ - tol) && return :out
         within_boundary_distance_exact(q, A, -δ + tol) && return :band
         return :in

@@ -237,21 +237,6 @@ function contour_contained(child::Vector{GridPt}, parent::Vector{GridPt}; strict
     return true
 end
 
-function downward_attachment(q::GridPt, parent::Vector{GridPt})
-    ys = Exact[]
-    for i in eachindex(parent)
-        a, b = exact_point(parent[i]), exact_point(parent[mod1(i + 1, end)])
-        min(a[1], b[1]) <= q[1] <= max(a[1], b[1]) || continue
-        if a[1] == b[1]
-            min(a[2], b[2]) <= q[2] && push!(ys, min(Exact(q[2]), max(a[2], b[2])))
-        else
-            y = a[2] + (q[1] - a[1]) * (b[2] - a[2]) / (b[1] - a[1])
-            y <= q[2] && push!(ys, y)
-        end
-    end
-    return isempty(ys) ? nothing : (q[1], round(Int128, maximum(ys)))
-end
-
 function point_in_polygon_rational(q::ExactPt, v::Vector{GridPt})
     inside = false
     for i in eachindex(v)

@@ -65,9 +65,7 @@
     touching = rectangle_polygon(3, 3)
     @test contour_contained(togrid(touching), togrid(parent))
     @test !contour_contained(togrid(touching), togrid(parent); strict=true)
-    wall_parent = rectangle_polygon(40, 40)
-    wall_hole = Polygon(Point{Int}[(1, 20), (5, 21), (2, 24)])
-    wall_tree = holed_tree(wall_parent, [wall_hole])
+    # Keyhole validity rejects any zero-length edge, including at a cut endpoint.
     bad = GridPt[
         (0, 0),
         (1, 0),
@@ -81,9 +79,9 @@
         (40, 40),
         (0, 40)
     ]
-    @test downward_attachment((Int128(1), Int128(20)), togrid(wall_parent)) == (1, 0)
-    @test !valid_keyholes(wall_tree, [bad])
-    @test valid_keyholes(wall_tree, [dedupe_contour(bad)])
+    @test !valid_keyholes([bad])
+    @test valid_keyholes([dedupe_contour(bad)])
+    @test !valid_keyholes([reverse(dedupe_contour(bad))]) # clockwise
     concave = Polygon(
         Point{Int}[
             (0, 0),
@@ -100,51 +98,11 @@
     )
     high_hole = Polygon(Point{Int}[(10, 30), (15, 31), (12, 35)])
     high_tree = holed_tree(concave, [high_hole])
-    @test downward_attachment((Int128(10), Int128(30)), togrid(concave)) == (10, 20)
     out = only(togrid(to_polygons(high_tree)))
-    @test valid_keyholes(high_tree, [out])
+    @test valid_keyholes([out])
     idx = findfirst(==((10, 0)), out)
     insert!(out, idx, out[idx])
-    @test !valid_keyholes(high_tree, [out])
-    # Lower siblings change the upper hole's attachment. Multi-hole zero-edge
-    # exceptions fail closed instead of whitelisting an unused outer vertex.
-    outer = Polygon(Point{Int}[(0, 0), (10, 0), (40, 0), (40, 40), (0, 40)])
-    low = Polygon(Point{Int}[(5, 10), (15, 10), (10, 20)])
-    multi = holed_tree(outer, [low, high_hole])
-    bad_multi = GridPt[
-        (0, 0),
-        (5, 0),
-        (5, 10),
-        (10, 20),
-        (10, 30),
-        (12, 35),
-        (15, 31),
-        (10, 30),
-        (10, 20),
-        (15, 10),
-        (5, 10),
-        (5, 0),
-        (10, 0),
-        (10, 0),
-        (40, 0),
-        (40, 40),
-        (0, 40)
-    ]
-    @test !valid_keyholes(multi, [bad_multi])
-    @test valid_keyholes(multi, [dedupe_contour(bad_multi)])
-    # An exception from a touching component must not leak into this multi-hole one.
-    other_outer = Polygon(Point{Int}[(10, 40), (20, 80), (0, 80)])
-    other_hole = Polygon(Point{Int}[(10, 60), (13, 65), (8, 65)])
-    other_tree = holed_tree(other_outer, [other_hole])
-    other_out = dedupe_contour(only(togrid(to_polygons(other_tree))))
-    node = only(Clipper.children(other_tree.tree))
-    node.parent = multi.tree
-    push!(multi.tree.children, node)
-    first_out = dedupe_contour(bad_multi)
-    insert!(first_out, length(first_out), (Int128(10), Int128(40)))
-    @test valid_keyholes(multi, [first_out, other_out])
-    insert!(first_out, length(first_out), (Int128(10), Int128(40)))
-    @test !valid_keyholes(multi, [first_out, other_out])
+    @test !valid_keyholes([out])
 
     small = Polygon(Point{Float64}[(0, 0), (0.1, 0), (0.1, 0.1), (0, 0.1)])
     @test lattice_delta(small, 0.02) == 20_000_000
