@@ -259,16 +259,9 @@ end
 
 _cross(u::Point, v::Point) = getx(u) * gety(v) - gety(u) * getx(v)
 
-# Shoelace over the vertices, plus each curve's signed area against its chord. Cross products
-# are taken relative to the first vertex for precision far from the origin.
-function Polygons.signed_area(e::CurvilinearPolygon{T}) where {T}
-    a2 = zero(float(T))^2
-    isempty(e.p) && return a2
-    o = first(e.p)
-    n = length(e.p)
-    for i = 1:n
-        a2 += _cross(e.p[i] - o, e.p[mod1(i + 1, n)] - o)
-    end
+# Shoelace over the vertices, plus each curve's signed area against its chord.
+function Polygons.signed_area(e::CurvilinearPolygon)
+    a2 = 2 * Polygons.signed_area(Polygon(e.p))
     for c in e.curves
         a2 += _chord_area2(c)
     end
@@ -347,14 +340,10 @@ function _unwrapped_angle(g, t0, t1, g0, g1, depth)
            _unwrapped_angle(g, tm, t1, gm, g1, depth + 1)
 end
 
+# Closing the discretized curve into a polygon adds exactly its chord.
 function _chord_area2(c::Paths.Segment{T}) where {T}
     pts = DeviceLayout.discretize_curve(c, DeviceLayout.onenanometer(T); rtol=nothing)
-    o = first(pts)
-    a2 = zero(float(T))^2
-    for k = 1:(length(pts) - 1)
-        a2 += _cross(pts[k] - o, pts[k + 1] - o)
-    end
-    return a2
+    return 2 * Polygons.signed_area(Polygon(pts))
 end
 
 function transform(e::CurvilinearPolygon, f::Transformation)
