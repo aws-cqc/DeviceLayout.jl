@@ -249,7 +249,7 @@ end
         @test !any(n -> n.sty isa Paths.DecoratedStyle, Paths.nodes(pa))
     end
 
-    @testset "Corners and offset segments" begin
+    @testset "Corners" begin
         cs = post_cs()
         # Rows on the inside of a corner would overlap the path's metal and each other
         pa = Path(μm)
@@ -265,22 +265,46 @@ end
             side=:left
         )
         @test !any(n -> n.sty isa Paths.DecoratedStyle, Paths.nodes(pa))
+    end
 
-        # Offset segments are parameterized by the pathlength of the curve they offset
+    @testset "Offset segments" begin
+        cs = post_cs()
+        # Offset segments are parameterized by the pathlength of the curve they offset, but
+        # rows are still spaced along their own length. A turn offset by 30 μm to its inside
+        # is a turn of radius 70 μm.
         pa = Path(μm)
         turn!(pa, 90°, 100μm, Paths.CPW(10μm, 6μm))
         pa[1].seg = Paths.offset(pa[1].seg, 30μm)
-        @test_throws r"Node 1 .* offset segment" fence!(pa, sref(cs), 10μm, 20μm)
+        reconcile!(pa)
+        pts = fence!(pa, sref(cs), 10μm, 20μm)
+        pa2 = Path(μm)
+        turn!(pa2, 90°, 70μm, Paths.CPW(10μm, 6μm))
+        @test pts ≈ fence!(pa2, sref(cs), 10μm, 20μm)
+        c = Cell(uniquename("c"), nm)
+        render!(c, pa, GDSMeta())
+        @test same_points(origin.(c.refs), pts)
+
+        # Varying offsets. Bending to the right, where `curvatureradius` of the offset
+        # segment has the wrong sign; and on a turn, inside compound segments nested by
+        # repeated `simplify!`.
         pa = Path(μm)
-        straight!(pa, 20μm, Paths.CPW(10μm, 6μm))
-        turn!(pa, 90°, 100μm)
-        pa[2].seg = Paths.offset(pa[2].seg, 30μm)
-        simplify!(pa)
-        @test_throws r"Node 1 .* offset segment" fence!(pa, sref(cs), 10μm, 20μm)
-        # `simplify!` again nests the compound segment in another
-        simplify!(pa)
-        @test only(pa[1].seg.segments) isa Paths.CompoundSegment
-        @test_throws r"Node 1 .* offset segment" fence!(pa, sref(cs), 10μm, 20μm)
+        straight!(pa, 100μm, Paths.CPW(10μm, 6μm))
+        pa[1].seg = Paths.offset(pa[1].seg, t -> -30μm * (t / 100μm)^2)
+        pa_turn = Path(μm)
+        straight!(pa_turn, 20μm, Paths.CPW(10μm, 6μm))
+        turn!(pa_turn, 90°, 100μm)
+        pa_turn[2].seg = Paths.offset(pa_turn[2].seg, t -> 10μm + 20μm * t / (50π * μm))
+        simplify!(pa_turn)
+        simplify!(pa_turn)
+        @test only(pa_turn[1].seg.segments) isa Paths.CompoundSegment
+        for p in (pa, pa_turn), σ in (1, -1)
+            posts = row(p, 10μm, σ, 20μm)
+            @test isapprox(
+                row_spacings(p, 10μm, σ, posts),
+                fill(20μm, length(posts) - 1),
+                rtol=1e-6
+            )
+        end
     end
 
     @testset "Reversal" begin

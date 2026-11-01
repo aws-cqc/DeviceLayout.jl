@@ -45,8 +45,6 @@ support, even outside the window from `start` to `stop`:
   - A `Paths.Corner`. Rows on the inside of a sharp corner would overlap the path and each
     other, so use [`turn!`](@ref) with a radius larger than each row's distance from the
     centerline instead.
-  - An offset segment, which is parameterized by the pathlength of the curve it offsets
-    rather than by its own.
 
 Every segment of `pa` must implement `Paths.curvatureradius`.
 """
@@ -107,18 +105,8 @@ function _fence_unsupported(seg, sty)
         is a `Paths.Corner`, which `fence!` does not support: rows on the inside of a sharp \
         corner would overlap the path and each other. Use `turn!` with a radius larger than \
         each row's distance from the centerline instead."""
-    # `_row_speed` assumes each segment is parameterized by its own pathlength
-    if _has_offset(seg)
-        return """
-            has an offset segment, which `fence!` does not support: it is parameterized by \
-            the pathlength of the curve it offsets rather than by its own."""
-    end
     return nothing
 end
-
-# `simplify!` can nest compound segments, so look through every level
-_has_offset(seg) = seg isa OffsetSegment
-_has_offset(seg::CompoundSegment) = any(_has_offset, seg.segments)
 
 # Posts for one row at distance `o` outside the extent edge on side `σ` (+1 left, -1 right),
 # as (node index, pathlength within node, row point) with uniform spacing along the row.
@@ -172,13 +160,29 @@ end
 # Speed of the row point γ(t) + σ ℓ(t) n(t) with respect to pathlength t along the segment,
 # or zero where the row lies at or past the center of curvature (it would run backward)
 function _row_speed(seg, ℓ, σ, t, degenerate)
-    a = 1 - σ * uconvert(NoUnits, ℓ(t) * signed_curvature(seg, t))
+    a = _row_tangential_speed(seg, σ * ℓ(t), t)
     if a <= 0
         degenerate[] = true
         return 0.0
     end
     dℓ = uconvert(NoUnits, ForwardDiff.derivative(ℓ, t))
     return sqrt(a^2 + dℓ^2)
+end
+
+# Speed along the segment's direction of the point at signed distance `d` to the left of
+# `seg(t)`, with respect to `t`
+_row_tangential_speed(seg, d, t) = 1 - uconvert(NoUnits, d * signed_curvature(seg, t))
+# Offset segments are parameterized by the pathlength of the curve they offset rather than by
+# their own, and `curvatureradius` is only approximate for some of them, so differentiate
+# their direction instead
+function _row_tangential_speed(seg::OffsetSegment, d, t)
+    dα = ForwardDiff.derivative(s -> direction(seg, s), t)
+    return norm(tangent(seg, t)) - uconvert(NoUnits, d * dα)
+end
+# Compound segments can contain offset segments, at any depth after repeated `simplify!`
+function _row_tangential_speed(seg::CompoundSegment, d, t)
+    sub, t_sub = subsegment(seg, t)
+    return _row_tangential_speed(sub, d, t_sub)
 end
 
 # Pathlength in [s, b] after which the row has advanced by `need` beyond the row point at `s`,
