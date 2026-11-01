@@ -539,6 +539,41 @@ end
     @test Cells.dbscale(c1, c2, c3) == 1.0pm
 end
 
+@testitem "Negative-radius Turn stores a positive radius" setup = [CommonTestSetup] begin
+    # Turn(α, -r) traces the same arc as Turn(-α, r). Heading (α1, direction) and offsets
+    # read α and r directly and assume r ≥ 0, so the stored form must be the positive-radius one.
+    t = Paths.Turn(90.0°, -10.0μm; p0=Point(0.0μm, 0.0μm), α0=0.0°)
+
+    @testset "Stored form" begin
+        @test t.α == -90.0°
+        @test t.r == 10.0μm
+        @test t == Paths.Turn(-90.0°, 10.0μm; p0=Point(0.0μm, 0.0μm), α0=0.0°)
+    end
+
+    @testset "Endpoint and heading" begin
+        @test Paths.p1(t) ≈ Point(10.0μm, -10.0μm) atol = 1nm
+        @test Paths.α1(t) ≈ -90.0°
+        @test t(Paths.pathlength(t)) ≈ Paths.p1(t) atol = 1nm
+    end
+
+    @testset "Offset turn" begin
+        off = Paths.Turn(Paths.ConstantOffset(t, 2.0μm))
+        @test Paths.p0(off) ≈ Point(0.0μm, 2.0μm) atol = 1nm
+        @test Paths.p1(off) ≈ Point(12.0μm, -10.0μm) atol = 1nm
+        @test Paths.α1(off) ≈ -90.0°
+        @test off.r ≈ 12.0μm
+    end
+
+    @testset "Path continues from the turn's heading" begin
+        p = Path(Point(0.0μm, 0.0μm); α0=0.0°)
+        turn!(p, 90.0°, -10.0μm, Paths.Trace(2.0μm))
+        @test α1(p) ≈ -90.0°
+        @test p1(p) ≈ Point(10.0μm, -10.0μm) atol = 1nm
+        straight!(p, 10.0μm, Paths.Trace(2.0μm))
+        @test p1(p) ≈ Point(10.0μm, -20.0μm) atol = 1nm
+    end
+end
+
 @testitem "Path basics" setup = [CommonTestSetup] begin
     @testset "> Path constructors" begin
         @test typeof(Path()) == Path{typeof(1.0nm2nm)}
