@@ -1652,7 +1652,7 @@ end
     @test all(haskey(pgs, name) for s in values(registry) for name in s.pgs)
 end
 
-@testitem "Strictness modes" begin
+@testitem "Strictness modes" setup = [CommonTestSetup, QuietGmshSetup] begin
     using DeviceLayout
     using DeviceLayout.SchematicDrivenLayout
     using DeviceLayout.SolidModels
@@ -1664,28 +1664,35 @@ end
     place!(cs, Rectangle(10.0, 10.0), LayerRef(:metal))
     sg = SchematicGraph("finalization_warning")
     add_node!(sg, BasicComponent(cs); base_id="q1")
-    schematic = plan(sg; log_dir=mktempdir()) |> check!
     target = SolidModelTarget(
         SourceStack(
             :metal => SourceLayer(METAL; level=1, offset=0.0, thickness=0.0);
             levels=(1 => 0.0,)
         )
     )
-    SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
-    # A metal connected component without a Terminal or Ground locator logs an error, which
-    # fails the render under strict=:warn (as under the default strict=:error).
-    @test_throws ErrorException render!(
-        SolidModel("strict_warning"; overwrite=true),
-        schematic,
-        target;
-        strict=:warn
-    )
-    @test render!(
-        SolidModel("nonstrict_warning"; overwrite=true),
-        schematic,
-        target;
-        strict=:no
-    ) isa Dict
+    # A schematic sends its render logs to the logger active when it was planned.
+    planned_schematic() = check!(plan(sg; log_dir=mktempdir()))
+    # The metal connected component has no Terminal or Ground locator.
+    missing_locator =
+        log -> log.level == Logging.Error && log._module === SolidModelsExperimental
+
+    # The missing locator fails the render under strict=:warn (as under strict=:error).
+    with_test_logger(missing_locator; required=missing_locator) do
+        @test_throws ErrorException render!(
+            SolidModel("strict_warning"; overwrite=true),
+            planned_schematic(),
+            target;
+            strict=:warn
+        )
+    end
+    with_test_logger(missing_locator; required=missing_locator) do
+        @test render!(
+            SolidModel("nonstrict_warning"; overwrite=true),
+            planned_schematic(),
+            target;
+            strict=:no
+        ) isa Dict
+    end
 
     # A component whose geometry throws is logged and rendered empty instead of escaping.
     @compdef struct FailingComponent <: AbstractComponent{Float64}
@@ -1695,16 +1702,23 @@ end
         error("geometry failure")
     SchematicDrivenLayout.hooks(::FailingComponent) = (; origin=PointHook(0.0, 0.0, 0.0))
     add_node!(sg, FailingComponent())
-    schematic = plan(sg; log_dir=mktempdir()) |> check!
-    @test render!(
-        SolidModel("failed_geometry"; overwrite=true),
-        schematic,
-        target;
-        strict=:no
-    ) isa Dict
+    geometry_failure =
+        log ->
+            log.level == Logging.Error &&
+                log._module === SchematicDrivenLayout &&
+                haskey(log.kwargs, :exception)
+    allowed = log -> geometry_failure(log) || missing_locator(log)
+    with_test_logger(allowed; required=geometry_failure) do
+        @test render!(
+            SolidModel("failed_geometry"; overwrite=true),
+            planned_schematic(),
+            target;
+            strict=:no
+        ) isa Dict
+    end
 end
 
-@testitem "Selection opt-outs" begin
+@testitem "Selection opt-outs" setup = [CommonTestSetup, QuietGmshSetup] begin
     using DeviceLayout
     using DeviceLayout.SchematicDrivenLayout
     using DeviceLayout.SolidModels
@@ -1720,7 +1734,6 @@ end
         SourceLayer,
         SourceStack,
         Tag
-    import DeviceLayout: μm
 
     cs = CoordinateSystem("selection_opt_outs", μm)
     place!(cs, Rectangle(10μm, 10μm), LayerRef(:metal))
@@ -1732,7 +1745,6 @@ end
     place!(cs, Locator(center(bounds(port_geometry))), LumpedPort(:port, "drive"))
     sg = SchematicGraph("selection_opt_outs")
     add_node!(sg, BasicComponent(cs); base_id="q1")
-    schematic = plan(sg; log_dir=nothing) |> check!
     stack = SourceStack(
         :metal => SourceLayer(METAL; level=1, thickness=1μm),
         :pad => SourceLayer(NULL; level=1),
@@ -1741,22 +1753,34 @@ end
     )
     # Extruding the metal without `Hollow` leaves no 2D metal to select terminals on.
     target = SolidModelTarget(stack, [Extrude(:metal)])
-    SolidModels.gmsh.option.setNumber("General.Verbosity", 2)
-    render(name; kwargs...) =
-        render!(SolidModel(name; overwrite=true), schematic, target; kwargs...)
+    # A schematic sends its render logs to the logger active when it was planned.
+    function render(name; kwargs...)
+        schematic = check!(plan(sg; log_dir=nothing))
+        return render!(SolidModel(name; overwrite=true), schematic, target; kwargs...)
+    end
+    # Terminal selection without 2D metal logs an error.
+    no_metal = log -> log.level == Logging.Error && log._module === SolidModelsExperimental
 
-    @test_throws ErrorException render("selection_default")
-    @test isempty(render("selection_nonstrict"; strict=:no)["terminals"])
-    metadata = render("selection_no_terminals"; select_terminals=false)
+    with_test_logger(no_metal; required=no_metal) do
+        @test_throws ErrorException render("selection_default")
+    end
+    with_test_logger(no_metal; required=no_metal) do
+        @test isempty(render("selection_nonstrict"; strict=:no)["terminals"])
+    end
+    metadata = with_test_logger(_ -> false) do
+        return render("selection_no_terminals"; select_terminals=false)
+    end
     @test isempty(metadata["terminals"])
     @test haskey(metadata["tagged"], "q1.pad")
     @test haskey(metadata["ports"], "q1.drive")
-    metadata = render(
-        "selection_no_selections";
-        select_terminals=false,
-        select_tagged_surfaces=false,
-        select_ports=false
-    )
+    metadata = with_test_logger(_ -> false) do
+        return render(
+            "selection_no_selections";
+            select_terminals=false,
+            select_tagged_surfaces=false,
+            select_ports=false
+        )
+    end
     @test isempty(metadata["tagged"])
     @test isempty(metadata["ports"])
 end
@@ -2284,7 +2308,5 @@ end
                 end
             end
         end
-
-        println("\nE2E test artifacts in: $output_dir")
     end
 end
