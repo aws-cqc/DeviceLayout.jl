@@ -8,6 +8,22 @@ The format of this changelog is based on
 
 ### Added
 
+  - `SolidModels.design_velocities` returns, for each of a list of layout parameters, the
+    derivative of the rendered solid model's geometry with respect to the parameter as a
+    `SolidModels.DesignVelocity`: a field over 3D space that can be evaluated at the nodes of
+    any mesh of the model. It is built from the 2D layout by central differences of the
+    rendered vertices, a harmonic in-plane interpolation of the edge velocities on a
+    constrained triangulation of a window around the moving geometry, and an extrusion
+    profile in z. It fails rather than return a field that is not the derivative, for
+    example when a parameter changes the layout's topology. A method taking a
+    `SolidModelTarget` uses the target's layer mapping, z positions and extrusions, as
+    `render!` does. Adds DelaunayTriangulation.jl and the SparseArrays standard library as
+    dependencies.
+  - `SolidModels.morph_mesh` moves the nodes of a Gmsh (MSH 2.2 and 4.1, ASCII and binary)
+    or MFEM mesh file by a displacement, such as the `SolidModels.design_displacement` of a
+    set of parameter changes, without re-meshing, and reports the change in element quality
+    as a `SolidModels.MorphQuality`.
+
   - `SolidModels.exclude_groups` returns the entities of a physical group that belong to none of
     a list of other groups, a membership difference with the postrender-operation signature.
     A group left with no entities is removed (its entities stay in the model).

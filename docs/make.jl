@@ -69,6 +69,7 @@ makedocs(
             "Rendering and Export" => "concepts/render.md",
             "Solid Models (3D Geometry)" => "concepts/solidmodels.md",
             "Solid Models (Experimental)" => "concepts/solidmodels_experimental.md",
+            "Design Velocities and Mesh Morphing" => "concepts/design_velocities.md",
             "Schematic-Driven Design" => "concepts/schematic_driven_design.md",
             "Components" => "concepts/components.md",
             "Autofill" => "concepts/autofill.md",
