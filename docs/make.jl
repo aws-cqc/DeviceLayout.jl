@@ -85,6 +85,7 @@ makedocs(
             "Geometry API Reference" => "reference/api.md",
             "Path API Reference" => "reference/path_api.md",
             "Schematic API Reference" => "reference/schematic_api.md",
+            "Experimental Solid Model API Reference" => "reference/solidmodels_experimental_api.md",
             "ParameterSet API Reference" => "reference/parameter_set_api.md",
             "Shape Reference" => "reference/shapes.md"
         ],

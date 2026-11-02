@@ -1236,6 +1236,8 @@ Render `cs` to `sm`.
   - `skip_unused_layers`: If `true`, skip layers not referenced by `postrender_ops`,
     `post_fragment_ops`, or `retained_physical_groups`. Indexed and levelwise variants are kept
     when their base layer is referenced. Default is `false`.
+  - `preflattened`: If `true`, treat `cs` as already flat and skip flattening it. Default is
+    `false`.
   - `curvature_sizing`: If `true`, add radius-sized mesh control points at the centers of exact
     circular primitives preserved by the rendering backend. For `extrude_z!` postrender
     operations, generated perimeter and curvature controls are repeated at requested extrusion

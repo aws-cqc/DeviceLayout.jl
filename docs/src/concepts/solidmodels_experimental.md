@@ -1,25 +1,27 @@
-# Experimental simulation-agnostic solid models
+# Solid Models (Experimental)
 
-`DeviceLayout.SolidModelsExperimental` is an opt-in pipeline that separates geometry and
-mesh generation from simulator configuration. It produces a `SolidModel` plus a
-schema-versioned metadata dictionary. Concrete process stacks, material-property databases,
-Palace configuration, and downstream translation are intentionally outside DeviceLayout.
+`DeviceLayout.SolidModelsExperimental` renders a schematic to a `SolidModel` and returns
+metadata describing its layers and the surfaces selected by locators.
 
 !!! warning "Experimental API"
-    This API may change before DeviceLayout 2.0. The existing `SemanticMeta`,
-    `ProcessTechnology`, `SchematicDrivenLayout.SolidModelTarget`, and `ArtworkTarget`
-    pipeline is unchanged.
+    This API may change before DeviceLayout 2.0.
+
+The module exports nothing; import names from `DeviceLayout.SolidModelsExperimental`. See the
+[Experimental Solid Model API Reference](@ref solidmodels-experimental-api).
 
 ## Layer references, locators, and source stacks
 
-Geometry participating in this pipeline uses `LayerRef`; legacy `SemanticMeta` geometry is
-ignored so migrated and legacy components can coexist:
+Geometry is placed on a layer with `LayerRef`; geometry with `SemanticMeta` is ignored.
+Locators are `Locator` points carrying `Terminal`, `Ground`, `Tag`, `WavePort`, or
+`LumpedPort` metadata:
 
 ```julia
 using DeviceLayout
+using DeviceLayout.SchematicDrivenLayout
 using DeviceLayout.SolidModelsExperimental:
     Cut,
     DIELECTRIC,
+    Extrude,
     GetBoundary,
     LayerRef,
     Locator,
@@ -36,25 +38,22 @@ using Unitful: μm, °
 
 coordinate_system = CoordinateSystem("device", μm)
 place!(coordinate_system, Rectangle(100μm, 100μm), LayerRef(:metal))
-port_geometry = Rectangle(5μm, 20μm) |> WithDirection(90°)
+port_geometry = Rectangle(Point(100μm, 40μm), Point(105μm, 60μm)) |> WithDirection(90°)
 place!(coordinate_system, port_geometry, LayerRef(:port))
 place!(coordinate_system, Locator(center(bounds(port_geometry))), LumpedPort(:port, "jj"))
-place!(coordinate_system, Locator(0μm, 0μm), Terminal(:metal, "island"))
+place!(coordinate_system, Locator(50μm, 50μm), Terminal(:metal, "island"))
+footprint = Rectangle(Point(-50μm, -50μm), Point(200μm, 150μm))
+place!(coordinate_system, footprint, LayerRef(:substrate))
+place!(coordinate_system, footprint, LayerRef(:bounding_volume))
 ```
-
-A `Locator` marks a single point; locator resolution only uses that point, so no bounding
-shape is needed. `LumpedPort` locators must sit inside directed port geometry; `WavePort`
-locators don't carry a direction. The required `WithDirection` style belongs to that port geometry,
-not the locator.
-Its angle is transformed through placement rotations and reflections and serialized as
+A `LumpedPort` locator must lie inside the bounding box of exactly one `WithDirection`-styled
+entity on the port's layer. That style's angle, transformed by placement, is serialized as
 `[cos(theta), sin(theta), 0.0]`.
 
-The layer is a plain `Symbol`. A `SourceStack` is authoritative for its assembly level,
-z position, material class, declared thickness, and output visibility:
+A `SourceStack` gives each layer its material, assembly level, z offset, thickness, and GDS
+layer:
 
 ```julia
-using Unitful: μm
-
 stack = SourceStack(
     :metal => SourceLayer(METAL; level=1, gds_meta=GDSMeta(10, 0)),
     :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(11, 0)),
@@ -63,111 +62,95 @@ stack = SourceStack(
         level=1,
         thickness=-500μm,
         gds_meta=nothing
+    ),
+    :bounding_volume => SourceLayer(
+        NULL;
+        level=1,
+        offset=-500μm,
+        thickness=1000μm,
+        gds_meta=nothing
     );
     levels=(1 => 0μm, 2 => 500μm)
 )
 ```
+Every `LayerRef` and locator layer must be in the stack. Lengths are either all unitful or
+all unitless, in micrometers. Only `METAL` affects rendering: terminal selection uses the 2D
+`METAL` layers.
 
-Every placed `LayerRef` and locator layer must exist in the stack, and every level referenced
-by a source layer must exist in `stack.levels`. A declared `thickness` (or a level span
-`level=a => b`) describes the brick a layer forms in the final stack; it is built by an
-explicit `Extrude` operation, and rendering fails if a declared thickness is never extruded
-or an extrusion disagrees with it. `solidmodel=false` hides a layer from mesh
-geometry and returned metadata while leaving it eligible for GDS. Conversely,
-`gds_meta=nothing` hides only artwork. Locators are excluded from mesh geometry and resolved
-against finalized geometry.
-
-`SemanticMeta` and its `facing` behavior remain unchanged but are ignored by this pipeline.
-`LayerRef` has no `facing` behavior because `SourceStack` owns vertical placement.
+A layer's `thickness` (or level span `level=a => b`) is built by an `Extrude` operation that
+must agree with it; rendering fails if such a layer is still unextruded after the last
+operation. `solidmodel=false` omits a layer from the solid model, and `gds_meta=nothing` omits
+it from artwork.
 
 ## Rendering
 
-The target stores exactly the stack and layer-level operations:
-
-```julia
-target = SolidModelTarget(stack)
-metadata = render!(solid_model, checked_schematic, target)
-```
-
-Target operations describe the complete construction sequence: extrusion, layer-level
-booleans, boundary extraction, hollowing, restriction, translation, revolution, or periodic
-pairing. They are compiled to physical-group operations. Operations are immutable, typed
-objects; invalid argument and keyword types are rejected when they are constructed. For
-example:
+A `SolidModelTarget` holds the stack and the layer operations applied to it, in order:
 
 ```julia
 ops = [
     Extrude(:substrate),
     Extrude(:bounding_volume),
-    Cut(:vacuum, :bounding_volume, :substrate),
+    Cut(:vacuum, :bounding_volume, :substrate; remove_object=true),
     GetBoundary(:xmin, :vacuum; direction="x", position="min"),
     Translate(:shifted_port, :port, 10μm, 0μm, 0μm)
 ]
 target = SolidModelTarget(stack, ops)
+
+graph = SchematicGraph("device")
+add_node!(graph, BasicComponent(coordinate_system); base_id="q1")
+checked_schematic = check!(plan(graph; log_dir=nothing))
+solid_model = SolidModel("device"; overwrite=true)
+metadata = render!(solid_model, checked_schematic, target)
 ```
-
-The public operation types are:
-
 | Type | Meaning |
 |:--|:--|
-| `Extrude(source)`, `Extrude(source, dz)`, `Extrude(source; to_level, offset)`, or `Extrude(destination, source, …)` | Extrude a 1D or 2D layer along z. A source-stack layer is built to its declared thickness or level span; an explicit `dz` or target level is required for generated layers and must agree with the declaration otherwise. The one-layer forms operate in place; 3D sources are rejected. |
-| `Hollow(layer)` | Replace a 3D layer by its boundary shell and remove the enclosed volume from the model after fragmentation, so the interior is absent from the mesh regardless of which other volumes it overlaps. Shells are `GetBoundary(:x, :x); Extrude(:x)`. |
-| `Cut(destination, object, tools; remove_object, remove_tool)` | Subtract tool layers from an object layer. One tool may be a symbol; multiple tools must be grouped in a tuple or vector, and the object must not be one of the tools. Set `remove_object` or `remove_tool` to consume the object or all tools; an input that the destination replaces is always consumed, and replacing one of several tools requires `remove_tool`. |
-| `Fuse(source)` or `Fuse(destination, sources; remove_sources)` | Union one or more source layers; the one-layer form heals a layer in place. Set `remove_sources` to consume the sources other than the destination; a destination among several sources requires it. |
-| `SolidModelsExperimental.Intersect(destination, object, tool; remove_object, remove_tool)` | Compute the OCC intersection of two layers. Set `remove_object` or `remove_tool` to consume either input layer. |
-| `GetInterface(destination, object, tool)` | Resolve a deferred interface after fragmentation. The destination must be new, and the inputs' PG identities must remain available through deferred execution. |
-| `RestrictTo(volume)` | Restrict the model to a 3D bounding-volume layer. |
-| `GetBoundary(destination, source; combined, oriented, recursive, direction, position)` | Extract boundaries into a new destination or replace the source in place. |
-| `Translate(source, dx, dy, dz)` or `Translate(destination, source, dx, dy, dz)` | Translate a layer. The one-layer form moves it in place; a distinct destination receives a copy and the source is preserved. |
-| `Remove(source; remove_entities)` | Remove a layer, or do nothing if it is absent. To consume a boolean's inputs, use its removal flags instead: geometry that passes through a boolean unchanged keeps its entities, so a later `Remove` of an input also removes them from the result. |
-| `Revolve(source, origin, axis, angle)` or `Revolve(destination, source, origin, axis, angle)` | Sweep a layer around an axis, retaining swept entities one dimension above the source. The one-layer form operates in place. Three-dimensional sources are rejected. |
-| `SetPeriodic(first, second)` | Pair two distinct 2D periodic layers. |
+| `Extrude(source)`, `Extrude(source, dz)`, `Extrude(source; to_level, offset)`, `Extrude(destination, source)`, `Extrude(destination, source, dz)`, or `Extrude(destination, source; to_level, offset)` | Extrude a 1D or 2D layer along z, to its declared thickness or level span by default. |
+| `Hollow(layer)` | Replace a 3D layer by its boundary, removing its interior from the final model. |
+| `Cut(destination, object, tools; remove_object, remove_tool)` | Subtract a layer or a tuple or vector of layers from `object`. |
+| `Fuse(source)` or `Fuse(destination, sources; remove_sources)` | Union a tuple or vector of layers, or merge a layer's own overlapping geometry. |
+| `SolidModelsExperimental.Intersect(destination, object, tool; remove_object, remove_tool)` | Intersect two layers. The name must be qualified, since DeviceLayout also has an `Intersect` module. |
+| `GetInterface(destination, object, tool)` | Compute the interface between two layers of the final model. |
+| `RestrictTo(volume)` | Restrict the model to a 3D layer. |
+| `GetBoundary(source; combined, oriented, recursive, direction, position)` or `GetBoundary(destination, source; ...)` | Extract the boundary of a layer, optionally only its faces at one end of an axis. `exterior_boundaries(volume)` returns the six operations extracting a volume's faces into `:EXTBND_XMIN` through `:EXTBND_ZMAX`. |
+| `Translate(source, dx, dy, dz)` or `Translate(destination, source, dx, dy, dz)` | Translate a layer. |
+| `Remove(source; remove_entities)` | Remove a layer. |
+| `Revolve(source, origin, axis, angle)` or `Revolve(destination, source, origin, axis, angle)` | Revolve a layer around an axis. |
+| `SetPeriodic(first, second)` | Make two 2D layers periodic. |
 
-Until rendering, every layer holds exactly one physical group named after the layer, and every
-operation produces one layer from its inputs. A destination must therefore be either new or
-one of the operation's own inputs, in which case the result replaces that input; naming an
-existing unrelated layer is rejected. To accumulate several results in one layer, compute them
-into distinct layers and `Fuse` them. Layer operations have geometric and source-lifetime
-semantics but no user-facing PG identity semantics: after rendering, deduplication and locator
-resolution may split a layer into several PGs, and functional identity is applied by
-terminal, ground, tag, and port locators.
+A destination must be new or one of the operation's inputs, which it replaces. New
+destinations need not be in the stack. The booleans' `remove_*` flags consume their inputs;
+use them rather than a later `Remove`, which would also remove geometry that passed through
+the boolean unchanged.
 
-Terminal selection builds the connected components of the 2D `METAL` layers and attaches
-`Terminal` and `Ground` locators to them, so extruded metal takes part only once it is
-`Hollow`ed. If the model has no 2D metal, `render!` logs an error, so the render fails
-unless `strict=:no`. Pass
-`select_terminals=false` to skip terminal selection, `select_tagged_surfaces=false` to skip
-`Tag` locators, or `select_ports=false` to skip port locators; the corresponding metadata
-sections are then empty.
+Terminal selection builds the connected components of the 2D layers named after `METAL`
+stack layers, so a generated layer takes part only if it replaces such a layer (for example,
+`Cut(:metal, :metal, :etch)`), and extruded metal only once it is `Hollow`ed. Each component
+must contain a `Terminal` or `Ground` locator, and each such locator must lie on a component.
+Components with a `Ground` locator are reported under `ground`, and the others under
+`terminals`. The `select_terminals`, `select_tagged_surfaces`, and `select_ports` keywords of
+`render!` turn off each kind of selection.
 
-Generated destinations need not appear in `SourceStack`, but every referenced source must
-exist in the compiler registry when the operation is reached. Typed constructors reject
-malformed operations before compilation, while unavailable source layers and existing
-destinations are rejected before Gmsh rendering begins.
+Locator names are prefixed with the ID of their schematic node (for example, `q1.island`).
+`Tag` and port names must be unique, so such a locator in a structure referenced twice within
+one node throws an `ArgumentError`.
 
-The schematic renderer builds a private geometry/reference copy. It does not mutate the
-input schematic or component geometry caches. Each graph-node placement prefixes nonempty
-locator names with its stable node ID (for example, `q1.island`). The v1 contract applies one
-top-level node prefix recursively within that placement; arbitrary-depth composite paths are
-not yet encoded. Locator centers retain every hierarchical reference occurrence and its
-accumulated transform. The lower-level solid-model renderer performs the only flatten.
-
-`render!` returns `Dict{String,Any}` and never writes metadata or model artifacts. Persist
-metadata explicitly:
+`render!` returns the metadata as a `Dict{String, Any}`. To save it and the model:
 
 ```julia
 open("sm_metadata.json", "w") do io
     JSON.print(io, metadata, 4)
 end
-save("model.msh2", solid_model)
+DeviceLayout.save("model.xao", solid_model)
 ```
-
-The contract is checked in at `schemas/sm_metadata.schema.json`; its initial
-`schema_version` is `1.0.0`.
+The metadata has the sections `metadata` (schema version and length units, micrometers),
+`physical_groups`, `layers`, `tagged`, `ports`, `terminals`, and `ground`. Tags and ports are
+keyed by locator name, with a `LumpedPort` whose `index` is not 1 keyed `name_index`.
+Terminal and ground components are keyed `METAL_CC__` followed by a hash of their entities.
+The schema is `schemas/sm_metadata.schema.json`.
 
 ## Artwork
 
-No experimental GDS target type is required. Render directly from the stack:
+Render artwork from the stack:
 
 ```julia
 cell = Cell("artwork", μm)
@@ -179,16 +162,14 @@ render!(
     level_increment=GDSMeta(100, 10)
 )
 ```
-
-For multiple selected levels, both layer and datatype are offset by the selected-level
-position, `(level - 1) * level_increment`; levels at or below `0` are not offset. `LayerRef`
-carries no datatype index.
+Each layer is rendered to its `gds_meta`. When `levels` has more than one entry, a layer's
+GDS layer and datatype are offset by `(level - 1) * level_increment`, where `level` is the
+layer's first level (or 1 if that is lower).
 
 ## Migrating from the legacy pipeline
 
-Migration is not a target substitution. Components opt geometry in by replacing
-`SemanticMeta` with `LayerRef`, add explicit locators, map opposite-chip variants to layer
-symbols, and supply a complete `SourceStack`. Unported `SemanticMeta` geometry is ignored,
-allowing gradual component migration. The legacy technology and targets remain supported.
+To migrate a component, replace its `SemanticMeta` with `LayerRef`, add locators, map
+opposite-chip variants to layer symbols, and add its layers to a `SourceStack`. Unmigrated
+`SemanticMeta` geometry is ignored, so components can be migrated one at a time.
 
-See `examples/solidmodels_experimental.jl` for a small end-to-end example.
+See `examples/solidmodels_experimental.jl` for an end-to-end example.

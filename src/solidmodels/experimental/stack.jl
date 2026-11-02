@@ -1,17 +1,26 @@
 """
-    SourceLayer(material; level=1, offset=0μm, thickness=0μm, gds_meta=nothing,
-                solidmodel=true)
+    SourceLayer(material::Material; kwargs...)
 
-Describe one symbol-keyed source layer. Set `material` to `METAL`, `DIELECTRIC`, or
-`NULL` to classify the solid-model region.
-`level` selects the assembly level at which the layer's 2D geometry is placed; `offset`
-displaces it from that level. `thickness` declares the layer's extrusion distance, or a
-level pair `level=a => b` declares that the layer spans from level `a` to level `b` (with
-`offset` then a pair of displacements at each end, or a single displacement applied to
-both ends). Declared thicknesses are built by an explicit [`Extrude`](@ref) operation,
-which validates against the declaration.
-`gds_meta=nothing` hides the layer only from artwork; `solidmodel=false` hides it only from
-solid-model geometry and metadata.
+A layer in a [`SourceStack`](@ref). Geometry entities are placed into this layer using
+a [`LayerRef`](@ref) pointing to it:
+
+```julia
+place!(cs, entity, LayerRef(:layer))
+```
+
+Layers with nonzero thickness or a `source => destination` level pair are automatically
+extruded during rendering (see below).
+
+# Keywords
+
+  - `level`: level of the chiplet assembly at which the layer's 2D geometry is placed,
+    or a pair of levels `source => destination` that the layer spans. Default is `1`.
+  - `offset`: z displacement from `level`; for a level pair, a pair of displacements, or one
+    applied equally to both ends. Default is `0μm`.
+  - `thickness`: extrusion distance. Default is `0μm`.
+  - `gds_meta`: `GDSMeta` of the layer's artwork, used for rendering to a `Cell`. Set
+    `nothing` to omit the layer from the artwork. Default is `nothing`.
+  - `solidmodel`: If `false`, omit the layer from the solid model. Default is `true`.
 """
 struct SourceLayer{T <: Coordinate}
     material::Material
@@ -110,10 +119,12 @@ _spans_levels(layer::SourceLayer) = !isnothing(layer.destination_level)
 """
     SourceStack(layer_pairs...; levels)
 
-Collect symbol-keyed [`SourceLayer`](@ref) pairs and assembly-level z coordinates. Every
-level referenced by a source layer must be present in `levels`. Length coordinates must be
-either all unitful or all unitless; they are promoted to a common type `T`, and every layer
-is converted to `SourceLayer{T}`.
+A dictionary of layer names (`Symbol`)s to [`SourceLayer`](@ref)s.
+
+The `levels` dictionary maps levels of the chiplet assembly to z coordinates.
+
+Lengths supplied via the layers and the levels mapping must be all unitful or all
+unitless (in micrometers).
 """
 struct SourceStack{T <: Coordinate}
     layers::Dict{Symbol, SourceLayer{T}}

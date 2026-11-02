@@ -25,11 +25,10 @@ using DeviceLayout.SchematicDrivenLayout
 using Logging: with_logger
 
 """
-    SolidModelTarget(stack)
-    SolidModelTarget(stack, operations)
+    SolidModelTarget(stack::SourceStack, operations=LayerOp[])
 
-Opt-in schematic target for the simulation-agnostic solid-model pipeline. Store the
-[`SourceStack`](@ref) and ordered layer operations used by schematic [`render!`](@ref).
+Target for rendering a `Schematic` to a solid model with [`render!`](@ref), using the source
+layers of `stack` and applying the layer `operations` in order.
 """
 struct SolidModelTarget{T <: Coordinate} <: SchematicDrivenLayout.Target
     stack::SourceStack{T}
@@ -83,28 +82,26 @@ function _qualify_locator_names!(sch::Schematic)
 end
 
 """
-    render!(
-        sm::SolidModel,
-        sch::Schematic,
-        target::SolidModelTarget;
-        strict=:error,
-        select_terminals=true,
-        select_tagged_surfaces=true,
-        select_ports=true,
-        kwargs...
-    ) -> Dict{String, Any}
+    render!(sm::SolidModel, sch::Schematic, target::SolidModelTarget; kwargs...) -> Dict{String, Any}
 
-Build and render a private working copy of `sch`, finalize post-fragmentation discovery,
-and return schema-version `1.0.0` metadata. Set `strict=:error` to fail on logged errors,
-`strict=:warn` to fail on warnings or errors, or `strict=:no` to continue after recoverable
-diagnostics. This method performs no metadata or model artifact I/O; write the returned
-dictionary explicitly when persistence is desired.
+Render `sch` to `sm`, using rendering settings from `target`, and return the solid model's
+metadata (physical groups, layers, and selections).
 
-`select_terminals=false` skips building metal connected components and resolving `Terminal`
-and `Ground` locators, leaving the `terminals` metadata empty. Terminal selection otherwise
-requires 2D `METAL` layers and logs an error if there are none.
-`select_tagged_surfaces=false` and `select_ports=false` similarly skip resolving `Tag` and
-port locators, leaving the `tagged` and `ports` metadata empty.
+# Keywords
+
+  - `select_terminals`: If `false`, skip the identification of contiguous 2D metallic islands
+    marked by `Terminal` or `Ground` locators. If `true`, the model must have 2D layers
+    with `METAL` as their `material`. Default is `true`.
+  - `select_tagged_surfaces`: If `false`, skip selecting surfaces marked by `Tag` locators.
+    Default is `true`.
+  - `select_ports`: If `false`, skip selecting surfaces marked by `LumpedPort` or `WavePort`
+    locators. Default is `true`.
+  - `strict`: `:error`, `:warn`, or `:no`. With `:error`, throw an error if any errors were
+    logged while building component geometries, rendering geometries to `sm`, or selecting
+    locators. With `:warn`, also throw if any warnings were logged. With `:no`, any component
+    which was not successfully built has an empty geometry. Default is `:error`.
+
+Other keyword arguments are passed on to [`SolidModels.render!`](@ref).
 """
 function render!(
     sm::SolidModel,

@@ -2,8 +2,17 @@
     Locator(p::Point)
     Locator(x, y)
 
-A `Point` wrapper marking the position of a locator. Use `place!` to add it to
-geometry structures, like any other geometry entity.
+A point for marking 2D entities in a solid model for selection.
+
+A `Locator` is `place!`d into a `CoordinateSystem` like any other geometry entity, using
+a [`LocatorMeta`](@ref) as metadata:
+
+```julia
+place!(cs, locator, locator_meta)
+```
+
+The type of `LocatorMeta` that is used determines the type of selection that is made.
+Current available options are `Terminal`, `Ground`, `Tag`, `LumpedPort`, or `WavePort`.
 """
 struct Locator{T} <: DeviceLayout.GeometryEntity{T}
     p::DeviceLayout.Point{T}

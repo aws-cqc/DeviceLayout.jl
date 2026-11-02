@@ -3,7 +3,7 @@ using DeviceLayout
 using DeviceLayout.SchematicDrivenLayout
 using DeviceLayout.SolidModels
 using DeviceLayout.SolidModelsExperimental:
-    LayerRef, Locator, LumpedPort, NULL, SolidModelTarget, SourceLayer, SourceStack
+    Ground, LayerRef, Locator, LumpedPort, METAL, NULL, SolidModelTarget, SourceLayer, SourceStack
 using FileIO
 import JSON
 import Unitful: μm
@@ -13,6 +13,7 @@ mkpath(build_dir)
 
 geometry = CoordinateSystem("device", μm)
 place!(geometry, centered(Rectangle(100μm, 60μm)), LayerRef(:metal))
+place!(geometry, Locator(0μm, 0μm), Ground(:metal))
 port = WithDirection(π / 2)(Rectangle(Point(55μm, -10μm), Point(60μm, 10μm)))
 place!(geometry, port, LayerRef(:port))
 place!(geometry, Locator(center(bounds(port))), LumpedPort(:port, "drive"))
@@ -24,14 +25,14 @@ schematic = plan(graph; log_dir=build_dir)
 check!(schematic)
 
 stack = SourceStack(
-    :metal => SourceLayer(NULL; level=1, gds_meta=GDSMeta(10, 0)),
+    :metal => SourceLayer(METAL; level=1, gds_meta=GDSMeta(10, 0)),
     :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(11, 0));
     levels=(1 => 0μm,)
 )
 target = SolidModelTarget(stack)
 
 solid_model = SolidModel("solidmodels_experimental"; overwrite=true)
-metadata = render!(solid_model, schematic, target; select_terminals=false)
+metadata = render!(solid_model, schematic, target)
 open(joinpath(build_dir, "sm_metadata.json"), "w") do io
     return JSON.print(io, metadata, 4)
 end

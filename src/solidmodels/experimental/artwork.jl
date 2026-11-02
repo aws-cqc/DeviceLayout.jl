@@ -22,22 +22,20 @@ function _map_artwork_meta(
 end
 
 """
-    render!(
-        cell,
-        cs,
-        stack::SourceStack;
-        levels=[1],
-        level_increment=GDSMeta(0, 0),
-        kwargs...
-    )
+    render!(cell::Cell, cs, stack::SourceStack; kwargs...)
 
-Render `LayerRef` artwork using the GDS mapping stored in `stack`. Layers with
-`gds_meta=nothing` are omitted independently of `solidmodel` visibility. Metadata indices
-do not alter datatypes.
+Render `cs` to `cell`, mapping each [`LayerRef`](@ref) to the `gds_meta` of its layer in
+`stack`. Layers with `gds_meta=nothing` are not rendered.
 
-When more than one level is selected, a layer's GDS layer and datatype are offset by
-`(level - 1) * level_increment`, where `level` is the first level of the layer's declaration.
-Levels at or below `0` do not participate in the increment and render like level `1`.
+# Keywords
+
+  - `levels`: Assembly levels being rendered. If it has more than one entry, each layer's GDS
+    layer and datatype are offset by `(level - 1) * level_increment`, where `level` is the
+    first level of the layer (or `1` if that is lower). Default is `[1]`.
+  - `level_increment`: `GDSMeta` offset per level. Default is `GDSMeta(0, 0)`.
+
+Other keyword arguments are passed on to
+[`render!(::Cell, ::GeometryStructure)`](@ref render!(::DeviceLayout.Cell, ::DeviceLayout.GeometryStructure)).
 """
 function render!(
     cell::DeviceLayout.Cell,

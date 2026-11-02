@@ -47,6 +47,15 @@ The format of this changelog is based on
     all of them. `post_fragment_ops` run after the components' own operations.
   - `import_solid!` and `SolidModelComponent` are experimental: their API, including the
     names of generated physical groups, may change in minor versions.
+  - Experimental `SolidModelsExperimental` module: a simulation-agnostic solid-model pipeline
+    driven by `LayerRef` geometry, `Locator` annotations (terminals, ground, tags, wave and
+    lumped ports), a `SourceStack` of source layers, and explicit layer operations (`Extrude`,
+    `Cut`, `Fuse`, `Intersect`, `Hollow`, `GetBoundary`, `GetInterface`, `Translate`,
+    `Revolve`, `RestrictTo`, `SetPeriodic`, `Remove`). Its `render!` returns metadata
+    following `schemas/sm_metadata.schema.json`, and `render!(cell, cs, stack)` renders the
+    matching artwork. The API may change before DeviceLayout 2.0.
+  - `SolidModels.render!` accepts `preflattened=true` to skip flattening an already flat
+    coordinate system.
 
 ### Changed
 
@@ -101,6 +110,10 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - Schematic `render!` to a `Cell` or a `SolidModel` with `strict=:no` renders a component
+    whose geometry fails to build as empty geometry and logs the failure, as documented;
+    previously the `Cell` render threw. An interrupt (Ctrl-C) during geometry resolution now
+    stops the render instead of being logged and skipped.
   - `LineSegment`s can be placed in coordinate systems of a different coordinate type and
     transformed through references, which previously threw a `MethodError`, and their
     `bounds` (and `lowerleft`/`upperright`) now give their extent instead of a zero

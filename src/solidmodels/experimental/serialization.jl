@@ -19,11 +19,10 @@ end
 # ─── Metadata JSON serialization ─────────────────────────────────────────────
 
 """
-    serialize_metadata(registry, selections, deferred_interfaces, stack, sm)
-        -> Dict{String, Any}
+    serialize_metadata(registry, selections, deferred_interfaces, stack, sm) -> Dict{String, Any}
 
-Serialize the finalized solid model to a schema-version `1.0.0`, JSON-compatible
-metadata dictionary. Length values are expressed in micrometers.
+Return the JSON-compatible metadata of the rendered solid model `sm`, with lengths in
+micrometers.
 """
 function serialize_metadata(
     registry::LayerRegistry,
