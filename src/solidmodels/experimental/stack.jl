@@ -92,8 +92,8 @@ function SourceLayer(
     )
 end
 
-Base.convert(::Type{SourceLayer{T}}, layer::SourceLayer) where {T <: Coordinate} =
-    SourceLayer{T}(
+function Base.convert(::Type{SourceLayer{T}}, layer::SourceLayer) where {T <: Coordinate}
+    return SourceLayer{T}(
         layer.material,
         layer.level,
         layer.offset,
@@ -103,6 +103,7 @@ Base.convert(::Type{SourceLayer{T}}, layer::SourceLayer) where {T <: Coordinate}
         layer.gds_meta,
         layer.solidmodel
     )
+end
 
 _spans_levels(layer::SourceLayer) = !isnothing(layer.destination_level)
 

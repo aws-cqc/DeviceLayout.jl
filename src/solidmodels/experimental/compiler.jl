@@ -97,13 +97,15 @@ struct Cut{N} <: BooleanOp
         return new{N}(destination, object, tools, remove_object, remove_tool)
     end
 end
-Cut(
+function Cut(
     dest::Symbol,
     object::Symbol,
     tools::NTuple{N, Symbol};
     remove_object::Bool=false,
     remove_tool::Bool=false
-) where {N} = Cut{N}(dest, object, tools, remove_object, remove_tool)
+) where {N}
+    return Cut{N}(dest, object, tools, remove_object, remove_tool)
+end
 Cut(dest::Symbol, object::Symbol, tool::Symbol; kwargs...) =
     Cut(dest, object, (tool,); kwargs...)
 Cut(dest::Symbol, object::Symbol, tools::AbstractVector{Symbol}; kwargs...) =
