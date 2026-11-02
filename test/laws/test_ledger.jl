@@ -303,4 +303,108 @@
         @test valid_output(union2d([A], [B]); weak=true)
         @test valid_output(intersect2d([A], [B]); weak=true)
     end
+
+    # L12 — A taper's halo is short of δ along its slanted sides and overhangs at its
+    # narrow end. Found by: O7 `halo_offsets_taper` (2026-10-30). Class: DeviceLayout,
+    # tracked in #8 for 2.0.
+    # `halo(::TaperTrace, δ)` is the taper with both widths increased by 2δ, which
+    # keeps δ only along the path's normal: a side slanted at α from the path ends up
+    # δ·cos α from the taper. For 10 → 2 μm over 10 μm at δ = 2 μm (tan α = 0.4) that is
+    # 143 nm short, so anything kept out by the halo can come 143 nm closer than δ. At
+    # the narrow end, the square extension's corner (12, -3) lies 0.65 μm beyond the
+    # miter offset's corner (12, -2.354), outside every offset of the taper.
+    @testset "> L12 taper halo keeps δ only along the path normal" begin
+        pa = Path(Point(0.0, 0.0))
+        straight!(pa, 10.0, Paths.TaperTrace(10.0, 2.0))
+        H = togrid(path_region(halo(pa, 2.0, nothing)))
+        # 1.95 μm out from the middle of the lower side, so within δ of the taper.
+        n = Point(0.4, -1.0) / hypot(0.4, 1.0)
+        q = togrid(Point(5.0, -3.0) + 1.95 * n)
+        @test offset_class(q, togrid(path_region(pa)), _gridcoord(2.0), HALO_TOL) == :in
+        @test_broken point_in_region_exact(q, H) === true
+        miter = togrid(offset(path_polygons(pa), 2.0; j=Clipper.JoinTypeMiter))
+        q2 = togrid(Point(11.9, -2.9))
+        @test point_in_region_exact(q2, miter) === false
+        @test_broken point_in_region_exact(q2, H) === false
+        @test_broken halo_is_offset(pa, pa, 2.0)
+        # A uniform trace keeps δ everywhere.
+        pu = Path(Point(0.0, 0.0))
+        straight!(pu, 10.0, Paths.Trace(6.0))
+        @test halo_is_offset(pu, pu, 2.0)
+    end
+
+    # L13 — A path halo with an inner offset is open at the path's ends. Found by: O7
+    # `halo_inner` (2026-10-30). Class: DeviceLayout, tracked in #8 for 2.0.
+    # `halo(pa, δ, δi)` is documented as offsetting by δ, then subtracting the offset by
+    # δi, so it should be the band `halo(pa, δ) ∖ halo(pa, δi)`. Each path end instead
+    # gets one straight extension, δ long, styled as a CPW whose trace is the inner
+    # offset's width: it covers the two side bands but not the cap between δi and δ
+    # beyond the end, so the band does not close around the end.
+    @testset "> L13 inner-offset halo is open at the ends" begin
+        pa = Path(Point(0.0, 0.0))
+        straight!(pa, 10.0, Paths.Trace(4.0))
+        X = togrid(path_region(halo(pa, 2.0, 1.0)))
+        # 1.5 μm before the start, on the centerline: beyond δi, within δ.
+        q = togrid(Point(-1.5, 0.0))
+        @test point_in_region_exact(q, togrid(path_region(halo(pa, 2.0, nothing)))) === true
+        @test point_in_region_exact(q, togrid(path_region(halo(pa, 1.0, nothing)))) ===
+              false
+        @test_broken point_in_region_exact(q, X) === true
+        @test_broken inner_halo_is_difference(pa, 2.0, 1.0)
+        # Along the sides the band is right.
+        @test point_in_region_exact(togrid(Point(5.0, 3.5)), X) === true
+        @test point_in_region_exact(togrid(Point(5.0, 2.5)), X) === false
+    end
+
+    # L14 — A keyhole cut attached next to another hole's cut can cross that hole without
+    # a warning. Found by: B11 `keyhole_multi` (2026-10-30). Class: DL, kernel-independent;
+    # L11's mechanism where #350's check does not look. Hole B is cut first, from its
+    # lowest vertex (3,10) down to the outer contour. Hole A's ray from (5,32) then meets
+    # B's edge (7,11)–(3,10) at y = 10.5, and the attachment rounds to (5,10), below B's
+    # other edge (3,10)–(21,13), which passes 0.33 below the hit point: the cut crosses
+    # it. The kink check looks at the hit edge's neighbors in the contour as spliced so
+    # far, and across (3,10) that neighbor is now B's own cut, not the edge it crosses.
+    # Region within 1.
+    @testset "> L14 cut beside another hole's cut crosses it unwarned" begin
+        outer = Polygon(Point{Int}[(0, 0), (24, 0), (24, 48), (0, 48)])
+        A = Polygon(Point{Int}[(15, 36), (8, 34), (5, 32)])
+        B = Polygon(Point{Int}[(3, 10), (21, 13), (15, 15), (10, 20), (7, 11)])
+        cp = holed_tree(outer, [A, B])
+        @test valid_output(cp; nested=true)
+        out, warned = keyholes_warned(cp)
+        @test first(region_within(out, togrid(cp), 1))
+        @test_broken warned || valid_keyholes(out)
+        # Either hole alone is cut validly.
+        for h in (A, B)
+            out1, _ = keyholes_warned(holed_tree(outer, [h]))
+            @test valid_keyholes(out1)
+        end
+    end
+
+    # L15 — After a cut that `interiorcuts` flags, a later hole of a valid tree can fail
+    # to attach. Found by: sampling 20 000 `int_multi_holed_polygon` trees (2026-11-02,
+    # 2 trees). Class: DL, kernel-independent. The sliver hole (32,9),(35,8),(39,7) is
+    # cut first. The second hole's ray from (38,32) meets the sliver's edge (39,7)–(32,9)
+    # at y ≈ 7.29, and the attachment rounds to (38,7), which lays (32,9)–(38,7) onto the
+    # collinear edge (32,9)–(35,8). That cut is flagged, but the third hole's ray from
+    # (33,52) meets the two overlapping edges at the same point and takes the one facing
+    # the exterior, so `to_polygons` throws before emitting the warning. Accepted: the
+    # B11 laws treat this error as they would the warning.
+    @testset "> L15 hole after a flagged cut fails to attach" begin
+        outer = Polygon(Point{Int}[(24, 0), (48, 0), (48, 64), (24, 64)])
+        H = [
+            Polygon(Point{Int}[(32, 9), (35, 8), (39, 7)]),
+            Polygon(Point{Int}[(44, 33), (42, 33), (38, 32)]),
+            Polygon(Point{Int}[(33, 52), (36, 60), (30, 60)])
+        ]
+        cp = difference2d([outer], H)
+        @test valid_output(cp; nested=true)
+        @test count(Clipper.ishole, tree_nodes(cp)) == 3
+        @test_throws r"\(33, ?52\).*could not be\s+attached" to_polygons(cp)
+        # The first two holes alone are cut with the warning, and without the second
+        # hole the third attaches.
+        @test last(keyholes_warned(difference2d([outer], H[1:2])))
+        @test valid_keyholes(first(keyholes_warned(difference2d([outer], H[[1, 3]]))))
+        @test keyholes_warned(cp) == (nothing, true)
+    end
 end

@@ -4,10 +4,11 @@
     [CommonTestSetup, LawsSetup] tags = [:geomlaws] begin
     # T(A ∪ B) ≐ T(A) ∪ T(B), likewise for ∖ and offset. Quarter turns, reflections,
     # and integer translations map the integer lattice to itself, so the law is exact
-    # there; floats are rotated with `cos(π/2) ≈ 6e-17` and re-round to the same fm
-    # points, but the rotated inputs may round differently from the rotated outputs,
-    # so the float variants are within one lattice unit. Arbitrary rotations are
-    # float-only.
+    # there. Floats are rotated with `cos(π/2) ≈ 6e-17`, and the rotated output is
+    # rounded twice (by the kernel, then onto the lattice after rotating) where the
+    # union of the rotated inputs is rounded once, so the float variants are within two
+    # lattice units. Arbitrary rotations are float-only; the far variant also moves the
+    # pair up to 1 cm from the origin, where Float64 resolves about 2 fm.
     # Transform the tree contours, not the keyhole polygons, so the comparison is
     # contour-to-contour.
     transformed(t, cp::ClippedPolygon) = [t(p) for p in contour_polygons(cp)]
@@ -33,16 +34,26 @@
             region_within(union2d([tA], [tB]), transformed_exact(t, union2d([A], [B])), 1)
         )
     end
+    function equivariant_within(A, B, tf, tol)
+        u, d = union2d([A], [B]), difference2d([A], [B])
+        return first(region_within(union2d([tf(A)], [tf(B)]), transformed(tf, u), tol)) &&
+               first(region_within(difference2d([tf(A)], [tf(B)]), transformed(tf, d), tol))
+    end
     @lawcheck function equivariant_float(
         pair=float_star_pair,
         t=rigid_transform,
-        θ=Data.Floats{Float64}(; minimum=0.0, maximum=2π, nans=false, infs=false)
+        θ=gen_turn
     )
-        A, B = pair
-        tf = t ∘ Rotation(θ)
-        u, d = union2d([A], [B]), difference2d([A], [B])
-        return first(region_within(union2d([tf(A)], [tf(B)]), transformed(tf, u), 1)) &&
-               first(region_within(difference2d([tf(A)], [tf(B)]), transformed(tf, d), 1))
+        return equivariant_within(pair..., t ∘ Rotation(θ), 2)
+    end
+    @lawcheck function equivariant_far(
+        pair=float_star_pair,
+        t=rigid_transform,
+        θ=gen_turn,
+        far=Data.Vectors(Data.Integers(-10, 10); min_size=2, max_size=2)
+    )
+        tf = Translation(Point(1000.0far[1], 1000.0far[2])) ∘ t ∘ Rotation(θ)
+        return equivariant_within(pair..., tf, 2)
     end
 end
 

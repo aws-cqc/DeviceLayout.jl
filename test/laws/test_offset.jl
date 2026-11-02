@@ -1,12 +1,10 @@
 # Offsetting and halo laws (catalog §4.2) over `offset` and `halo`.
 #
-# Round joins are exercised only on integer polygons. Clipper's arc tolerance is a
-# fixed 0.25 lattice units, so on the fm lattice a round join at δ = 1 μm produces
-# ~1.4·10⁵ vertices per full turn (`offset([10 μm square], 1.0; j=JoinTypeRound)` has
-# 140 164 vertices), and shrinking such an output back hangs in Clipper1's
-# intersection fixup for minutes. Both are recorded in the phase-1 report; laws that
-# would trip them are stated on the integer lattice, where the same joins give a
-# dozen vertices.
+# Round joins discretize arcs into chords inside the true arc, to a tolerance `atol`:
+# 1 nm by default for floating-point coordinates, a quarter unit for integers. Float laws
+# pass `atol = |δ| / 200` (`round_atol`), which keeps the arc error small next to the
+# features at every scale, and widen their tolerance by `arc_lattice_tol`; O8 pins the
+# 1 nm default.
 #
 # Tolerances: an offset is a raw outline whose vertices are rounded to the lattice,
 # followed by a union that rounds again, so a single offset result can sit two lattice
@@ -97,6 +95,36 @@ end
     )
         return offset_oracle(A, offset([A], sgn * δ; j=Clipper.JoinTypeRound), sgn * δ, 2)
     end
+    # Offsets that change topology: erosion splits a dumbbell once δ exceeds half its
+    # neck, and growth closes a cavity's mouth into a hole. δ is drawn around each
+    # threshold.
+    @lawcheck function round_oracle_splits(
+        shape=int_necked_polygon,
+        dk=Data.Integers(-1, 2)
+    )
+        A, neck = shape
+        δ = max(1, cld(neck, 2) + dk)
+        return offset_oracle(A, offset([A], -δ; j=Clipper.JoinTypeRound), -δ, 2)
+    end
+    @lawcheck function round_oracle_encloses(
+        shape=int_cavity_polygon,
+        dk=Data.Integers(-1, 2)
+    )
+        A, mouth = shape
+        δ = max(1, cld(mouth, 2) + dk)
+        return offset_oracle(A, offset([A], δ; j=Clipper.JoinTypeRound), δ, 2)
+    end
+    @lawcheck function round_oracle_float(
+        A=float_polygon,
+        f=Data.SampledFrom([0.05, 0.2]),
+        sgn=Data.SampledFrom([1, -1])
+    )
+        δ = sgn * f * maximum(p -> max(abs(p.x), abs(p.y)), A.p)
+        well_conditioned_offset(A, δ) || reject!()
+        atol = round_atol(δ)
+        out = offset([A], δ; j=Clipper.JoinTypeRound, atol)
+        return offset_oracle(A, out, _gridcoord(δ), 2 + arc_lattice_tol(atol))
+    end
     @law :O3_int_sharp @lawcheck function round_oracle_sharp(
         A=int_thick_polygon,
         δ=Data.Integers(1, 8)
@@ -119,12 +147,24 @@ end
             return round_chords_within(A, out, δ, 2)
         end
     end
+    # Floating-point coordinates at the default `atol` of 1 nm, with δ well above it.
+    @lawcheck function round_chords_float(
+        A=int_convex_polygon,
+        logscale=Data.Integers(0, 1),
+        f=Data.SampledFrom([0.05, 0.2])
+    )
+        Af = Polygon(Point{Float64}.(A.p) .* (10.0^logscale / GRID_HALF))
+        is_convex_exact(togrid(Af)) || reject!()
+        δ = f * 10.0^logscale
+        out = offset([Af], δ; j=Clipper.JoinTypeRound)
+        return round_chords_within(Af, out, _gridcoord(δ), 2 + arc_lattice_tol(0.001))
+    end
 end
 
 @testitem "GeomLaws O4: join ordering" setup = [CommonTestSetup, LawsSetup] tags =
     [:geomlaws] begin
-    # At convex corners round ⊆ square ⊆ miter for δ > 0. (Miter is limited to 2δ, so
-    # very sharp corners get a square-like cut farther out than the square join's;
+    # At convex corners round ⊆ square ⊆ miter for δ > 0. (A miter reaching more than
+    # 2δ from its vertex, at corners sharper than 60°, is replaced by the square join;
     # containment still holds.) Stated away from the L7/L10 regime — a turn with
     # sin·δ < 1 followed by a sharp tip — where the kernel's square and miter joins are
     # wrong (see `well_conditioned_offset`).
@@ -180,8 +220,8 @@ end
     # (a short edge next to a reflex vertex) the closing clips A — e.g. the 9-gon
     # `(20,0),(37.1,0),(28.1,2.7),(19,6.4),(23.1,25.7),(14.2,55.6),(-3.4,19.7),
     # (-45.7,-36.4),(20,-0.8)` at δ = 11.12 loses a 0.48 μm-deep sliver of itself.
-    # Round joins are integer-only (see the header), stated away from the L7 regime,
-    # within `offset_tol` of the first result.
+    # Stated away from the L7 regime, within `offset_tol` of the first result plus, on
+    # floats, both arc discretizations.
     @lawcheck function closing_round(A=int_thick_polygon, δ=Data.Integers(1, 6))
         well_conditioned_offset(A, δ) || reject!()
         j = Clipper.JoinTypeRound
@@ -194,19 +234,41 @@ end
         i = offset([A], -δ; j)
         return first(region_subset_within(offset(i, δ; j), [A], offset_tol(i, δ)))
     end
+    @lawcheck function closing_round_float(A=float_polygon, f=Data.SampledFrom([0.05, 0.2]))
+        δ = f * maximum(p -> max(abs(p.x), abs(p.y)), A.p)
+        well_conditioned_offset(A, δ) || reject!()
+        j, atol = Clipper.JoinTypeRound, round_atol(δ)
+        o = offset([A], δ; j, atol)
+        tol = offset_tol(o, δ) + 2 * arc_lattice_tol(atol)
+        return first(region_subset_within([A], offset(o, -δ; j, atol), tol))
+    end
+    @lawcheck function opening_round_float(A=float_polygon, f=Data.SampledFrom([0.05, 0.2]))
+        δ = f * maximum(p -> max(abs(p.x), abs(p.y)), A.p)
+        well_conditioned_offset(A, δ) || reject!()
+        j, atol = Clipper.JoinTypeRound, round_atol(δ)
+        i = offset([A], -δ; j, atol)
+        tol = offset_tol(i, δ) + 2 * arc_lattice_tol(atol)
+        return first(region_subset_within(offset(i, δ; j, atol), [A], tol))
+    end
 end
 
-@testitem "GeomLaws O7: halo" setup = [CommonTestSetup, LawsSetup] tags = [:geomlaws] begin
-    # halo(A, δ) is offset(A, δ) and halo(A, δo, δi) is offset(A, δo) ∖ offset(A, δi),
-    # exactly (same calls, same rounding).
-    @lawcheck function halo_int(A=int_thick_polygon, δ=Data.Integers(1, 6))
-        return halo([A], δ) ≐ offset([A], δ) &&
-               halo([A], δ, -δ) ≐ difference2d(offset([A], δ), offset([A], -δ))
+@testitem "GeomLaws O7: path halos" setup = [CommonTestSetup, LawsSetup] tags = [:geomlaws] begin
+    # `halo(pa, δ)` is documented as equivalent to offsetting the path's geometry by δ
+    # (`halo_is_offset`). Halos of polygons are `offset` itself and need no law.
+    @lawcheck function halo_offsets(case=path_case)
+        pa, fp, δ, _ = case
+        return halo_is_offset(pa, fp, δ)
     end
-    @lawcheck function halo_float(A=float_polygon, f=Data.SampledFrom([0.05, 0.2]))
-        δ = f * maximum(p -> max(abs(p.x), abs(p.y)), A.p)
-        return halo([A], δ) ≐ offset([A], δ) &&
-               halo([A], δ, δ / 2) ≐ difference2d(offset([A], δ), offset([A], δ / 2))
+    # A taper's halo is a taper with both widths increased by 2δ, which keeps δ only
+    # along the path's normal: the slanted sides are δ·cos α from the taper, and the
+    # square end extension at the narrow end overhangs the miter corner (ledger L12).
+    @law :O7_taper @lawcheck function halo_offsets_taper(case=taper_case)
+        return halo_is_offset(case...)
+    end
+    # With an inner offset, the halo is the region between the two offsets (ledger L13).
+    @law :O7_inner @lawcheck function halo_inner(case=path_case)
+        pa, _, δ, δi = case
+        return inner_halo_is_difference(pa, δ, δi)
     end
 end
 

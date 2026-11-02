@@ -12,14 +12,16 @@ The format of this changelog is based on
     Supposition.jl: generators for integer, rectilinear, float, and fm-perturbed polygon
     pairs; exact lattice predicates; exact and tolerance-based region comparison; laws
     for the boolean algebra (`union2d`, `intersect2d`, `difference2d`, `xor2d`, `clip`
-    fill rules, `clip_tiled`, `to_polygons` keyhole cuts), offsetting (`offset`, `halo`),
-    rigid-transform equivariance, coordinate-unit invariance, and the prescale round
-    trip; and a ledger of shrunk counterexamples for known kernel and keyhole-cut
-    behaviors. Region comparisons use exact rational boundary arrangements and bounded
+    fill rules, `clip_tiled`, `to_polygons` keyhole cuts), offsetting (`offset`, path
+    `halo`s), rigid-transform equivariance, coordinate-unit invariance, and the prescale
+    round trip; and a ledger of shrunk counterexamples for known kernel, keyhole-cut, and
+    halo behaviors. Region comparisons use exact rational boundary arrangements and bounded
     tolerance certificates, with inconclusive results treated as non-passes. The suite
     enforces valid-example budgets, validates complete hole boundaries, and checks full
     convex round-offset chords. Runs in the regular test suite at a fixed seed;
-    `GEOMLAWS_EXAMPLES` and `GEOMLAWS_SEED` raise the budget for exploratory runs.
+    `GEOMLAWS_EXAMPLES` and `GEOMLAWS_SEED` raise the budget for exploratory runs, which a
+    weekly GeomLaws workflow performs. `test/laws/mutants/` lists the checks each modeled
+    kernel, keyhole-cut, or halo defect fails.
   - Differential harness (`test/laws/differential/`): generates cases from the law
     generators and a harvested polygon corpus, evaluates them in two DeviceLayout
     worktrees with different clipping kernels, and classifies every disagreement by

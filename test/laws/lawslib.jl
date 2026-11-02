@@ -10,7 +10,8 @@
 # ---------------------------------------------------------------------------------
 # Budget. PR runs use a fixed seed and a small example count so they are deterministic
 # and fast (50 examples keeps the whole tag near the 90 s target on the CI matrix);
-# the nightly job raises GEOMLAWS_EXAMPLES and sets GEOMLAWS_SEED=random.
+# the scheduled exploration workflow (`explore.jl`) raises GEOMLAWS_EXAMPLES and draws
+# a fresh seed per run.
 # ---------------------------------------------------------------------------------
 const GEOMLAWS_EXAMPLES = parse(Int, get(ENV, "GEOMLAWS_EXAMPLES", "50"))
 const GEOMLAWS_SEED = let s = get(ENV, "GEOMLAWS_SEED", "20260908")
@@ -58,8 +59,11 @@ const KNOWN_BROKEN =
         :B8_int,        # L3: integer output may self-cross after rounding
         :B8_nested,     # L4: a hole vertex may land outside its parent after rounding
         :B8_float_perturbed,  # L8: fm-scale self-crossing from a ≤ 2 fm feature
+        :B11_multi,     # L14: a cut next to another hole's cut can cross it unwarned
         :O1_int_thin,   # L1 again, through offset's internal union
-        :O3_int_sharp   # L7: small offsets leave the input vertex in place at sharp corners
+        :O3_int_sharp,  # L7: small offsets leave the input vertex in place at sharp corners
+        :O7_taper,      # L12 (#8): taper halos are short of δ at the sides, long at the ends
+        :O7_inner       # L13 (#8): halos with an inner offset are open at path ends
     ])
 macro law(id, check)
     return quote
@@ -401,11 +405,59 @@ end
 # Keyhole polygons of a tree, and whether `to_polygons` warned while cutting them.
 # `interiorcuts` warns when rounding a cut's attachment point to the lattice may make the
 # keyhole polygon self-intersect, so invalid output is acceptable only with a warning.
+# A flagged cut can also make a later hole of the same contour fail to attach (ledger
+# L15), and the error comes before the warning is emitted. That error is accepted as the
+# warning would be, giving `(nothing, true)`; any other error is rethrown.
 function keyholes_warned(cp::ClippedPolygon)
+    r = _keyholes_or_unattached(cp)
+    isnothing(r) || return r
+    failed = filter(
+        !isnothing,
+        map(_unattached_after_warning, filter(!Clipper.ishole, tree_nodes(cp)))
+    )
+    !isempty(failed) && all(failed) || return _keyholes_logged(cp)
+    return nothing, true
+end
+function _keyholes_logged(cp::ClippedPolygon)
     logs, out = Test.collect_test_logs(; min_level=Base.CoreLogging.Warn) do
         return togrid(to_polygons(cp))
     end
     return out, !isempty(logs)
+end
+# `nothing` if `to_polygons` throws for a hole it cannot attach.
+function _keyholes_or_unattached(cp::ClippedPolygon)
+    try
+        return _keyholes_logged(cp)
+    catch e
+        e isa ErrorException && occursin("could not be attached", e.msg) || rethrow()
+        return nothing
+    end
+end
+# `nothing` if contour `E` and its holes are cut, else whether the hole that fails to
+# attach follows a warned cut. `interiorcuts` cuts each contour's holes in order of their
+# lowest vertex, each cut depending only on the holes before it, so cutting those holes
+# alone reproduces the warning that the error preempted.
+function _unattached_after_warning(E::Clipper.PolyNode)
+    holes = sort(Clipper.children(E); by=h -> minimum(gety, Clipper.contour(h)))
+    for m in eachindex(holes)
+        isnothing(_keyholes_or_unattached(_contour_with_holes(E, holes[1:m]))) || continue
+        return m > 1 && last(_keyholes_logged(_contour_with_holes(E, holes[1:(m - 1)])))
+    end
+    return nothing
+end
+function _contour_with_holes(E::N, holes) where {N <: Clipper.PolyNode}
+    function node(n, parent)
+        c = N(Clipper.contour(n), Clipper.ishole(n), false)
+        c.parent = parent
+        c.children = N[]
+        return c
+    end
+    root = N(empty(Clipper.contour(E)), false, false)
+    root.parent = root
+    e = node(E, root)
+    e.children = [node(h, e) for h in holes]
+    root.children = [e]
+    return ClippedPolygon(root)
 end
 
 # Exact point-to-region distance oracle for the offset laws: 0 inside, else the
@@ -434,6 +486,47 @@ function offset_class(q::GridPt, A::GridRegion, δ::Integer, tol::Integer)
         return :in
     end
 end
+
+# Membership oracle for the four boolean operations (law B7): at probes off every
+# boundary, membership in each result must equal the Boolean combination of
+# memberships in the operands, which are contour lists read under the even-odd rule
+# (for a valid tree, the same region as the positive rule the operations use). The
+# right-hand side never touches the clipping kernel. Examples where no probe lands
+# inside both operands are rejected rather than passed.
+function boolean_oracle_holds(As::Vector{<:Polygon}, Bs::Vector{<:Polygon}; tol=1)
+    gA, gB = togrid(As), togrid(Bs)
+    results = (
+        (togrid(union2d(As, Bs)), |),
+        (togrid(intersect2d(As, Bs)), &),
+        (togrid(difference2d(As, Bs)), (a, b) -> a & !b),
+        (togrid(xor2d(As, Bs)), ⊻)
+    )
+    saw_a = saw_b = false
+    for q in sample_points(gA, gB, first.(results)...; step=tol + 1)
+        near_boundary(q, tol, gA, gB, first.(results)...) && continue
+        a = point_in_region_exact(q, gA)
+        b = point_in_region_exact(q, gB)
+        (ismissing(a) || ismissing(b)) && continue
+        saw_a |= a
+        saw_b |= b
+        for (g, op) in results
+            r = point_in_region_exact(q, g)
+            ismissing(r) && continue
+            op(a, b) == r || return false
+        end
+    end
+    (saw_a && saw_b) || reject!()
+    return true
+end
+
+# Round joins discretize arcs into chords inside the true arc. Float laws pass
+# `atol = |δ| / 200`, which keeps the arc error small next to the features at every
+# scale and the chords few enough for exact comparisons.
+# `arc_lattice_tol` is the error bound in lattice units: Clipper1 rounds each corner's
+# number of chords to the nearest integer (at least one), so a chord can span up to 1.5
+# times the angle `atol` implies, and its sagitta reach 2.25 atol.
+round_atol(δ) = abs(δ) / 200
+arc_lattice_tol(atol::AbstractFloat) = ceil(Int, 2.25 * Float64(_gridcoord(atol)))
 
 # ---------------------------------------------------------------------------------
 # Generators.
@@ -497,10 +590,11 @@ function staircase_polygon(w::Int, xs::Vector{Int}, hs::Vector{Int})
 end
 int_rectilinear_polygon = @composed function _int_rectilinear(
     w=Data.Integers(3, 2GRID_HALF),
-    breaks=Data.Vectors(Data.Integers(1, 2GRID_HALF - 1); min_size=0, max_size=5),
-    hs=Data.Vectors(Data.Integers(1, 2GRID_HALF); min_size=1, max_size=6)
+    nsteps=Data.Integers(0, 5),
+    breaks=Data.Vectors(Data.Integers(1, 2GRID_HALF - 1); min_size=5, max_size=5),
+    hs=Data.Vectors(Data.Integers(1, 2GRID_HALF); min_size=6, max_size=6)
 )
-    xs = sort(unique(filter(x -> x < w, breaks)); rev=true)
+    xs = sort(unique(filter(x -> x < w, breaks[1:nsteps])); rev=true)
     push!(xs, 0)
     hs = hs[1:min(length(hs), length(xs))]
     # Adjacent equal heights collapse into one step, which is fine.
@@ -597,17 +691,23 @@ function min_corner_angle(p::Polygon)
     return θmin
 end
 
-# Integer star polygons.
-const gen_angles = Data.Vectors(
-    Data.Floats{Float64}(; minimum=0.0, maximum=2π, nans=false, infs=false);
-    min_size=3,
-    max_size=12
+# Star polygon parameters. The vertex count is drawn on its own: the shorter of two
+# independently sized vectors, at the sizes Supposition favors with small budgets, is
+# usually 3, and triangles are convex. Angles, radii, and other continuous parameters
+# are drawn on integer grids, not with `Data.Floats`, which draws bit patterns: about a
+# quarter of its draws on [0, 2π] land within 1e-3 of zero, piling vertices onto the
+# +x axis.
+const gen_nverts = Data.Integers(3, 12)
+const gen_angles = map(
+    v -> 2π .* v ./ 3600,
+    Data.Vectors(Data.Integers(0, 3599); min_size=12, max_size=12)
 )
-const gen_radii = Data.Vectors(
-    Data.Floats{Float64}(; minimum=0.2, maximum=1.0, nans=false, infs=false);
-    min_size=3,
-    max_size=12
-)
+const gen_radii =
+    map(v -> v ./ 100, Data.Vectors(Data.Integers(20, 100); min_size=12, max_size=12))
+# Fraction in [lo, hi] at a resolution of 0.01.
+grid_fraction(lo, hi) =
+    map(i -> i / 100, Data.Integers(round(Int, 100lo), round(Int, 100hi)))
+const gen_turn = map(k -> 2π * k / 3600, Data.Integers(0, 3599))
 
 """
     int_star_polygon = @composed ...
@@ -616,43 +716,45 @@ Integer-coordinate star polygon on [-GRID_HALF, GRID_HALF]². Vertices are round
 the grid, so small polygons frequently gain collinear triples and repeated
 vertices — exactly the degeneracies clipping must handle.
 """
-int_star_polygon = @composed function _int_star(θ=gen_angles, r=gen_radii)
-    n = min(length(θ), length(r))
+int_star_polygon = @composed function _int_star(n=gen_nverts, θ=gen_angles, r=gen_radii)
     p = star_polygon(Int, θ[1:n], r[1:n], GRID_HALF)
     valid_polygon(p) || reject!()
     return p
 end
 
-int_thick_star_polygon = @composed function _int_thick_star(θ=gen_angles, r=gen_radii)
-    n = min(length(θ), length(r))
-    p = star_polygon(Int, θ[1:n], r[1:n], GRID_HALF)
-    (valid_polygon(p) && is_thick(p)) || reject!()
-    return p
-end
+int_thick_star_polygon =
+    @composed function _int_thick_star(n=gen_nverts, θ=gen_angles, r=gen_radii)
+        p = star_polygon(Int, θ[1:n], r[1:n], GRID_HALF)
+        (valid_polygon(p) && is_thick(p)) || reject!()
+        return p
+    end
 
 # Float coordinates spanning nm to 100 μm feature scales. Vertices are rounded to
 # 1e-3 of the scale so they land on a coarse grid (cheap collinearity) while the
 # kernel still rounds their fm images; the cap at 1e2 keeps lattice coordinates
 # below ~1e11 so the exact predicates stay in Int128.
-float_star_polygon =
-    @composed function _float_star(θ=gen_angles, r=gen_radii, logscale=Data.Integers(-3, 2))
-        n = min(length(θ), length(r))
-        scale = 10.0^logscale
-        pts = [
-            Point(
-                round(rr * cos(tt) * scale; digits=3 - logscale),
-                round(rr * sin(tt) * scale; digits=3 - logscale)
-            ) for (tt, rr) in zip(sort(θ[1:n]), r[1:n])
-        ]
-        p = make_polygon(pts)
-        valid_polygon(p) || reject!()
-        return p
-    end
+float_star_polygon = @composed function _float_star(
+    n=gen_nverts,
+    θ=gen_angles,
+    r=gen_radii,
+    logscale=Data.Integers(-3, 2)
+)
+    scale = 10.0^logscale
+    pts = [
+        Point(
+            round(rr * cos(tt) * scale; digits=3 - logscale),
+            round(rr * sin(tt) * scale; digits=3 - logscale)
+        ) for (tt, rr) in zip(sort(θ[1:n]), r[1:n])
+    ]
+    p = make_polygon(pts)
+    valid_polygon(p) || reject!()
+    return p
+end
 
 int_convex_polygon = @composed function _int_convex(
     n=Data.Integers(3, 12),
     radius=Data.Integers(5, GRID_HALF),
-    θ=Data.Floats{Float64}(; minimum=0.0, maximum=2π, nans=false, infs=false)
+    θ=gen_turn
 )
     p = make_polygon([
         Point(
@@ -758,12 +860,12 @@ function _fm_offset(A::Polygon{Float64}, i, kfm)
 end
 float_star_pair = @composed function _float_star_pair(
     A=float_star_polygon,
+    m=gen_nverts,
     r=gen_radii,
     θ=gen_angles,
-    shift=Data.Floats{Float64}(; minimum=-0.5, maximum=0.5, nans=false, infs=false)
+    shift=grid_fraction(-0.5, 0.5)
 )
     scale = maximum(p -> max(abs(p.x), abs(p.y)), A.p)
-    m = min(length(θ), length(r))
     pts = [
         Point(rr * cos(tt), rr * sin(tt)) * scale for (tt, rr) in zip(sort(θ[1:m]), r[1:m])
     ]
@@ -793,6 +895,19 @@ float_perturbed_pair = @composed function _float_perturbed_pair(
     return (A, B, kfm)
 end
 
+# A float star pair moved to where layouts live: up to 1 cm from the origin, about
+# 1e13 lattice units, where Float64 resolves only about 2 fm. The exact predicates stay
+# exact in Int128 up to about 1e18 lattice units.
+float_far_pair = @composed function _float_far_pair(
+    pair=float_star_pair,
+    x=Data.Integers(-10, 10),
+    y=Data.Integers(-10, 10)
+)
+    A, B = pair
+    d = Point(1000.0x, 1000.0y)
+    return (A + d, B + d)
+end
+
 int_triple = @composed function _int_triple(
     pair=int_star_pair,
     C=int_thick_polygon,
@@ -812,7 +927,7 @@ end
 # A set of several polygons spread over a region several times the polygon size,
 # for the tiled and identity laws.
 int_polygon_set = @composed function _int_polygon_set(
-    polys=Data.Vectors(int_thick_polygon; min_size=1, max_size=6),
+    polys=Data.Vectors(int_thick_polygon; min_size=2, max_size=6),
     offsets=Data.Vectors(Data.Integers(-2GRID_HALF, 2GRID_HALF); min_size=12, max_size=12)
 )
     return [p + Point(offsets[2i - 1], offsets[2i]) for (i, p) in enumerate(polys)]
@@ -823,36 +938,162 @@ float_polygon_set = @composed function _float_polygon_set(set=int_polygon_set)
     return [Polygon(Point{Float64}.(p.p)) for p in set]
 end
 
-# A polygon with holes, built directly as a ClippedPolygon tree: a star and a copy
-# scaled toward the center (star-shaped about the origin ⇒ the copy is strictly
-# inside), optionally with a second hole. Exercises `to_polygons`' keyhole cutting
-# on trees of known validity.
-function holed_tree(outer::Polygon{Int}, holes::Vector{Polygon{Int}})
+# Rectilinear shapes whose offsets change topology, which convex stars and rectangles
+# never do. A dumbbell (two lobes joined by a neck `neck` wide) splits under erosion
+# by more than `neck / 2`; a box with an internal cavity reached through a mouth
+# `mouth` wide encloses a hole once grown by more than `mouth / 2`. Each returns the
+# shape and that width, so laws can draw δ around the threshold. `scale` keeps the
+# lattice tolerance small relative to the features.
+int_necked_polygon = @composed function _int_necked(
+    w1=Data.Integers(4, 16),
+    h1=Data.Integers(4, 20),
+    w2=Data.Integers(4, 16),
+    h2=Data.Integers(4, 20),
+    len=Data.Integers(1, 10),
+    neck=Data.Integers(1, 8),
+    y0=Data.Integers(0, 16),
+    b=Data.Integers(0, 20),
+    scale=Data.Integers(1, 4)
+)
+    (y0 + neck <= h1 && neck <= h2) || reject!()
+    # Lobe 2 spans the neck's height: its bottom lies in [y0 + neck - h2, y0].
+    yb = y0 + neck - h2 + mod(b, h2 - neck + 1)
+    x2, x3 = w1 + len, w1 + len + w2
+    pts = Point{Int}[
+        (0, 0),
+        (w1, 0),
+        (w1, y0),
+        (x2, y0),
+        (x2, yb),
+        (x3, yb),
+        (x3, yb + h2),
+        (x2, yb + h2),
+        (x2, y0 + neck),
+        (w1, y0 + neck),
+        (w1, h1),
+        (0, h1)
+    ]
+    p = make_polygon(pts .* scale)
+    valid_polygon(p) || reject!()
+    return (p, neck * scale)
+end
+int_cavity_polygon = @composed function _int_cavity(
+    mouth_length=Data.Integers(1, 8),
+    cw=Data.Integers(2, 20),
+    ch=Data.Integers(3, 20),
+    wall=Data.Vectors(Data.Integers(1, 8); min_size=3, max_size=3),
+    mouth=Data.Integers(1, 8),
+    at=Data.Integers(0, 20),
+    scale=Data.Integers(1, 4)
+)
+    ch >= mouth + 2 || reject!()
+    cx0, cx1 = mouth_length, mouth_length + cw
+    cy0, cy1 = wall[1], wall[1] + ch
+    my = cy0 + 1 + mod(at, ch - mouth - 1)
+    W, H = cx1 + wall[2], cy1 + wall[3]
+    pts = Point{Int}[
+        (0, 0),
+        (W, 0),
+        (W, H),
+        (0, H),
+        (0, my + mouth),
+        (cx0, my + mouth),
+        (cx0, cy1),
+        (cx1, cy1),
+        (cx1, cy0),
+        (cx0, cy0),
+        (cx0, my),
+        (0, my)
+    ]
+    p = make_polygon(pts .* scale)
+    valid_polygon(p) || reject!()
+    return (p, mouth * scale)
+end
+
+# A polygon with holes, built directly as a ClippedPolygon tree. `islands[i]` lists
+# polygons inside `holes[i]`. Outer and island contours are counterclockwise and holes
+# clockwise, as Clipper returns them. Exercises `to_polygons`' keyhole cutting on trees
+# of known validity.
+function holed_tree(
+    outer::Polygon{Int},
+    holes::Vector{Polygon{Int}},
+    islands=[Polygon{Int}[] for _ in holes]
+)
+    function node(pts, ishole, parent)
+        n = Clipper.PolyNode{Point{Int}}(pts, ishole, false)
+        n.parent = parent
+        n.children = Clipper.PolyNode{Point{Int}}[]
+        return n
+    end
     root = Clipper.PolyNode{Point{Int}}(Point{Int}[], false, false)
     root.parent = root
-    o = Clipper.PolyNode{Point{Int}}(outer.p, false, false)
-    o.parent = root
-    o.children = map(holes) do h
-        node = Clipper.PolyNode{Point{Int}}(reverse(h.p), true, false)
-        node.parent = o
-        node.children = Clipper.PolyNode{Point{Int}}[]
-        return node
+    o = node(outer.p, false, root)
+    o.children = map(zip(holes, islands)) do (h, is)
+        hn = node(reverse(h.p), true, o)
+        hn.children = [node(i.p, false, hn) for i in is]
+        return hn
     end
     root.children = [o]
     return ClippedPolygon(root)
 end
+# A star and a copy scaled toward the center (star-shaped about the origin ⇒ the copy
+# is strictly inside).
 int_holed_polygon = @composed function _int_holed(
+    n=gen_nverts,
     θ=gen_angles,
     r=gen_radii,
-    shrink=Data.Floats{Float64}(; minimum=0.2, maximum=0.6, nans=false, infs=false)
+    shrink=grid_fraction(0.2, 0.6)
 )
-    n = min(length(θ), length(r))
     big = 5GRID_HALF
     outer = star_polygon(Int, θ[1:n], r[1:n], big)
     hole = star_polygon(Int, θ[1:n], r[1:n], big * shrink)
     (valid_polygon(outer) && valid_polygon(hole)) || reject!()
     contour_contained(togrid(hole), togrid(outer); strict=true) || reject!()
     return holed_tree(outer, [hole])
+end
+
+# Several holes, some with islands. Each hole is a star in its own cell of a
+# `rows × cols` grid, so holes are disjoint by construction and need not resemble
+# the outer contour. Holes stacked in a column make the keyhole ray from an upper hole
+# meet the hole below it, holes in one row tie for lowest vertex, and the outer
+# contour's zigzag bottom edge puts the lowest cuts on non-axis-aligned edges.
+const HOLE_CELL = 24
+hole_shape = @composed function _hole_shape(
+    n=gen_nverts,
+    θ=gen_angles,
+    r=gen_radii,
+    island=Data.Booleans()
+)
+    return (θ[1:n], r[1:n], island)
+end
+int_multi_holed_polygon = @composed function _int_multi_holed(
+    rows=Data.Integers(2, 3),
+    cols=Data.Integers(1, 2),
+    shapes=Data.Vectors(hole_shape; min_size=6, max_size=6),
+    present=Data.Vectors(Data.Booleans(); min_size=6, max_size=6),
+    zig=Data.Vectors(Data.Integers(2, 8); min_size=5, max_size=5)
+)
+    W, H = cols * HOLE_CELL, rows * HOLE_CELL
+    bottom = [Point(round(Int, W * i / 6), -zig[i]) for i = 1:5]
+    outer =
+        make_polygon(vcat([Point(0, 0)], bottom, Point{Int}[(W, 0), (W, H), (0, H)]))
+    holes, islands = Polygon{Int}[], Vector{Polygon{Int}}[]
+    for i = 1:rows, j = 1:cols
+        k = (i - 1) * cols + j
+        (k <= 2 || present[k]) || continue
+        θ, r, island = shapes[k]
+        c = Point(round(Int, (j - 0.5) * HOLE_CELL), round(Int, (i - 0.5) * HOLE_CELL))
+        hole = star_polygon(Int, θ, r, HOLE_CELL ÷ 2 - 2) + c
+        valid_polygon(hole) || reject!()
+        push!(holes, hole)
+        inner = star_polygon(Int, θ, r, 0.4 * (HOLE_CELL ÷ 2 - 2)) + c
+        keep =
+            island &&
+            valid_polygon(inner) &&
+            contour_contained(togrid(inner), togrid(hole); strict=true)
+        push!(islands, keep ? [inner] : Polygon{Int}[])
+    end
+    return holed_tree(outer, holes, islands)
 end
 
 # Rigid transformations only: magnification is out of scope for equivariance laws.
@@ -881,3 +1122,98 @@ with_unit(p::Polygon{Int}, u) = Polygon([
         Unitful.uconvert(u, float(q.y) * Unitful.μm)
     ) for q in p.p
 ])
+
+# Paths for the halo laws: one to three straight or turning segments of one style, in
+# μm on a coarse grid, each returned with its footprint (the same segments as a trace
+# of the full width), which is what a halo offsets. The tangent stays within 90° of the
+# start direction, so the centerline never crosses itself: a path that overlapped
+# itself could bury an end, and the halo's square end extension would then reach past
+# every offset of the footprint. Turn radii exceed the halo's half-width: on a tighter
+# turn a trace's inner edge collapses to the turn's center, and the halo's collapses
+# there too instead of reaching δ past it. The footprint carries a 1 nm straight lead
+# at each end so that its miter offset has the true end corners, rather than corners
+# turned by the first chord of an arc. `δi` is an inner offset in (0, δ).
+path_case = @composed function _path_case(
+    nseg=Data.Integers(1, 3),
+    turn=Data.Vectors(Data.Integers(-6, 6); min_size=3, max_size=3),
+    len=Data.Vectors(Data.Integers(1, 20); min_size=3, max_size=3),
+    slack=Data.Vectors(Data.Integers(1, 20); min_size=3, max_size=3),
+    w=Data.Integers(1, 10),
+    gap=Data.Integers(0, 5),
+    δ=Data.SampledFrom([0.5, 1.0, 2.0, 5.0]),
+    inner=grid_fraction(0.1, 0.9)
+)
+    all(k -> abs(sum(turn[1:k])) <= 6, 1:nseg) || reject!()
+    halfwidth = w / 2 + gap
+    sty, fpsty = if gap == 0
+        Paths.Trace(Float64(w)), Paths.Trace(Float64(w))
+    else
+        Paths.CPW(Float64(w), Float64(gap)), Paths.Trace(2halfwidth)
+    end
+    function build(s, lead)
+        p = Path(Point(0.0, 0.0))
+        lead > 0 && straight!(p, lead, s)
+        for i = 1:nseg
+            if turn[i] == 0
+                straight!(p, Float64(len[i]), s)
+            else
+                turn!(p, turn[i] * π / 12, halfwidth + δ + slack[i], s)
+            end
+        end
+        lead > 0 && straight!(p, lead, s)
+        return p
+    end
+    return (build(sty, 0.0), build(fpsty, 0.001), δ, inner * δ)
+end
+# A straight taper between two widths, which is its own footprint.
+taper_case = @composed function _taper_case(
+    w=Data.Vectors(Data.Integers(1, 10); min_size=2, max_size=2),
+    len=Data.Integers(1, 20),
+    δ=Data.SampledFrom([0.5, 1.0, 2.0, 5.0])
+)
+    w[1] == w[2] && reject!()
+    pa = Path(Point(0.0, 0.0))
+    straight!(pa, Float64(len), Paths.TaperTrace(Float64(w[1]), Float64(w[2])))
+    return (pa, pa, δ)
+end
+# Path geometry is discretized to `HALO_ATOL` (10 nm), and halo comparisons hold within
+# three of those.
+const HALO_ATOL = 0.01
+const HALO_TOL = 3 * _gridcoord(HALO_ATOL) + 2
+path_polygons(pa) = reduce(
+    vcat,
+    [vcat(to_polygons(n; atol=HALO_ATOL)) for n in pa];
+    init=Polygon{Float64}[]
+)
+path_region(pa) = union2d(path_polygons(pa))
+# The halo of a path is documented as equivalent to offsetting its geometry by δ: it
+# covers every point within δ of the footprint, decided exactly from the footprint, and
+# nothing that the miter-join offset of the footprint leaves out, since a halo squares
+# off path ends. Sampled like B7 and O3: an exact certificate between two discretized
+# curves costs about a second per example.
+function halo_is_offset(pa, fp, δ)
+    gF = togrid(path_region(fp))
+    gH = togrid(path_region(halo(pa, δ, nothing)))
+    gM = togrid(offset(to_polygons(path_region(fp)), δ; j=Clipper.JoinTypeMiter))
+    for q in sample_points(gF, gH, gM; step=HALO_TOL + 1)
+        near_boundary(q, HALO_TOL, gH, gM) && continue
+        h = point_in_region_exact(q, gH)
+        ismissing(h) && continue
+        !h && offset_class(q, gF, _gridcoord(δ), HALO_TOL) == :in && return false
+        h && point_in_region_exact(q, gM) === false && return false
+    end
+    return true
+end
+# With an inner offset δi, the halo is the region between the two offsets.
+function inner_halo_is_difference(pa, δ, δi)
+    gX = togrid(path_region(halo(pa, δ, δi)))
+    gO = togrid(path_region(halo(pa, δ, nothing)))
+    gI = togrid(path_region(halo(pa, δi, nothing)))
+    for q in sample_points(gX, gO, gI; step=HALO_TOL + 1)
+        near_boundary(q, HALO_TOL, gX, gO, gI) && continue
+        x, o, i = point_in_region_exact.(Ref(q), (gX, gO, gI))
+        any(ismissing, (x, o, i)) && continue
+        x == (o && !i) || return false
+    end
+    return true
+end
