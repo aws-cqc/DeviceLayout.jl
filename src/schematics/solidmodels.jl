@@ -417,6 +417,49 @@ function _map_meta_fn(target::SolidModelTarget)
 end
 
 """
+    SolidModels.design_velocities(f, p0::NamedTuple, target::SolidModelTarget; kwargs...)
+
+Return the design velocities of the solid model that `render!(sm, f(p), target)` renders,
+with respect to the parameters in `p0`. `f(p::NamedTuple)` returns a planned and checked
+`Schematic`.
+
+The metadata mapping, z coordinates, extrusions and rendering options are those of `target`,
+as in [`render!(::SolidModel, ::Schematic, ::Target)`](@ref), so that the velocities are those
+of the rendered geometry. Keyword arguments are as in
+[`SolidModels.design_velocities`](@ref).
+"""
+function SolidModels.design_velocities(
+    f,
+    p0::NamedTuple,
+    target::SolidModelTarget;
+    kwargs...
+)
+    map_meta = _map_meta_fn(target)
+    sch0 = f(p0)
+    sch0 isa Schematic || throw(
+        ArgumentError("the layout function must return a Schematic, got $(typeof(sch0))")
+    )
+    extrusions = layer_extrusions_dz(target, sch0)
+    function thickness(m)
+        name = map_meta(m)
+        isnothing(name) && return 0.0μm
+        t, dim = get(extrusions, string(name), (0.0μm, 2))
+        # Wave port layers are extruded line segments, not sheets.
+        return dim == 2 ? t : 0.0μm
+    end
+    layout(p) = (p == p0 ? sch0 : f(p)).coordinate_system
+    return SolidModels.design_velocities(
+        layout,
+        p0;
+        map_meta=map_meta,
+        zmap=Base.Fix1(layer_z, target),
+        thickness=thickness,
+        _without_schematic_options(target.rendering_options)...,
+        kwargs...
+    )
+end
+
+"""
     render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, kwargs...)
 
 Render `sch` to `sm`, using rendering settings from `target`.
