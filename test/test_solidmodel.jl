@@ -2147,7 +2147,7 @@ end
     end
 end
 
-@testitem "Mesh sizing for imported models" setup = [CommonTestSetup] begin
+@testitem "Mesh sizing for imported models" setup = [CommonTestSetup, QuietGmshSetup] begin
     using DeviceLayout.SolidModels
     import DeviceLayout.SolidModels:
         dimtags,

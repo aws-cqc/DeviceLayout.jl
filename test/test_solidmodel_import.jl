@@ -118,7 +118,8 @@
     gmsh.model.occ.synchronize()
     step = joinpath(tdir, "mixed.step")
     brep_mixed = joinpath(tdir, "mixed.brep")
-    gmsh.write(step)
+    # OCC's STEP writer prints transfer statistics to stdout regardless of Gmsh verbosity.
+    redirect_stdout(() -> gmsh.write(step), devnull)
     gmsh.write(brep_mixed)
     gmsh.model.remove()
     function surface_types(sm)
@@ -942,7 +943,8 @@ end
         f = joinpath(tdir, fname)
         write(f, contents)
         sm = SolidModel("isnone"; overwrite=true)
-        @test_throws ArgumentError import_solid!(sm, f)
+        # OCC's BREP reader complains about the missing header on stdout.
+        @test_throws ArgumentError redirect_stdout(() -> import_solid!(sm, f), devnull)
     end
 end
 

@@ -654,11 +654,18 @@ function perimeter(e::Ellipse)
     return π * ((a + b) + 3 * (a - b)^2 / (10 * (a + b) + sqrt(a^2 + 14 * a * b + b^2)))
 end
 
-function signed_area(p::Polygon) # Can be negative
-    return sum(
-        (gety.(p.p) + gety.(circshift(p.p, -1))) .*
-        (getx.(p.p) - getx.(circshift(p.p, -1)))
-    ) / 2
+# Can be negative. Cross products are taken relative to the first vertex for precision far
+# from the origin.
+function signed_area(p::Polygon{T}) where {T}
+    a2 = zero(float(T))^2
+    isempty(p.p) && return a2
+    o = first(p.p)
+    n = length(p.p)
+    for i = 1:n
+        u, v = p.p[i] - o, p.p[mod1(i + 1, n)] - o
+        a2 += getx(u) * gety(v) - gety(u) * getx(v)
+    end
+    return a2 / 2
 end
 
 """
