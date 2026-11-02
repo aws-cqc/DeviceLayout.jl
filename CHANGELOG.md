@@ -22,7 +22,9 @@ The format of this changelog is based on
   - `SolidModels.morph_mesh` moves the nodes of a Gmsh (MSH 2.2 and 4.1, ASCII and binary)
     or MFEM mesh file by a displacement, such as the `SolidModels.design_displacement` of a
     set of parameter changes, without re-meshing, and reports the change in element quality
-    as a `SolidModels.MorphQuality`.
+    as a `SolidModels.MorphQuality`, checked at the corners of every element.
+    `SolidModels.morph_quality` compares a mesh with an earlier one, to decide when a
+    sequence of morphs calls for re-meshing.
 
   - `SolidModels.exclude_groups` returns the entities of a physical group that belong to none of
     a list of other groups, a membership difference with the postrender-operation signature.

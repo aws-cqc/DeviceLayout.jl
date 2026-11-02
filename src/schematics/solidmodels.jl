@@ -423,9 +423,9 @@ Return the design velocities of the solid model that `render!(sm, f(p), target)`
 with respect to the parameters in `p0`. `f(p::NamedTuple)` returns a planned and checked
 `Schematic`.
 
-The metadata mapping, z coordinates, extrusions and rendering options are those of `target`,
-as in [`render!(::SolidModel, ::Schematic, ::Target)`](@ref), so that the velocities are those
-of the rendered geometry. Keyword arguments are as in
+The metadata mapping, z coordinates, extrusions and rendering options are those of
+`target`, as in [`render!(::SolidModel, ::Schematic, ::Target)`](@ref), so that the
+velocities are those of the rendered geometry. Keyword arguments are as in
 [`SolidModels.design_velocities`](@ref).
 """
 function SolidModels.design_velocities(

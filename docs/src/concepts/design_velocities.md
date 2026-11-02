@@ -29,8 +29,8 @@ parameter is a geometry control knob, as everywhere in DeviceLayout.jl.
 [`SolidModels.design_velocities`](@ref) takes a function that builds the layout from a
 `NamedTuple` of parameters, and the parameters at which to differentiate. With a
 [`SchematicDrivenLayout.SolidModelTarget`](@ref), the function returns a planned and checked
-`Schematic`, and the target supplies the layer mapping, z positions and extrusions, exactly as
-for `render!(sm, sch, target)`:
+`Schematic`, and the target supplies the layer mapping, z positions and extrusions, exactly
+as for `render!(sm, sch, target)`:
 
 ```julia
 using DeviceLayout, DeviceLayout.SchematicDrivenLayout, DeviceLayout.PreferredUnits
@@ -43,7 +43,8 @@ function qubit(p)
     cs = floorplan.coordinate_system
     render!(cs, centered(Rectangle(600μm, 400μm)), LayerVocabulary.METAL_NEGATIVE)
     for s in (-1, 1)
-        pad = centered(Rectangle(p.width, 150μm); on_pt=Point(s * (p.gap + p.width) / 2, 0μm))
+        center = Point(s * (p.gap + p.width) / 2, 0μm)
+        pad = centered(Rectangle(p.width, 150μm); on_pt=center)
         render!(cs, pad, LayerVocabulary.METAL_POSITIVE)
     end
     area = centered(Rectangle(2mm, 2mm))

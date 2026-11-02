@@ -74,8 +74,8 @@ end
 
 @testitem "Design velocities of overlapping and touching geometry" setup =
     [CommonTestSetup, DesignVelocitySetup] begin
-    # A rectangle moving diagonally across a fixed one: where their edges cross, the crossing
-    # slides along the fixed edge.
+    # A rectangle moving diagonally across a fixed one: where their edges cross, the
+    # crossing slides along the fixed edge.
     function crossing(p)
         cs = CoordinateSystem("crossing", nm)
         render!(cs, centered(Rectangle(600μm, 400μm)), SemanticMeta(:box))
@@ -151,12 +151,28 @@ end
         (y=0.0μm,);
         zlimits=(-10μm, 10μm)
     )
-    # A window that cuts through a moving edge.
-    @test_throws r"window cuts a moving edge" SM.design_velocities(
+    # A window that leaves out moving geometry, and one that cuts through a moving edge.
+    @test_throws r"does not contain the moving geometry" SM.design_velocities(
         pad_in_cutout,
         PAD_P0;
         zlimits=(-150μm, 150μm),
-        window=centered(Rectangle(200μm, 400μm))
+        window=Rectangle(Point(-300μm, -200μm), Point(100μm, 200μm))
+    )
+    # A moving vertex inside the window whose edges reach fixed vertices outside it.
+    function lead(p)
+        cs = CoordinateSystem("lead", nm)
+        render!(
+            cs,
+            Polygon([Point(p.x, 0μm), Point(500μm, -50μm), Point(500μm, 50μm)]),
+            SemanticMeta(:lead)
+        )
+        return cs
+    end
+    @test_throws r"window cuts a moving edge" SM.design_velocities(
+        lead,
+        (x=0.0μm,);
+        zlimits=(-10μm, 10μm),
+        window=centered(Rectangle(400μm, 400μm))
     )
     # A change in the number of entities.
     function appearing(p)
@@ -235,8 +251,8 @@ end
     target = ExamplePDK.singlechip_solidmodel_target()
     p0 = (gap=40.0μm, width=240.0μm)
     dv = SM.design_velocities(qubit, p0, target)
-    # The pads move apart by half the change in the gap, and their centers by half the change
-    # in their width.
+    # The pads move apart by half the change in the gap, and their centers by half the
+    # change in their width.
     @test dv.gap(140.0, 0.0, 0.0) ≈ [0.5, 0, 0] atol = 1e-9
     @test dv.gap(-140.0, 0.0, 0.0) ≈ [-0.5, 0, 0] atol = 1e-9
     @test dv.width(140.0, 0.0, 0.0) ≈ [0.5, 0, 0] atol = 1e-9
@@ -342,6 +358,81 @@ end
     # The file's unit scales the displacement: a mesh in mm moves by d / 1000.
     q1 = SM.morph_mesh(src, joinpath(tdir, "mm.msh2"), X -> ones(size(X)); unit=mm)
     @test q1.max_displacement ≈ sqrt(3) / 1000
+end
+
+@testitem "Morph quality of hexahedra, prisms and pyramids" setup = [CommonTestSetup] begin
+    const SM = DeviceLayout.SolidModels
+    # A unit hexahedron, prism and pyramid, with separate vertices, in MFEM's vertex order.
+    hex = [0 1 1 0 0 1 1 0; 0 0 1 1 0 0 1 1; 0 0 0 0 1 1 1 1]
+    prism = [0 1 0 0 1 0; 0 0 1 0 0 1; 0 0 0 1 1 1] .+ [2, 0, 0]
+    pyramid = [0 1 1 0 0; 0 0 1 1 0; 0 0 0 0 1] .+ [4, 0, 0]
+    X = hcat(hex, prism, pyramid)
+    elements =
+        ["1 5 $(join(0:7, ' '))", "1 6 $(join(8:13, ' '))", "1 7 $(join(14:18, ' '))"]
+    mesh = """
+    MFEM mesh v1.0
+
+    dimension
+    3
+
+    elements
+    3
+    $(join(elements, "\n"))
+
+    boundary
+    0
+
+    vertices
+    $(size(X, 2))
+    3
+    $(join(("$(X[1, j]) $(X[2, j]) $(X[3, j])" for j in axes(X, 2)), "\n"))
+    """
+    src = joinpath(tdir, "mixed.mesh")
+    write(src, mesh)
+    # A shear preserves the volume of every corner simplex.
+    q = SM.morph_mesh(
+        src,
+        joinpath(tdir, "mixed_sheared.mesh"),
+        Y -> [0.5 .* Y[3:3, :]; zeros(2, size(Y, 2))]
+    )
+    @test q.num_elements == 3
+    @test q.num_inverted == 0
+    @test q.min_jacobian_ratio ≈ 1
+    @test q.max_jacobian_ratio ≈ 1
+    # A reflection inverts every element.
+    @test_throws r"inverts 3 of 3" SM.morph_mesh(
+        src,
+        joinpath(tdir, "x.mesh"),
+        Y -> [zeros(2, size(Y, 2)); -2 .* Y[3:3, :]]
+    )
+    # Moving one corner of the hexahedron through the opposite face inverts the element at
+    # that corner, although its volume stays positive.
+    corner(Y) = (D = zeros(size(Y)); D[3, 7] = -1.5; D)
+    q = SM.morph_mesh(src, joinpath(tdir, "x.mesh"), corner; check=false)
+    @test q.num_inverted == 1
+    @test q.min_jacobian_ratio < 0
+
+    # A Gmsh mesh of one hexahedron.
+    msh = """
+    \$MeshFormat
+    2.2 0 8
+    \$EndMeshFormat
+    \$Nodes
+    8
+    $(join(("$j $(hex[1, j]) $(hex[2, j]) $(hex[3, j])" for j = 1:8), "\n"))
+    \$EndNodes
+    \$Elements
+    1
+    1 5 2 1 1 1 2 3 4 5 6 7 8
+    \$EndElements
+    """
+    src = joinpath(tdir, "hex.msh2")
+    write(src, msh)
+    q = SM.morph_mesh(src, joinpath(tdir, "hex_morphed.msh2"), Y -> 0.1 .* Y)
+    @test q.num_elements == 1
+    @test q.min_jacobian_ratio ≈ 1.1^3
+    @test SM.morph_quality(src, joinpath(tdir, "hex_morphed.msh2")).max_jacobian_ratio ≈
+          1.1^3
 end
 
 @testitem "Mesh morphing of MFEM meshes" setup = [CommonTestSetup] begin
