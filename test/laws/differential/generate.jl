@@ -157,8 +157,9 @@ const FAMILIES = [
                 j in ("miter", "square", "round")
             ]
         end,
-    # Round joins are excluded on the float lattice: the kernels' absolute arc
-    # tolerance makes them emit ~1e5 vertices per turn (phase-1 report).
+    # Round joins are excluded on the float lattice: their 1 nm default arc tolerance is
+    # some 10⁶ lattice units, far beyond the case tolerance, so two kernels' arcs differ
+    # by more than the classes allow. The laws cover them (O3, O6, O8).
     "float_offset" =>
         () -> begin
             A = example(float_polygon)

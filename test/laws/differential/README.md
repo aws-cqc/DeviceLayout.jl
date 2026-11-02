@@ -40,7 +40,8 @@ and skips cases already present, so a kernel hang loses nothing.
 `float_star_pair`, `float_perturbed_pair`, triples, polygon sets, holed trees) and
 emits the operations the laws cover: `union2d`/`intersect2d`/`difference2d`/`xor2d`,
 `union2d` of a set, `clip` with single and mixed fill rules, `offset` (miter/square
-on all families, round on integer families only — see `../test_offset.jl`),
+on all families, round on integer families only, since float arcs differ by up to their
+1 nm tolerance),
 `clip_tiled`, and `to_polygons` keyhole cutting of a kernel tree. Each case records
 the tolerance at which the laws hold on that family, so `compare.jl` needs no
 knowledge of the generator.

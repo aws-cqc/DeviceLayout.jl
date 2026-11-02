@@ -229,42 +229,17 @@ end
 @testitem "GeomLaws B7: point-membership oracle" setup = [CommonTestSetup, LawsSetup] tags =
     [:geomlaws] begin
     # For every sampled point off all boundaries, membership in each result must equal
-    # the corresponding Boolean combination of memberships in the operands. The
-    # right-hand side never touches the clipping kernel. Examples where no probe
-    # lands inside both operands are rejected rather than passed.
-    function oracle_holds(A, B; tol=1)
-        gA, gB = [togrid(A)], [togrid(B)]
-        results = (
-            (togrid(union2d([A], [B])), |),
-            (togrid(intersect2d([A], [B])), &),
-            (togrid(difference2d([A], [B])), (a, b) -> a & !b),
-            (togrid(xor2d([A], [B])), ⊻)
-        )
-        saw_a = saw_b = false
-        for q in sample_points(gA, gB, first.(results)...; step=tol + 1)
-            near_boundary(q, tol, gA, gB, first.(results)...) && continue
-            a = point_in_region_exact(q, gA)
-            b = point_in_region_exact(q, gB)
-            (ismissing(a) || ismissing(b)) && continue
-            saw_a |= a
-            saw_b |= b
-            for (g, op) in results
-                r = point_in_region_exact(q, g)
-                ismissing(r) && continue
-                op(a, b) == r || return false
-            end
-        end
-        (saw_a && saw_b) || reject!()
-        return true
-    end
-    for gen in (int_pair, int_rectilinear_pair, float_star_pair)
+    # the corresponding Boolean combination of memberships in the operands
+    # (`boolean_oracle_holds`, which never touches the clipping kernel).
+    for gen in (int_pair, int_rectilinear_pair, float_star_pair, float_far_pair)
         @lawcheck function membership(pair=gen)
-            return oracle_holds(pair...)
+            A, B = pair
+            return boolean_oracle_holds([A], [B])
         end
     end
     @lawcheck function membership_perturbed(triple=float_perturbed_pair)
         A, B, kfm = triple
-        return oracle_holds(A, B; tol=kfm + 2)
+        return boolean_oracle_holds([A], [B]; tol=kfm + 2)
     end
 end
 
@@ -279,8 +254,10 @@ end
     @lawcheck function valid_rectilinear(pair=int_rectilinear_pair)
         return all(c -> valid_output(c; weak=true, nested=true), results(pair...))
     end
-    @lawcheck function valid_float(pair=float_star_pair)
-        return all(c -> valid_output(c; weak=true), results(pair...))
+    for gen in (float_star_pair, float_far_pair)
+        @lawcheck function valid_float(pair=gen)
+            return all(c -> valid_output(c; weak=true), results(pair...))
+        end
     end
     # Features one or two fm wide reproduce L3 on the fm lattice (ledger L8).
     @law :B8_float_perturbed @lawcheck function valid_float_perturbed(
@@ -374,7 +351,6 @@ end
         polys=float_polygon_set,
         tile=Data.SampledFrom([7.0, 15.0, 40.0])
     )
-        length(polys) >= 2 || reject!()
         a = polys[1:cld(end, 2)]
         b = polys[(cld(end, 2) + 1):end]
         tu = collect(Polygons.clip_tiled(Clipper.ClipTypeUnion, a, b, tile))
@@ -418,6 +394,55 @@ end
             event!("keyhole", out)
             return (warned || valid_keyholes(out)) &&
                    first(region_within(out, togrid(c), 1))
+        end
+    end
+    # Several holes, some with islands: holes stacked in a column, so a later hole's ray
+    # meets an earlier one, holes tied for lowest vertex, and islands that are cut
+    # separately. The kernel variant rebuilds the tree by unioning its contours (holes
+    # clockwise), on both lattices. On these trees a cut can cross another hole without
+    # a warning (ledger L14), so validity is checked separately from the region, and a
+    # hole after a warned cut can fail to attach (L15), which leaves no output to check.
+    @lawcheck function keyhole_multi(cp=int_multi_holed_polygon)
+        out, _ = keyholes_warned(cp)
+        return isnothing(out) || first(region_within(out, togrid(cp), 1))
+    end
+    @law :B11_multi @lawcheck function keyhole_multi_valid(cp=int_multi_holed_polygon)
+        out, warned = keyholes_warned(cp)
+        return warned || valid_keyholes(out)
+    end
+    for floating in (false, true)
+        @lawcheck function keyhole_multi_kernel(cp=int_multi_holed_polygon)
+            polys = contour_polygons(cp)
+            floating && (polys = [Polygon(Point{Float64}.(p.p)) for p in polys])
+            c = union2d(polys)
+            valid_output(c; weak=true, nested=true) || reject!()
+            out, _ = keyholes_warned(c)
+            return isnothing(out) || first(region_within(out, togrid(c), 1))
+        end
+    end
+end
+
+@testitem "GeomLaws B12: kernel output as operand" setup = [CommonTestSetup, LawsSetup] tags =
+    [:geomlaws] begin
+    # A result's rounded intersection vertices lie within a lattice unit of its operands'
+    # edges, so clipping it against an operand again reaches near-coincident edges that
+    # independent operands almost never produce. B6's absorption law is one such
+    # combination; it found the Clipper2 hole fill in "B6 fixed". The first result must
+    # be a valid tree, whose contours (holes clockwise) then describe it under the
+    # positive fill rule, and the second operation is checked against the membership
+    # oracle.
+    for gen in (int_pair, float_star_pair)
+        @lawcheck function output_as_operand(
+            pair=gen,
+            op=Data.SampledFrom([union2d, intersect2d, difference2d, xor2d]),
+            other=Data.Booleans()
+        )
+            A, B = pair
+            X = op([A], [B])
+            valid_output(X; weak=true, nested=true) || reject!()
+            Xp = contour_polygons(X)
+            isempty(Xp) && reject!()
+            return boolean_oracle_holds(Xp, [other ? A : B])
         end
     end
 end
