@@ -1,8 +1,8 @@
 ######## Design velocities
 #
-# A design velocity is the derivative of the position of every point of a rendered solid model
-# with respect to one layout parameter. It is built from the 2D layout alone, before any
-# meshing, so that it can be evaluated at the nodes of any mesh of the model: the vertex
+# A design velocity is the derivative of the position of every point of a rendered solid
+# model with respect to one layout parameter. It is built from the 2D layout alone, before
+# any meshing, so that it can be evaluated at the nodes of any mesh of the model: the vertex
 # velocities of the layout come from central differences of the layout at p ± h, an in-plane
 # field interpolates them harmonically on a constrained triangulation of a window around the
 # moving geometry, and an extrusion profile in z extends the in-plane field into 3D.
@@ -11,9 +11,8 @@ import DelaunayTriangulation
 import LinearAlgebra
 import SparseArrays
 import Random
-import StaticArrays: SVector
 import Unitful
-import Unitful: °, NoUnits
+import Unitful: NoUnits
 import Clipper
 import DeviceLayout: Rectangle, onenanometer, clip, orientation, lowerleft, upperright
 import DeviceLayout.Polygons: _all_contours
@@ -22,8 +21,8 @@ import DeviceLayout.Polygons: _all_contours
 # tolerances (`onenanometer`) and far above Float64 resolution at chip scale.
 const VELOCITY_MERGE_ATOL = 1e-6
 
-# A triangulation of the window of one plane: points, triangles and a point locator. Shared by
-# the design velocities of all parameters built together.
+# A triangulation of the window of one plane: points, triangles and a point locator. Shared
+# by the design velocities of all parameters built together.
 struct _PlaneMesh
     window::NTuple{4, Float64} # (xmin, xmax, ymin, ymax)
     points::Matrix{Float64} # 2 × n
@@ -46,27 +45,27 @@ end
 """
     struct DesignVelocity
 
-The design velocity of a layout parameter `p`: the field ``V(x, y, z) = ∂X/∂p`` that gives the
-rate at which each point ``X`` of the rendered solid model moves as `p` changes. Construct
-with [`SolidModels.design_velocities`](@ref).
+The design velocity of a layout parameter `p`: the field ``V(x, y, z) = ∂X/∂p`` that gives
+the rate at which each point ``X`` of the rendered solid model moves as `p` changes.
+Construct with [`SolidModels.design_velocities`](@ref).
 
 A `DesignVelocity` `dv` is callable:
 
   - `dv(x, y, z)` returns ``V`` at one point as an `SVector{3, Float64}`.
   - `dv(X)` returns a `3 × N` matrix of ``V`` at the columns of a `3 × N` matrix `X`.
 
-Coordinates are in `SolidModels.STP_UNIT` (μm), the units of meshes exported by `SolidModel`,
-unless they are `Unitful` lengths. ``V`` is dimensionless for a length parameter and in
-`STP_UNIT` per `SolidModels.parameter_unit(dv)` otherwise.
+Coordinates are in `SolidModels.STP_UNIT` (μm), the units of meshes exported by
+`SolidModel`, unless they are `Unitful` lengths. ``V`` is dimensionless for a length
+parameter and in `STP_UNIT` per `SolidModels.parameter_unit(dv)` otherwise.
 
-``V`` is the harmonic interpolation, in the plane of the moving geometry, of the velocities of
-all rendered edges in a rectangular window around it, times an extrusion profile in z. It is
-zero on fixed edges, on the window boundary, outside the window and beyond the profile's
-support. Within a moving metal sheet's plane it moves points only in-plane.
+``V`` is the harmonic interpolation, in the plane of the moving geometry, of the velocities
+of all rendered edges in a rectangular window around it, times an extrusion profile in z. It
+is zero on fixed edges, on the window boundary, outside the window and beyond the profile's
+support. It has no z component, so planar interfaces stay planar.
 """
 struct DesignVelocity
     parameter::Symbol
-    unit::Any
+    unit::Unitful.Units
     planes::Vector{_PlaneField}
 end
 
@@ -197,7 +196,8 @@ Each `δp[k]` has the units of the parameter, or none for a unitless parameter. 
 [`SolidModels.DesignDisplacement`](@ref).
 """
 function design_displacement(velocities, δp::NamedTuple)
-    combined = Dict{_PlaneMesh, _PlaneField}()
+    # Fields on the same triangulation (from one `design_velocities` call) are summed.
+    combined = IdDict{_PlaneMesh, _PlaneField}()
     order = _PlaneMesh[]
     for (k, δ) in pairs(δp)
         haskey(velocities, k) ||
@@ -222,8 +222,7 @@ function design_displacement(velocities, δp::NamedTuple)
 end
 
 _parameter_float(δ::Real, ::typeof(NoUnits), _) = Float64(δ)
-_parameter_float(δ, u, k) = _parameter_float_units(δ, u, k)
-function _parameter_float_units(δ, u, k)
+function _parameter_float(δ, u, k)
     try
         return Float64(ustrip(u, δ))
     catch e
@@ -255,9 +254,9 @@ with respect to that parameter at `p0`.
 `f(p::NamedTuple)` builds the 2D geometry (an `AbstractCoordinateSystem`) that would be
 rendered to a `SolidModel` for parameters `p`. It is called at `p0` and at `p0` with each
 parameter changed by `± steps[k]`, so it must be deterministic. A parameter's step defaults
-to 1 nm for a length parameter (or `0.001` for a unitless one, interpreted as μm) and must be
-given otherwise. The layout's vertices are typically affine in the parameters, so that the
-differences are exact for any step that does not change the layout's topology.
+to 1 nm for a length parameter (or `0.001` for a unitless one, interpreted as μm) and must
+be given otherwise. The layout's vertices are typically affine in the parameters, so that
+the differences are exact for any step that does not change the layout's topology.
 
 `map_meta`, `zmap` and `kwargs` have the same meaning as in
 [`render!(::SolidModel, ::CoordinateSystem)`](@ref): entities whose metadata `map_meta` maps
@@ -277,8 +276,9 @@ and below, or at `zlimits` if nearer.
 
   - `parameters`: The parameter names to differentiate with respect to.
   - `steps`: A `NamedTuple` of finite-difference steps by parameter name.
-  - `window`: A `Rectangle` outside which the velocities vanish. By default, the bounding box
-    of all moving edges, expanded by `margin` on each side.
+  - `window`: A `Rectangle` outside which the velocities vanish. It must contain all the
+    moving geometry. By default, the bounding box of all moving edges, expanded by `margin`
+    on each side.
   - `margin`: The default window's margin around the moving edges; by default half the
     larger side of their bounding box.
   - `zlimits`: The lowest and highest z at which the velocities may be nonzero, for example
@@ -289,8 +289,8 @@ and below, or at `zlimits` if nearer.
 
 The construction fails, rather than return a velocity that is not the derivative of the
 rendered geometry, when a step changes the topology of the layout (the number of entities,
-boundary loops or vertices, or whether features touch), when a moving edge crosses the
-window boundary, when a parameter changes the z or thickness of an entity, or when nothing
+boundary loops or vertices, or whether features touch), when the window does not contain all
+moving geometry, when a parameter changes the z or thickness of an entity, or when nothing
 bounds the profile in z.
 """
 function design_velocities(
@@ -317,7 +317,7 @@ function design_velocities(
     base = snapshot(p0)
     isempty(base) && error("the layout has no rendered entities")
     velocities = Vector{Vector{Vector{Matrix{Float64}}}}(undef, length(names))
-    units = Vector{Any}(undef, length(names))
+    units = Vector{Unitful.Units}(undef, length(names))
     for (j, k) in enumerate(names)
         h = _parameter_step(p0[k], get(steps, k, nothing), k)
         units[j] = _velocity_unit(p0[k])
@@ -502,7 +502,7 @@ function _vertex_velocities(base, plus, minus, h, k)
     return velocities
 end
 
-# Reorder the loops of `other` and their vertices to correspond to `base`, or return nothing.
+# Reorder the loops of `other` and their vertices to match `base`, or return nothing.
 function _align_loops(base, other)
     length(base) == length(other) || return nothing
     used = falses(length(other))
@@ -533,10 +533,10 @@ function _align_vertices(a, b)
     emin = minimum(
         hypot(a[1, mod1(i + 1, n)] - a[1, i], a[2, mod1(i + 1, n)] - a[2, i]) for i = 1:n
     )
-    first = argmin([hypot(b[1, j] - a[1, 1], b[2, j] - a[2, 1]) for j = 1:n])
+    j0 = argmin([hypot(b[1, j] - a[1, 1], b[2, j] - a[2, 1]) for j = 1:n])
     best, bestd = nothing, Inf
     for dir in (1, -1)
-        idx = [mod1(first + dir * (i - 1), n) for i = 1:n]
+        idx = [mod1(j0 + dir * (i - 1), n) for i = 1:n]
         d = maximum(hypot(b[1, idx[i]] - a[1, i], b[2, idx[i]] - a[2, i]) for i = 1:n)
         d < bestd && ((best, bestd) = (idx, d))
     end
@@ -566,7 +566,16 @@ function _velocity_window(base, vel, window, margin)
         window isa Rectangle ||
             throw(ArgumentError("window must be a Rectangle, got $(typeof(window))"))
         ll, ur = lowerleft(window), upperright(window)
-        return (_stp_float(ll.x), _stp_float(ur.x), _stp_float(ll.y), _stp_float(ur.y))
+        win = (_stp_float(ll.x), _stp_float(ur.x), _stp_float(ll.y), _stp_float(ur.y))
+        # The field vanishes outside the window, which must contain every moving vertex.
+        for (i, e) in enumerate(base), (l, loop) in enumerate(e.loops), k in axes(loop, 2)
+            _moves(vel, i, l, k) || continue
+            x, y = loop[1, k], loop[2, k]
+            (win[1] < x < win[2] && win[3] < y < win[4]) || error(
+                "The design velocity window does not contain the moving geometry of layer $(layer(e.meta)) at ($x, $y) μm; enlarge the window"
+            )
+        end
+        return win
     end
     xmin, xmax, ymin, ymax = Inf, -Inf, Inf, -Inf
     for (i, e) in enumerate(base), (l, loop) in enumerate(e.loops)
@@ -769,8 +778,6 @@ function _arrangement(base, vel, z, win)
     return arr
 end
 
-# Split the segments at their crossings and at vertices that lie on them, so that segments
-# meet only at shared endpoints, and give each crossing the velocity it moves with.
 # A uniform grid over the window listing the segments whose bounding box overlaps each cell.
 struct _SegmentGrid
     origin::NTuple{2, Float64}
@@ -781,7 +788,11 @@ end
 function _SegmentGrid(arr::_Arrangement)
     xmin, xmax, ymin, ymax = arr.window
     nc = max(1, round(Int, sqrt(length(arr.segments))))
-    grid = _SegmentGrid((xmin, ymin), ((xmax - xmin) / nc, (ymax - ymin) / nc), Dict())
+    grid = _SegmentGrid(
+        (xmin, ymin),
+        ((xmax - xmin) / nc, (ymax - ymin) / nc),
+        Dict{NTuple{2, Int}, Vector{Int}}()
+    )
     for (s, (i, j)) in enumerate(arr.segments)
         p, q = arr.points[i], arr.points[j]
         (i0, j0), (i1, j1) = _cellindex(grid, min.(p, q)), _cellindex(grid, max.(p, q))
@@ -797,6 +808,8 @@ _cellindex(g::_SegmentGrid, p) = (
     floor(Int, (p[2] - g.origin[2]) / g.cell[2])
 )
 
+# Split the segments at their crossings and at vertices that lie on them, so that segments
+# meet only at shared endpoints, and give each crossing the velocity it moves with.
 function _split_segments!(arr::_Arrangement, np)
     segs = arr.segments
     splits = [Tuple{Float64, Int}[] for _ in segs]
@@ -827,6 +840,7 @@ function _intersect_segments!(arr, splits, s1, s2, np)
     A, B, C, D = arr.points[a], arr.points[b], arr.points[c], arr.points[d]
     # Endpoints of one segment on the interior of the other: T-junctions and collinear
     # overlaps. The vertex keeps its velocity, which must keep it on the other segment.
+    touching = false
     for (s, (p, q), P, Q, e, E) in (
         (s2, (c, d), C, D, a, A),
         (s2, (c, d), C, D, b, B),
@@ -845,9 +859,11 @@ function _intersect_segments!(arr, splits, s1, s2, np)
             )
         end
         push!(splits[s], (t, e))
+        touching = true
     end
-    # Proper crossings.
-    length(intersect((a, b), (c, d))) > 0 && return
+    # Proper crossings, of segments that do not already touch: a vertex within the merge
+    # tolerance of the other segment is a T-junction, not a crossing.
+    (touching || length(intersect((a, b), (c, d))) > 0) && return
     o1 = orientation(Point(A...), Point(B...), Point(C...))
     o2 = orientation(Point(A...), Point(B...), Point(D...))
     o3 = orientation(Point(C...), Point(D...), Point(A...))
@@ -893,7 +909,7 @@ function _plane_velocity(base, vel, z, win, triangle_size, min_angle)
     for p in ((xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax))
         _add_point!(arr, SVector(p...), zero2)
     end
-    perimeter(p) =
+    along_boundary(p) =
         abs(p[2] - ymin) <= VELOCITY_MERGE_ATOL ? (p[1] - xmin) :
         abs(p[1] - xmax) <= VELOCITY_MERGE_ATOL ? (xmax - xmin) + (p[2] - ymin) :
         abs(p[2] - ymax) <= VELOCITY_MERGE_ATOL ?
@@ -901,7 +917,7 @@ function _plane_velocity(base, vel, z, win, triangle_size, min_angle)
         2(xmax - xmin) + 2(ymax - ymin) - (p[2] - ymin)
     onboundary =
         [i for i in eachindex(arr.points) if _on_window_boundary(win, arr.points[i])]
-    sort!(onboundary, by=i -> perimeter(arr.points[i]))
+    sort!(onboundary, by=i -> along_boundary(arr.points[i]))
     boundary_nodes = vcat(onboundary, onboundary[1])
     isboundary = falses(length(arr.points))
     isboundary[onboundary] .= true
@@ -922,12 +938,15 @@ function _plane_velocity(base, vel, z, win, triangle_size, min_angle)
         _stp_float(triangle_size)
     DelaunayTriangulation.refine!(
         tri;
-        min_angle=Float64(ustrip(°, min_angle isa Real ? min_angle * ° : min_angle)),
+        min_angle=_degrees(min_angle),
         max_area=sqrt(3) / 4 * h^2,
         rng=rng
     )
     return _harmonic_fields(tri, arr, np)
 end
+
+_degrees(θ::Real) = Float64(θ)
+_degrees(θ) = Float64(ustrip(°, θ))
 
 _same_side(win, p, q) = any(
     abs(p[c] - w) <= VELOCITY_MERGE_ATOL && abs(q[c] - w) <= VELOCITY_MERGE_ATOL for
@@ -951,12 +970,9 @@ function _harmonic_fields(tri, arr::_Arrangement, np)
         values[:, i] .= arr.velocities[i]
         dirichlet[i] = true
     end
+    # Steiner points on the window boundary, where the field vanishes.
     for i = (n0 + 1):n
-        p = SVector(pts[1, i], pts[2, i])
-        if _on_window_boundary(arr.window, p)
-            dirichlet[i] = true
-            continue
-        end
+        dirichlet[i] = _on_window_boundary(arr.window, SVector(pts[1, i], pts[2, i]))
     end
     # Steiner points that refinement put on constrained edges take the edge's velocity.
     onsegment = Set{Int}()
@@ -1027,14 +1043,14 @@ function _solve_harmonic!(values, dirichlet, pts, triangles)
     return values
 end
 
-# Jacobi-preconditioned conjugate gradients for the symmetric positive definite P1 Laplacian.
-# Iterative, in Julia, so that design velocities do not load a sparse direct solver library
-# (whose OpenMP runtime can conflict with the one Gmsh is linked with).
+# Jacobi-preconditioned conjugate gradients for the symmetric positive definite P1
+# Laplacian. Iterative, in Julia, so that design velocities do not load a sparse direct
+# solver library (whose OpenMP runtime can conflict with the one Gmsh is linked with).
 function _conjugate_gradient(A, b; rtol=1e-13)
     x = zeros(length(b))
     nb = LinearAlgebra.norm(b)
     iszero(nb) && return x
-    d = [A[i, i] for i in axes(A, 1)]
+    d = LinearAlgebra.diag(A)
     r = copy(b)
     z = r ./ d
     p = copy(z)

@@ -1,10 +1,10 @@
 ######## Mesh morphing
 #
 # A morph moves the nodes of an existing mesh file by a displacement field, such as a
-# `DesignDisplacement`, and leaves everything else in the file unchanged: the elements, their
-# attributes and physical groups, and the order of nodes. It is an alternative to re-meshing
-# after small design changes, and keeps the mesh's topology (and so a solver's discretization)
-# fixed between designs.
+# `DesignDisplacement`, and leaves everything else in the file unchanged: the elements,
+# their attributes and physical groups, and the order of nodes. It is an alternative to
+# re-meshing after small design changes, and keeps the mesh's topology (and so a solver's
+# discretization) fixed between designs.
 
 """
     struct MorphQuality
@@ -18,13 +18,15 @@
 
 The change in element quality from a [`SolidModels.morph_mesh`](@ref).
 
-  - `num_elements`: The number of elements checked: tetrahedra, or triangles in a mesh
-    without tetrahedra. Their corner nodes define the checks.
-  - `num_inverted`: The number of checked elements whose orientation the morph reversed.
-  - `min_jacobian_ratio`, `max_jacobian_ratio`: The extreme ratios of an element's volume
-    (area for triangles) after the morph to its volume before.
-  - `max_strain`: The largest change in an element edge's vector relative to its length,
-    an estimate of the largest displacement gradient.
+  - `num_elements`: The number of elements checked: the volume elements (tetrahedra,
+    hexahedra, prisms and pyramids), or the surface elements (triangles and quadrilaterals)
+    of a mesh without volume elements. Each is checked on the simplices at its corners,
+    which its corner nodes define.
+  - `num_inverted`: The number of checked elements that the morph inverted at some corner.
+  - `min_jacobian_ratio`, `max_jacobian_ratio`: The extreme ratios of a corner simplex's
+    volume (area for surface elements) after the morph to its volume before.
+  - `max_strain`: The largest change in an edge vector of a corner simplex relative to its
+    length, an estimate of the largest displacement gradient.
   - `max_displacement`: The largest node displacement, in the mesh file's units.
 
 A small `min_jacobian_ratio` (below about 0.3) or a large `max_strain` (above about 0.3)
@@ -57,10 +59,10 @@ meshes v1.x (`.mesh`), including high-order meshes whose nodes are a vector grid
 Only node coordinates change. Gmsh parametric node coordinates, if present, are left
 unchanged.
 
-With `check=true`, an error is thrown if the morph inverts any element, and nothing is
-written. The quality of a high-order mesh is checked on its corner nodes. For an MFEM mesh
-with nodes, this requires the nodes to be an `H1` grid function, whose first degrees of
-freedom are the vertices.
+With `check=true`, an error is thrown if the morph inverts any element at any corner, and
+nothing is written. The quality of a high-order mesh is checked on its corner nodes. For an
+MFEM mesh with nodes, this requires the nodes to be an `H1` grid function, whose first
+degrees of freedom are the vertices.
 """
 function morph_mesh(
     src::AbstractString,
@@ -126,8 +128,9 @@ struct _MeshFile
     # range of the coordinate text of each node (or of each value, for MFEM byNODES).
     locations::Vector{UnitRange{Int}}
     mfem_by_nodes::Bool
-    cells::Vector{Vector{Int}} # node indices of checked elements' corners
-    cell_dim::Int # 3 for tetrahedra, 2 for triangles
+    # The shape and corner node indices of the elements to check.
+    cells::Vector{Tuple{Symbol, Vector{Int}}}
+    checkable::Bool # false for MFEM nodes that are not an H1 grid function
 end
 
 function _read_mesh(path::AbstractString)
@@ -171,33 +174,66 @@ end
 
 ######## Quality
 
+# The simplices at the corners of each element shape: each corner with its neighbors, by
+# local corner index, in the corner order that Gmsh and MFEM share. An element is inverted
+# when the volume (area) of any of them changes sign.
+const _CORNER_SIMPLICES = Dict{Symbol, Vector{Vector{Int}}}(
+    :tet => [[1, 2, 3, 4]],
+    :hex => [
+        [1, 2, 4, 5],
+        [2, 3, 1, 6],
+        [3, 4, 2, 7],
+        [4, 1, 3, 8],
+        [5, 8, 6, 1],
+        [6, 5, 7, 2],
+        [7, 6, 8, 3],
+        [8, 7, 5, 4]
+    ],
+    :prism => [
+        [1, 2, 3, 4],
+        [2, 3, 1, 5],
+        [3, 1, 2, 6],
+        [4, 6, 5, 1],
+        [5, 4, 6, 2],
+        [6, 5, 4, 3]
+    ],
+    :pyramid => [[1, 2, 4, 5], [2, 3, 1, 5], [3, 4, 2, 5], [4, 1, 3, 5]],
+    :tri => [[1, 2, 3]],
+    :quad => [[1, 2, 4], [2, 3, 1], [3, 4, 2], [4, 1, 3]]
+)
+const _CORNER_COUNTS =
+    Dict(:tet => 4, :hex => 8, :prism => 6, :pyramid => 5, :tri => 3, :quad => 4)
+_isvolume(shape) = shape in (:tet, :hex, :prism, :pyramid)
+
+# The elements to check: the volume elements, or the surface elements if there are none.
+function _checked_cells(cells)
+    any(c -> _isvolume(c[1]), cells) && return filter(c -> _isvolume(c[1]), cells)
+    return cells
+end
+
 function _morph_quality(mesh::_MeshFile, newnodes)
-    mesh.format == :mfem && isempty(mesh.cells) && mesh.cell_dim == 0 && return nothing
+    mesh.checkable || return nothing
     X, Y = mesh.nodes, newnodes
     dmax = 0.0
     for j in axes(X, 2)
         dmax = max(dmax, hypot(Y[1, j] - X[1, j], Y[2, j] - X[2, j], Y[3, j] - X[3, j]))
     end
     rmin, rmax, smax, ninv = Inf, -Inf, 0.0, 0
-    for c in mesh.cells
-        r = mesh.cell_dim == 3 ? _volume_ratio(X, Y, c) : _area_ratio(X, Y, c)
-        isnan(r) && continue
-        rmin, rmax = min(rmin, r), max(rmax, r)
-        r <= 0 && (ninv += 1)
-        for a = 1:length(c), b = (a + 1):length(c)
-            e = SVector(
-                X[1, c[b]] - X[1, c[a]],
-                X[2, c[b]] - X[2, c[a]],
-                X[3, c[b]] - X[3, c[a]]
-            )
-            f = SVector(
-                Y[1, c[b]] - Y[1, c[a]],
-                Y[2, c[b]] - Y[2, c[a]],
-                Y[3, c[b]] - Y[3, c[a]]
-            )
-            L = LinearAlgebra.norm(e)
-            L > 0 && (smax = max(smax, LinearAlgebra.norm(f - e) / L))
+    for (shape, corners) in mesh.cells
+        inverted = false
+        for simplex in _CORNER_SIMPLICES[shape]
+            c = view(corners, simplex)
+            r = length(c) == 4 ? _volume_ratio(X, Y, c) : _area_ratio(X, Y, c)
+            isnan(r) && continue
+            rmin, rmax = min(rmin, r), max(rmax, r)
+            inverted |= r <= 0
+            for a = 1:length(c), b = (a + 1):length(c)
+                e, f = _col(X, c[b]) - _col(X, c[a]), _col(Y, c[b]) - _col(Y, c[a])
+                L = LinearAlgebra.norm(e)
+                L > 0 && (smax = max(smax, LinearAlgebra.norm(f - e) / L))
+            end
         end
+        ninv += inverted
     end
     isempty(mesh.cells) && ((rmin, rmax) = (1.0, 1.0))
     return MorphQuality(length(mesh.cells), ninv, rmin, rmax, smax, dmax)
@@ -206,21 +242,22 @@ end
 _col(X, i) = SVector(X[1, i], X[2, i], X[3, i])
 
 function _volume_ratio(X, Y, c)
-    det(X) = LinearAlgebra.dot(
+    volume(X) = LinearAlgebra.dot(
         _col(X, c[2]) - _col(X, c[1]),
         LinearAlgebra.cross(_col(X, c[3]) - _col(X, c[1]), _col(X, c[4]) - _col(X, c[1]))
     )
-    d0 = det(X)
-    iszero(d0) && return NaN
-    return det(Y) / d0
+    v0 = volume(X)
+    iszero(v0) && return NaN
+    return volume(Y) / v0
 end
 
 function _area_ratio(X, Y, c)
-    n(X) = LinearAlgebra.cross(_col(X, c[2]) - _col(X, c[1]), _col(X, c[3]) - _col(X, c[1]))
-    n0 = n(X)
+    normal(X) =
+        LinearAlgebra.cross(_col(X, c[2]) - _col(X, c[1]), _col(X, c[3]) - _col(X, c[1]))
+    n0 = normal(X)
     a0 = LinearAlgebra.dot(n0, n0)
     iszero(a0) && return NaN
-    return LinearAlgebra.dot(n(Y), n0) / a0
+    return LinearAlgebra.dot(normal(Y), n0) / a0
 end
 
 ######## Gmsh MSH
@@ -261,9 +298,16 @@ const _GMSH_NODES = Dict{Int, Int}(
     92 => 64,
     93 => 125
 )
-# Element types whose first 4 (tetrahedra) or 3 (triangles) nodes are the corners.
-const _GMSH_TETS = (4, 11, 29, 30, 31)
-const _GMSH_TRIS = (2, 9, 20, 21, 22, 23, 24, 25)
+# The shape of each Gmsh element type with corners to check. For elements of any order, the
+# first nodes are the corners.
+const _GMSH_SHAPES = Dict{Int, Symbol}(
+    (t => :tet for t in (4, 11, 29, 30, 31))...,
+    (t => :hex for t in (5, 12, 17, 92, 93))...,
+    (t => :prism for t in (6, 13, 18))...,
+    (t => :pyramid for t in (7, 14, 19))...,
+    (t => :tri for t in (2, 9, 20, 21, 22, 23, 24, 25))...,
+    (t => :quad for t in (3, 10, 16))...
+)
 
 # A cursor over a mesh file's bytes.
 mutable struct _Cursor
@@ -309,7 +353,7 @@ function _read_msh(bytes, path)
     nodes = Matrix{Float64}(undef, 3, 0)
     locations = UnitRange{Int}[]
     tags = Int[]
-    elements = Tuple{Int, Vector{Int}}[] # (type, node tags) of checked element types
+    elements = Tuple{Int, Vector{Int}}[] # (type, node tags) of element types with a shape
     while c.pos <= length(bytes)
         header = strip(_line(c, _readline!(c)))
         isempty(header) && continue
@@ -347,18 +391,18 @@ function _read_msh(bytes, path)
     end
     isempty(locations) && error("No nodes in $path")
     index = Dict(t => j for (j, t) in enumerate(tags))
-    tets = [e for e in elements if e[1] in _GMSH_TETS]
-    dim = isempty(tets) ? 2 : 3
-    checked = isempty(tets) ? [e for e in elements if e[1] in _GMSH_TRIS] : tets
-    cells = [[index[t] for t in e[2][1:(dim + 1)]] for e in checked]
+    cells = map(elements) do (type, nodetags)
+        shape = _GMSH_SHAPES[type]
+        return (shape, [index[t] for t in nodetags[1:_CORNER_COUNTS[shape]]])
+    end
     return _MeshFile(
         binary ? :msh_binary : :msh_ascii,
         bytes,
         nodes,
         locations,
         false,
-        cells,
-        dim
+        _checked_cells(cells),
+        true
     )
 end
 
@@ -401,7 +445,7 @@ function _msh2_elements!(c, binary)
             nn = _GMSH_NODES[type]
             for _ = 1:count
                 data = [_read!(c, Int32) for _ = 1:(1 + ntags + nn)]
-                (type in _GMSH_TETS || type in _GMSH_TRIS) &&
+                haskey(_GMSH_SHAPES, type) &&
                     push!(elements, (Int(type), Int.(data[(2 + ntags):end])))
             end
             nread += count
@@ -410,8 +454,7 @@ function _msh2_elements!(c, binary)
         for _ = 1:n
             fields = parse.(Int, split(_line(c, _readline!(c))))
             type, ntags = fields[2], fields[3]
-            (type in _GMSH_TETS || type in _GMSH_TRIS) &&
-                push!(elements, (type, fields[(4 + ntags):end]))
+            haskey(_GMSH_SHAPES, type) && push!(elements, (type, fields[(4 + ntags):end]))
         end
     end
     return elements
@@ -507,7 +550,7 @@ function _msh4_elements!(c, binary)
         end
         haskey(_GMSH_NODES, type) || error("Unsupported Gmsh element type $type")
         nn = _GMSH_NODES[type]
-        keep = type in _GMSH_TETS || type in _GMSH_TRIS
+        keep = haskey(_GMSH_SHAPES, type)
         for _ = 1:m
             if binary
                 data = [Int(_read!(c, UInt64)) for _ = 1:(1 + nn)]
@@ -523,13 +566,15 @@ end
 
 ######## MFEM mesh
 
-# Geometry types of MFEM elements and their number of vertices.
+# Geometry types of MFEM elements and their number of vertices, and the shapes to check.
 const _MFEM_VERTICES = Dict(0 => 1, 1 => 2, 2 => 3, 3 => 4, 4 => 4, 5 => 8, 6 => 6, 7 => 5)
+const _MFEM_SHAPES =
+    Dict(2 => :tri, 3 => :quad, 4 => :tet, 5 => :hex, 6 => :prism, 7 => :pyramid)
 
 function _read_mfem(bytes, path)
     c = _Cursor(bytes, 1)
     nv, sdim = 0, 0
-    tets, tris = Vector{Int}[], Vector{Int}[]
+    cells = Tuple{Symbol, Vector{Int}}[]
     nodes = Matrix{Float64}(undef, 3, 0)
     locations = UnitRange{Int}[]
     by_nodes, h1 = false, true
@@ -543,9 +588,8 @@ function _read_mfem(bytes, path)
                 geom = fields[2]
                 haskey(_MFEM_VERTICES, geom) ||
                     error("Unsupported MFEM geometry type $geom in $path")
-                v = fields[3:end] .+ 1
-                geom == 4 && push!(tets, v)
-                geom == 2 && push!(tris, v)
+                haskey(_MFEM_SHAPES, geom) &&
+                    push!(cells, (_MFEM_SHAPES[geom], fields[3:end] .+ 1))
             end
         elseif line == "vertices"
             nv = parse(Int, strip(_line(c, _readline!(c))))
@@ -617,10 +661,15 @@ function _read_mfem(bytes, path)
         end
     end
     isempty(locations) && error("No vertex or node coordinates in $path")
-    cells = isempty(tets) ? tris : tets
-    dim = isempty(tets) ? 2 : 3
-    # Corner nodes of the checked elements: the vertices, which are the first degrees of
-    # freedom of an H1 nodes space.
-    (has_nodes && !h1) && return _MeshFile(:mfem, bytes, nodes, locations, by_nodes, [], 0)
-    return _MeshFile(:mfem, bytes, nodes, locations, by_nodes, cells, dim)
+    # The corners of the elements are their vertices, which are the first degrees of freedom
+    # of an H1 nodes space; the nodes of other spaces are not ordered by vertex.
+    return _MeshFile(
+        :mfem,
+        bytes,
+        nodes,
+        locations,
+        by_nodes,
+        _checked_cells(cells),
+        !has_nodes || h1
+    )
 end
