@@ -171,5 +171,3 @@ layer's first level (or 1 if that is lower).
 To migrate a component, replace its `SemanticMeta` with `LayerRef`, add locators, map
 opposite-chip variants to layer symbols, and add its layers to a `SourceStack`. Unmigrated
 `SemanticMeta` geometry is ignored, so components can be migrated one at a time.
-
-See `examples/solidmodels_experimental.jl` for an end-to-end example.
