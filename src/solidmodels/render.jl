@@ -668,6 +668,8 @@ set_mesh_size_callback!() = gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
 
 _stp_float(x::Length) = Float64(ustrip(STP_UNIT, x))
 _stp_float(x::Real) = Float64(x)
+# Unitless lengths are in STP units; operations such as `extrude_z!` take lengths.
+_stp_length(x) = _stp_float(x) * STP_UNIT
 
 const _MeshControlPointRecord = NTuple{5, Float64} # (x, y, z, h, α)
 const _MeshControlPointOwners = Dict{Tuple{String, Int}, Set{_MeshControlPointRecord}}

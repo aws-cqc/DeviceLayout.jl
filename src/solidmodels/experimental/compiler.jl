@@ -270,6 +270,7 @@ function GetBoundary(
         position
     )
 end
+GetBoundary(source::Symbol; kwargs...) = GetBoundary(source, source; kwargs...)
 
 const _EXTERIOR_BOUNDARY_LAYERS = Dict(
     ("X", "min") => :EXTBND_XMIN,
@@ -341,24 +342,30 @@ Sweep `source` through `angle` radians around the axis passing through `origin` 
 specified axis direction. The one-layer form operates in place. The destination dimension
 is one greater than the source dimension; 3D sources are rejected.
 """
-struct Revolve <: LayerOp
+struct Revolve{X <: Coordinate, Y <: Coordinate, Z <: Coordinate} <: LayerOp
     destination::Symbol
     source::Symbol
-    origin::NTuple{3, Float64}
+    origin::Tuple{X, Y, Z}
     axis::NTuple{3, Float64}
     angle::Float64
 end
 function Revolve(
     destination::Symbol,
     source::Symbol,
-    origin::NTuple{3, <:Real},
-    axis::NTuple{3, <:Real},
-    angle::Real
+    origin::Tuple{Coordinate, Coordinate, Coordinate},
+    axis::NTuple{3, Real},
+    angle
 )
-    return Revolve(destination, source, Float64.(origin), Float64.(axis), Float64(angle))
+    return Revolve{map(typeof, origin)...}(destination, source, origin, axis, angle)
 end
-Revolve(source::Symbol, origin::NTuple{3, <:Real}, axis::NTuple{3, <:Real}, angle::Real) =
-    Revolve(source, source, origin, axis, angle)
+function Revolve(
+    source::Symbol,
+    origin::Tuple{Coordinate, Coordinate, Coordinate},
+    axis::NTuple{3, Real},
+    angle
+)
+    return Revolve(source, source, origin, axis, angle)
+end
 
 """
     Hollow(layer)
@@ -723,7 +730,11 @@ function _compile!(cmp::_CompilerState, op::Extrude)
     else
         push!(
             cmp.ops,
-            (string(op.destination), SolidModels.extrude_z!, (source_pg, dz, dim))
+            (
+                string(op.destination),
+                SolidModels.extrude_z!,
+                (source_pg, _stp_length(dz), dim)
+            )
         )
         state.dz = _stp_float(dz)
     end
@@ -777,6 +788,9 @@ function _compile!(cmp::_CompilerState, op::Cut)
     remove_object = op.remove_object || op.destination == op.object
     remove_tool = op.remove_tool || op.destination in op.tools
     dim = cmp.reg[op.object].dim
+    # difference_geom! looks up tools at the object's dimension and skips any it can't find.
+    all(tool -> cmp.reg[tool].dim == dim, op.tools) ||
+        throw(ArgumentError("Cut tool layers must have the dimension of the object layer"))
     object_pg = _pg(cmp, op.object)
     tool_pgs = [_pg(cmp, tool) for tool in op.tools]
     op.destination in (op.object, op.tools...) || _create!(cmp, op.destination, dim)
@@ -902,7 +916,7 @@ function _compile!(cmp::_CompilerState, op::Translate)
         (
             string(op.destination),
             SolidModels.translate!,
-            (source_pg, op.dx, op.dy, op.dz),
+            (source_pg, _stp_length(op.dx), _stp_length(op.dy), _stp_length(op.dz), dim),
             :copy => copy
         )
     )
@@ -936,7 +950,7 @@ function _compile!(cmp::_CompilerState, op::Revolve)
         (
             string(op.destination),
             SolidModels.revolve!,
-            (source_pg, dim, op.origin..., op.axis..., op.angle)
+            (source_pg, dim, _stp_length.(op.origin)..., op.axis..., op.angle)
         )
     )
     return nothing

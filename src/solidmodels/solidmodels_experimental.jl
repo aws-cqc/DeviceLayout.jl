@@ -11,7 +11,7 @@ using DeviceLayout: Coordinate, GDSMeta, nm, μm, ustrip, element_metadata, elem
 using DeviceLayout.SchematicDrivenLayout:
     Schematic, check_render_strict, close_logfile, reopen_logfile
 using ..SolidModels
-using ..SolidModels: SolidModel, STP_UNIT, _stp_float
+using ..SolidModels: SolidModel, STP_UNIT, _stp_float, _stp_length
 
 import DeviceLayout: layer, render!, place!
 
@@ -117,11 +117,6 @@ function render!(
     kwargs...
 )
     sch.checked[] || error("cannot render an unchecked Schematic. Run check!(sch) first.")
-    haskey(kwargs, :output_dir) && throw(
-        ArgumentError(
-            "experimental render! does not accept an output_dir keyword; write the returned metadata explicitly"
-        )
-    )
 
     # Prefixing mutates only a disposable schematic copy; the caller's schematic and
     # component geometry caches remain unchanged.

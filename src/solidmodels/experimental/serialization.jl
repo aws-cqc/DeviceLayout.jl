@@ -112,7 +112,8 @@ function _serialize!(sections, sel::Selection, pgs::Vector{String})
     if any(rl -> rl.meta isa Ground, sel.locators)
         sections.ground[cc_name] = Dict{String, Any}("pgs" => pgs)
     else
-        names = [rl.meta.name for rl in sel.locators]
+        # A component can carry several locators with the same terminal name.
+        names = unique(rl.meta.name for rl in sel.locators)
         sections.terminals[cc_name] = Dict{String, Any}("pgs" => pgs, "locators" => names)
     end
     return sections

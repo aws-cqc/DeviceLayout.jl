@@ -186,7 +186,7 @@ end
         LayerRegistry,
         compile_ops,
         exterior_boundaries
-    import Unitful: μm
+    import Unitful: μm, nm, °
 
     # Debugging helpers
     function inspect_registry(registry::LayerRegistry; io::IO=stdout)
@@ -340,6 +340,11 @@ end
             stack,
             registry
         )
+        @test_throws ArgumentError compile_ops(
+            [Cut(:cut, :metal, :volume)],
+            stack,
+            with(registry, :volume => LayerState(["volume"], 3))
+        )
 
         # A new destination preserves both inputs.
         ops, reg, _ = compile_ops([Cut(:cut, :metal, :voids)], stack, registry)
@@ -452,6 +457,9 @@ end
         @test op.recursive
         @test op.direction == "z"
         @test op.position == "max"
+        in_place = GetBoundary(:metal; direction="z")
+        @test in_place.destination == in_place.source == :metal
+        @test in_place.direction == "z"
         @test_throws ArgumentError GetBoundary(:bad, :metal; direction="diagonal")
         @test_throws ArgumentError GetBoundary(:bad, :metal; position="middle")
         @test_throws ArgumentError compile_ops(
@@ -511,7 +519,7 @@ end
         ops, reg, _ =
             compile_ops([Translate(:shifted, :metal, 1μm, 0μm, 0μm)], stack, registry)
         @test only(ops)[1:3] ==
-              ("shifted", SolidModels.translate!, ("metal", 1μm, 0μm, 0μm))
+              ("shifted", SolidModels.translate!, ("metal", 1μm, 0μm, 0μm, 2))
         @test (:copy => true) in only(ops)
         @test haskey(reg, :metal)
         @test reg[:shifted].dim == 2
@@ -799,7 +807,7 @@ end
 
     @testset "Revolve" begin
         rev = Revolve(:revolved, :metal, (0, 0, 0), (0, 0, 1), π)
-        @test rev.origin === (0.0, 0.0, 0.0)
+        @test rev.origin === (0, 0, 0)
         @test rev.axis === (0.0, 0.0, 1.0)
         @test rev.angle === Float64(π)
         in_place = Revolve(:metal, (0, 0, 0), (0, 0, 1), π)
@@ -816,11 +824,17 @@ end
         @test only(ops) == (
             "revolved",
             SolidModels.revolve!,
-            ("metal", 2, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, Float64(π))
+            ("metal", 2, 0.0μm, 0.0μm, 0.0μm, 0.0, 0.0, 1.0, Float64(π))
         )
         @test reg[:revolved].dim == 3
         @test only(reg[:revolved].pgs) == "revolved"
         @test haskey(reg, :metal)
+
+        # A unitful origin is converted to STP lengths and a unitful angle to radians.
+        unitful = Revolve(:revolved, :metal, (1μm, 0μm, 2nm), (0, 0, 1), 90°)
+        args = only(first(compile_ops([unitful], stack, registry)))[3]
+        @test collect(args[3:5]) ≈ [1.0μm, 0.0μm, 0.002μm]
+        @test args[9] ≈ π / 2
 
         # In place, repeats advance through successive dimensions under the same name.
         reg = with(registry, :line => LayerState(["line"], 1))
@@ -964,6 +978,7 @@ end
         SourceStack,
         Translate
     import DeviceLayout: μm
+    import Unitful: nm, °
 
     function render_case(name, cs, stack, ops)
         sg = SchematicGraph(name)
@@ -1213,6 +1228,41 @@ end
         @test collect(layer_bbox(translated, :shifted)) ≈ [3.0, 0.0, 0.0, 5.0, 1.0, 0.0] atol =
             1e-6
 
+        # 3D solids translate as expected, and unitless stack lengths are in micrometers.
+        for (name, geometry, stack, dx) in (
+            (
+                "compiler_geometry_translated_solid",
+                CoordinateSystem("translated_solid", μm),
+                flat_stack(:shape; thickness=1μm),
+                3μm
+            ),
+            (
+                "compiler_geometry_translated_unitless",
+                CoordinateSystem{Float64}("translated_unitless"),
+                SourceStack(
+                    :shape => SourceLayer(NULL; level=1, offset=0.0, thickness=1.0);
+                    levels=(1 => 0.0,)
+                ),
+                3.0
+            )
+        )
+            place!(
+                geometry,
+                Rectangle(Point(0, 0) * oneunit(dx), Point(2, 1) * oneunit(dx)),
+                LayerRef(:shape)
+            )
+            moved = render_case(
+                name,
+                geometry,
+                stack,
+                [Extrude(:shape), Translate(:moved, :shape, dx, zero(dx), zero(dx))]
+            )
+            @test moved.metadata["layers"]["moved"]["dim"] == 3
+            @test layer_measure(moved, :moved) ≈ 2.0 atol = 1e-8
+            @test collect(layer_bbox(moved, :moved)) ≈ [3.0, 0.0, 0.0, 5.0, 1.0, 1.0] atol =
+                1e-6
+        end
+
         revolved_geometry = CoordinateSystem("revolved", μm)
         place!(revolved_geometry, _rectangle(1.0, 0.0, 2.0, 1.0), LayerRef(:shape))
         revolved = render_case(
@@ -1224,6 +1274,18 @@ end
         @test revolved.metadata["layers"]["solid"]["dim"] == 3
         @test layer_measure(revolved, :solid) ≈ 3π / 2 atol = 1e-8
         @test collect(layer_bbox(revolved, :solid)) ≈ [-2.0, 0.0, -2.0, 2.0, 1.0, 0.0] atol =
+            1e-6
+
+        # A half-turn about the axis through x = 1μm sweeps the 1μm-wide rectangle into a
+        # half cylinder of radius 1μm.
+        revolved = render_case(
+            "compiler_geometry_revolved_unitful",
+            revolved_geometry,
+            flat_stack(:shape),
+            [Revolve(:solid, :shape, (1000nm, 0μm, 0μm), (0, 1, 0), 180°)]
+        )
+        @test layer_measure(revolved, :solid) ≈ π / 2 atol = 1e-8
+        @test collect(layer_bbox(revolved, :solid)) ≈ [0.0, 0.0, -1.0, 2.0, 1.0, 0.0] atol =
             1e-6
     end
 
