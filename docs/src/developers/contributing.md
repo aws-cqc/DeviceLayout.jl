@@ -89,6 +89,17 @@ item only fully tests those deprecations under `Pkg.test()`.
 CI runs the full suite on every released Julia minor from 1.10 upward. Pre-release Julia is
 allowed to fail but failures should be investigated.
 
+### Geometry laws
+
+Test items tagged `:geomlaws`, in `test/laws/`, are property-based tests of the 2D polygon
+operations: they check laws such as "`union2d` is commutative" on inputs generated with
+[Supposition.jl](https://github.com/Seelengrab/Supposition.jl). In the regular suite they run
+at a fixed seed with 50 inputs per check, so they are deterministic; the environment variables
+`GEOMLAWS_SEED` and `GEOMLAWS_EXAMPLES` change that, and a weekly workflow runs them with fresh
+seeds and 2000 inputs per check. If you change clipping, offsetting, keyhole cuts, or halos,
+run them with `filter=ti -> :geomlaws in ti.tags`. `test/laws/README.md` describes every law,
+what a pass does and doesn't establish, the known failures, and how to reproduce a failure.
+
 ### [Writing tests](@id dev-writing-tests)
 
 - Put new tests in the topical `test_<topic>.jl` file, or create one. Use `@testitem` with the shared setup snippet:

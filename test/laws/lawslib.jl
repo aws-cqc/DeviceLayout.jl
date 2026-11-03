@@ -9,9 +9,8 @@
 
 # ---------------------------------------------------------------------------------
 # Budget. PR runs use a fixed seed and a small example count so they are deterministic
-# and fast (50 examples keeps the whole tag near the 90 s target on the CI matrix);
-# the scheduled exploration workflow (`explore.jl`) raises GEOMLAWS_EXAMPLES and draws
-# a fresh seed per run.
+# and take a few minutes. The scheduled exploration workflow (`explore.jl`) raises
+# GEOMLAWS_EXAMPLES and draws a fresh seed per run.
 # ---------------------------------------------------------------------------------
 const GEOMLAWS_EXAMPLES = parse(Int, get(ENV, "GEOMLAWS_EXAMPLES", "50"))
 const GEOMLAWS_SEED = let s = get(ENV, "GEOMLAWS_SEED", "20260908")

@@ -8,25 +8,15 @@ The format of this changelog is based on
 
 ### Added
 
-  - Property-based geometry law suite (`test/laws/`, tag `:geomlaws`) built on
-    Supposition.jl: generators for integer, rectilinear, float, and fm-perturbed polygon
-    pairs; exact lattice predicates; exact and tolerance-based region comparison; laws
-    for the boolean algebra (`union2d`, `intersect2d`, `difference2d`, `xor2d`, `clip`
-    fill rules, `clip_tiled`, `to_polygons` keyhole cuts), offsetting (`offset`, path
-    `halo`s), rigid-transform equivariance, coordinate-unit invariance, and the prescale
-    round trip; and a ledger of shrunk counterexamples for known kernel, keyhole-cut, and
-    halo behaviors. Region comparisons use exact rational boundary arrangements and bounded
-    tolerance certificates, with inconclusive results treated as non-passes. The suite
-    enforces valid-example budgets, validates complete hole boundaries, and checks full
-    convex round-offset chords. Runs in the regular test suite at a fixed seed;
-    `GEOMLAWS_EXAMPLES` and `GEOMLAWS_SEED` raise the budget for exploratory runs, which a
-    weekly GeomLaws workflow performs. `test/laws/mutants/` lists the checks each modeled
-    kernel, keyhole-cut, or halo defect fails.
-  - Differential harness (`test/laws/differential/`): generates cases from the law
-    generators and a harvested polygon corpus, evaluates them in two DeviceLayout
-    worktrees with different clipping kernels, and classifies every disagreement by
-    region with the exact predicates as referee (vertex-only, decomposition, within
-    tolerance, or a provable error of one kernel).
+  - Property-based tests of the 2D polygon operations (`test/laws/`, test item tag
+    `:geomlaws`), with Supposition.jl as a new test-only dependency. Laws for the boolean
+    operations, `offset`, the keyhole cuts of `to_polygons`, path `halo`s, rigid-transform
+    equivariance, and unit invariance are checked on generated inputs, comparing outputs
+    as regions with exact arithmetic that doesn't use the clipping library. They run at
+    a fixed seed in the regular suite and with fresh seeds in a weekly GeomLaws workflow,
+    and known failures are kept as minimal reproducers. `test/laws/README.md` describes
+    what the laws cover and what they don't. `test/laws/differential/` holds scripts that
+    compare two clipping kernels on the same generated and real-design inputs.
   - `SolidModels.exclude_groups` returns the entities of a physical group that belong to none of
     a list of other groups, a membership difference with the postrender-operation signature.
     A group left with no entities is removed (its entities stay in the model).

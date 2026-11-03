@@ -8,7 +8,7 @@
 
 @testitem "GeomLaws ledger" setup = [CommonTestSetup, LawsSetup] tags = [:geomlaws] begin
     # L1 — Integer-lattice polygon vanishes under the identity union.
-    # Found by: B3 `union_self` (2026-09-08, Clipper 0.6 / Clipper1 engine).
+    # Found by: B3 self-union (Clipper1).
     # Class: kernel finding. A valid counterclockwise triangle of area 2 is dropped
     # entirely by `union2d([A])`, `union2d([A],[A])`, and `intersect2d([A],[A])`. The
     # apex (11,-4) lies 0.24 lattice units from the opposite edge; scaling the same
@@ -30,7 +30,7 @@
     end
 
     # L2 — Union output has a pinch point (vertex repeated non-consecutively).
-    # Found by: B8 `union_valid` with strict simplicity (2026-09-08, Clipper1).
+    # Found by: B8 with strict simplicity (Clipper1).
     # Class: tolerance. Two overlapping triangles whose true overlap is sub-lattice
     # collapse to a single shared vertex (11,-3) after rounding. The region is correct
     # within one lattice unit; the contour is weakly but not strictly simple. B8 is
@@ -46,7 +46,7 @@
     end
 
     # L3 — Union output self-crosses after lattice rounding.
-    # Found by: B8 `union_valid` with weak simplicity (2026-09-08, Clipper1, random seed).
+    # Found by: B8 with weak simplicity (Clipper1).
     # Class: kernel finding (documented Clipper1 behavior: output is not guaranteed
     # simple unless `StrictlySimple` is set, which DL does not do). The true
     # intersection of the two long edges is off-lattice; rounding puts (0,5) on the
@@ -65,7 +65,7 @@
     end
 
     # L4 — Hole vertex outside its parent contour after rounding.
-    # Found by: B8 `nested_int` (2026-09-09, Clipper1). Class: kernel finding, both
+    # Found by: B8 `nested_int` (Clipper1). Class: kernel finding, both
     # lattices (integer stars ≈ 1 % of hole-bearing results; fm-lattice floats ≈ 0.3 %).
     # B's vertex (4,4) lies just outside A, so the true xor has a hairline spike there;
     # Clipper drops the spike from the outer contour but keeps (4,4) in the hole, which
@@ -83,13 +83,13 @@
     end
 
     # L5 — `to_polygons` cannot cut a hole whose lowest vertex lies outside its parent.
-    # Found by: B11 on kernel output (2026-09-09). Class: DeviceLayout, kernel-
-    # independent. `interiorcuts` shoots a ray downward from the hole's lowest vertex
-    # and joins the hole at the first parent edge it hits; when that vertex lies outside
-    # the parent (L4) no edge is hit. Until #350 the hole was skipped without warning,
-    # filling it in; `to_polygons` now throws instead. Here the xor of two triangles has
-    # a hole of area 156 out of 379.5. The fm-lattice case reproduces on random
-    # stars at μm scale (`(-2,5),(-16,11),(-12,-4),(-11,-9),(19,-4),(17,-3)` xor
+    # Found by: B11 on kernel output. Class: DeviceLayout, kernel-independent.
+    # `interiorcuts` shoots a ray downward from the hole's lowest vertex and joins the
+    # hole at the first parent edge it hits; when that vertex lies outside the parent
+    # (L4) no edge is hit, and `to_polygons` throws (#350) rather than skip the hole,
+    # which would fill it in. Here the xor of two triangles has a hole of area 156 out
+    # of 379.5. The fm-lattice case reproduces on random stars at μm scale
+    # (`(-2,5),(-16,11),(-12,-4),(-11,-9),(19,-4),(17,-3)` xor
     # `(14,10),(21,14),(11,12),(18,20),(-1,12),(-2,4),(5,-5),(6,-11),(8,2),(13,-5)`,
     # both × 0.37, hole area 1.13 μm²). Throwing is #350's chosen behavior, so this entry
     # pins it rather than marking it broken.
@@ -101,12 +101,13 @@
         @test region_area_exact(togrid(x)) == 759 // 2
         @test_throws ErrorException to_polygons(x)
         # Moving B's offending vertex one unit up puts the hole inside its parent, and
-        # the cut succeeds.
+        # the cut succeeds. Its attachment is close enough to another edge that
+        # `interiorcuts` may warn.
         B2 = Polygon(Point{Int}[(16, 6), (8, 16), (4, 11), (7, 20), (-18, 4), (7, -8)])
         x2 = xor2d([A], [B2])
         @test count(Clipper.ishole, tree_nodes(x2)) == 1
         @test valid_output(x2; weak=true, nested=true)
-        @test first(region_within(togrid(to_polygons(x2)), togrid(x2), 1))
+        @test first(region_within(first(keyholes_warned(x2)), togrid(x2), 1))
         # The fm-lattice instance.
         Af = Polygon(
             Point{Float64}[(-2, 5), (-16, 11), (-12, -4), (-11, -9), (19, -4), (17, -3)] .* 0.37
@@ -132,7 +133,7 @@
     end
 
     # L6 — Keyhole output had repeated consecutive vertices when a hole touches its
-    # parent. Found by: B11 inspection on rectilinear pairs (2026-09-09). Class: DL
+    # parent. Found by: B11 inspection on rectilinear pairs. Class: DL
     # output hygiene, kernel-independent. When the hole's lowest vertex lies on a parent
     # edge the cut has zero length, and `interiorcuts` emitted the cut vertex up to three
     # times in a row. Fixed by #350, which drops consecutive repeated points; kept as a
@@ -147,12 +148,13 @@
         @test all(i -> p.p[i] != p.p[mod1(i + 1, end)], eachindex(p.p))
         # A strictly interior hole can also have a sub-lattice cut: rounding the
         # parent intersection lands on the hole vertex. Construct the tree directly
-        # so changes to the clipping kernel cannot bypass this DL regression.
+        # so changes to the clipping kernel cannot bypass this DL regression. The cut
+        # may warn, but its output must be valid.
         outer = Polygon(Point{Int}[(31, 0), (20, 1), (-100, -3)])
         hole = Polygon(Point{Int}[(-22, -1), (7, 0), (4, 0)])
         cp = holed_tree(outer, [hole])
         @test contour_contained(togrid(hole), togrid(outer); strict=true)
-        out = togrid(to_polygons(cp))
+        out, _ = keyholes_warned(cp)
         @test valid_keyholes(out)
         @test all(v -> is_simple_exact(v; weak=true), out)
         # The attachment can also coincide with an existing parent vertex even when
@@ -167,8 +169,8 @@
     end
 
     # L11 — A keyhole cut rounded onto the lattice can make the keyhole polygon
-    # self-intersect. Found by: B11 at 5000 examples (2026-09-21, both kernels; the tree
-    # is built directly). Class: DL, kernel-independent. The hole's lowest vertex (20,-9)
+    # self-intersect. Found by: B11 at 5000 examples (both kernels; the tree is built
+    # directly). Class: DL, kernel-independent. The hole's lowest vertex (20,-9)
     # lies 0.4 above the parent edge (-79,32)–(86,-37), so on the lattice the cut has
     # zero length, and the pinch lifts that edge through the hole vertex (-19,7), which
     # was 0.09 above it. `interiorcuts` warns. In a sample of 5000 valid B11 trees,
@@ -185,7 +187,7 @@
     end
 
     # L7 — Small offsets leave the input vertex on the output boundary at a sharp
-    # corner. Found by: O3 `round_oracle_small` (2026-09-09, Clipper1, integer lattice).
+    # corner. Found by: O3 on integer polygons (Clipper1).
     # Class: kernel finding. `OffsetPoint` treats the 14.5° turn at (4,1) as collinear
     # while sin(turn)·δ < 1 and returns before advancing its previous-normal index, so the
     # tip is joined against the normal of the edge before (4,1); with that stale normal
@@ -219,12 +221,12 @@
     end
 
     # L10 — Square and miter offsets cut a sharp tip inside the input when the tip
-    # follows a near-collinear vertex. Found by: O4 `join_order_int` (2026-09-21,
-    # Clipper1, seed 2 at 5000 examples). Class: kernel defect, the antiparallel case of
-    # L7's mechanism. The 9° turn at (11,0) has sin·δ < 1, so `OffsetPoint` skips it
-    # without advancing its previous-normal index; at the tip (-8,-3) the stale incoming
-    # normal (0,1) is exactly opposite the outgoing (0,-1), the cross product is IEEE
-    # -0.0, `atan2(-0.0, -1) = -π`, and `DoSquare` mirrors both join points through the
+    # follows a near-collinear vertex. Found by: O4 `join_order_int` (Clipper1, 5000
+    # examples). Class: kernel defect, the antiparallel case of L7's mechanism. The 9°
+    # turn at (11,0) has sin·δ < 1, so `OffsetPoint` skips it without advancing its
+    # previous-normal index; at the tip (-8,-3) the stale incoming normal (0,1) is
+    # exactly opposite the outgoing (0,-1), the cross product is IEEE -0.0,
+    # `atan2(-0.0, -1) = -π`, and `DoSquare` mirrors both join points through the
     # vertex: the tip is cut δ inside the input, for every δ with sin(9°)·δ < 1 and at
     # any scale. Round joins take their rotation sense from the step sign and are
     # unaffected. Correct on Clipper2.
@@ -243,7 +245,7 @@
     end
 
     # L9 — A micro-edge created by one offset misdirects the next.
-    # Found by: O6 `closing_float` (2026-09-09, Clipper1, fm lattice). Class: kernel
+    # Found by: O6 closing with miter joins on floats (Clipper1). Class: kernel
     # finding, tolerance amplification. `A` has a nearly straight vertex (turn 0.08°).
     # Growing by δ ≈ 98 nm with miter joins emits two offset points there that round to
     # lattice points 1 fm apart — a horizontal edge whose direction has nothing to do
@@ -274,7 +276,7 @@
     end
 
     # L8 — Self-crossing output on the fm lattice from a 2 fm feature.
-    # Found by: B8 `valid_float_perturbed` (2026-09-09, Clipper1). Class: kernel
+    # Found by: B8 `valid_float_perturbed` (Clipper1). Class: kernel
     # finding; L3 at the scale float users actually hit. `B` is a 2 fm-wide sliver along
     # one edge of `A` (coordinates ~0.4 μm). `A ∖ B` should be `A` shaved by 2 fm along
     # that edge; Clipper1 returns a quadrilateral that keeps both A's original vertex and
@@ -305,7 +307,7 @@
     end
 
     # L12 — A taper's halo is short of δ along its slanted sides and overhangs at its
-    # narrow end. Found by: O7 `halo_offsets_taper` (2026-10-30). Class: DeviceLayout,
+    # narrow end. Found by: O7 `halo_offsets_taper`. Class: DeviceLayout,
     # tracked in #8 for 2.0.
     # `halo(::TaperTrace, δ)` is the taper with both widths increased by 2δ, which
     # keeps δ only along the path's normal: a side slanted at α from the path ends up
@@ -334,7 +336,7 @@
     end
 
     # L13 — A path halo with an inner offset is open at the path's ends. Found by: O7
-    # `halo_inner` (2026-10-30). Class: DeviceLayout, tracked in #8 for 2.0.
+    # `halo_inner`. Class: DeviceLayout, tracked in #8 for 2.0.
     # `halo(pa, δ, δi)` is documented as offsetting by δ, then subtracting the offset by
     # δi, so it should be the band `halo(pa, δ) ∖ halo(pa, δi)`. Each path end instead
     # gets one straight extension, δ long, styled as a CPW whose trace is the inner
@@ -357,7 +359,7 @@
     end
 
     # L14 — A keyhole cut attached next to another hole's cut can cross that hole without
-    # a warning. Found by: B11 `keyhole_multi` (2026-10-30). Class: DL, kernel-independent;
+    # a warning. Found by: B11 `keyhole_multi`. Class: DL, kernel-independent;
     # L11's mechanism where #350's check does not look. Hole B is cut first, from its
     # lowest vertex (3,10) down to the outer contour. Hole A's ray from (5,32) then meets
     # B's edge (7,11)–(3,10) at y = 10.5, and the attachment rounds to (5,10), below B's
@@ -382,8 +384,8 @@
     end
 
     # L15 — After a cut that `interiorcuts` flags, a later hole of a valid tree can fail
-    # to attach. Found by: sampling 20 000 `int_multi_holed_polygon` trees (2026-11-02,
-    # 2 trees). Class: DL, kernel-independent. The sliver hole (32,9),(35,8),(39,7) is
+    # to attach. Found by: sampling 20 000 `int_multi_holed_polygon` trees (2 of them
+    # fail). Class: DL, kernel-independent. The sliver hole (32,9),(35,8),(39,7) is
     # cut first. The second hole's ray from (38,32) meets the sliver's edge (39,7)–(32,9)
     # at y ≈ 7.29, and the attachment rounds to (38,7), which lays (32,9)–(38,7) onto the
     # collinear edge (32,9)–(35,8). That cut is flagged, but the third hole's ray from

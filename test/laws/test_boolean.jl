@@ -1,5 +1,5 @@
-# Boolean-algebra laws (catalog §4.1) over `union2d`, `intersect2d`, `difference2d`,
-# `xor2d`, `clip`, and `clip_tiled`.
+# Boolean-algebra laws over `union2d`, `intersect2d`, `difference2d`, `xor2d`, `clip`,
+# `clip_tiled`, and the keyhole cuts of `to_polygons`. README.md lists every law.
 #
 # Verdict conventions, from calibration at ≥ 1000 examples per family on Clipper1:
 #   * rectilinear integer inputs: every intersection is a lattice point, so the laws
@@ -198,7 +198,7 @@ end
     end
 end
 
-@testitem "GeomLaws B6 fixed: hole beside a coincident edge" setup =
+@testitem "GeomLaws B6 reproducer: hole beside a coincident edge" setup =
     [CommonTestSetup, LawsSetup] tags = [:geomlaws] begin
     # The subject's edges v₁v₂ and v₄v₅ run along the clip edge c₂c₃ less than one unit
     # inside it, and the concavity v₂v₃v₄ between them encloses, with that edge, a
@@ -282,7 +282,8 @@ end
     # contours: Positive and NonZero give the union, EvenOdd the symmetric difference,
     # Negative nothing; reversing both contours swaps Positive and Negative. Mixed
     # rules (`pfs ≠ pfc`) must equal normalizing each operand under its own rule first,
-    # which is how the Clipper2 shim implements them (`_normalize_clip_fill`).
+    # which is how a kernel with a single fill rule per operation, such as Clipper2
+    # (#199), has to implement them.
     rev(p) = Polygon(reverse(p.p))
     for gen in (int_pair, int_rectilinear_pair, float_star_pair)
         @lawcheck function single_rule(pair=gen)
@@ -427,8 +428,8 @@ end
     # A result's rounded intersection vertices lie within a lattice unit of its operands'
     # edges, so clipping it against an operand again reaches near-coincident edges that
     # independent operands almost never produce. B6's absorption law is one such
-    # combination; it found the Clipper2 hole fill in "B6 fixed". The first result must
-    # be a valid tree, whose contours (holes clockwise) then describe it under the
+    # combination; it found the Clipper2 hole fill in "B6 reproducer". The first result
+    # must be a valid tree, whose contours (holes clockwise) then describe it under the
     # positive fill rule, and the second operation is checked against the membership
     # oracle.
     for gen in (int_pair, float_star_pair)

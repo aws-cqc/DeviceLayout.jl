@@ -102,8 +102,8 @@ const FAMILIES = [
             [mixed_fill_case("int_rectilinear_triple", A, B, C, 0)]
         end,
     # Mixed fill rules are within 2, not 1: a kernel may normalize the two rules in
-    # two passes (`_normalize_clip_fill`), and two independently rounded intersection
-    # vertices can sit √2 apart diagonally.
+    # two passes (see B9), and two independently rounded intersection vertices can sit
+    # √2 apart diagonally.
     "int_triple" => () -> begin
         A, B, C = example(int_triple)
         [mixed_fill_case("int_triple", A, B, C, 2)]

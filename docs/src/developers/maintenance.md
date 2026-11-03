@@ -74,6 +74,7 @@ Workflows live in `.github/workflows/`.
 | `TagBot.yml` | comment by `JuliaTagBot`, manual | Creates the GitHub release after a version is registered in General. |
 | `CompatHelper.yaml` | daily, manual | Checks for new dependency versions outside `[compat]` (see [Dependency compatibility](@ref dev-compathelper)). |
 | `Benchmark.yml` | manual | Runs the benchmark suite and uploads `benchmark.md`. |
+| `GeomLaws.yml` | weekly, manual | Runs the `:geomlaws` test items with a fresh seed and 2000 examples per check, one job per law file, with shrinking off (see `test/laws/README.md`). Manual runs can set the seed and the number of examples. |
 
 All jobs run on `ubuntu-latest` x64 only; macOS, Windows, and ARM are not covered.
 
