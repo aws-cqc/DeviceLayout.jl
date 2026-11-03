@@ -2310,3 +2310,88 @@ end
         end
     end
 end
+
+@testitem "Mixed legacy and experimental metadata" setup = [CommonTestSetup, QuietGmshSetup] begin
+    using DeviceLayout
+    using DeviceLayout.SchematicDrivenLayout
+    using DeviceLayout.SolidModels
+    using DeviceLayout.SolidModelsExperimental:
+        Ground, LayerRef, Locator, METAL, SourceLayer, SourceStack, Terminal
+    using DeviceLayout.PreferredUnits
+    import DeviceLayout.SchematicDrivenLayout.ExamplePDK
+    import DeviceLayout.SolidModelsExperimental as SME
+
+    @test isempty(to_polygons(Locator(5μm, 5μm); atol=1nm))
+
+    # Legacy targets skip experimental metadata.
+    function experimental_in_legacy()
+        cs = CoordinateSystem("experimental_in_legacy", μm)
+        place!(cs, Rectangle(10μm, 10μm), LayerRef(:metal_negative))
+        place!(cs, Locator(5μm, 5μm), Terminal(:metal_negative, "t"))
+        place!(cs, Rectangle(3μm, 3μm), LayerRef(:port))
+        place!(cs, Rectangle(20μm, 20μm), SemanticMeta(:metal_negative))
+        g = SchematicGraph("experimental_in_legacy")
+        add_node!(g, BasicComponent(cs))
+        return check!(plan(g; log_dir=nothing))
+    end
+
+    artwork_target = ArtworkTarget(ExamplePDK.EXAMPLE_FLIPCHIP_TECHNOLOGY; levels=[1])
+    cell = Cell("experimental_in_legacy", nm)
+    with_test_logger(_ -> false) do
+        return render!(cell, experimental_in_legacy(), artwork_target)
+    end
+    flat = flatten(cell)
+    @test element_metadata(flat) == [GDSMeta(1, 2)]
+    @test bounds(flat) ≈ Rectangle(20μm, 20μm)
+
+    legacy_target = SchematicDrivenLayout.SolidModelTarget(
+        ExamplePDK.EXAMPLE_SINGLECHIP_TECHNOLOGY;
+        indexed_layers=[:port]
+    )
+    sm = SolidModel("experimental_in_legacy"; overwrite=true)
+    # The PDK technology extrudes layers this schematic lacks, which logs an info for each.
+    missing_layer = log -> log.level == Logging.Info && log._module === SolidModels
+    # A schematic sends its render logs to the logger active when it was planned.
+    sch = with_test_logger(missing_layer; required=missing_layer) do
+        schematic = experimental_in_legacy()
+        render!(sm, schematic, legacy_target)
+        return schematic
+    end
+    @test isempty(sch.index_dict[:port])
+    @test !SolidModels.hasgroup(sm, "port", 2)
+    @test collect(SolidModels.bounds3d(sm["metal_negative", 2])) ≈
+          [0.0, 0.0, 0.0, 20.0, 20.0, 0.0] atol = 1e-6
+
+    # Experimental targets skip legacy metadata, even on layers the stack defines.
+    cs = CoordinateSystem("legacy_in_experimental", μm)
+    place!(cs, Rectangle(10μm, 10μm), LayerRef(:metal))
+    place!(cs, Locator(5μm, 5μm), Ground(:metal))
+    # As metal, this disconnected island without a locator would fail the strict render.
+    place!(cs, Rectangle(10μm, 10μm) + Point(20μm, 0μm), SemanticMeta(:metal))
+    place!(cs, Rectangle(10μm, 10μm) + Point(40μm, 0μm), GDSMeta(1, 0))
+    # A layer missing from the stack would throw if it were looked up.
+    place!(cs, Rectangle(10μm, 10μm) + Point(60μm, 0μm), SemanticMeta(:unknown))
+    place!(cs, Rectangle(10μm, 10μm) + Point(80μm, 0μm), DeviceLayout.NORENDER_META)
+    stack = SourceStack(
+        :metal => SourceLayer(METAL; level=1, gds_meta=GDSMeta(1, 0));
+        levels=(1 => 0μm,)
+    )
+    g = SchematicGraph("legacy_in_experimental")
+    add_node!(g, BasicComponent(cs); base_id="q1")
+    sm = SolidModel("legacy_in_experimental"; overwrite=true)
+    metadata = with_test_logger(_ -> false) do
+        return render!(sm, check!(plan(g; log_dir=nothing)), SME.SolidModelTarget(stack))
+    end
+    pg_name = only(metadata["layers"]["metal"]["pgs"])
+    @test collect(SolidModels.bounds3d(sm[pg_name, 2])) ≈
+          [0.0, 0.0, 0.0, 10.0, 10.0, 0.0] atol = 1e-6
+    @test length(metadata["ground"]) == 1
+    @test isempty(metadata["terminals"])
+
+    cell = Cell("legacy_in_experimental", nm)
+    with_test_logger(_ -> false) do
+        return render!(cell, cs, stack)
+    end
+    @test element_metadata(cell) == [GDSMeta(1, 0)]
+    @test bounds(cell) ≈ Rectangle(10μm, 10μm)
+end

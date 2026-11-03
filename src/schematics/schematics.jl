@@ -1422,7 +1422,7 @@ function index_layer!(sch::Schematic, ly, nextindex=1)
     index_components = ComponentNode[]
     # Index top-level schematic elements
     for (idx, m) in pairs(element_metadata(sch.coordinate_system))
-        if (layer(m) == ly)
+        if layer(m) == ly && !is_experimental_meta(m)
             element_metadata(sch.coordinate_system)[idx] = SemanticMeta(m, index=nextindex)
             nextindex = nextindex + 1
         end
@@ -1449,7 +1449,7 @@ function index_layer!(
 )
     for (cs, trans) in DeviceLayout.traversal(comp_cs)
         for (idx, el, m) in zip(1:length(elements(cs)), elements(cs), element_metadata(cs))
-            if layer(m) == ly
+            if layer(m) == ly && !is_experimental_meta(m)
                 place!(parent_cs, trans(el), SemanticMeta(m, index=nextindex))
                 element_metadata(cs)[idx] = SemanticMeta(m, index=0)
                 nextindex = nextindex + 1

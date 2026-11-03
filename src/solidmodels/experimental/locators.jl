@@ -28,7 +28,7 @@ Base.convert(::Type{DeviceLayout.GeometryEntity{T}}, loc::Locator) where {T} =
     convert(Locator{T}, loc)
 
 DeviceLayout.transform(loc::Locator, f::DeviceLayout.Transformation) = Locator(f(loc.p))
-DeviceLayout.to_polygons(::Locator{T}) where {T} = DeviceLayout.Polygon{T}[]
+DeviceLayout.to_polygons(::Locator{T}; kwargs...) where {T} = DeviceLayout.Polygon{T}[]
 
 # ─── Resolution against flat geometry ────────────────────────────────────────
 

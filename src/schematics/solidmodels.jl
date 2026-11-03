@@ -21,7 +21,7 @@ to position and extrude 2D geometry elements.
 
 When rendering entities, metadata is mapped to physical group names as follows:
 
- 1. If `layer(m) == layer(DeviceLayout.NORENDER_META)` (i.e., `:norender`), the entity is skipped and not rendered to the solid model.
+ 1. If `m` is experimental solid model metadata (`SolidModelsExperimental.LayerRef` or `SolidModelsExperimental.LocatorMeta`), or if `layer(m) == layer(DeviceLayout.NORENDER_META)` (i.e., `:norender`), the entity is skipped and not rendered to the solid model.
  2. If `layer(m)` is in `ignored_layers`, the entity is skipped and not rendered to the solid model.
  3. The base name is taken from `layername(m)`.
  4. If `layer(m)` is in `levelwise_layers`, `"_L\$(level(m))"` is appended.
@@ -315,7 +315,7 @@ function layer_extrusions_dz(target, sch)
         if isempty(size(t))
             if ly in indexed_layers(target)
                 for m in element_metadata(sch.coordinate_system)
-                    if layer(m) == ly
+                    if layer(m) == ly && !is_experimental_meta(m)
                         t_dict[_map_meta_fn(target)(m)] = (sgn * t, dim)
                     end
                 end
@@ -330,7 +330,7 @@ function layer_extrusions_dz(target, sch)
                 lev_sgn = isodd(lev) ? sgn : -sgn
                 if ly in indexed_layers(target)
                     for m in element_metadata(sch.coordinate_system)
-                        if layer(m) == ly && level(m) == lev
+                        if layer(m) == ly && level(m) == lev && !is_experimental_meta(m)
                             t_dict[_map_meta_fn(target)(m)] = (lev_sgn * t_level, dim)
                         end
                     end
@@ -353,7 +353,9 @@ layer_z(t::Target, m::DeviceLayout.Meta) = layer_z(t.technology, m)
 
 # Whether geometry on `m`'s layer is left out of a `SolidModel` rendered with `target`.
 _isignored(target::SolidModelTarget, m::DeviceLayout.Meta) =
-    layer(m) == layer(DeviceLayout.NORENDER_META) || layer(m) in target.ignored_layers
+    is_experimental_meta(m) ||
+    layer(m) == layer(DeviceLayout.NORENDER_META) ||
+    layer(m) in target.ignored_layers
 
 function _map_meta_fn(target::SolidModelTarget)
     # By default, target maps a layer to layername (string)
