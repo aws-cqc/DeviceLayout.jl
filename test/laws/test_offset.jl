@@ -1,4 +1,4 @@
-# Offsetting and halo laws (catalog §4.2) over `offset` and `halo`.
+# Offsetting and halo laws over `offset` and `halo`. README.md lists every law.
 #
 # Round joins discretize arcs into chords inside the true arc, to a tolerance `atol`:
 # 1 nm by default for floating-point coordinates, a quarter unit for integers. Float laws
@@ -272,11 +272,11 @@ end
     end
 end
 
-@testitem "GeomLaws O3 fixed: erosion at sharp tips" setup = [CommonTestSetup, LawsSetup] tags =
-    [:geomlaws] begin
+@testitem "GeomLaws O3 reproducer: erosion at sharp tips" setup =
+    [CommonTestSetup, LawsSetup] tags = [:geomlaws] begin
     # Erosion of a convex polygon does not depend on the join type: q ∈ offset(A, −δ)
     # iff q ∈ A and dist(q, ∂A) ≥ δ, so the inset of a thin triangle is the triangle
-    # bounded by the three inset edges. The phase-2 differential run found Clipper2
+    # bounded by the three inset edges. The differential harness found Clipper2
     # misclassifying tips sharper than acos(0.999) ≈ 2.6° in its concavity test: the
     # inset's tip vertex lands 0.5 δ short of the exact one (a sub-unit-thick sliver,
     # inside the region tolerance) or, on the second triangle, the inset vanishes for

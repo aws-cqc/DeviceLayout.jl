@@ -1,4 +1,4 @@
-# Transform, unit, and round-trip laws (catalog §4.3 T1, T4 and §4.4 D1).
+# Transform, unit, and round-trip laws. README.md lists every law.
 
 @testitem "GeomLaws T1: equivariance under rigid transforms" setup =
     [CommonTestSetup, LawsSetup] tags = [:geomlaws] begin
@@ -57,7 +57,7 @@
     end
 end
 
-@testitem "GeomLaws T4: coordinate-unit invariance" setup = [CommonTestSetup, LawsSetup] tags =
+@testitem "GeomLaws T2: coordinate-unit invariance" setup = [CommonTestSetup, LawsSetup] tags =
     [:geomlaws] begin
     # One integer polygon expressed in nm, μm, and mm (all exactly representable) must
     # give lattice-identical results, and identical to the unitless Float64 (μm) path:

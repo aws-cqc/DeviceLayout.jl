@@ -1,11 +1,12 @@
 # Case and result exchange for the differential harness.
 #
-# The two kernels under comparison cannot be loaded into one process (the Clipper2 shim
-# replaces the `Clipper` dependency), so inputs and outputs cross process boundaries as
-# plain text. Coordinates are written with `repr`, which round-trips `Int` and `Float64`
-# exactly, so every worktree evaluates bit-identical operands and `togrid` in the
-# comparison step sees exactly what each kernel saw. GDS is not used for the exchange:
-# its 32-bit database units cannot hold the femtometer lattice of a 100 μm polygon.
+# The two kernels under comparison cannot be loaded into one process (each DeviceLayout
+# build links one clipping library through its `Clipper` dependency), so inputs and
+# outputs cross process boundaries as plain text. Coordinates are written with `repr`,
+# which round-trips `Int` and `Float64` exactly, so every worktree evaluates
+# bit-identical operands and `togrid` in the comparison step sees exactly what each
+# kernel saw. GDS is not used for the exchange: its 32-bit database units cannot hold
+# the femtometer lattice of a 100 μm polygon.
 #
 # This file depends only on Base and DeviceLayout's `Point`/`Polygon` so that
 # `evaluate.jl` runs in any DeviceLayout worktree.

@@ -12,7 +12,7 @@
 # reproducers for every case where a kernel is provably wrong), and
 # <rundir>/report.md.
 #
-# Classes (§5.5 of the GeomLaws plan):
+# Classes:
 #   a0  outputs identical vertex for vertex
 #   a1  same canonical contours (vertex order, start vertex, collinear vertices differ)
 #   a2  same region, different contour decomposition (e.g. two touching outers vs

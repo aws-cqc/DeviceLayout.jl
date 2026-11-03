@@ -91,8 +91,8 @@ end
 
 const MUTANTS = Dict{Symbol, Function}()
 
-# Kernel fills a hole that has a vertex within one lattice unit of its parent (the
-# Clipper2 trigger in gate report §3.6).
+# Kernel fills a hole that has a vertex within one lattice unit of its parent, as
+# Clipper2 does in "GeomLaws B6 reproducer".
 MUTANTS[:fill_hole_near_parent] = function ()
     MUTATE_CLIP[] = function (r, op, s, c, pfs, pfc)
         each_outer(o -> (o.children = filter(h -> !near_parent(h, o), o.children)), r.tree)
