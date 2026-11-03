@@ -668,6 +668,8 @@ set_mesh_size_callback!() = gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
 
 _stp_float(x::Length) = Float64(ustrip(STP_UNIT, x))
 _stp_float(x::Real) = Float64(x)
+# Unitless lengths are in STP units; operations such as `extrude_z!` take lengths.
+_stp_length(x) = _stp_float(x) * STP_UNIT
 
 const _MeshControlPointRecord = NTuple{5, Float64} # (x, y, z, h, α)
 const _MeshControlPointOwners = Dict{Tuple{String, Int}, Set{_MeshControlPointRecord}}
@@ -1234,6 +1236,8 @@ Render `cs` to `sm`.
   - `skip_unused_layers`: If `true`, skip layers not referenced by `postrender_ops`,
     `post_fragment_ops`, or `retained_physical_groups`. Indexed and levelwise variants are kept
     when their base layer is referenced. Default is `false`.
+  - `preflattened`: If `true`, treat `cs` as already flat and skip flattening it. Default is
+    `false`.
   - `curvature_sizing`: If `true`, add radius-sized mesh control points at the centers of exact
     circular primitives preserved by the rendering backend. For `extrude_z!` postrender
     operations, generated perimeter and curvature controls are repeated at requested extrusion
@@ -1361,6 +1365,7 @@ function _render_orchestrator!(
     skip_postrender=false,
     auto_union=false,
     skip_unused_layers=false,
+    preflattened=false,
     curvature_sizing=true,
     kwargs...
 ) where {T}
@@ -1382,7 +1387,7 @@ function _render_orchestrator!(
 
     set_gmsh_option(gmsh_options)
 
-    flat = flatten(cs)
+    flat = preflattened ? cs : flatten(cs)
 
     clear_mesh_control_points!()
     mesh_seen = Set{_MeshControlPointRecord}()

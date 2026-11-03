@@ -1627,3 +1627,76 @@ end
         @test subdz["chip_outline_L$(lev)_extrusion"] == -outward(lev) * thicknesses[lev]
     end
 end
+
+@testitem "Geometry resolution recovery" setup = [CommonTestSetup, QuietGmshSetup] begin
+    using .SchematicDrivenLayout
+    import .SchematicDrivenLayout: with_geometry_resolution_context
+
+    @enum Attitude optimistic pessimistic quitter
+    @compdef struct MoodyComponent <: Component
+        name = "moody"
+        attitude::Attitude = optimistic
+    end
+    geometry_calls = 0
+    function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, c::MoodyComponent)
+        global geometry_calls += 1
+        # Place before failing so recovery must discard a partially built geometry.
+        place!(cs, centered(Rectangle(10μm, 10μm)), :metal)
+        c.attitude == pessimistic && throw(ErrorException("I failed!"))
+        c.attitude == quitter && throw(InterruptException()) # I quit!
+        return cs
+    end
+    SchematicDrivenLayout.hooks(::MoodyComponent) = (; origin=PointHook(0μm, 0μm, 0°))
+
+    @testset "Without a context" begin
+        @test_throws ErrorException geometry(MoodyComponent(; attitude=pessimistic))
+    end
+
+    @testset "Within a context" begin
+        comp = MoodyComponent(; attitude=pessimistic)
+        global geometry_calls = 0
+        first_cs, second_cs = @test_logs (:error,) with_geometry_resolution_context() do
+            return geometry(comp), geometry(comp)
+        end
+        @test isempty(first_cs)
+        @test second_cs === first_cs
+        @test geometry_calls == 1 # cache hit
+        @test isempty(comp._geometry) # internal component cache flushed
+        # original context used is no longer accessible outside of do-block
+        @test isnothing(SchematicDrivenLayout._geometry_resolution_context())
+    end
+
+    @testset "Interrupts propagate" begin
+        comp = MoodyComponent(; attitude=quitter)
+        @test_throws InterruptException with_geometry_resolution_context() do
+            return geometry(comp)
+        end
+    end
+
+    @testset "Solid-model render" begin
+        # Plan under a TestLogger so the schematic logger tees render logs into it.
+        function recovery_schematic(logger)
+            g = SchematicGraph("recovery")
+            add_node!(g, MoodyComponent(; attitude=optimistic))
+            add_node!(g, MoodyComponent(; attitude=pessimistic))
+            sch = with_logger(() -> plan(g; log_dir=nothing), logger)
+            check!(sch)
+            return sch
+        end
+        tech = ProcessTechnology((; metal=GDSMeta()), (; height=(; metal=0μm)))
+        target =
+            SolidModelTarget(tech; simulation=true, retained_physical_groups=[("metal", 2)])
+
+        logger = TestLogger()
+        sm = SolidModel("recovered"; overwrite=true)
+        render!(sm, recovery_schematic(logger), target; strict=:no)
+        @test length(SolidModels.entitytags(sm["metal", 2])) == 1
+        @test count(log -> log.level == Logging.Error, logger.logs) == 1
+
+        @test_throws ErrorException render!(
+            SolidModel("strict"; overwrite=true),
+            recovery_schematic(TestLogger()),
+            target
+        )
+    end
+end

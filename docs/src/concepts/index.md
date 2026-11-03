@@ -17,6 +17,7 @@ How DeviceLayout handles geometric objects and their metadata.
 - [Routes](routes.md): Defining Paths implicitly based on routing rules
 - [Rendering and File Export](render.md): How geometry becomes output data
 - [Solid Models](solidmodels.md): 3D geometry and meshing
+- [Solid Models (Experimental)](solidmodels_experimental.md): Solid models and metadata from schematics
 
 ### [Schematic-Driven Design](@id schematic-concepts)
 
