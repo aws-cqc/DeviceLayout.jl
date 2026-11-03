@@ -1,62 +1,50 @@
-# Solid Models (Experimental)
-
-`DeviceLayout.SolidModelsExperimental` renders a schematic to a `SolidModel` and returns
-metadata describing its layers and the surfaces selected by locators.
+# Solid Models with Metadata (Experimental)
 
 !!! warning "Experimental API"
     This API may change before DeviceLayout 2.0.
 
-The module exports nothing; import names from `DeviceLayout.SolidModelsExperimental`. See the
-[Experimental Solid Model API Reference](@ref solidmodels-experimental-api).
+`DeviceLayout.SolidModelsExperimental` is an experimental module that enables users to
+add rich metadata to a `SolidModel` and export it to a JSON file after rendering. More
+specifically, this module makes it possible to make explicit selections of terminals,
+ports, and other surfaces of interest by marking them with point-like locators. It also 
+introduces a new way of specifying stackups and layers (and the CAD kernel operations on 
+them) that is more natural and higher level than the existing way offered by the library.
+
+At this time, the metadata types available and the information they carry are unapologetically 
+geared towards [Palace](https://github.com/awslabs/palace) simulations, but other simulation backends may be added
+in the future. 
 
 ## Layer references, locators, and source stacks
 
-Geometry is placed on a layer with `LayerRef`; geometry with `SemanticMeta` is ignored.
-Locators are `Locator` points carrying `Terminal`, `Ground`, `Tag`, `WavePort`, or
-`LumpedPort` metadata:
+First, this module introduces three new types that _replace_ what is currently
+done using `SemanticMeta` and `ProcessTechnology` in the main library:
+
+- `SourceLayer`. This is a natural extension of `SemanticMeta`. It has a level, but also includes a `Material` (an enum with members `METAL`, `DIELECTRIC`, or `NULL`) and a thickness. It corresponds naturally to a grouping of objects that can be added or removed by a single fabrication step, e.g. when depositing a film or etching pockets. Each source layer can be configured to appear or not appear in its eventual solid model or GDS destination (for the latter, an explicit `GDSMeta` can be passed). The "source" qualifier refers to the fact that these are the layers into which we'll `place!` entities (see below). Subsequent CAD kernel operations can create new ones, which we refer to as "generated" layers.
+- `SourceStack`. The set of all `SourceLayer`s in a model, keyed by their name, plus a map of level indices to $z$-coordinates.
+- `LayerRef`. A `Symbol` wrapper (and subtype of `DeviceLayout.Meta`) used to signal which `SourceLayer` we're placing an entity into.
+
+As a simple example, suppose we want to create a model containing a $500 \, \mu\text{m}$-thick
+dielectric substrate with $500 \, \mu\text{m}$ of vacuum below and above, with a mock
+Imon-style transmon in the middle. We'll place the Imon shape via its _negative_ 
+(i.e. the gaps between the island and ground) and compute the positive metal
+via booleans. We'll also add a simple lumped port to model the junction in Palace. 
+The stack for this is
 
 ```julia
 using DeviceLayout
-using DeviceLayout.SchematicDrivenLayout
+using DeviceLayout.PreferredUnits
 using DeviceLayout.SolidModelsExperimental:
-    Cut,
     DIELECTRIC,
-    Extrude,
-    GetBoundary,
-    LayerRef,
-    Locator,
-    LumpedPort,
     METAL,
     NULL,
-    SolidModelTarget,
     SourceLayer,
-    SourceStack,
-    Terminal,
-    Translate
-import JSON
-using Unitful: μm, °
+    SourceStack
 
-coordinate_system = CoordinateSystem("device", μm)
-place!(coordinate_system, Rectangle(100μm, 100μm), LayerRef(:metal))
-port_geometry = Rectangle(Point(100μm, 40μm), Point(105μm, 60μm)) |> WithDirection(90°)
-place!(coordinate_system, port_geometry, LayerRef(:port))
-place!(coordinate_system, Locator(center(bounds(port_geometry))), LumpedPort(:port, "jj"))
-place!(coordinate_system, Locator(50μm, 50μm), Terminal(:metal, "island"))
-footprint = Rectangle(Point(-50μm, -50μm), Point(200μm, 150μm))
-place!(coordinate_system, footprint, LayerRef(:substrate))
-place!(coordinate_system, footprint, LayerRef(:bounding_volume))
-```
-A `LumpedPort` locator must lie inside the bounding box of exactly one `WithDirection`-styled
-entity on the port's layer. That style's angle, transformed by placement, is serialized as
-`[cos(theta), sin(theta), 0.0]`.
-
-A `SourceStack` gives each layer its material, assembly level, z offset, thickness, and GDS
-layer:
-
-```julia
 stack = SourceStack(
-    :metal => SourceLayer(METAL; level=1, gds_meta=GDSMeta(10, 0)),
-    :port => SourceLayer(NULL; level=1, gds_meta=GDSMeta(11, 0)),
+    :metal_neg => SourceLayer(NULL; level=1, gds_meta=GDSMeta(10, 0)),
+    :metal_pos => SourceLayer(METAL; level=1, gds_meta=nothing),
+    :ports => SourceLayer(NULL; level=1, gds_meta=nothing),
+    :chip_outline => SourceLayer(NULL; level=1, gds_meta=GDSMeta(100, 0)),
     :substrate => SourceLayer(
         DIELECTRIC;
         level=1,
@@ -65,109 +53,221 @@ stack = SourceStack(
     ),
     :bounding_volume => SourceLayer(
         NULL;
-        level=1,
-        offset=-500μm,
-        thickness=1000μm,
-        gds_meta=nothing
+        level=0 => 1,            # shorthand for "this layer spans levels 0 to 1, with 
+        offset=(-500μm, 500μm),  # an offset of -500μm from the source layer and +500μm
+        gds_meta=nothing         # from the destination layer
     );
-    levels=(1 => 0μm, 2 => 500μm)
+    levels=(0 => -500μm, 1 => 0μm)
 )
 ```
-Every `LayerRef` and locator layer must be in the stack. Lengths are either all unitful or
-all unitless, in micrometers. Only `METAL` affects rendering: terminal selection uses the 2D
-`METAL` layers.
 
-A layer's `thickness` (or level span `level=a => b`) is built by an `Extrude` operation that
-must agree with it; rendering fails if such a layer is still unextruded after the last
-operation. `solidmodel=false` omits a layer from the solid model, and `gds_meta=nothing` omits
-it from artwork.
+where we defined the bottom and top surfaces of the substrate as the "levels" 0 and 1
+in the stack (at $z$ coordinates $-500 \, \mu\text{m}$ and $0 \, \mu\text{m}$, respectively).
+Note that we've assigned a explicit `gds_meta`s to the `:metal_neg` and `:chip_outline`
+layers -- these will be the layer numbers/datatypes that entities will be mapped to when 
+we render to GDS; all other layers are only used for simulations so we just 
+set `gds_meta=nothing`.
 
-## Rendering
+## CAD kernel operations
 
-A `SolidModelTarget` holds the stack and the layer operations applied to it, in order:
+In addition to declaring the source stack, we must also specify the CAD operations that
+are needed to build the full 3D model. 
 
 ```julia
+using DeviceLayout.SolidModelsExperimental:
+    Cut,
+    Extrude,
+    GetBoundary,
+    Remove,
+    SolidModelTarget
+
+# Declare CAD operations in the order that they will be performed
 ops = [
-    Extrude(:substrate),
+    Extrude(:substrate), # extrude :substrate layer in-place
     Extrude(:bounding_volume),
-    Cut(:vacuum, :bounding_volume, :substrate; remove_object=true),
-    GetBoundary(:xmin, :vacuum; direction="x", position="min"),
-    Translate(:shifted_port, :port, 10μm, 0μm, 0μm)
+    # Subtract metal_neg from chip_outline and assign result to metal_pos
+    Cut(:metal_pos, :chip_outline, :metal_neg), 
+    Cut(:vacuum, :bounding_volume, :substrate),
+    # Get the 2D boundary of bounding_volume and assign the result to exterior_boundary
+    GetBoundary(:exterior_boundary, :bounding_volume),
+    # Remove only the group: its entities also bound exterior_boundary
+    Remove(:bounding_volume; remove_entities=false)
 ]
+# Complete the specification of the SolidModel target: the stack, plus the CAD operations.
+# This is what we'll pass to render!, along with the schematic itself
 target = SolidModelTarget(stack, ops)
-
-graph = SchematicGraph("device")
-add_node!(graph, BasicComponent(coordinate_system); base_id="q1")
-checked_schematic = check!(plan(graph; log_dir=nothing))
-solid_model = SolidModel("device"; overwrite=true)
-metadata = render!(solid_model, checked_schematic, target)
 ```
-| Type | Meaning |
-|:--|:--|
-| `Extrude(source)`, `Extrude(source, dz)`, `Extrude(source; to_level, offset)`, `Extrude(destination, source)`, `Extrude(destination, source, dz)`, or `Extrude(destination, source; to_level, offset)` | Extrude a 1D or 2D layer along z, to its declared thickness or level span by default. |
-| `Hollow(layer)` | Replace a 3D layer by its boundary, removing its interior from the final model. |
-| `Cut(destination, object, tools; remove_object, remove_tool)` | Subtract a layer or a tuple or vector of layers from `object`. |
-| `Fuse(source)` or `Fuse(destination, sources; remove_sources)` | Union a tuple or vector of layers, or merge a layer's own overlapping geometry. |
-| `SolidModelsExperimental.Intersect(destination, object, tool; remove_object, remove_tool)` | Intersect two layers. The name must be qualified, since DeviceLayout also has an `Intersect` module. |
-| `GetInterface(destination, object, tool)` | Compute the interface between two layers of the final model. |
-| `RestrictTo(volume)` | Restrict the model to a 3D layer. |
-| `GetBoundary(source; combined, oriented, recursive, direction, position)` or `GetBoundary(destination, source; ...)` | Extract the boundary of a layer, optionally only its faces at one end of an axis. `exterior_boundaries(volume)` returns the six operations extracting a volume's faces into `:EXTBND_XMIN` through `:EXTBND_ZMAX`. |
-| `Translate(source, dx, dy, dz)` or `Translate(destination, source, dx, dy, dz)` | Translate a layer. |
-| `Remove(source; remove_entities)` | Remove a layer. |
-| `Revolve(source, origin, axis, angle)` or `Revolve(destination, source, origin, axis, angle)` | Revolve a layer around an axis. |
-| `SetPeriodic(first, second)` | Make two 2D layers periodic. |
 
-A destination must be new or one of the operation's inputs, which it replaces. New
-destinations need not be in the stack. The booleans' `remove_*` flags consume their inputs;
-use them rather than a later `Remove`, which would also remove geometry that passed through
-the boolean unchanged.
+In this case we only needed a handful of operation types; see the [API documentation](@ref solidmodels-experimental-api)
+for a full list.
 
-Terminal selection builds the connected components of the 2D layers named after `METAL`
-stack layers, so a generated layer takes part only if it replaces such a layer (for example,
-`Cut(:metal, :metal, :etch)`), and extruded metal only once it is `Hollow`ed. Each component
-must contain a `Terminal` or `Ground` locator, and each such locator must lie on a component.
-Components with a `Ground` locator are reported under `ground`, and the others under
-`terminals`. The `select_terminals`, `select_tagged_surfaces`, and `select_ports` keywords of
-`render!` turn off each kind of selection.
+## Placements and selections
 
-Locator names are prefixed with the ID of their schematic node (for example, `q1.island`).
-`Tag` and port names must be unique, so such a locator in a structure referenced twice within
-one node throws an `ArgumentError`.
-
-`render!` returns the metadata as a `Dict{String, Any}`. To save it and the model:
+To place entities into this stack we call `place!` as usual but pass a `LayerRef` as the 
+metadata, which points each placement to a `SourceLayer`. And to mark surfaces for selection,
+we place `Locator`s with the appropriate type of metadata (`Terminal`, `Ground`, etc.):
 
 ```julia
+using DeviceLayout.SolidModelsExperimental:
+    Ground,
+    LayerRef,
+    Locator,
+    LumpedPort,
+    Terminal
+
+cs = CoordinateSystem("imon", μm)
+
+# Define the center island of the Imon, the transmon cutout, and their difference 
+# (the gaps between the island and ground). The gaps are what will actually be rendered
+island = centered(Rectangle(20μm, 200μm))
+cutout = offset(island, 30μm)
+gaps = difference2d(cutout, island)
+place!(cs, gaps, LayerRef(:metal_neg))
+# Place a locator at the origin to select a Terminal from :metal_pos called "island".
+# This will pick out the Imon island because it's the entity in the final model that
+# contains the locator
+place!(cs, Locator(0μm, 0μm), Terminal(:metal_pos, "island"))
+
+# Define the lumped port for simulation. We'll style the port rectangle with a WithDirection
+# pointing North, as this is the direction of current flow we expect
+port = Align.above(centered(Rectangle(2μm, 30μm)), island; centered=true) |> WithDirection(90°)
+place!(cs, port, LayerRef(:ports))
+# Place a locator centered on the port
+place!(cs, Locator(center(bounds(port))), LumpedPort(:ports, "jj"))
+
+# Define the cross section of the substrate and bounding volume. In this case
+# they're the same, as we're not interested in fully surrounding the substrate with
+# vacuum
+box = centered(Rectangle(500μm, 500μm))
+place!(cs, box, LayerRef(:chip_outline))
+place!(cs, box, LayerRef(:substrate))
+place!(cs, box, LayerRef(:bounding_volume))
+
+# Then place another locator far away from the Imon to mark the ground plane
+place!(cs, Locator(100μm, 0μm), Ground(:metal_pos))
+```
+
+See the [API documentation](@ref solidmodels-experimental-api) for a the complete set
+of locator metadata types (i.e. the types of selections that can be made).
+
+## Rendering the model and saving its metadata
+
+Then finally, to render the model, we wrap our simple `CoordinateSystem` in a component and
+call `render!` using the `target` we defined:
+
+```julia
+using DeviceLayout.SchematicDrivenLayout
+using DeviceLayout.SolidModels: SolidModel
+
+graph = SchematicGraph("imon")
+add_node!(graph, BasicComponent(cs))
+sch = check!(plan(graph; log_dir=nothing))
+sm = SolidModel("imon"; overwrite=true)
+metadata = render!(sm, sch, target) # returns the metadata as a Dict
+DeviceLayout.save("model.xao", sm)
+```
+
+Here's a snapshot of the resulting model viewed through the Gmsh GUI:
+
+```@raw html
+<img src="../../assets/solidmodel-experimental.png" style="width: 100%;"/>
+```
+
+We can save the metadata to disk if we want to use it later to build Palace
+configurations:
+
+```julia
+using JSON
+
 open("sm_metadata.json", "w") do io
     JSON.print(io, metadata, 4)
 end
-DeviceLayout.save("model.xao", solid_model)
 ```
-The metadata has the sections `metadata` (schema version and length units, micrometers),
-`physical_groups`, `layers`, `tagged`, `ports`, `terminals`, and `ground`. Tags and ports are
-keyed by locator name, with a `LumpedPort` whose `index` is not 1 keyed `name_index`.
-Terminal and ground components are keyed `METAL_CC__` followed by a hash of their entities.
-The schema is `schemas/sm_metadata.schema.json`.
 
-## Artwork
+An abriged version of the metadata file is shown below to illustrate
+the structure of the data and the information that gets recorded:
 
-Render artwork from the stack:
+```json
+{
+    "metadata": {
+        "schema_version": "1.0.0",
+        "length_units": "um",
+        "assembly": { "levels": { "0": -500.0, "1": 0.0 } }
+    },
+    "physical_groups": {
+        "substrate": { "dim": 3, "tag": 1 },
+        "vacuum": { "dim": 3, "tag": 2 },
+        "exterior_boundary": { "dim": 2, "tag": 4 },
+        "__592bac94fb8108ba": { "dim": 2, "tag": 28 },
+        "__d45f9082fcee6bf5": { "dim": 2, "tag": 29 },
+        "__d8d680a0ae2f5cfd": { "dim": 2, "tag": 30 }
+    },
+    "layers": {
+        "metal_pos": {
+            "type": "source", "dim": 2, "level": 1, "offset": 0.0, "thickness": 0.0,
+            "pgs": ["__592bac94fb8108ba", "__d45f9082fcee6bf5"]
+        },
+        "substrate": {
+            "type": "source", "dim": 3, "level": 1, "offset": 0.0, "thickness": -500.0,
+            "pgs": ["substrate"]
+        },
+        "vacuum": { "type": "generated", "dim": 3, "pgs": ["vacuum"] },
+        "exterior_boundary": { "type": "generated", "dim": 2, "pgs": ["exterior_boundary"] }
+    },
+    "ports": {
+        "imon.jj": {
+            "type": "LumpedPort", "name": "imon.jj", "index": 1, "layer": "ports",
+            "direction": [0.0, 1.0, 0.0],
+            "pgs": ["__d8d680a0ae2f5cfd"]
+        }
+    },
+    "terminals": {
+        "METAL_CC__592bac94fb8108ba": {
+            "locators": ["imon.island"],
+            "pgs": ["__592bac94fb8108ba"]
+        }
+    },
+    "ground": {
+        "METAL_CC__d45f9082fcee6bf5": { "pgs": ["__d45f9082fcee6bf5"] }
+    },
+    "tagged": {}
+}
+```
+
+This file can be queried by downstream consumers to assemble Palace configurations, e.g.
+by fetching all physical group tags associated with layer `substrate` in order add an entry to
+`Domains.Materials`. It can likewise be used to make sense of Palace postprocessing results
+by looking up the semantic meaning of, say, port or terminal entries. The crucial benefit
+of all of this is that we've offloaded all of the information about a solid model that is necessary
+to configure simulations from the in-memory `SolidModel` to a compact file on disk,
+making it possible to reuse meshes long after the Julia process that generated them is gone.
+
+Note that the names of selections made inside the Imon coordinate system were automatically prefixed 
+with `"imon."`; this is to ensure all selections made throughout a schematic get unique names. 
+The prefix is the ID of the component's node in the schematic node, which defaults to the component's name. 
+In this case, it's simply the coordinate system's name, i.e. `"imon"`.
+
+We can also render the schematic to a `Cell` for GDS export:
 
 ```julia
 cell = Cell("artwork", μm)
-render!(
-    cell,
-    coordinate_system,
-    stack;
-    levels=[1, 2],
-    level_increment=GDSMeta(100, 10)
-)
+render!(cell, cs, stack)
 ```
-Each layer is rendered to its `gds_meta`. When `levels` has more than one entry, a layer's
-GDS layer and datatype are offset by `(level - 1) * level_increment`, where `level` is the
-layer's first level (or 1 if that is lower).
 
-## Migrating from the legacy pipeline
+Each layer is rendered to its `gds_meta`.
 
-To migrate a component, replace its `SemanticMeta` with `LayerRef`, add locators, map
-opposite-chip variants to layer symbols, and add its layers to a `SourceStack`. Unmigrated
-`SemanticMeta` geometry is ignored, so components can be migrated one at a time.
+## Migrating from the legacy API
+
+To migrate components and other code to this new API, replace `SemanticMeta` with `LayerRef`,
+add locators, and build the `SourceStack` and `SolidModelTarget`. Entities marked with
+`SemanticMeta` are ignored by this new rendering pipeline, so a schematic that mixes ported
+and unported components can still be rendered with it -- the unported components simply won't
+show up in the model. This makes it possible to migrate a complex component library gradually,
+one component at a time.
+
+The converse is not true, however: the legacy targets don't ignore entities marked with
+`LayerRef` or `LocatorMeta`. A `LayerRef` is rendered using its layer name (or to GDS
+layer 0/0 with a warning, if the legacy technology doesn't have a layer by that name), and
+rendering a `Locator` fails. So once a component has been ported, it should only be rendered
+with the new pipeline. We will put in a fix shortly to make it possible to continue
+using the legacy pipeline.
