@@ -2383,8 +2383,8 @@ end
         return render!(sm, check!(plan(g; log_dir=nothing)), SME.SolidModelTarget(stack))
     end
     pg_name = only(metadata["layers"]["metal"]["pgs"])
-    @test collect(SolidModels.bounds3d(sm[pg_name, 2])) ≈
-          [0.0, 0.0, 0.0, 10.0, 10.0, 0.0] atol = 1e-6
+    @test collect(SolidModels.bounds3d(sm[pg_name, 2])) ≈ [0.0, 0.0, 0.0, 10.0, 10.0, 0.0] atol =
+        1e-6
     @test length(metadata["ground"]) == 1
     @test isempty(metadata["terminals"])
 

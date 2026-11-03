@@ -116,4 +116,5 @@ DeviceLayout.name(lm::Union{Terminal, Tag, Port}) = lm.name
 DeviceLayout.layerindex(port::LumpedPort) = port.index
 Base.broadcastable(lm::LocatorMeta) = Ref(lm)
 
-DeviceLayout.SchematicDrivenLayout.is_experimental_meta(::Union{LayerRef, LocatorMeta}) = true
+DeviceLayout.SchematicDrivenLayout.is_experimental_meta(::Union{LayerRef, LocatorMeta}) =
+    true
