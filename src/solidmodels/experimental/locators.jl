@@ -80,7 +80,8 @@ end
 function _port_direction(lm::LumpedPort, p, directed)
     matches = filter(directed) do (entity, layer, _)
         layer == lm.layer || return false
-        box = bounds(entity)
+        # An optional entity hidden by default, like `only_simulated`, has empty bounds.
+        box = bounds(DeviceLayout.unstyled(entity))
         ll, ur = lowerleft(box), upperright(box)
         # containment check assumes underlying port entity is rectangular
         return (getx(ll) <= getx(p) <= getx(ur)) && (gety(ll) <= gety(p) <= gety(ur))
