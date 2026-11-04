@@ -261,13 +261,8 @@ Each layer is rendered to its `gds_meta`.
 To migrate components and other code to this new API, replace `SemanticMeta` with `LayerRef`,
 add locators, and build the `SourceStack` and `SolidModelTarget`. Entities marked with
 `SemanticMeta` are ignored by this new rendering pipeline, so a schematic that mixes ported
-and unported components can still be rendered with it -- the unported components simply won't
-show up in the model. This makes it possible to migrate a complex component library gradually,
-one component at a time.
-
-The converse is not true, however: the legacy targets don't ignore entities marked with
-`LayerRef` or `LocatorMeta`. A `LayerRef` is rendered using its layer name (or to GDS
-layer 0/0 with a warning, if the legacy technology doesn't have a layer by that name), and
-rendering a `Locator` fails. So once a component has been ported, it should only be rendered
-with the new pipeline. We will put in a fix shortly to make it possible to continue
-using the legacy pipeline.
+and unported components can still be rendered with it -- the unported components won't
+show up in the model. Similarly, the legacy pipeline ignores entities marked with
+`LayerRef` or `LocatorMeta`. This bi-directional compatibility makes it possible to migrate 
+a complex component library gradually, one component at a time, so that once everything
+has been ported and validated the dead code can simply be removed.
