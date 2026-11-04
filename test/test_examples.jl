@@ -62,9 +62,11 @@ end
     @test layer_entities("lumped_element") == 1
     @test layer_entities("port") == 2
     # Ground, island, and transmission line
-    @test sort([only(t["locators"]) for t in values(metadata["terminals"])]) == ["p_ro.feedline", "qubit.island"]
-    @test length(metadata["ground"]) == 1
-    @test Set(keys(metadata["ports"])) ==
+    @test sort([
+        only(t["locators"]) for t in values(metadata["selections"]["terminals"])
+    ]) == ["p_ro.feedline", "qubit.island"]
+    @test length(metadata["selections"]["ground"]) == 1
+    @test Set(keys(metadata["selections"]["ports"])) ==
           Set(["p_ro.port_1", "p_ro.port_2", "qubit.junction"])
 
     config = SingleTransmonExperimental.configfile(metadata_path)
@@ -118,11 +120,11 @@ end
         end
         wave_metadata = JSON.parsefile(wave_metadata_path)
         @test isvalid(schema, wave_metadata)
-        @test Set(keys(wave_metadata["ports"])) ==
+        @test Set(keys(wave_metadata["selections"]["ports"])) ==
               Set(["qubit.junction", "p_ro_wave_port_1", "p_ro_wave_port_2"])
         # Each patch is split where the substrate surface meets it
         for name in ("p_ro_wave_port_1", "p_ro_wave_port_2")
-            @test sum(wave_metadata["ports"][name]["pgs"]) do pg_name
+            @test sum(wave_metadata["selections"]["ports"][name]["pgs"]) do pg_name
                 return length(SolidModels.entitytags(wave_sm[pg_name, 2]))
             end == 2
         end

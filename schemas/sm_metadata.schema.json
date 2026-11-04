@@ -4,7 +4,7 @@
   "title": "DeviceLayout experimental solid-model metadata",
   "type": "object",
   "additionalProperties": false,
-  "required": ["metadata", "physical_groups", "layers", "tagged", "ports", "terminals", "ground"],
+  "required": ["metadata", "physical_groups", "layers", "selections"],
   "properties": {
     "metadata": {
       "type": "object",
@@ -35,21 +35,28 @@
       "type": "object",
       "additionalProperties": { "$ref": "#/definitions/layer" }
     },
-    "tagged": {
+    "selections": {
       "type": "object",
-      "additionalProperties": { "$ref": "#/definitions/tagged" }
-    },
-    "ports": {
-      "type": "object",
-      "additionalProperties": { "$ref": "#/definitions/port" }
-    },
-    "terminals": {
-      "type": "object",
-      "additionalProperties": { "$ref": "#/definitions/terminal" }
-    },
-    "ground": {
-      "type": "object",
-      "additionalProperties": { "$ref": "#/definitions/group_membership" }
+      "additionalProperties": false,
+      "required": ["tagged", "ports", "terminals", "ground"],
+      "properties": {
+        "tagged": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/tagged" }
+        },
+        "ports": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/port" }
+        },
+        "terminals": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/terminal" }
+        },
+        "ground": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/group_membership" }
+        }
+      }
     }
   },
   "definitions": {
