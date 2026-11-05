@@ -1,5 +1,5 @@
 """
-    module ReadoutResonatorsExperimental
+    module ReadoutResonators
 
 An `ExamplePDKExperimental` component module containing a readout resonator for a rectangular
 transmon.
@@ -8,11 +8,11 @@ transmon.
 changes may occur within major versions.** Don't depend on it in your own PDK or for real
 devices!
 """
-module ReadoutResonatorsExperimental
+module ReadoutResonators
 
 using DeviceLayout, DeviceLayout.SchematicDrivenLayout, DeviceLayout.PreferredUnits
 import DeviceLayout.SolidModelsExperimental: LayerRef
-import ..ExamplePDKExperimental.TransmonsExperimental: ExampleRectangleTransmon
+import ..ExamplePDKExperimental.Transmons: ExampleRectangleTransmon
 
 export ExampleClawedMeanderReadout
 

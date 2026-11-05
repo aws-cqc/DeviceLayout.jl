@@ -1,5 +1,5 @@
 """
-    module TransmonsExperimental
+    module Transmons
 
 An `ExamplePDKExperimental` component module containing a simple rectangular transmon.
 
@@ -7,11 +7,11 @@ An `ExamplePDKExperimental` component module containing a simple rectangular tra
 changes may occur within major versions.** Don't depend on it in your own PDK or for real
 devices!
 """
-module TransmonsExperimental
+module Transmons
 
 using DeviceLayout, DeviceLayout.SchematicDrivenLayout, DeviceLayout.PreferredUnits
 import DeviceLayout.SolidModelsExperimental: LayerRef, Locator, Terminal
-import ..ExamplePDKExperimental.SimpleJunctionsExperimental: ExampleSimpleJunction
+import ..ExamplePDKExperimental.SimpleJunctions: ExampleSimpleJunction
 
 export ExampleRectangleTransmon
 

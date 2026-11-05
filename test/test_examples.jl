@@ -260,8 +260,7 @@ end
                 return length(SolidModels.entitytags(wave_sm[pg_name, 2]))
             end == 2
         end
-        wave_config =
-            SingleTransmonExperimental.configfile(wave_metadata_path; wave_ports=true)
+        wave_config = SingleTransmonExperimental.configfile(wave_metadata_path)
         wave_attributes = [
             only(p["Attributes"]) for p in [
                 wave_config["Boundaries"]["WavePort"]

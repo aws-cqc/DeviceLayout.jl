@@ -1,5 +1,5 @@
 """
-    module SimpleJunctionsExperimental
+    module SimpleJunctions
 
 An `ExamplePDKExperimental` component module containing a simple placeholder Josephson
 junction.
@@ -8,7 +8,7 @@ junction.
 changes may occur within major versions.** Don't depend on it in your own PDK or for real
 devices!
 """
-module SimpleJunctionsExperimental
+module SimpleJunctions
 
 using DeviceLayout, DeviceLayout.SchematicDrivenLayout, DeviceLayout.PreferredUnits
 import DeviceLayout.SolidModelsExperimental: LayerRef, Locator, LumpedPort

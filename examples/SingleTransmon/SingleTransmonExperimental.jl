@@ -5,11 +5,12 @@ module SingleTransmonExperimental
 using FileIO, JSON, JSONSchema
 using DeviceLayout, DeviceLayout.SchematicDrivenLayout, DeviceLayout.PreferredUnits
 import DeviceLayout.SolidModelsExperimental: Ground, LayerRef, Locator, LumpedPort, Terminal
+import .SchematicDrivenLayout.ExamplePDK: bridge_geometry
 import .SchematicDrivenLayout.ExamplePDKExperimental
 import .ExamplePDKExperimental: SINGLECHIP_STACK, add_bridges!, add_wave_ports!
-using .ExamplePDKExperimental.TransmonsExperimental,
-    .ExamplePDKExperimental.ReadoutResonatorsExperimental
-import .ExamplePDKExperimental.SimpleJunctionsExperimental: ExampleSimpleJunction
+using .ExamplePDKExperimental.Transmons,
+    .ExamplePDKExperimental.ReadoutResonators
+import .ExamplePDKExperimental.SimpleJunctions: ExampleSimpleJunction
 
 """
     single_transmon(
@@ -62,7 +63,11 @@ function single_transmon(;
     cpw_width = 10μm
     cpw_gap = 6μm
     PATH_STYLE = Paths.SimpleCPW(cpw_width, cpw_gap)
-    BRIDGE_STYLE = ExamplePDKExperimental.bridge_geometry(PATH_STYLE)
+    BRIDGE_STYLE = bridge_geometry(
+        PATH_STYLE;
+        air_bridge_meta=LayerRef(:bridge),
+        scaffold_meta=LayerRef(:bridge_base)
+    )
     coupling_gap = 5μm
     grasp_width = cap_width + 2 * cap_gap
     arm_length = 428μm # straight length from meander exit to claw
@@ -203,14 +208,15 @@ function single_transmon(;
 end
 
 """
-    configfile(metadata_path; palace_build=nothing, solver_order=2, amr=0, wave_ports=false)
+    configfile(metadata_path; palace_build=nothing, solver_order=2, amr=0)
 
 Given the path of the metadata JSON file written by [`single_transmon`](@ref), assemble a
 dictionary defining a configuration file for use within Palace.
 
   - `metadata_path`: Path to the metadata JSON file of the solid model, which records its
     physical groups and the port selections and directions. The configuration reads the mesh
-    from, and writes Palace's output to, the directory of this file.
+    from, and writes Palace's output to, the directory of this file. It uses wave ports if the
+    metadata has any, and lumped ports on the readout line otherwise.
   - `palace_build = nothing`: Path to a Palace build directory, used to perform validation of
     the configuration file. If not present, no validation is performed.
   - `solver_order = 2`: Finite element order (degree) for the solver. Palace supports arbitrary
@@ -221,8 +227,7 @@ function configfile(
     metadata_path::AbstractString;
     palace_build=nothing,
     solver_order=2,
-    amr=0,
-    wave_ports=false
+    amr=0
 )
     metadata = JSON.parsefile(metadata_path)
     # single_transmon writes the mesh next to the metadata
@@ -231,6 +236,7 @@ function configfile(
     layer_attributes(layer_name) = tags(metadata["layers"][layer_name]["pgs"])
     port = name -> metadata["ports"][name]
     port_attributes(name) = tags(port(name)["pgs"])
+    wave_ports = any(p -> p["type"] == "WavePort", values(metadata["ports"]))
 
     config = Dict(
         "Problem" => Dict(

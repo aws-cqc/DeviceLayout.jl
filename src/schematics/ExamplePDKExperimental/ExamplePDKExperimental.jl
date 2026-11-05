@@ -131,8 +131,8 @@ function singlechip_solidmodel_target(; wave_ports=false, bridge_height=10μm)
 end
 
 include("utils.jl")
-include("components/SimpleJunctionsExperimental/SimpleJunctionsExperimental.jl")
-include("components/TransmonsExperimental/TransmonsExperimental.jl")
-include("components/ReadoutResonatorsExperimental/ReadoutResonatorsExperimental.jl")
+include("components/SimpleJunctions/SimpleJunctions.jl")
+include("components/Transmons/Transmons.jl")
+include("components/ReadoutResonators/ReadoutResonators.jl")
 
 end # module
