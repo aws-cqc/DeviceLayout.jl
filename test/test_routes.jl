@@ -223,4 +223,32 @@
     # Convenience constructor for fixed turn radius
     @test Paths.StraightAnd45(10.0).min_bend_radius ==
           Paths.StraightAnd45(10.0).max_bend_radius
+
+    # A leftover straight within rounding error of zero is dropped, not drawn as a degenerate
+    # sliver whose existence depends on floating-point details
+    p_end = Point(20.0 + 1e-10, 100.0)
+    r8 = Route(
+        Paths.StraightAnd90(min_bend_radius=20, max_bend_radius=20),
+        Point(0.0, 0.0),
+        p_end,
+        0°,
+        90°
+    )
+    pa = @test_logs Path(r8, sty)
+    @test length(pa) == 2
+    @test Paths.segment(pa.nodes[1]) isa Paths.Turn
+    @test p1(pa) ≈ p_end atol = 1e-9
+
+    p_end = Point(50.0 + 20 * tan(22.5°) + 1e-10, 50.0)
+    r9 = Route(
+        Paths.StraightAnd45(min_bend_radius=20, max_bend_radius=20),
+        Point(0.0, 0.0),
+        p_end,
+        0°,
+        45°
+    )
+    pa = @test_logs Path(r9, sty)
+    @test length(pa) == 2
+    @test Paths.segment(pa.nodes[1]) isa Paths.Turn
+    @test p1(pa) ≈ p_end atol = 1e-9
 end

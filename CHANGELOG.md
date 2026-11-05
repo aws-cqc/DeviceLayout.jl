@@ -165,6 +165,11 @@ The format of this changelog is based on
     name in gmsh's name registry first. Booleans and synchronization drop group-table entries
     but keep names registered, and a stale name silently left the re-created group unnamed, so
     it was written to `.xao` as `G_<dim>_<tag>`.
+  - `StraightAnd90` and `StraightAnd45` routes no longer add a straight segment whose length
+    is within rounding error of zero, as when waypoints are exactly one bend radius apart.
+    Such a segment rendered as zero-area polygons, and whether it appeared depended on
+    floating-point details such as whether the CPU fused multiply-adds, so the same layout
+    could render with different fingerprints on different machines.
 
 ## 1.20.0 (2026-10-06)
 
