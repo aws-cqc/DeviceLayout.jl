@@ -96,6 +96,7 @@ export reconcile!,
     bspline!,
     corner!,
     direction,
+    fence!,
     laststyle,
     launch!,
     meander!,
@@ -905,6 +906,8 @@ include("segments/bspline_optimization.jl")
 include("routes.jl")
 
 include("channels.jl")
+
+include("fencing.jl")
 
 function change_handedness!(seg::Union{Turn, Corner})
     return seg.α = -seg.α

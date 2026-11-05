@@ -156,6 +156,35 @@ if we want to refer to references inside that attachment: `aaa["bbb",2]["ccc"]`.
 manner, it is easy to find the right `CellReference` to use with
 [`transformation(::DeviceLayout.GeometryStructure, ::StructureReference)`](@ref).
 
+### Fences
+
+To attach structures like vias periodically alongside a path, use [`fence!`](@ref). If you
+attach them with `attach!` at regularly spaced positions instead, the attachments are
+evenly spaced along the path itself, so attachments offset to the inside of a curve become
+crowded, and those offset to the outside become sparse. `fence!` places attachments in rows
+at given distances outside the edges of the path's style, and spaces them evenly along each
+row.
+
+```@example 1
+pa = Path(μm)
+straight!(pa, 60μm, Paths.CPW(10μm, 6μm))
+turn!(pa, 90°, 50μm)
+straight!(pa, 60μm)
+via = CoordinateSystem("via", nm)
+render!(via, Circle(3μm), GDSMeta(1))
+# Rows 8 μm outside each edge of the path, with vias every 20 μm along each row
+fence!(pa, sref(via), 8μm, 20μm)
+
+c = Cell("fence", nm)
+render!(c, pa, GDSMeta(0))
+save("fence.svg", flatten(c); background=:white);
+nothing; # hide
+```
+
+```@raw html
+<img src="../fence.svg" style="width:4in;"/>
+```
+
 ## Intersections
 
 How to do the right thing when paths intersect is often tedious. [`Intersect.intersect!`](@ref)

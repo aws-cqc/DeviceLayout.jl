@@ -13,6 +13,9 @@ The format of this changelog is based on
     A group left with no entities is removed (its entities stay in the model).
     `SolidModels.apply_precedence` turns a priority list of material groups into such operations;
     run after fragmentation, they make the groups mutually exclusive.
+  - `fence!` attaches a structure alongside a `Path` in rows at given distances outside the
+    edges of the path's style, with posts spaced uniformly along each row rather than along the
+    path, so rows on the inside and outside of curves keep the requested pitch (#130).
   - `SolidModels.mesh_respect_lc` makes the mesh-size callback return the smaller of the
     control-point size and the size gmsh proposes itself, so curvature or boundary sizing
     applies to geometry without control points, such as imported CAD. Off by default.

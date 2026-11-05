@@ -26,6 +26,7 @@
     attach!(::Path{T}, ::DeviceLayout.GeometryReference{T}, ::DeviceLayout.Coordinate) where {T}
     bspline!
     corner!
+    fence!
     launch!
     meander!
     overlay!
