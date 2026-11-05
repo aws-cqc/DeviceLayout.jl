@@ -168,7 +168,7 @@ const SINGLECHIP_SOLIDMODEL_TARGET = SolidModelTarget(
     substrate_layers=[:chip_area], # CHIP_AREA will be extruded downward
     indexed_layers=[:port, :lumped_element, :integration, :wave_port], # Automatically index these layers
     wave_port_layers=[:wave_port], # WAVE_PORT are 1D line segments in x-y to be extruded in z
-    prerender_ops=[ # Curve-preserving 2D operations that `render_conformal!` runs instead
+    prerender_ops=[ # 2D operations that `render_conformal!` runs instead
         (   # Unify metal negative before removing from writeable_area
             "metal_negative", # Output group name
             union_geom2d!, # Operation

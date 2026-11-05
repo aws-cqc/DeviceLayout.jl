@@ -310,7 +310,6 @@ See [Shapes](./shapes.md).
     SolidModels.render_conformal!
     SolidModels.ConformalRenderContext
     SolidModels.add_conformal_loop!
-    SolidModels.render_conformal_groups!
     SchematicDrivenLayout.union_geom2d!
     SchematicDrivenLayout.difference_geom2d!
 ```

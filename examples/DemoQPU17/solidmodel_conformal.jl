@@ -6,10 +6,10 @@
 #     render!(sm, schematic, target)            # a fragment pass makes shared boundaries conformal
 #     render_conformal!(sm, schematic, target)  # an edge cache does, without a fragment pass
 #
-# `render_conformal!` forms the 2D groups with the target's curve-preserving
-# `prerender_ops` (`union_geom2d!` / `difference_geom2d!`) instead of its
-# `postrender_ops`, nodes shared boundaries with `split_t_junctions!`, splits self-touching
-# contours with `split_pinches`, and emits the groups with `render_conformal_groups!`.
+# `render_conformal!` forms the 2D groups with the target's `prerender_ops`
+# (`union_geom2d!` / `difference_geom2d!`) instead of its `postrender_ops`, nodes shared
+# boundaries with `split_t_junctions!`, splits self-touching contours with `split_pinches`,
+# and emits the groups through the geometry-level `render_conformal!`.
 # Fabrication-only fill (`not_simulated`) is dropped for the simulation model, as in
 # `render!`.
 #
@@ -24,9 +24,9 @@
 #     sm = qpu17_solidmodel_conformal(schematic, target)
 #     DeviceLayout.save(joinpath(@__DIR__, "qpu17_conformal.xao"), sm)
 #
-# Scope: `render_conformal!(sm, schematic, target)` renders 2D geometry: the metal, ports
-# and lumped elements. The target's 3D operations (substrate and vacuum extrusion, bridges)
-# are not run.
+# `render_conformal!(sm, schematic, target)` is experimental. It renders 2D geometry only:
+# the metal, ports and lumped elements. The target's 3D operations (substrate and vacuum
+# extrusion, bridges) are not run.
 
 using DeviceLayout,
     .SchematicDrivenLayout,
