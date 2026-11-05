@@ -111,14 +111,14 @@ The schematic-level method uses the [`SolidModelTarget`](@ref SchematicDrivenLay
 
 ```julia
 prerender_ops = [
-    ("metal_negative", union2d_curved!, ("metal_negative",)),
-    ("metal", difference2d_curved!, ("writeable_area", "metal_negative")),
-    ("metal", union2d_curved!, ("metal", "metal_positive")),
-    ("metal", difference2d_curved!, ("metal", "port"))
+    ("metal_negative", union_geom2d!, ("metal_negative",)),
+    ("metal", difference_geom2d!, ("writeable_area", "metal_negative")),
+    ("metal", union_geom2d!, ("metal", "metal_positive")),
+    ("metal", difference_geom2d!, ("metal", "port"))
 ]
 ```
 
-These operations, [`union2d_curved!`](@ref SchematicDrivenLayout.union2d_curved!) and [`difference2d_curved!`](@ref SchematicDrivenLayout.difference2d_curved!), are authored like the `union_geom!` and `difference_geom!` postrender operations, with the same dimension arguments, vectors of group names, and `remove_object` / `remove_tool` options, but act on 2D region groups, with Clipper booleans that recover curves. After them, shared boundaries are noded with [`split_t_junctions!`](@ref), self-touching contours are split with [`split_pinches`](@ref), and the groups are emitted with [`render_conformal_groups!`](@ref SolidModels.render_conformal_groups!).
+These operations, [`union_geom2d!`](@ref SchematicDrivenLayout.union_geom2d!) and [`difference_geom2d!`](@ref SchematicDrivenLayout.difference_geom2d!), are authored like the `union_geom!` and `difference_geom!` postrender operations, with the same dimension arguments, vectors of group names, and `remove_object` / `remove_tool` options, but act on 2D region groups, with Clipper booleans that recover curves. After them, shared boundaries are noded with [`split_t_junctions!`](@ref), self-touching contours are split with [`split_pinches`](@ref), and the groups are emitted with [`render_conformal_groups!`](@ref SolidModels.render_conformal_groups!).
 
 !!! note "Scope"
     `render_conformal!(sm, sch, target)` renders 2D geometry: the target's `retained_physical_groups` of dimension 2, such as the metal, ports and lumped elements, each in the plane at its layer's height. It doesn't run the target's `postrender_ops` or 3D operations (extrusions, `bounding_layers` intersections, bridges), and it skips 1D elements such as wave ports. Mesh sizes are sampled and the mesh-size callback is installed as in `render!`.

@@ -55,8 +55,8 @@ The format of this changelog is based on
   - `render_conformal!(sm, sch, target::SolidModelTarget)` renders a schematic like
     `render!(sm, sch, target)`, but through the conformal render, which resolves shared
     boundaries with an edge cache instead of a fragment pass. Its 2D groups are formed
-    before emission by the target's new `prerender_ops`: curve-preserving `union2d_curved!`
-    and `difference2d_curved!` operations, authored like `postrender_ops`. It renders 2D
+    before emission by the target's new `prerender_ops`: curve-preserving `union_geom2d!`
+    and `difference_geom2d!` operations, authored like `postrender_ops`. It renders 2D
     geometry only; see `examples/DemoQPU17/solidmodel_conformal.jl`. `SolidModelTarget`
     gains a `prerender_ops` keyword and a `prerenderer` field, added last, and the
     `ExamplePDK` single-chip target defines `prerender_ops`.

@@ -311,8 +311,8 @@ See [Shapes](./shapes.md).
     SolidModels.ConformalRenderContext
     SolidModels.add_conformal_loop!
     SolidModels.render_conformal_groups!
-    SchematicDrivenLayout.union2d_curved!
-    SchematicDrivenLayout.difference2d_curved!
+    SchematicDrivenLayout.union_geom2d!
+    SchematicDrivenLayout.difference_geom2d!
 ```
 
 ### Physical Groups

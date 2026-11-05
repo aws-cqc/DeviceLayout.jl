@@ -7,7 +7,7 @@
 #     render_conformal!(sm, schematic, target)  # an edge cache does, without a fragment pass
 #
 # `render_conformal!` forms the 2D groups with the target's curve-preserving
-# `prerender_ops` (`union2d_curved!` / `difference2d_curved!`) instead of its
+# `prerender_ops` (`union_geom2d!` / `difference_geom2d!`) instead of its
 # `postrender_ops`, nodes shared boundaries with `split_t_junctions!`, splits self-touching
 # contours with `split_pinches`, and emits the groups with `render_conformal_groups!`.
 # Fabrication-only fill (`not_simulated`) is dropped for the simulation model, as in

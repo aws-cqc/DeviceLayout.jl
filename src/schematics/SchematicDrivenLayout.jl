@@ -132,7 +132,7 @@ export ParameterSet,
     load_parameter_set
 export ProcessTechnology, SimulationTarget, ArtworkTarget, SolidModelTarget
 export base_variant, flipchip!, map_metadata!, @composite_variant, @variant
-export render_conformal!, union2d_curved!, difference2d_curved!
+export render_conformal!, union_geom2d!, difference_geom2d!
 
 """
     const Component = AbstractComponent{typeof(1.0UPREFERRED)}

@@ -821,7 +821,7 @@ end
             simulation=true,
             prerender_ops=[(
                 "metal",
-                difference2d_curved!,
+                difference_geom2d!,
                 ("writeable_area", "metal_negative")
             )],
             retained_physical_groups=[("metal", 2)]
@@ -886,7 +886,7 @@ end
     @testset "SolidModelTarget carries prerender_ops through the constructor" begin
         target = SolidModelTarget(
             tech;
-            prerender_ops=[("metal", union2d_curved!, ("metal_negative",))]
+            prerender_ops=[("metal", union_geom2d!, ("metal_negative",))]
         )
         @test length(target.prerenderer) == 1
         @test target.prerenderer[1][1] == "metal"
@@ -895,12 +895,12 @@ end
         positional = SolidModelTarget(tech, [], [], [], [], [], [], [], (;), [])
         @test isempty(positional.prerenderer)
         # As with `postrender_ops`, a tuple works, and helpers can add any operation
-        target = SolidModelTarget(tech; prerender_ops=(("metal", union2d_curved!, ("a",)),))
-        push!(target.prerenderer, ("metal", difference2d_curved!, ("metal", ["b", "c"])))
+        target = SolidModelTarget(tech; prerender_ops=(("metal", union_geom2d!, ("a",)),))
+        push!(target.prerenderer, ("metal", difference_geom2d!, ("metal", ["b", "c"])))
         @test length(target.prerenderer) == 2
     end
 
-    @testset "prerender ops: union2d_curved! and difference2d_curved!" begin
+    @testset "prerender ops: union_geom2d! and difference_geom2d!" begin
         square(x) = centered(Rectangle(20μm, 20μm)) + Point(x, 0μm)
         groups() = Dict{String, Any}(
             "a" => Any[square(0μm), square(10μm)], # overlapping entities
@@ -908,29 +908,29 @@ end
             "c" => Any[centered(Rectangle(4μm, 4μm))]
         )
         # A self-union merges a group's overlapping entities
-        @test area2d(union2d_curved!(groups(), "a")) ≈ 600
+        @test area2d(union_geom2d!(groups(), "a")) ≈ 600
         # Dimensions as in `postrender_ops` are accepted; only 2D is supported
-        @test area2d(union2d_curved!(groups(), "a", "b", 2, 2)) ≈ 1000
-        @test_throws ArgumentError union2d_curved!(groups(), "a", "b", 3, 3)
+        @test area2d(union_geom2d!(groups(), "a", "b", 2, 2)) ≈ 1000
+        @test_throws ArgumentError union_geom2d!(groups(), "a", "b", 3, 3)
         # As with `union_geom!`, a single dimension is a self-union that removes the object
         g = groups()
-        @test area2d(union2d_curved!(g, "a", 2)) ≈ 600
+        @test area2d(union_geom2d!(g, "a", 2)) ≈ 600
         @test !haskey(g, "a")
-        @test_throws ArgumentError union2d_curved!(groups(), "a", 3)
+        @test_throws ArgumentError union_geom2d!(groups(), "a", 3)
         # A vector of group names stands for their union
-        @test area2d(difference2d_curved!(groups(), ["a", "b"], "c")) ≈ 1000 - 16
+        @test area2d(difference_geom2d!(groups(), ["a", "b"], "c")) ≈ 1000 - 16
         # A missing tool is logged and the object is used alone, merged into regions
         @test_logs (:info, r"not a group") match_mode = :any begin
-            @test area2d(difference2d_curved!(groups(), "a", "missing")) ≈ 600
-            @test area2d(union2d_curved!(groups(), "missing", "b")) ≈ 400
+            @test area2d(difference_geom2d!(groups(), "a", "missing")) ≈ 600
+            @test area2d(union_geom2d!(groups(), "missing", "b")) ≈ 400
         end
-        @test_logs (:error, r"not a group") match_mode = :any difference2d_curved!(
+        @test_logs (:error, r"not a group") match_mode = :any difference_geom2d!(
             groups(),
             "missing",
             "a"
         )
         # A missing name in a vector of names is logged too
-        @test_logs (:info, r"typo is not a group") match_mode = :any difference2d_curved!(
+        @test_logs (:info, r"typo is not a group") match_mode = :any difference_geom2d!(
             groups(),
             "a",
             ["b", "typo"]
@@ -938,7 +938,7 @@ end
         # remove_object / remove_tool delete the inputs after they are read
         g = groups()
         @test area2d(
-            difference2d_curved!(g, "a", "c"; remove_object=true, remove_tool=true)
+            difference_geom2d!(g, "a", "c"; remove_object=true, remove_tool=true)
         ) ≈ 600 - 16
         @test !haskey(g, "a") && !haskey(g, "c") && haskey(g, "b")
     end
@@ -1033,7 +1033,7 @@ end
             merged = SolidModelTarget(
                 flipchip;
                 levelwise_layers=[:a],
-                prerender_ops=[("a", union2d_curved!, ("a_L1", "a_L2"))]
+                prerender_ops=[("a", union_geom2d!, ("a_L1", "a_L2"))]
             )
             sm = SolidModel("conformal_levels_merged"; overwrite=true)
             @test_throws ArgumentError render_conformal!(sm, sch, merged)
@@ -1102,7 +1102,7 @@ end
             simulation=true,
             prerender_ops=[(
                 "metal",
-                difference2d_curved!,
+                difference_geom2d!,
                 ("writeable_area", "metal_negative")
             )],
             postrender_ops=[(
@@ -1138,7 +1138,7 @@ end
             render!(sch.coordinate_system, only_simulated(line), SemanticMeta(:wave_port))
             return sch
         end
-        prerender_ops = [("metal", difference2d_curved!, ("writeable_area", "port"))]
+        prerender_ops = [("metal", difference_geom2d!, ("writeable_area", "port"))]
         target = SolidModelTarget(
             tech;
             simulation=true,

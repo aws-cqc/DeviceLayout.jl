@@ -171,25 +171,25 @@ const SINGLECHIP_SOLIDMODEL_TARGET = SolidModelTarget(
     prerender_ops=[ # Curve-preserving 2D operations that `render_conformal!` runs instead
         (   # Unify metal negative before removing from writeable_area
             "metal_negative", # Output group name
-            union2d_curved!, # Operation
+            union_geom2d!, # Operation
             ("metal_negative", "metal_negative", 2, 2), # (object, tool, object_dim, tool_dim)
             :remove_object => true
         ),
         (   # Get metal ground plane by subtracting negative from writeable area
             "metal",
-            difference2d_curved!,
+            difference_geom2d!,
             ("writeable_area", "metal_negative", 2, 2),
             :remove_object => true # Remove "writeable_area" group after operation
         ),
         (   # Then add any positive back in
             "metal",
-            union2d_curved!,
+            union_geom2d!,
             ("metal", "metal_positive", 2, 2),
             :remove_tool => true
         ),
         (   # Remove the ports from the metal, as the postrender operations do
             "metal",
-            difference2d_curved!,
+            difference_geom2d!,
             ("metal", "port")
         )
     ],
@@ -273,7 +273,7 @@ function singlechip_solidmodel_target(boundary_groups...)
     )
     push!(
         target.prerenderer,
-        ("metal", difference2d_curved!, ("metal", [boundary_groups...]))
+        ("metal", difference_geom2d!, ("metal", [boundary_groups...]))
     )
     retained_physical_groups = [(x, 2) for x ∈ boundary_groups]
     append!(target.retained_physical_groups, retained_physical_groups)

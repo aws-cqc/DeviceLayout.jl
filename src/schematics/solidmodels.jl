@@ -56,8 +56,8 @@ The `prerenderer`, given by the `prerender_ops` keyword, is a list of curve-pres
 operations that
 [`render_conformal!`](@ref)`(sm, sch, target)` uses instead of the `postrenderer` to form
 2D groups, such as the metal, from other groups before they are emitted. It is authored
-like the `postrenderer`, with the operations [`union2d_curved!`](@ref) and
-[`difference2d_curved!`](@ref), which act on 2D region groups rather than on entities in
+like the `postrenderer`, with the operations [`union_geom2d!`](@ref) and
+[`difference_geom2d!`](@ref), which act on 2D region groups rather than on entities in
 the solid model. `render!` doesn't use the `prerenderer`.
 """
 struct SolidModelTarget <: Target
@@ -558,9 +558,9 @@ function _check_2d(op, d1, d2)
 end
 
 """
-    union2d_curved!(groups, object, tool=object, d1=2, d2=2;
+    union_geom2d!(groups, object, tool=object, d1=2, d2=2;
         remove_object=false, remove_tool=false)
-    union2d_curved!(groups, object, d; remove_object=true)
+    union_geom2d!(groups, object, d; remove_object=true)
 
 Prerender operation: the curve-preserving union of the groups `object` and `tool`, or of
 `object` with itself. Each is a group name or a vector of names. Returns the merged
@@ -569,24 +569,24 @@ the others are used, `remove_object` / `remove_tool` remove the inputs, and the 
 a single dimension `d` is a self-union that removes `object`. The dimensions must be 2. See
 `prerender_ops` in [`SolidModelTarget`](@ref).
 """
-function union2d_curved!(groups::AbstractDict, object, tool=object, d1=2, d2=2; kwargs...)
-    _check_2d(:union2d_curved!, d1, d2)
+function union_geom2d!(groups::AbstractDict, object, tool=object, d1=2, d2=2; kwargs...)
+    _check_2d(:union_geom2d!, d1, d2)
     missing = unique([_missing_groups(groups, object); _missing_groups(groups, tool)])
     if length(missing) == length(unique([_names(object); _names(tool)]))
-        @error "union2d_curved!(groups, $object, $tool): $(_not_groups(missing))."
+        @error "union_geom2d!(groups, $object, $tool): $(_not_groups(missing))."
     elseif !isempty(missing)
-        @info "union2d_curved!(groups, $object, $tool): $(_not_groups(missing)), using the rest."
+        @info "union_geom2d!(groups, $object, $tool): $(_not_groups(missing)), using the rest."
     end
     operand = _group_geom(groups, object)
     _names(tool) == _names(object) || append!(operand, _group_geom(groups, tool))
     _consume!(groups, object, tool; kwargs...)
     return isempty(operand) ? CurvilinearRegion[] : union2d_curved(operand)
 end
-union2d_curved!(groups::AbstractDict, object, d::Integer; remove_object=true, kwargs...) =
-    union2d_curved!(groups, object, object, d, d; remove_object, kwargs...)
+union_geom2d!(groups::AbstractDict, object, d::Integer; remove_object=true, kwargs...) =
+    union_geom2d!(groups, object, object, d, d; remove_object, kwargs...)
 
 """
-    difference2d_curved!(groups, object, tool, d1=2, d2=2;
+    difference_geom2d!(groups, object, tool, d1=2, d2=2;
         remove_object=false, remove_tool=false)
 
 Prerender operation: the curve-preserving difference of the groups `object` and `tool`.
@@ -596,14 +596,14 @@ error, other missing groups are logged and the rest are used, and `remove_object
 `remove_tool` remove the inputs. The dimensions `d1` and `d2` must be 2. See
 `prerender_ops` in [`SolidModelTarget`](@ref).
 """
-function difference2d_curved!(groups::AbstractDict, object, tool, d1=2, d2=2; kwargs...)
-    _check_2d(:difference2d_curved!, d1, d2)
+function difference_geom2d!(groups::AbstractDict, object, tool, d1=2, d2=2; kwargs...)
+    _check_2d(:difference_geom2d!, d1, d2)
     missing_object = _missing_groups(groups, object)
     missing = unique([missing_object; _missing_groups(groups, tool)])
     if length(missing_object) == length(_names(object))
-        @error "difference2d_curved!(groups, $object, $tool): $(_not_groups(missing_object))."
+        @error "difference_geom2d!(groups, $object, $tool): $(_not_groups(missing_object))."
     elseif !isempty(missing)
-        @info "difference2d_curved!(groups, $object, $tool): $(_not_groups(missing)), using the rest."
+        @info "difference_geom2d!(groups, $object, $tool): $(_not_groups(missing)), using the rest."
     end
     obj = _group_geom(groups, object)
     result =
@@ -658,7 +658,7 @@ edge cache rather than a fragment pass, and curves stay exact arcs.
 
 The target's layers, levels, indices, `rendering_options` and physical-group names are used
 as in `render!`. The 2D geometry is formed by the target's `prerender_ops` instead of its
-`postrender_ops`: [`union2d_curved!`](@ref) and [`difference2d_curved!`](@ref) operations
+`postrender_ops`: [`union_geom2d!`](@ref) and [`difference_geom2d!`](@ref) operations
 on 2D groups, authored like `postrender_ops` but run before emission. Shared boundaries
 between groups are then noded with [`split_t_junctions!`](@ref), self-touching contours are
 split with [`split_pinches`](@ref), and the groups are emitted with
