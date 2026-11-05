@@ -657,6 +657,13 @@ function route!(
     end
 end
 
+# A leftover straight length within rounding error of zero would exist or not
+# depending on floating-point details like FMA. For consistency and to avoid degenerate
+# output, those segments should be filtered out, using `route!`'s default `atol` so that
+# the endpoint can still be reached within `atol`.
+_nonnegligible_length(l, ::Type{S}) where {S} =
+    l > 1e-9 * DeviceLayout.onemicron(S) ? l : zero(l)
+
 function _route_leg!(
     p::Path{S},
     next::Point,
@@ -675,9 +682,9 @@ function _route_leg!(
     end
 
     bend_r = max(rule.min_bend_radius, min(rule.max_bend_radius, abs(perp), abs(par)))
-    l1 = max(abs(par) - bend_r, zero(bend_r))
+    l1 = _nonnegligible_length(abs(par) - bend_r, S)
     l2 = π / 2 * bend_r
-    l3 = max(abs(perp) - bend_r, zero(bend_r))
+    l3 = _nonnegligible_length(abs(perp) - bend_r, S)
 
     # Taper styles need to know the total length to split the taper appropriately
     if isa(sty, ContinuousStyle{true})
@@ -721,9 +728,9 @@ function _route_leg!(
     )
     d = bend_r * tan(22.5°)
 
-    d_diag = max(zero(d), sqrt(2) * abs(perp) - d)
+    d_diag = _nonnegligible_length(sqrt(2) * abs(perp) - d, S)
     l_bend = pi / 4 * bend_r
-    d_straight = max(zero(d), abs(par) - abs(perp) - d)
+    d_straight = _nonnegligible_length(abs(par) - abs(perp) - d, S)
 
     # Taper styles need to know the total length to split the taper appropriately
     if isa(sty, ContinuousStyle{true})

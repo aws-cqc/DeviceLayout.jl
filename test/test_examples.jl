@@ -10,18 +10,15 @@
         return log.level < Logging.Warn
     end
     # Check for changes to geometry
-    if VERSION >= v"1.12-"
-        # Julia v1.10 and v1.11 give different fingerprints
-        # Mainly for flagging unintentional changes, so doesn't need to run on every version
-        fingerprint = Cells.geometry_fingerprint(artwork)
-        expected = "5bcbb718f37f534b9d1a30af2fc88f78644151a3ec3f4b6fc9372a5562af7af8"
-        @test fingerprint == expected
-        fingerprint != expected && println("""
-            Expected QPU17 artwork fingerprint: $expected
-            Found: $fingerprint
-            If rendering changes were intentional, update the expected fingerprint.
-        """)
-    end
+    # Mainly for flagging unintentional changes, so doesn't need to run on every version
+    fingerprint = Cells.geometry_fingerprint(artwork)
+    expected = "a80f5676a8dbad9f535c669356cffb92cc5f20630262887947ef905af0d9e896"
+    @test fingerprint == expected
+    fingerprint != expected && println("""
+        Expected QPU17 artwork fingerprint: $expected
+        Found: $fingerprint
+        If rendering changes were intentional, update the expected fingerprint.
+    """)
     # Check target constructor
     fc_target = SchematicDrivenLayout.ExamplePDK.flipchip_solidmodel_target([
         "port_1",
