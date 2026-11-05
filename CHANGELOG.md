@@ -142,6 +142,9 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - `isapprox` on arrays of `Point`s returns `false` when the arrays differ in size.
+    Previously it compared only the elements both arrays have, so an empty array was
+    approximately equal to any other.
   - Schematic `render!` to a `Cell` or a `SolidModel` with `strict=:no` logs a component
     whose geometry fails to build and renders it as empty geometry, instead of throwing.
     (#287)
