@@ -109,6 +109,14 @@ The format of this changelog is based on
   - Schematic `render!` to a `Cell` or a `SolidModel` with `strict=:no` logs a component
     whose geometry fails to build and renders it as empty geometry, instead of throwing.
     (#287)
+  - Rendering to a `SolidModel` applies entity styles instead of silently dropping them.
+    Styles without a kernel-native implementation are discretized through `to_polygons`,
+    with a warning on OpenCascade.
+  - `Rounded` circles and ellipses render to an OpenCascade `SolidModel` as exact ellipses
+    instead of recursing until the stack overflows.
+  - `StyleDict` on an entity other than a `ClippedPolygon` or `CurvilinearRegion`, such as a
+    `Rectangle`, applies its style at `[1]` instead of recursing until the stack overflows,
+    and throws an `ArgumentError` if it has styles at other indices.
   - `LineSegment`s can be placed in coordinate systems of a different coordinate type and
     transformed through references, which previously threw a `MethodError`, and their
     `bounds` (and `lowerleft`/`upperright`) now give their extent instead of a zero

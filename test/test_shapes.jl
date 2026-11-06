@@ -94,6 +94,14 @@
     rdr = Polygons.Rounded(0.25μm)(rd1)
     @test all(isapprox.(all_rounded_render, to_polygons(rdr), atol=0.1nm))
     @test bk == rd1 # does not mutate rd1
+    # On an entity without contours, the StyleDict applies the style of its single contour
+    @test to_polygons(r1, d) == to_polygons(Polygons.Rounded(0.25μm)(r1))
+    # and styles at other indices throw rather than being ignored
+    d2 = StyleDict()
+    d2[2] = Polygons.Rounded(0.25μm)
+    cpw = Path(0.0μm, 0.0μm)
+    straight!(cpw, 10.0μm, Paths.CPW(2.0μm, 1.0μm))
+    @test_throws ArgumentError to_polygons(d2(cpw[1]))
 
     # Repeat call
     all_rounded_render = to_polygons(rd1, d)

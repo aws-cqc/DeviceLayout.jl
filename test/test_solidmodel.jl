@@ -2695,3 +2695,119 @@ end
         @test length(intersect(faces("a"), faces("b"))) == 1
     end
 end
+
+@testitem "SolidModel rendering applies entity styles" setup =
+    [CommonTestSetup, QuietGmshSetup] begin
+    using DeviceLayout.SolidModels
+    import DeviceLayout: GeometryEntityStyle, Plain, ToTolerance, WithDirection
+    import DeviceLayout.SolidModels: to_primitives, GmshNative
+
+    # A style that grows its entity, implemented through `to_polygons` as the docs recommend
+    struct Bias <: GeometryEntityStyle
+        d::typeof(1.0μm)
+    end
+    DeviceLayout.to_polygons(p::Polygon, s::Bias; kwargs...) = only(offset(p, s.d))
+
+    sm = SolidModel("styles_occ"; overwrite=true)
+    smg = SolidModel("styles_native", GmshNative(); overwrite=true)
+    r = Rectangle(10.0μm, 10.0μm)
+    c = Circle(5.0μm)
+    grown = Rectangle(Point(-2.0μm, -2.0μm), Point(12.0μm, 12.0μm))
+
+    @testset "Styles without a SolidModel method apply via to_polygons" begin
+        @test bounds(to_primitives(sm, Bias(2μm)(r))) ≈ grown
+        @test bounds(to_primitives(smg, Bias(2μm)(r))) ≈ grown
+        # Rounding on GmshNative
+        rr = to_primitives(smg, Rounded(2μm)(r))
+        @test length(points(rr)) > 4
+        @test Polygons.area(rr) ≈ Polygons.area(to_polygons(Rounded(2μm)(r)))
+        # Discretizing a curve on OpenCascade warns; GmshNative discretizes everything anyway
+        empty!(DeviceLayout.Curvilinear._curve_loss_warned)
+        @test_logs (:warn, r"no OpenCascade `SolidModels.to_primitives` method") to_primitives(
+            sm,
+            Bias(1μm)(c)
+        )
+        @test_logs to_primitives(smg, Bias(1μm)(c))
+    end
+
+    @testset "ToTolerance renders with its atol" begin
+        coarse = to_polygons(c; atol=100nm)
+        @test points(to_primitives(smg, ToTolerance(100nm)(c))) == points(coarse)
+        @test to_primitives(sm, ToTolerance(100nm)(c)) === c # Native circle kept
+    end
+
+    @testset "Geometry-transparent styles keep native curves" begin
+        for sty in (Plain(), MeshSized(1μm), WithDirection(0°))
+            @test to_primitives(sm, sty(c)) === c
+            @test to_primitives(sm, sty(r)) == to_primitives(sm, r)
+        end
+    end
+
+    @testset "StyleDict on entities without contours" begin
+        sd = StyleDict(Rounded(2μm))
+        reg = to_primitives(sm, sd(to_polygons(r)))
+        @test reg isa CurvilinearRegion
+        @test length(reg.exterior.curves) == 4
+        native = to_primitives(smg, sd(to_polygons(r)))
+        @test Polygons.area(native) ≈ Polygons.area(to_polygons(Rounded(2μm)(r)))
+        cp = CurvilinearPolygon(points(r))
+        @test length(to_primitives(sm, sd(cp)).exterior.curves) == 4
+        native_reg = to_primitives(smg, sd(CurvilinearRegion(cp)))
+        @test Polygons.area(only(native_reg)) ≈ Polygons.area(native)
+        # Other entities: a `Rectangle` keeps exact arcs and a circle stays an exact
+        # ellipse on OpenCascade; on GmshNative they are rounded via `to_polygons`
+        @test length(to_primitives(sm, sd(r)).exterior.curves) == 4
+        @test Polygons.area(to_primitives(smg, sd(r))) ≈ Polygons.area(native)
+        @test to_primitives(sm, sd(c)) === c
+        e = Ellipse(Point(0.0μm, 0.0μm), (5.0μm, 3.0μm), 0°)
+        pa = Path(0.0μm, 0.0μm)
+        straight!(pa, 10.0μm, Paths.SimpleTrace(2.0μm))
+        node = pa[1]
+        empty!(DeviceLayout.Curvilinear._curve_loss_warned)
+        @test (@test_logs to_primitives(sm, sd(e))) === e
+        @test (@test_logs to_primitives(sm, sd(node))) isa CurvilinearRegion
+        for ent in (e, node)
+            @test (@test_logs to_primitives(smg, sd(ent))) isa Polygon
+        end
+        # Styles at other indices have no contour to apply to
+        sd2 = StyleDict()
+        sd2[2] = Rounded(1μm)
+        @test_throws ArgumentError to_primitives(sm, sd2(r))
+        @test_throws ArgumentError to_primitives(smg, sd2(r))
+        # Nested inside `Rounded`, which on GmshNative goes through `styled_loop`
+        twice = to_primitives(smg, Rounded(1μm)(sd(r)))
+        @test Polygons.area(twice) ≈ Polygons.area(native) rtol = 1e-3
+    end
+
+    @testset "Nested styles" begin
+        rounded_area = Polygons.area(to_polygons(Rounded(2μm)(r)))
+        for m in (sm, smg)
+            for ent in (MeshSized(1μm)(Rounded(2μm)(r)), Rounded(2μm)(MeshSized(1μm)(r)))
+                @test sum(Polygons.area, vcat(to_polygons(to_primitives(m, ent)))) ≈
+                      rounded_area
+            end
+        end
+    end
+
+    @testset "Rounded ellipses stay exact" begin
+        # An ellipse has no corners, so OpenCascade keeps the native one, without a warning
+        empty!(DeviceLayout.Curvilinear._curve_loss_warned)
+        @test (@test_logs to_primitives(sm, Rounded(1μm)(c))) === c
+        e = Ellipse(Point(0.0μm, 0.0μm), (5.0μm, 3.0μm), 0°)
+        @test (@test_logs to_primitives(sm, Rounded(1μm)(e))) === e
+    end
+
+    @testset "Styled entities render" begin
+        cs = CoordinateSystem("styles", nm)
+        place!(cs, Rounded(2μm)(r), SemanticMeta(:rounded))
+        place!(cs, Bias(2μm)(r + Point(20μm, 0μm)), SemanticMeta(:biased))
+        place!(cs, Rounded(1μm)(c + Point(50μm, 0μm)), SemanticMeta(:circle))
+        for m in (sm, smg)
+            render!(m, cs; zmap=(_) -> 0μm)
+            x0, _, _, x1, _, _ = SolidModels.bounds3d(m["biased", 2])
+            @test x1 - x0 ≈ 14 atol = 1e-3 # μm, grown by 2μm on each side
+            @test length(SolidModels.get_boundary(m["rounded", 2])) > 4
+            @test SolidModels.hasgroup(m, "circle", 2)
+        end
+    end
+end
