@@ -304,20 +304,20 @@ end
             dst = joinpath(tdir, "morph_o$(order)_$(binary)_morphed.$ext")
             save(src, sm)
             q = SM.morph_mesh(src, dst, dv, δp)
+            @test gmsh.model.get_current() == "morph_test"
             @test q.num_inverted == 0
             @test q.num_elements > 0
             @test 0.5 < q.min_jacobian_ratio <= 1 <= q.max_jacobian_ratio < 2
             binary == 1 && @test filesize(dst) == filesize(src)
-            current = gmsh.model.get_current()
-            gmsh.open(src)
-            tags0, x0 = gmsh.model.mesh.get_nodes()
-            gmsh.model.remove()
-            gmsh.open(dst)
-            tags1, x1 = gmsh.model.mesh.get_nodes()
-            gmsh.model.remove()
-            gmsh.model.set_current(current)
-            @test tags0 == tags1
-            X0, X1 = reshape(x0, 3, :), reshape(x1, 3, :)
+            groups() = [
+                (d, t, gmsh.model.get_physical_name(d, t)) for
+                (d, t) in gmsh.model.get_physical_groups()
+            ]
+            a = SM._with_mesh(m -> (m, groups()), src, version)
+            b = SM._with_mesh(m -> (m, groups()), dst, version)
+            @test a[2] == b[2]
+            version > 3 && @test a[1].tags == b[1].tags
+            X0, X1 = a[1].nodes, SM._corresponding_nodes(a[1], b[1], src, dst)
             @test X1 ≈ X0 .+ d(X0) atol = 1e-12
             @test q.max_displacement ≈ maximum(sqrt.(sum(abs2, X1 .- X0, dims=1)))
             # Nodes on the pad's edges end up on the edges of the pad of the new design.
@@ -351,7 +351,7 @@ end
     SM.morph_mesh(step, joinpath(tdir, "step2.msh2"), d)
     q2 = SM.morph_quality(src, joinpath(tdir, "step2.msh2"))
     @test q2.max_displacement ≈ 2 * SM.morph_quality(src, step).max_displacement rtol = 0.05
-    @test_throws r"does not have the nodes" SM.morph_quality(
+    @test_throws r"does not have the elements" SM.morph_quality(
         src,
         joinpath(tdir, "morph_o1_1.msh2")
     )
@@ -360,146 +360,111 @@ end
     @test q1.max_displacement ≈ sqrt(3) / 1000
 end
 
-@testitem "Morph quality of hexahedra, prisms and pyramids" setup = [CommonTestSetup] begin
+@testsnippet MshSetup begin
+    # A unit hexahedron, and the text of an MSH 2.2 file with nodes (3 × N) and elements
+    # (lines of type, tags and nodes).
+    const HEX = [0 1 1 0 0 1 1 0; 0 0 1 1 0 0 1 1; 0 0 0 0 1 1 1 1]
+    msh(nodes, elements) = """
+    \$MeshFormat
+    2.2 0 8
+    \$EndMeshFormat
+    \$Nodes
+    $(size(nodes, 2))
+    $(join(("$j $(nodes[1, j]) $(nodes[2, j]) $(nodes[3, j])" for j in axes(nodes, 2)), "\n"))
+    \$EndNodes
+    \$Elements
+    $(length(elements))
+    $(join(("$e $(elements[e])" for e in eachindex(elements)), "\n"))
+    \$EndElements
+    """
+end
+
+@testitem "Morph quality of hexahedra, prisms and pyramids" setup =
+    [CommonTestSetup, QuietGmshSetup, MshSetup] begin
     const SM = DeviceLayout.SolidModels
-    # A unit hexahedron, prism and pyramid, with separate vertices, in MFEM's vertex order.
-    hex = [0 1 1 0 0 1 1 0; 0 0 1 1 0 0 1 1; 0 0 0 0 1 1 1 1]
+    # A unit hexahedron, prism and pyramid, side by side.
     prism = [0 1 0 0 1 0; 0 0 1 0 0 1; 0 0 0 1 1 1] .+ [2, 0, 0]
     pyramid = [0 1 1 0 0; 0 0 1 1 0; 0 0 0 0 1] .+ [4, 0, 0]
-    X = hcat(hex, prism, pyramid)
-    elements =
-        ["1 5 $(join(0:7, ' '))", "1 6 $(join(8:13, ' '))", "1 7 $(join(14:18, ' '))"]
-    mesh = """
-    MFEM mesh v1.0
-
-    dimension
-    3
-
-    elements
-    3
-    $(join(elements, "\n"))
-
-    boundary
-    0
-
-    vertices
-    $(size(X, 2))
-    3
-    $(join(("$(X[1, j]) $(X[2, j]) $(X[3, j])" for j in axes(X, 2)), "\n"))
-    """
-    src = joinpath(tdir, "mixed.mesh")
-    write(src, mesh)
-    # A shear preserves the volume of every corner simplex.
+    X = hcat(HEX, prism, pyramid)
+    src = joinpath(tdir, "mixed.msh2")
+    write(
+        src,
+        msh(
+            X,
+            [
+                "5 2 1 1 $(join(1:8, ' '))",
+                "6 2 1 1 $(join(9:14, ' '))",
+                "7 2 1 1 $(join(15:19, ' '))"
+            ]
+        )
+    )
+    # A shear preserves the Jacobian determinant everywhere.
     q = SM.morph_mesh(
         src,
-        joinpath(tdir, "mixed_sheared.mesh"),
+        joinpath(tdir, "mixed_sheared.msh2"),
         Y -> [0.5 .* Y[3:3, :]; zeros(2, size(Y, 2))]
     )
     @test q.num_elements == 3
     @test q.num_inverted == 0
     @test q.min_jacobian_ratio ≈ 1
     @test q.max_jacobian_ratio ≈ 1
+    @test q.max_strain ≈ 0.5
     # A reflection inverts every element.
     @test_throws r"inverts 3 of 3" SM.morph_mesh(
         src,
-        joinpath(tdir, "x.mesh"),
+        joinpath(tdir, "x.msh2"),
         Y -> [zeros(2, size(Y, 2)); -2 .* Y[3:3, :]]
     )
     # Moving one corner of the hexahedron through the opposite face inverts the element at
     # that corner, although its volume stays positive.
     corner(Y) = (D = zeros(size(Y)); D[3, 7] = -1.5; D)
-    q = SM.morph_mesh(src, joinpath(tdir, "x.mesh"), corner; check=false)
+    q = SM.morph_mesh(src, joinpath(tdir, "x.msh2"), corner; check=false)
     @test q.num_inverted == 1
     @test q.min_jacobian_ratio < 0
-
-    # A Gmsh mesh of one hexahedron.
-    msh = """
-    \$MeshFormat
-    2.2 0 8
-    \$EndMeshFormat
-    \$Nodes
-    8
-    $(join(("$j $(hex[1, j]) $(hex[2, j]) $(hex[3, j])" for j = 1:8), "\n"))
-    \$EndNodes
-    \$Elements
-    1
-    1 5 2 1 1 1 2 3 4 5 6 7 8
-    \$EndElements
-    """
+    # A scaling of one hexahedron, through a sequence of two morphs.
     src = joinpath(tdir, "hex.msh2")
-    write(src, msh)
+    write(src, msh(HEX, ["5 2 1 1 $(join(1:8, ' '))"]))
     q = SM.morph_mesh(src, joinpath(tdir, "hex_morphed.msh2"), Y -> 0.1 .* Y)
     @test q.num_elements == 1
     @test q.min_jacobian_ratio ≈ 1.1^3
-    @test SM.morph_quality(src, joinpath(tdir, "hex_morphed.msh2")).max_jacobian_ratio ≈
-          1.1^3
+    SM.morph_mesh(
+        joinpath(tdir, "hex_morphed.msh2"),
+        joinpath(tdir, "hex_2.msh2"),
+        Y -> 0.1 .* Y
+    )
+    @test SM.morph_quality(src, joinpath(tdir, "hex_2.msh2")).max_jacobian_ratio ≈ 1.21^3
 end
 
-@testitem "Mesh morphing of MFEM meshes" setup = [CommonTestSetup] begin
+@testitem "Morphing physical groups and file formats" setup =
+    [CommonTestSetup, QuietGmshSetup, MshSetup] begin
     const SM = DeviceLayout.SolidModels
-    # One tetrahedron, written with vertex coordinates, with P1 nodes by vertex dimension,
-    # and with P1 nodes by node.
-    header = """
-    MFEM mesh v1.0
-
-    #
-    # MFEM Geometry Types (see fem/geom.hpp):
-    #
-
-    dimension
-    3
-
-    elements
-    1
-    1 4 0 1 2 3
-
-    boundary
-    1
-    2 2 0 1 2
-
-    vertices
-    4
-    """
-    X = [0.0 1 0 0; 0 0 1 0; 0 0 0 1]
-    vertices =
-        header * "3\n" * join(("$(X[1, j]) $(X[2, j]) $(X[3, j])" for j = 1:4), "\n") * "\n"
-    nodes =
-        header * "\nnodes\nFiniteElementSpace\nFiniteElementCollection: H1_3D_P1\nVDim: 3\n"
-    by_vdim =
-        nodes *
-        "Ordering: 1\n\n" *
-        join(("$(X[1, j]) $(X[2, j]) $(X[3, j])" for j = 1:4), "\n") *
-        "\n"
-    by_nodes = nodes * "Ordering: 0\n\n" * join(string.(vec(permutedims(X))), "\n") * "\n"
-    l2 = replace(by_vdim, "H1_3D_P1" => "L2_T1_3D_P1")
-    shear(Y) = [0.5 .* Y[3:3, :]; zeros(1, size(Y, 2)); zeros(1, size(Y, 2))]
-    for (name, text) in
-        (("vertices", vertices), ("by_vdim", by_vdim), ("by_nodes", by_nodes))
-        src, dst = joinpath(tdir, "$name.mesh"), joinpath(tdir, "$(name)_morphed.mesh")
-        write(src, text)
-        q = SM.morph_mesh(src, dst, shear)
-        @test q.num_elements == 1
-        @test q.min_jacobian_ratio ≈ 1 # a shear preserves volume
-        @test q.max_strain ≈ 0.5
-        m = SM._read_mesh(dst)
-        @test m.nodes ≈ X .+ shear(X)
-        # Everything but the coordinates is unchanged.
-        @test readlines(dst)[1:20] == readlines(src)[1:20]
-    end
-    src = joinpath(tdir, "l2.mesh")
-    write(src, l2)
-    @test_throws r"H1 grid function" SM.morph_mesh(
+    # MSH 2.2 repeats an element for each physical group it is in; a morph keeps it so.
+    quad = "3 2 2 7 $(join(1:4, ' '))"
+    src = joinpath(tdir, "groups.msh2")
+    write(
         src,
-        joinpath(tdir, "l2_morphed.mesh"),
-        shear
+        msh(HEX, ["5 2 1 1 $(join(1:8, ' '))", quad, replace(quad, "2 2 7" => "2 3 7")])
     )
-    @test isnothing(
-        SM.morph_mesh(src, joinpath(tdir, "l2_morphed.mesh"), shear; check=false)
+    dst = joinpath(tdir, "groups_morphed.msh2")
+    SM.morph_mesh(src, dst, Y -> 0.1 .* Y)
+    SM.morph_mesh(dst, dst, Y -> 0.1 .* Y)
+    count_elements(f) =
+        parse(Int, first(split(split(read(f, String), "\$Elements\n")[2], '\n')))
+    @test count_elements(dst) == 3
+    # Elements outside physical groups cannot be kept in MSH 2.2.
+    write(src, msh(HEX, ["5 2 1 1 $(join(1:8, ' '))", "3 2 0 7 $(join(1:4, ' '))"]))
+    @test_throws r"outside physical groups" SM.morph_mesh(src, dst, Y -> 0.1 .* Y)
+    # The destination keeps the source's format, which its extension must not change.
+    @test_throws r"use the extension .msh or .msh2" SM.morph_mesh(
+        src,
+        joinpath(tdir, "x.msh4"),
+        Y -> zeros(size(Y))
     )
-    write(joinpath(tdir, "not_a_mesh.mesh"), "solid\nendsolid\n")
+    # Only Gmsh MSH 2.2 and 4.1 files.
+    write(joinpath(tdir, "not_a_mesh.mesh"), "MFEM mesh v1.0\n")
     @test_throws r"Unsupported mesh format" SM.morph_mesh(
         joinpath(tdir, "not_a_mesh.mesh"),
         joinpath(tdir, "x.mesh"),
-        shear
+        Y -> zeros(size(Y))
     )
 end
