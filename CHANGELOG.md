@@ -15,8 +15,7 @@ The format of this changelog is based on
     as regions with exact arithmetic that doesn't use the clipping library. They run at
     a fixed seed in the regular suite and with fresh seeds in a weekly GeomLaws workflow,
     and known failures are kept as minimal reproducers. `test/laws/README.md` describes
-    what the laws cover and what they don't. `test/laws/differential/` holds scripts that
-    compare two clipping kernels on the same generated and real-design inputs.
+    what the laws cover and what they don't.
   - `SolidModels.exclude_groups` returns the entities of a physical group that belong to none of
     a list of other groups, a membership difference with the postrender-operation signature.
     A group left with no entities is removed (its entities stay in the model).

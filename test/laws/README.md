@@ -14,9 +14,7 @@ regions of the plane, using exact rational arithmetic that never calls the clipp
 library under test.
 
 This file is the overview: how to run the laws, what a passing run does and doesn't
-tell you, every law and known failure, and what isn't covered. The two tools in the
-subdirectories, [mutants](mutants/README.md) and [differential](differential/README.md),
-have their own short READMEs.
+tell you, every law and known failure, and what isn't covered.
 
 ## Running
 
@@ -110,33 +108,6 @@ Two more things set the strength of a verdict:
 At the default budget each check sees the same 50 inputs every time. Roughly, a defect
 that one generated input in 100 triggers has a 40 % chance of being among them, and a
 weekly run with 2000 inputs per check is all but certain to find it.
-
-### Which defects the suite catches
-
-`mutants/` injects modeled defects into DeviceLayout's clipping wrappers, `interiorcuts`,
-and path halos, and records which checks then fail. At the default budget and seed:
-
-| Mutant                      | Defect                                                            | Checks that fail                    |
-|:--------------------------- |:----------------------------------------------------------------- |:----------------------------------- |
-| `fill_hole_near_parent`     | A hole with a vertex within one grid unit of its parent is filled | B5, B7, B9, B12, ledger             |
-| `fill_small_holes`          | Holes under 5 % of their parent's area are filled                 | B5, B6, B7, B12, O3, ledger         |
-| `drop_small_components`     | Output components under 5 % of the largest one's area are dropped | B2, B5, B6, B7, B10, B12            |
-| `xor_touch_is_union`        | `xor2d` of operands that share a vertex returns their union       | B4, B5, B7, B9, B12, ledger         |
-| `evenodd_subjects`          | Subjects are filled even-odd instead of positive                  | B2, B3, B9, B10                     |
-| `hole_orientation`          | Holes are returned counterclockwise                               | B2, B3, B5, B6, B8, B9, B11, ledger |
-| `duplicate_vertex`          | Each outer contour has a repeated vertex                          | B3, B8, B11, B12, ledger            |
-| `erosion_largest_only`      | Erosion keeps only its largest component                          | O3                                  |
-| `offset_fills_holes`        | Growth fills the holes it creates                                 | O3                                  |
-| `float_arc_100x`            | Float round joins are 100 times coarser than `atol`               | O3, O6, O8                          |
-| `miter_limit_4`             | Miter limit 4δ instead of 2δ                                      | None: no law states a miter limit   |
-| `cuts_forget_spliced_holes` | A later hole's keyhole cut can pass through a hole already cut    | B11, ledger                         |
-| `cuts_drop_islands`         | Islands inside holes are dropped from the keyhole output          | B11                                 |
-| `halo_short`                | `Trace` and `CPW` halos are widened by 0.95δ instead of δ         | O7, ledger                          |
-
-This is evidence that the suite is sensitive to these defect classes, not a proof that
-it catches every defect in them. Every mutant treats both operand orders alike and
-commutes with rigid transforms, so B1 and T1 catch none of them; those laws target
-other defects.
 
 ## How outputs are compared
 
@@ -270,8 +241,8 @@ ends by about δ/(2L) (ledger L9).
 | O7  | `halo(path, δ)` covers every point within δ of the path's footprint (its full width, including any CPW gaps), and nothing outside the footprint's miter offset | Sampled, on `Trace` and `CPW` paths. **Broken:** tapers (L12), halos with an inner offset (L13)                                                                                                                                                                   |
 | O8  | Round joins: every output edge lies between δ − t and δ + t from `A`                                                                                           | Exhaustive. Positive offsets of convex integer polygons and rectangles (t = 2), and of convex float polygons at the default `atol`                                                                                                                                |
 
-"O3 reproducer" pins two thin triangles whose erosion Clipper2 gets wrong, found by the
-differential harness.
+"O3 reproducer" pins two thin triangles whose erosion Clipper2 gets wrong, found by
+comparing Clipper1 with Clipper2.
 
 ### Transforms, units, and round trips (`test_transform.jl`)
 
@@ -328,9 +299,8 @@ coordinates appear only in T2 and D1. No law asserts when `to_polygons` should w
 
 **Input sizes.** Generated polygons have at most 15 vertices, apart from discretized
 paths; sets have at most 6 polygons, and trees at most 6 holes. Integer coordinates stay
-within a few hundred units, and float inputs within 1 cm of the origin. Large
-real-design polygons are exercised only by the differential harness's corpus, outside
-the test suite.
+within a few hundred units, and float inputs within 1 cm of the origin. The laws use no
+real-design polygons.
 
 **Input shapes.** Generated operands are simple, counterclockwise `Polygon`s.
 Self-overlapping or clockwise operands appear only as reversed contours in B9 and as
@@ -359,7 +329,6 @@ comparison, not a call into Clipper, so a kernel call that hangs hangs the test.
     pass; if a comparison is too slow, find out why.
   - New generators build valid inputs by construction, validate them exactly, and don't
     call the clipping kernel.
-  - Add a mutant the new law should catch to `mutants/mutants.jl`, and check that it does.
   - If the law fails on the current code, add a minimal input to the ledger with
     `@test_broken`, add an id to `KNOWN_BROKEN` with a comment naming the entry, and wrap
     the check in `@law :id`. When a fix makes a ledger assertion pass, change it to
@@ -368,14 +337,12 @@ comparison, not a call into Clipper, so a kernel call that hangs hangs the test.
 
 ## Files
 
-| File                                                     | Contents                                                                                                                                |
-|:-------------------------------------------------------- |:--------------------------------------------------------------------------------------------------------------------------------------- |
-| `setup.jl`                                               | The `LawsSetup` test snippet, which includes `lawslib.jl`                                                                               |
-| `lawslib.jl`                                             | Budget and seed, `KNOWN_BROKEN`, exact predicates, comparisons, validity checks, generators                                             |
-| `region_oracle.jl`                                       | The rational sweep, region certificates, containment, and O8's chord check                                                              |
-| `test_boolean.jl`, `test_offset.jl`, `test_transform.jl` | The laws                                                                                                                                |
-| `test_ledger.jl`                                         | Known failures                                                                                                                          |
-| `test_fixtures.jl`, `test_oracle_regressions.jl`         | Tests of the predicates, generators, and comparisons                                                                                    |
-| `explore.jl`                                             | Exploration runner, used by the weekly workflow                                                                                         |
-| `mutants/`                                               | Modeled defects and a runner that reports which checks catch each                                                                       |
-| `differential/`                                          | Scripts that compare two DeviceLayout builds, typically with different clipping kernels, on the same inputs; not part of the test suite |
+| File                                                     | Contents                                                                                    |
+|:-------------------------------------------------------- |:------------------------------------------------------------------------------------------- |
+| `setup.jl`                                               | The `LawsSetup` test snippet, which includes `lawslib.jl`                                   |
+| `lawslib.jl`                                             | Budget and seed, `KNOWN_BROKEN`, exact predicates, comparisons, validity checks, generators |
+| `region_oracle.jl`                                       | The rational sweep, region certificates, containment, and O8's chord check                  |
+| `test_boolean.jl`, `test_offset.jl`, `test_transform.jl` | The laws                                                                                    |
+| `test_ledger.jl`                                         | Known failures                                                                              |
+| `test_fixtures.jl`, `test_oracle_regressions.jl`         | Tests of the predicates, generators, and comparisons                                        |
+| `explore.jl`                                             | Exploration runner, used by the weekly workflow                                             |
