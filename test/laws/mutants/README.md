@@ -8,7 +8,8 @@ checks that fail. The results at the default budget are in the
 
 ## Running
 
-From the package root, with TestEnv in your default environment:
+From the package root, with Julia 1.13 or later (`runner.jl` uses `Test.@with_testset`)
+and TestEnv in your default environment:
 
 ```sh
 julia --project=. test/laws/mutants/run.jl                  # every mutant

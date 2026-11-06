@@ -105,9 +105,7 @@ function evaluate_case(c::DiffCase)
         )
     elseif c.op == "keyhole"
         outer, hole = ops
-        return plain_contours(
-            to_polygons(difference2d([outer], [Polygon(reverse(hole.p))]))
-        )
+        return plain_contours(to_polygons(difference2d([outer], [hole])))
     else
         error("unknown operation $(c.op)")
     end

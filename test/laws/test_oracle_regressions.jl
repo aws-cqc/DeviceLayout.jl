@@ -65,6 +65,11 @@
     touching = rectangle_polygon(3, 3)
     @test contour_contained(togrid(touching), togrid(parent))
     @test !contour_contained(togrid(touching), togrid(parent); strict=true)
+    # A parent edge whose endpoint lies on the line of a child edge, one unit past its
+    # end, without meeting it, is no contact.
+    notched =
+        GridPt[(-10, -10), (-10, 30), (30, 30), (30, -10), (13, -10), (11, 0), (9, -10)]
+    @test contour_contained(square, notched; strict=true)
     # Keyhole validity rejects any zero-length edge, including at a cut endpoint.
     bad = GridPt[
         (0, 0),
