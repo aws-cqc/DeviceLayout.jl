@@ -92,13 +92,34 @@ function _vertex_velocities(base, plus, minus, h, k)
         )
         lp = _align_loops(b.loops, bp.loops)
         lm = _align_loops(b.loops, bm.loops)
-        (isnothing(lp) || isnothing(lm)) && _topology_error(
-            k,
-            "the boundary of an entity on layer $(layer(b.meta)) changed its number of loops or vertices"
-        )
+        if isnothing(lp) || isnothing(lm)
+            b.adaptive && _adaptive_error(k, b)
+            _topology_error(
+                k,
+                "the boundary of an entity on layer $(layer(b.meta)) changed its number of loops or vertices"
+            )
+        end
         velocities[i] = [(lp[l] .- lm[l]) ./ (2h) for l in eachindex(b.loops)]
+        b.adaptive && !_is_rigid(b.loops, velocities[i]) && _adaptive_error(k, b)
     end
     return velocities
+end
+
+_adaptive_error(k, b) = error(
+    "Cannot compute the design velocity of :$k: it changes the shape of a curve on layer $(layer(b.meta)) that is not a line or an arc. Such curves, like B-splines, are discretized adaptively, so their vertices are not the same points of the curve at p0 ± step, and they may only move rigidly."
+)
+
+# Whether the vertex velocities `vel` of the loops `loops` are a rigid motion: a translation
+# and a rotation, fitted by least squares about the centroid. The tolerance is far above the
+# differences' round-off and far below the residual of a change of shape.
+function _is_rigid(loops, vel)
+    x, v = reduce(hcat, loops), reduce(hcat, vel)
+    dx = x .- sum(x, dims=2) ./ size(x, 2)
+    dv = v .- sum(v, dims=2) ./ size(v, 2)
+    den = sum(abs2, dx)
+    ω = iszero(den) ? 0.0 : sum(dx[1, :] .* dv[2, :] .- dx[2, :] .* dv[1, :]) / den
+    residual = dv .- ω .* [-dx[2:2, :]; dx[1:1, :]]
+    return maximum(abs, residual; init=0.0) <= 1e-4 * max(1.0, maximum(abs, v; init=0.0))
 end
 
 # Reorder the loops of `other` and their vertices to match `base`, or return nothing.
@@ -126,20 +147,22 @@ end
 _centroid(a) = SVector(sum(view(a, 1, :)), sum(view(a, 2, :))) / size(a, 2)
 
 # The cyclic order (and direction) of the columns of `b` that matches `a`, when it is
-# unambiguous: every vertex moves less than a quarter of the shortest edge of `a`.
+# unambiguous: the largest vertex displacement of the best of the orders near the nearest
+# vertex is less than a quarter of that of any other.
 function _align_vertices(a, b)
     n = size(a, 2)
-    emin = minimum(
-        hypot(a[1, mod1(i + 1, n)] - a[1, i], a[2, mod1(i + 1, n)] - a[2, i]) for i = 1:n
-    )
     j0 = argmin([hypot(b[1, j] - a[1, 1], b[2, j] - a[2, 1]) for j = 1:n])
-    best, bestd = nothing, Inf
-    for dir in (1, -1)
-        idx = [mod1(j0 + dir * (i - 1), n) for i = 1:n]
+    best, bestd, second = nothing, Inf, Inf
+    for dir in (1, -1), shift in unique(mod1.(j0 .+ (-2:2), n))
+        idx = [mod1(shift + dir * (i - 1), n) for i = 1:n]
         d = maximum(hypot(b[1, idx[i]] - a[1, i], b[2, idx[i]] - a[2, i]) for i = 1:n)
-        d < bestd && ((best, bestd) = (idx, d))
+        if d < bestd
+            best, bestd, second = idx, d, bestd
+        elseif d < second
+            second = d
+        end
     end
-    bestd < emin / 4 || return nothing
+    bestd < second / 4 || return nothing
     return b[:, best]
 end
 

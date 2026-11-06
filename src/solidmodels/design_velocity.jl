@@ -192,8 +192,11 @@ with respect to that parameter at `p0`.
 rendered to a `SolidModel` for parameters `p`. It is called at `p0` and at `p0` with each
 parameter changed by `± steps[k]`, so it must be deterministic. A parameter's step defaults
 to 1 nm for a length parameter (or `0.001` for a unitless one, interpreted as μm) and must
-be given otherwise. The layout's vertices are typically affine in the parameters, so that
-the differences are exact for any step that does not change the layout's topology.
+be given otherwise. The differences are exact for vertices that are affine in the
+parameters, and second order in the step otherwise, provided that each vertex is the same
+point of the geometry at `p0 ± steps[k]`. Arcs are sampled uniformly in angle, so this holds
+while their number of vertices is unchanged. Other curves, such as B-splines, are sampled
+adaptively, so they may only move rigidly.
 
 `map_meta`, `zmap` and `kwargs` have the same meaning as in
 [`render!(::SolidModel, ::CoordinateSystem)`](@ref): entities whose metadata `map_meta` maps
@@ -226,9 +229,9 @@ and below, or at `zlimits` if nearer.
 
 The construction fails, rather than return a velocity that is not the derivative of the
 rendered geometry, when a step changes the topology of the layout (the number of entities,
-boundary loops or vertices, or whether features touch), when the window does not contain all
-moving geometry, when a parameter changes the z or thickness of an entity, or when nothing
-bounds the profile in z.
+boundary loops or vertices, or whether features touch), when it changes the shape of a curve
+other than a line or an arc, when the window does not contain all moving geometry, when a
+parameter changes the z or thickness of an entity, or when nothing bounds the profile in z.
 """
 function design_velocities(
     f,

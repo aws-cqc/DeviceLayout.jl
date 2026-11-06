@@ -134,6 +134,55 @@ end
     @test iszero(dv.r(0.0, 0.0, 0.0))
 end
 
+@testitem "Design velocities of curves" setup = [CommonTestSetup, DesignVelocitySetup] begin
+    # A B-spline trace, which `x0` translates and `y1` reshapes.
+    function trace(p)
+        cs = CoordinateSystem("trace", nm)
+        pa = Path(Point(p.x0, 0μm); α0=0°)
+        bspline!(
+            pa,
+            [Point(p.x0 + 100μm, p.y1), Point(p.x0 + 200μm, 0μm)],
+            0°,
+            Paths.Trace(10μm)
+        )
+        place!(cs, pa, SemanticMeta(:metal))
+        return cs
+    end
+    p0 = (x0=0.0μm, y1=50.0μm)
+    dv = SM.design_velocities(trace, p0; parameters=(:x0,), zlimits=(-100μm, 100μm))
+    @test dv.x0(0.0, 5.0, 0.0) ≈ [1, 0, 0] atol = 1e-5
+    @test_throws r"may only move rigidly" SM.design_velocities(
+        trace,
+        p0;
+        parameters=(:y1,),
+        zlimits=(-100μm, 100μm)
+    )
+    # The edges of a tapered turn are not arcs.
+    function taper(p)
+        cs = CoordinateSystem("taper", nm)
+        pa = Path(Point(0μm, 0μm); α0=0°)
+        turn!(pa, 90°, 100μm, Paths.TaperTrace(10μm, p.w))
+        place!(cs, pa, SemanticMeta(:metal))
+        return cs
+    end
+    @test_throws r"may only move rigidly" SM.design_velocities(
+        taper,
+        (w=4.0μm,);
+        zlimits=(-100μm, 100μm)
+    )
+    # Arcs: the corner radius of a rounded pad. The midpoint of a corner's arc moves by
+    # 1/√2 - 1 in x and y.
+    function rounded(p)
+        cs = CoordinateSystem("rounded", nm)
+        render!(cs, centered(Rectangle(600μm, 400μm)), SemanticMeta(:cutout))
+        place!(cs, Rounded(p.r)(centered(Rectangle(200μm, 150μm))), SemanticMeta(:pad))
+        return cs
+    end
+    dr = SM.design_velocities(rounded, (r=20.0μm,); zlimits=(-100μm, 100μm))
+    mid = (80 + 20 / √2, 55 + 20 / √2)
+    @test dr.r(mid..., 0.0) ≈ [1 / √2 - 1, 1 / √2 - 1, 0] atol = 1e-3
+end
+
 @testitem "Design velocity errors" setup = [CommonTestSetup, DesignVelocitySetup] begin
     # A pad that detaches from the edge it touches changes the layout's topology.
     function detaching(p)

@@ -13,6 +13,10 @@ struct _LayoutEntity
     z::Float64
     thickness::Float64
     loops::Vector{Matrix{Float64}} # 2 × n vertices of each boundary loop, in STP_UNIT
+    # Whether the entity has curves other than lines and arcs. These, such as B-splines, are
+    # discretized adaptively, so their vertices follow points of the curve only when it
+    # moves rigidly.
+    adaptive::Bool
 end
 
 function _layout_entities(cs, map_meta, zmap, thickness; kwargs...)
@@ -29,7 +33,14 @@ function _layout_entities(cs, map_meta, zmap, thickness; kwargs...)
         isempty(loops) && continue
         push!(
             entities,
-            _LayoutEntity(i, m, _stp_float(zmap(m)), _stp_float(thickness(m)), loops)
+            _LayoutEntity(
+                i,
+                m,
+                _stp_float(zmap(m)),
+                _stp_float(thickness(m)),
+                loops,
+                _has_adaptive_curves(e; kwargs...)
+            )
         )
     end
     return entities
@@ -69,6 +80,25 @@ function _boundary_loops(e::GeometryEntity; kwargs...)
     end
     return loops
 end
+
+# Whether `e` has curves that `to_polygons` discretizes adaptively: all but lines and arcs.
+_has_adaptive_curves(e; kwargs...) = false
+_has_adaptive_curves(e::StyledEntity; kwargs...) = _has_adaptive_curves(e.ent; kwargs...)
+_has_adaptive_curves(e::AbstractVector; kwargs...) = any(_has_adaptive_curves, e)
+# A path node's edges are the curves of `pathtopolys`: the offsets of a turn, for example, are
+# arcs for a constant width but not for a taper.
+_has_adaptive_curves(e::Paths.Node; kwargs...) =
+    _has_adaptive_curves(DeviceLayout.pathtopolys(e))
+_has_adaptive_curves(e::CurvilinearPolygon; kwargs...) = any(_is_adaptive, e.curves)
+_has_adaptive_curves(e::CurvilinearRegion; kwargs...) =
+    _has_adaptive_curves(e.exterior) || any(_has_adaptive_curves, e.holes)
+_has_adaptive_curves(e::Ellipse; Δθ=nothing, kwargs...) =
+    isnothing(Δθ) && !DeviceLayout.Polygons.iscircle(e)
+_is_adaptive(::Paths.Segment) = true
+_is_adaptive(::Paths.Straight) = false
+_is_adaptive(::Paths.Turn) = false
+_is_adaptive(s::Paths.ConstantOffset) = _is_adaptive(s.seg)
+_is_adaptive(s::Paths.CompoundSegment) = any(_is_adaptive, s.segments)
 
 _contour_loops(p::ClippedPolygon) =
     [l for l in (_stp_loop(c) for c in _all_contours(p.tree)) if size(l, 2) >= 3]
