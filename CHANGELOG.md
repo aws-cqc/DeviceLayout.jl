@@ -97,6 +97,8 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - Differentiating a `BSpline` segment's position, `Paths.curvatureradius`, or unitless
+    direction with `ForwardDiff` (as `Paths.curvature` does) no longer throws a `MethodError`.
   - `LineSegment`s can be placed in coordinate systems of a different coordinate type and
     transformed through references, which previously threw a `MethodError`, and their
     `bounds` (and `lowerleft`/`upperright`) now give their extent instead of a zero

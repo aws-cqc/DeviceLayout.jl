@@ -438,6 +438,17 @@ function arclength_to_t(b::BSpline{T}, s1) where {T}
     return t
 end
 
+# `quadgk` in `t_to_arclength` can't take `Dual` limits, so differentiate the inverse with
+# dt/ds = 1 / |dr/dt| instead. This also makes `b(s)` and `curvatureradius(b, s)` `Dual`-safe.
+function arclength_to_t(
+    b::BSpline,
+    s::Union{Dual{S}, Unitful.Quantity{<:Dual{S}}}
+) where {S}
+    us, s_ = unit(s), ustrip(s)
+    t = arclength_to_t(b, value(s_) * us)
+    return Dual{S}(t, partials(s_) * uconvert(NoUnits, us * dtds(t, b.r)))
+end
+
 function t_to_arclength(b::BSpline{T}, t1::Real) where {T}
     rp = _get_reparam(b)
     t1 >= 1.0 && return rp.ss[end]

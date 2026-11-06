@@ -14,6 +14,13 @@
     @test Paths.curvatureradius(b, Paths.t_to_arclength(b, 0.0)) < zero(1.0μm)
     @test Paths.curvatureradius(b, Paths.t_to_arclength(b, 1.0)) < zero(1.0μm)
 
+    # Derivatives through the arclength parameterization, as for rows along offset curves
+    l, h = 300μm, 1e-3μm
+    @test ForwardDiff.derivative(b, l) ≈ Point(cos(direction(b, l)), sin(direction(b, l)))
+    dr = (Paths.curvatureradius(b, l + h) - Paths.curvatureradius(b, l - h)) / 2h
+    @test ForwardDiff.derivative(x -> Paths.curvatureradius(b, x), l) ≈ dr rtol = 1e-6
+    @test norm(Paths.curvature(b, l)) ≈ 1 / abs(Paths.curvatureradius(b, l))
+
     # Reflect about y = 0, check the curvature radius changes
     g0 = 100 * Point(1.0μm, -1.0μm) / sqrt(2)
     g1 = 100 * Point(0.6μm, 0.8μm)
@@ -59,6 +66,8 @@
         Point(6, -8)
     )
     @test eltype(b2) == Float64
+    @test ForwardDiff.derivative(x -> direction(b2, x), 300.0) ≈
+          1 / Paths.curvatureradius(b2, 300.0)
 
     # Convert
     b3 = convert(Paths.BSpline{typeof(1.0mm)}, b)

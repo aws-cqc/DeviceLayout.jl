@@ -20,7 +20,8 @@ Each row has its first post at `start` and continues up to `stop`, both measured
 pathlength along `pa`. `margin` keeps posts at least that far from both ends of `pa`. The
 spacing carries over from one path segment to the next. A post that falls exactly where one
 segment ends, including the first post of a row that starts there, goes on the next
-segment's row.
+segment's row. If that row doesn't exist at the start of the next segment (see below), a
+post that falls due there stays at the end of the segment instead.
 
 If a row on the inside of a turn would lie at or past the turn's center of curvature, it has
 no length there. No posts are placed on it there, and a warning is issued.
@@ -136,8 +137,10 @@ function _fence_row(pa::Path{T}, o::T, σ, pitch::T, s0::T, s1::T) where {T}
                 need -= traveled
                 break
             end
-            # Likewise, a post due exactly at the end of a node goes on the next node's row
-            if s_next == len && i < i_last
+            # Likewise, a post due exactly at the end of a node goes on the next node's row. If
+            # that row doesn't exist at its start, the post stays here, as after `simplify!`,
+            # rather than moving to wherever the row resumes or being dropped if it doesn't.
+            if s_next == len && i < i_last && _row_starts_after(pa, i, o, σ)
                 need = zero(T)
                 break
             end
@@ -155,6 +158,14 @@ function _fence_row(pa::Path{T}, o::T, σ, pitch::T, s0::T, s1::T) where {T}
         $degenerate_nodes. No posts are placed there.
         """
     return posts
+end
+
+# Whether the row at distance `o` outside the extent edge on side `σ` exists at the start of
+# the first node with length after node `i`
+function _row_starts_after(pa::Path{T}, i, o, σ) where {T}
+    node = nodes(pa)[findnext(n -> !iszero(pathlength(segment(n))), nodes(pa), i + 1)]
+    d = σ * (extent(style(node), zero(T)) + o)
+    return _row_tangential_speed(segment(node), d, zero(T)) > 0
 end
 
 # Speed of the row point γ(t) + σ ℓ(t) n(t) with respect to pathlength t along the segment,

@@ -236,6 +236,34 @@ end
             @test !(pa[1].sty isa Paths.DecoratedStyle)
             @test pts ≈ [Point(-6μm, y) for y in (50:20:90)μm]
         end
+
+        # A post due where a straight ends, before a turn whose row lies past its center,
+        # stays on the straight, as after `simplify!`. The left row is 21 μm from the
+        # centerline, past the 10 μm turn's center.
+        function straight_turn(last_straight, simplified)
+            p = Path(μm)
+            straight!(p, 60μm, Paths.CPW(10μm, 6μm))
+            turn!(p, 90°, 10μm)
+            last_straight && straight!(p, 60μm)
+            simplified && simplify!(p)
+            return p
+        end
+        left_fence(p; kw...) = @test_logs (:warn, r"center of curvature") fence!(
+            p,
+            sref(cs),
+            10μm,
+            20μm;
+            side=:left,
+            kw...
+        )
+        on_straight = [Point(x, 21μm) for x in (0:20:60)μm]
+        for simplified in (false, true)
+            @test left_fence(straight_turn(true, simplified)) ≈
+                  [on_straight; [Point(49μm, y) for y in (30:20:70)μm]]
+            # Not dropped if nothing follows the turn, or if the window ends inside it
+            @test left_fence(straight_turn(false, simplified)) ≈ on_straight
+            @test left_fence(straight_turn(true, simplified); stop=65μm) ≈ on_straight
+        end
     end
 
     @testset "Generic tapers" begin
@@ -305,6 +333,40 @@ end
                 rtol=1e-6
             )
         end
+
+        # Offsets of B-splines, alone, inside a compound segment, and without units. Their
+        # rows need derivatives of the B-spline's curvature.
+        function offset_bspline(u, off; straight=false)
+            p = Path{typeof(1.0u)}()
+            straight && straight!(p, 30u, Paths.CPW(10u, 6u))
+            bspline!(
+                p,
+                [Point(200u, 60u), Point(400u, 0u)],
+                0°,
+                Paths.CPW(10u, 6u);
+                endpoints_speed=300u,
+                auto_curvature=true
+            )
+            straight && simplify!(p)
+            p[1].seg = Paths.offset(p[1].seg, off)
+            reconcile!(p)
+            return p
+        end
+        pa = offset_bspline(μm, t -> 10μm * sin(t / 50μm))
+        pa_compound = offset_bspline(μm, t -> 5μm + 10μm * t / 300μm; straight=true)
+        pa_unitless = offset_bspline(1.0, 5.0)
+        for (p, u) in ((pa, μm), (pa_compound, μm), (pa_unitless, 1.0)), σ in (1, -1)
+            posts = @test_logs min_level = Logging.Warn row(p, 10u, σ, 20u)
+            @test isapprox(
+                row_spacings(p, 10u, σ, posts),
+                fill(20u, length(posts) - 1),
+                rtol=1e-6
+            )
+        end
+        pts = fence!(pa, sref(cs), 10μm, 20μm)
+        c = Cell(uniquename("c"), nm)
+        render!(c, pa, GDSMeta())
+        @test same_points(origin.(c.refs), pts)
     end
 
     @testset "Reversal" begin
