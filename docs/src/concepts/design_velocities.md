@@ -111,11 +111,12 @@ moving edges, or bound the profile below it with `zlimits`.
 quality = SolidModels.morph_mesh("design.msh2", "design_morphed.msh2", dv, (gap=1μm,))
 ```
 
-It reads and writes Gmsh MSH 2.2 and 4.1 (ASCII and binary) and MFEM meshes, including
-high-order meshes, and changes only the node coordinates. The returned
-[`SolidModels.MorphQuality`](@ref) reports the change in element quality. An inverted
-element is an error. A small minimum volume ratio (below about 0.3) or a large strain (above
-about 0.3) means the morph has degraded the mesh, and the design should be re-meshed.
+Gmsh reads the mesh, an MSH 2.2 or 4.1 file of any order, and writes it back in the same
+format with only the nodes moved; MSH 2.2 files have their nodes and elements renumbered. The returned
+[`SolidModels.MorphQuality`](@ref) reports the change in element quality at the corners of
+every element. An inverted element is an error. A small minimum Jacobian ratio (below about
+0.3) or a large strain (above about 0.3) means the morph has degraded the mesh, and the
+design should be re-meshed.
 
 Morphing keeps the mesh's topology, so the boundary of a mesh region stays where it is if
 the design velocity vanishes there. This allows, for example, a region of a substructured
