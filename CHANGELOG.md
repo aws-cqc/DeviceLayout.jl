@@ -15,7 +15,8 @@ The format of this changelog is based on
     rendered vertices, a harmonic in-plane interpolation of the edge velocities on a
     constrained triangulation of a window around the moving geometry, and an extrusion
     profile in z. It fails rather than return a field that is not the derivative, for
-    example when a parameter changes the layout's topology. A method taking a
+    example when a parameter changes the layout's topology or the shape of a curve other
+    than a line or an arc, such as a B-spline. A method taking a
     `SolidModelTarget` uses the target's layer mapping, z positions and extrusions, as
     `render!` does. Adds DelaunayTriangulation.jl and the SparseArrays standard library as
     dependencies.

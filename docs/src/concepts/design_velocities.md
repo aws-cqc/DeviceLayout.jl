@@ -15,11 +15,11 @@ parameters normally means rendering, meshing and simulating again. Two tools in
     discretization, stays the same between designs.
 
 Together they give smooth, accurate finite differences of simulated quantities with respect
-to layout parameters, with no noise from re-meshing. They also give exact derivatives from
-solvers that compute shape sensitivities: a solver that reports the gradient ``gₖ`` of a
-quantity ``J`` with respect to the positions ``xₖ`` of its mesh nodes gives
-``dJ/dp = Σₖ gₖ ⋅ V(xₖ)``. The design velocity carries the layout's design intent to the
-solver's mesh, and the solver needs no knowledge of the layout.
+to layout parameters, with no noise from re-meshing. They also give derivatives from a
+single simulation with solvers that compute shape sensitivities: a solver that reports the
+gradient ``gₖ`` of a quantity ``J`` with respect to the positions ``xₖ`` of its mesh nodes
+gives ``dJ/dp = Σₖ gₖ ⋅ V(xₖ)``. The design velocity carries the layout's design intent to
+the solver's mesh, and the solver needs no knowledge of the layout.
 
 Design velocities are geometry: they know nothing about the physics of the simulation. A
 parameter is a geometry control knob, as everywhere in DeviceLayout.jl.
@@ -67,9 +67,14 @@ The construction has three steps:
 
  1. **Vertex velocities.** The layout is built at `p0` and at `p0 ± h` for each parameter,
     and the velocity of every vertex of the rendered geometry is the central difference of
-    its position. Layout vertices are usually affine in the parameters, so the differences
-    are exact. Curves are discretized as by `to_polygons`, which suffices when a parameter
-    moves a curve without changing its discretization (for example, a translation).
+    its position. The differences are exact for vertices that are affine in the
+    parameters, and second order in `h` otherwise, as long as each vertex is the same point
+    of the geometry at `p0 ± h`. Curves are discretized as by `to_polygons`: arcs uniformly
+    in angle, so their vertices are the same points while their number is unchanged, and
+    other curves, such as B-splines, adaptively, so they may only move rigidly. With the
+    OpenCASCADE kernel, the solid model's curves are exact, and their velocities differ
+    from those of their discretization by about the discretization tolerance (`atol`, 1 nm
+    by default) over the radius of curvature.
  2. **In-plane field.** All rendered edges in a rectangular window around the moving
     geometry form a planar arrangement, like the fragmentation of the solid model: edges
     are split where they cross or touch, and each crossing moves with the derivative of
@@ -80,8 +85,8 @@ The construction has three steps:
     nearest other plane of rendered geometry above and below, for example the bottom of the
     substrate and the top of the simulation box. `zlimits` bounds it further.
 
-The result is continuous, moves every rendered edge with its exact velocity, and keeps
-planar interfaces planar. It is zero wherever the geometry is fixed: on fixed edges,
+The result is continuous, moves every rendered edge with the velocities of its vertices,
+and keeps planar interfaces planar. It is zero wherever the geometry is fixed: on fixed edges,
 outside the window, and beyond the profile.
 
 ## When construction fails
@@ -91,6 +96,8 @@ Rather than return a field that is not the derivative of the rendered geometry,
 
   - a step changes the layout's topology: the number of entities, boundary loops or
     vertices, or whether features touch;
+  - a parameter changes the shape of a curve other than a line or an arc, such as a
+    B-spline;
   - a moving edge crosses the window boundary;
   - a parameter changes the z or thickness of an entity (only in-plane velocities are
     supported);
