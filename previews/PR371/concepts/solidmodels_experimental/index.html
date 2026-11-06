@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="referrer" content="no-referrer"/><title>Solid Models (Experimental) · DeviceLayout.jl</title><meta name="title" content="Solid Models (Experimental) · DeviceLayout.jl"/><meta property="og:title" content="Solid Models (Experimental) · DeviceLayout.jl"/><meta property="twitter:title" content="Solid Models (Experimental) · DeviceLayout.jl"/><meta name="description" content="Documentation for DeviceLayout.jl."/><meta property="og:description" content="Documentation for DeviceLayout.jl."/><meta property="twitter:description" content="Documentation for DeviceLayout.jl."/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.63.2/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script><link href="../../assets/favicon.ico" rel="icon" type="image/x-icon"/><link href="../../assets/dark_figures.css" rel="stylesheet" type="text/css"/></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">DeviceLayout.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><a class="tocitem" href="../../how_to/get_started/">Getting Started</a></li><li><input class="collapse-toggle" id="menuitem-3" type="checkbox"/><label class="tocitem" for="menuitem-3"><span class="docs-label">Tutorials</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../tutorials/">Overview</a></li><li><a class="tocitem" href="../../tutorials/first_layout/">First Layout</a></li><li><a class="tocitem" href="../../tutorials/working_with_paths/">Working with Paths</a></li><li><a class="tocitem" href="../../tutorials/building_a_component/">Building a Component</a></li><li><a class="tocitem" href="../../tutorials/schematic_basics/">Schematic Basics</a></li><li><a class="tocitem" href="../../tutorials/composite_components/">Composite Components</a></li><li><a class="tocitem" href="../../tutorials/parameter_set/">Data-Driven Design with ParameterSet</a></li><li><a class="tocitem" href="../../tutorials/creating_a_pdk/">Creating a PDK</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-4" type="checkbox" checked/><label class="tocitem" for="menuitem-4"><span class="docs-label">Concepts</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../">Overview</a></li><li><a class="tocitem" href="../units/">Units</a></li><li><a class="tocitem" href="../points/">Points</a></li><li><a class="tocitem" href="../geometry/">Geometry</a></li><li><a class="tocitem" href="../transformations/">Transformations</a></li><li><a class="tocitem" href="../polygons/">Polygons</a></li><li><a class="tocitem" href="../coordinate_systems/">Coordinate Systems</a></li><li><a class="tocitem" href="../texts/">Texts</a></li><li><a class="tocitem" href="../paths/">Paths</a></li><li><a class="tocitem" href="../routes/">Routes</a></li><li><a class="tocitem" href="../render/">Rendering and Export</a></li><li><a class="tocitem" href="../solidmodels/">Solid Models (3D Geometry)</a></li><li class="is-active"><a class="tocitem" href>Solid Models (Experimental)</a><ul class="internal"><li><a class="tocitem" href="#Layer-references,-locators,-and-source-stacks"><span>Layer references, locators, and source stacks</span></a></li><li><a class="tocitem" href="#CAD-kernel-operations"><span>CAD kernel operations</span></a></li><li><a class="tocitem" href="#Placements-and-selections"><span>Placements and selections</span></a></li><li><a class="tocitem" href="#Rendering-the-model-and-saving-its-metadata"><span>Rendering the model and saving its metadata</span></a></li><li><a class="tocitem" href="#Migrating-from-the-legacy-API"><span>Migrating from the legacy API</span></a></li></ul></li><li><a class="tocitem" href="../schematic_driven_design/">Schematic-Driven Design</a></li><li><a class="tocitem" href="../components/">Components</a></li><li><a class="tocitem" href="../autofill/">Autofill</a></li><li><a class="tocitem" href="../pdks/">PDKs</a></li><li><a class="tocitem" href="../styleguide/">Style Guide</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-5" type="checkbox"/><label class="tocitem" for="menuitem-5"><span class="docs-label">Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../examples/examplepdk/">ExamplePDK</a></li><li><a class="tocitem" href="../../examples/qpu17/">Quantum Processor</a></li><li><a class="tocitem" href="../../examples/singletransmon/">Single-Transmon Simulation</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-6" type="checkbox"/><label class="tocitem" for="menuitem-6"><span class="docs-label">Reference</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../reference/">Overview</a></li><li><a class="tocitem" href="../../reference/api/">Geometry API Reference</a></li><li><a class="tocitem" href="../../reference/path_api/">Path API Reference</a></li><li><a class="tocitem" href="../../reference/schematic_api/">Schematic API Reference</a></li><li><a class="tocitem" href="../../reference/solidmodels_experimental_api/">Experimental Solid Model API Reference</a></li><li><a class="tocitem" href="../../reference/parameter_set_api/">ParameterSet API Reference</a></li><li><a class="tocitem" href="../../reference/shapes/">Shape Reference</a></li></ul></li><li><a class="tocitem" href="../../how_to/faq/">FAQ/Troubleshooting</a></li><li><input class="collapse-toggle" id="menuitem-8" type="checkbox"/><label class="tocitem" for="menuitem-8"><span class="docs-label">Developer Guide</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../developers/">Overview</a></li><li><a class="tocitem" href="../../developers/principles/">Design Principles</a></li><li><a class="tocitem" href="../../developers/conventions/">Conventions</a></li><li><a class="tocitem" href="../../developers/contributing/">Contributing</a></li><li><a class="tocitem" href="../../developers/versioning/">Versioning Policy</a></li><li><a class="tocitem" href="../../developers/maintenance/">Maintainer Runbook</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Concepts</a></li><li class="is-active"><a href>Solid Models (Experimental)</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Solid Models (Experimental)</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/aws-cqc/DeviceLayout.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/aws-cqc/DeviceLayout.jl/blob/main/docs/src/concepts/solidmodels_experimental.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Solid-Models-with-Metadata-(Experimental)"><a class="docs-heading-anchor" href="#Solid-Models-with-Metadata-(Experimental)">Solid Models with Metadata (Experimental)</a><a id="Solid-Models-with-Metadata-(Experimental)-1"></a><a class="docs-heading-anchor-permalink" href="#Solid-Models-with-Metadata-(Experimental)" title="Permalink"></a></h1><div class="admonition is-warning" id="Experimental-API-2849c704b79b5d8f"><header class="admonition-header">Experimental API<a class="admonition-anchor" href="#Experimental-API-2849c704b79b5d8f" title="Permalink"></a></header><div class="admonition-body"><p>This API may change before DeviceLayout 2.0.</p></div></div><p><code>DeviceLayout.SolidModelsExperimental</code> is an experimental module that enables users to add rich metadata to a <code>SolidModel</code> and export it to a JSON file after rendering. More specifically, this module makes it possible to make explicit selections of terminals, ports, and other surfaces of interest by marking them with point-like locators. It also  introduces a new way of specifying stackups and layers (and the CAD kernel operations on  them) that is more natural and higher level than the existing way offered by the library.</p><p>At this time, the metadata types available and the information they carry are unapologetically  geared towards <a href="https://github.com/awslabs/palace">Palace</a> simulations, but other simulation backends may be added in the future. </p><h2 id="Layer-references,-locators,-and-source-stacks"><a class="docs-heading-anchor" href="#Layer-references,-locators,-and-source-stacks">Layer references, locators, and source stacks</a><a id="Layer-references,-locators,-and-source-stacks-1"></a><a class="docs-heading-anchor-permalink" href="#Layer-references,-locators,-and-source-stacks" title="Permalink"></a></h2><p>First, this module introduces three new types that <em>replace</em> what is currently done using <code>SemanticMeta</code> and <code>ProcessTechnology</code> in the main library:</p><ul><li><code>SourceLayer</code>. This is a natural extension of <code>SemanticMeta</code>. It has a level, but also includes a <code>Material</code> (an enum with members <code>METAL</code>, <code>DIELECTRIC</code>, or <code>NULL</code>) and a thickness. It corresponds naturally to a grouping of objects that can be added or removed by a single fabrication step, e.g. when depositing a film or etching pockets. Each source layer can be configured to appear or not appear in its eventual solid model or GDS destination (for the latter, an explicit <code>GDSMeta</code> can be passed). The &quot;source&quot; qualifier refers to the fact that these are the layers into which we&#39;ll <code>place!</code> entities (see below). Subsequent CAD kernel operations can create new ones, which we refer to as &quot;generated&quot; layers.</li><li><code>SourceStack</code>. The set of all <code>SourceLayer</code>s in a model, keyed by their name, plus a map of level indices to <span>$z$</span>-coordinates.</li><li><code>LayerRef</code>. A <code>Symbol</code> wrapper (and subtype of <code>DeviceLayout.Meta</code>) used to signal which <code>SourceLayer</code> we&#39;re placing an entity into.</li></ul><p>As a simple example, suppose we want to create a model containing a <span>$500 \, \mu\text{m}$</span>-thick dielectric substrate with <span>$500 \, \mu\text{m}$</span> of vacuum below and above, with a mock Imon-style transmon in the middle. We&#39;ll place the Imon shape via its <em>negative</em>  (i.e. the gaps between the island and ground) and compute the positive metal via booleans. We&#39;ll also add a simple lumped port to model the junction in Palace.  The stack for this is</p><pre><code class="language-julia hljs">using DeviceLayout
+using DeviceLayout.PreferredUnits
+using DeviceLayout.SolidModelsExperimental:
+    DIELECTRIC,
+    METAL,
+    NULL,
+    SourceLayer,
+    SourceStack
+
+stack = SourceStack(
+    :metal_neg =&gt; SourceLayer(NULL; level=1, gds_meta=GDSMeta(10, 0)),
+    :metal_pos =&gt; SourceLayer(METAL; level=1, gds_meta=nothing),
+    :ports =&gt; SourceLayer(NULL; level=1, gds_meta=nothing),
+    :chip_outline =&gt; SourceLayer(NULL; level=1, gds_meta=GDSMeta(100, 0)),
+    :substrate =&gt; SourceLayer(
+        DIELECTRIC;
+        level=1,
+        thickness=-500μm,
+        gds_meta=nothing
+    ),
+    :bounding_volume =&gt; SourceLayer(
+        NULL;
+        level=0 =&gt; 1,            # shorthand for &quot;this layer spans levels 0 to 1, with 
+        offset=(-500μm, 500μm),  # an offset of -500μm from the source layer and +500μm
+        gds_meta=nothing         # from the destination layer
+    );
+    levels=(0 =&gt; -500μm, 1 =&gt; 0μm)
+)</code></pre><p>where we defined the bottom and top surfaces of the substrate as the &quot;levels&quot; 0 and 1 in the stack (at <span>$z$</span> coordinates <span>$-500 \, \mu\text{m}$</span> and <span>$0 \, \mu\text{m}$</span>, respectively). Note that we&#39;ve assigned a explicit <code>gds_meta</code>s to the <code>:metal_neg</code> and <code>:chip_outline</code> layers – these will be the layer numbers/datatypes that entities will be mapped to when  we render to GDS; all other layers are only used for simulations so we just  set <code>gds_meta=nothing</code>.</p><h2 id="CAD-kernel-operations"><a class="docs-heading-anchor" href="#CAD-kernel-operations">CAD kernel operations</a><a id="CAD-kernel-operations-1"></a><a class="docs-heading-anchor-permalink" href="#CAD-kernel-operations" title="Permalink"></a></h2><p>In addition to declaring the source stack, we must also specify the CAD operations that are needed to build the full 3D model. </p><pre><code class="language-julia hljs">using DeviceLayout.SolidModelsExperimental:
+    Cut,
+    Extrude,
+    GetBoundary,
+    Remove,
+    SolidModelTarget
+
+# Declare CAD operations in the order that they will be performed
+ops = [
+    Extrude(:substrate), # extrude :substrate layer in-place
+    Extrude(:bounding_volume),
+    # Subtract metal_neg from chip_outline and assign result to metal_pos
+    Cut(:metal_pos, :chip_outline, :metal_neg), 
+    Cut(:vacuum, :bounding_volume, :substrate),
+    # Get the 2D boundary of bounding_volume and assign the result to exterior_boundary
+    GetBoundary(:exterior_boundary, :bounding_volume),
+    # Remove only the group: its entities also bound exterior_boundary
+    Remove(:bounding_volume; remove_entities=false)
+]
+# Complete the specification of the SolidModel target: the stack, plus the CAD operations.
+# This is what we&#39;ll pass to render!, along with the schematic itself
+target = SolidModelTarget(stack, ops)</code></pre><p>In this case we only needed a handful of operation types; see the <a href="../../reference/solidmodels_experimental_api/#solidmodels-experimental-api">API documentation</a> for a full list.</p><h2 id="Placements-and-selections"><a class="docs-heading-anchor" href="#Placements-and-selections">Placements and selections</a><a id="Placements-and-selections-1"></a><a class="docs-heading-anchor-permalink" href="#Placements-and-selections" title="Permalink"></a></h2><p>To place entities into this stack we call <code>place!</code> as usual but pass a <code>LayerRef</code> as the  metadata, which points each placement to a <code>SourceLayer</code>. And to mark surfaces for selection, we place <code>Locator</code>s with the appropriate type of metadata (<code>Terminal</code>, <code>Ground</code>, etc.):</p><pre><code class="language-julia hljs">using DeviceLayout.SolidModelsExperimental:
+    Ground,
+    LayerRef,
+    Locator,
+    LumpedPort,
+    Terminal
+
+cs = CoordinateSystem(&quot;imon&quot;, μm)
+
+# Define the center island of the Imon, the transmon cutout, and their difference 
+# (the gaps between the island and ground). The gaps are what will actually be rendered
+island = centered(Rectangle(20μm, 200μm))
+cutout = offset(island, 30μm)
+gaps = difference2d(cutout, island)
+place!(cs, gaps, LayerRef(:metal_neg))
+# Place a locator at the origin to select a Terminal from :metal_pos called &quot;island&quot;.
+# This will pick out the Imon island because it&#39;s the entity in the final model that
+# contains the locator
+place!(cs, Locator(0μm, 0μm), Terminal(:metal_pos, &quot;island&quot;))
+
+# Define the lumped port for simulation. We&#39;ll style the port rectangle with a WithDirection
+# pointing North, as this is the direction of current flow we expect
+port = Align.above(centered(Rectangle(2μm, 30μm)), island; centered=true) |&gt; WithDirection(90°)
+place!(cs, port, LayerRef(:ports))
+# Place a locator centered on the port
+place!(cs, Locator(center(bounds(port))), LumpedPort(:ports, &quot;jj&quot;))
+
+# Define the cross section of the substrate and bounding volume. In this case
+# they&#39;re the same, as we&#39;re not interested in fully surrounding the substrate with
+# vacuum
+box = centered(Rectangle(500μm, 500μm))
+place!(cs, box, LayerRef(:chip_outline))
+place!(cs, box, LayerRef(:substrate))
+place!(cs, box, LayerRef(:bounding_volume))
+
+# Then place another locator far away from the Imon to mark the ground plane
+place!(cs, Locator(100μm, 0μm), Ground(:metal_pos))</code></pre><p>See the <a href="../../reference/solidmodels_experimental_api/#solidmodels-experimental-api">API documentation</a> for a the complete set of locator metadata types (i.e. the types of selections that can be made).</p><h2 id="Rendering-the-model-and-saving-its-metadata"><a class="docs-heading-anchor" href="#Rendering-the-model-and-saving-its-metadata">Rendering the model and saving its metadata</a><a id="Rendering-the-model-and-saving-its-metadata-1"></a><a class="docs-heading-anchor-permalink" href="#Rendering-the-model-and-saving-its-metadata" title="Permalink"></a></h2><p>Then finally, to render the model, we wrap our simple <code>CoordinateSystem</code> in a component and call <code>render!</code> using the <code>target</code> we defined:</p><pre><code class="language-julia hljs">using DeviceLayout.SchematicDrivenLayout
+using DeviceLayout.SolidModels: SolidModel
+
+graph = SchematicGraph(&quot;imon&quot;)
+add_node!(graph, BasicComponent(cs))
+sch = check!(plan(graph; log_dir=nothing))
+sm = SolidModel(&quot;imon&quot;; overwrite=true)
+metadata = render!(sm, sch, target) # returns the metadata as a Dict
+DeviceLayout.save(&quot;model.xao&quot;, sm)</code></pre><p>Here&#39;s a snapshot of the resulting model viewed through the Gmsh GUI:</p><img src="../../assets/solidmodel-experimental.png" style="width: 100%;"/><p>We can save the metadata to disk if we want to use it later to build Palace configurations:</p><pre><code class="language-julia hljs">using JSON
+
+open(&quot;sm_metadata.json&quot;, &quot;w&quot;) do io
+    JSON.print(io, metadata, 4)
+end</code></pre><p>An abriged version of the metadata file is shown below to illustrate the structure of the data and the information that gets recorded:</p><pre><code class="language-json hljs">{
+    &quot;metadata&quot;: {
+        &quot;schema_version&quot;: &quot;1.0.0&quot;,
+        &quot;length_units&quot;: &quot;um&quot;,
+        &quot;assembly&quot;: { &quot;levels&quot;: { &quot;0&quot;: -500.0, &quot;1&quot;: 0.0 } }
+    },
+    &quot;physical_groups&quot;: {
+        &quot;substrate&quot;: { &quot;dim&quot;: 3, &quot;tag&quot;: 1 },
+        &quot;vacuum&quot;: { &quot;dim&quot;: 3, &quot;tag&quot;: 2 },
+        &quot;exterior_boundary&quot;: { &quot;dim&quot;: 2, &quot;tag&quot;: 4 },
+        &quot;__592bac94fb8108ba&quot;: { &quot;dim&quot;: 2, &quot;tag&quot;: 28 },
+        &quot;__d45f9082fcee6bf5&quot;: { &quot;dim&quot;: 2, &quot;tag&quot;: 29 },
+        &quot;__d8d680a0ae2f5cfd&quot;: { &quot;dim&quot;: 2, &quot;tag&quot;: 30 }
+    },
+    &quot;layers&quot;: {
+        &quot;metal_pos&quot;: {
+            &quot;type&quot;: &quot;source&quot;, &quot;dim&quot;: 2, &quot;level&quot;: 1, &quot;offset&quot;: 0.0, &quot;thickness&quot;: 0.0,
+            &quot;pgs&quot;: [&quot;__592bac94fb8108ba&quot;, &quot;__d45f9082fcee6bf5&quot;]
+        },
+        &quot;substrate&quot;: {
+            &quot;type&quot;: &quot;source&quot;, &quot;dim&quot;: 3, &quot;level&quot;: 1, &quot;offset&quot;: 0.0, &quot;thickness&quot;: -500.0,
+            &quot;pgs&quot;: [&quot;substrate&quot;]
+        },
+        &quot;vacuum&quot;: { &quot;type&quot;: &quot;generated&quot;, &quot;dim&quot;: 3, &quot;pgs&quot;: [&quot;vacuum&quot;] },
+        &quot;exterior_boundary&quot;: { &quot;type&quot;: &quot;generated&quot;, &quot;dim&quot;: 2, &quot;pgs&quot;: [&quot;exterior_boundary&quot;] }
+    },
+    &quot;ports&quot;: {
+        &quot;imon.jj&quot;: {
+            &quot;type&quot;: &quot;LumpedPort&quot;, &quot;name&quot;: &quot;imon.jj&quot;, &quot;index&quot;: 1, &quot;layer&quot;: &quot;ports&quot;,
+            &quot;direction&quot;: [0.0, 1.0, 0.0],
+            &quot;pgs&quot;: [&quot;__d8d680a0ae2f5cfd&quot;]
+        }
+    },
+    &quot;terminals&quot;: {
+        &quot;METAL_CC__592bac94fb8108ba&quot;: {
+            &quot;locators&quot;: [&quot;imon.island&quot;],
+            &quot;pgs&quot;: [&quot;__592bac94fb8108ba&quot;]
+        }
+    },
+    &quot;ground&quot;: {
+        &quot;METAL_CC__d45f9082fcee6bf5&quot;: { &quot;pgs&quot;: [&quot;__d45f9082fcee6bf5&quot;] }
+    },
+    &quot;tagged&quot;: {}
+}</code></pre><p>This file can be queried by downstream consumers to assemble Palace configurations, e.g. by fetching all physical group tags associated with layer <code>substrate</code> in order add an entry to <code>Domains.Materials</code>. It can likewise be used to make sense of Palace postprocessing results by looking up the semantic meaning of, say, port or terminal entries. The crucial benefit of all of this is that we&#39;ve offloaded all of the information about a solid model that is necessary to configure simulations from the in-memory <code>SolidModel</code> to a compact file on disk, making it possible to reuse meshes long after the Julia process that generated them is gone.</p><p>Note that the names of selections made inside the Imon coordinate system were automatically prefixed  with <code>&quot;imon.&quot;</code>; this is to ensure all selections made throughout a schematic get unique names.  The prefix is the ID of the component&#39;s node in the schematic node, which defaults to the component&#39;s name.  In this case, it&#39;s simply the coordinate system&#39;s name, i.e. <code>&quot;imon&quot;</code>.</p><p>We can also render the schematic to a <code>Cell</code> for GDS export:</p><pre><code class="language-julia hljs">cell = Cell(&quot;artwork&quot;, μm)
+render!(cell, cs, stack)</code></pre><p>Each layer is rendered to its <code>gds_meta</code>.</p><h2 id="Migrating-from-the-legacy-API"><a class="docs-heading-anchor" href="#Migrating-from-the-legacy-API">Migrating from the legacy API</a><a id="Migrating-from-the-legacy-API-1"></a><a class="docs-heading-anchor-permalink" href="#Migrating-from-the-legacy-API" title="Permalink"></a></h2><p>To migrate components and other code to this new API, replace <code>SemanticMeta</code> with <code>LayerRef</code>, add locators, and build the <code>SourceStack</code> and <code>SolidModelTarget</code>. Entities marked with <code>SemanticMeta</code> are ignored by this new rendering pipeline, so a schematic that mixes ported and unported components can still be rendered with it – the unported components won&#39;t show up in the model. Similarly, the legacy pipeline ignores entities marked with <code>LayerRef</code> or <code>LocatorMeta</code>. This bi-directional compatibility makes it possible to migrate  a complex component library gradually, one component at a time, so that once everything has been ported and validated the dead code can simply be removed.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../solidmodels/">« Solid Models (3D Geometry)</a><a class="docs-footer-nextpage" href="../schematic_driven_design/">Schematic-Driven Design »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.20.0 on <span class="colophon-date" title="Friday 6 November 2026 15:02">Friday 6 November 2026</span>. Using Julia version 1.10.13.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
