@@ -217,7 +217,8 @@ function contour_contained(child::Vector{GridPt}, parent::Vector{GridPt}; strict
             if !isnothing(params)
                 strict && return false
                 push!(ts, params[1])
-            elseif iszero(cross2(sub2(b, a), sub2(c, a)))
+            elseif iszero(cross2(sub2(b, a), sub2(d, c))) &&
+                   iszero(cross2(sub2(b, a), sub2(c, a)))
                 strict && return false
                 k = a[1] == b[1] ? 2 : 1
                 for p in (c, d)

@@ -5,8 +5,9 @@
 #   * rectilinear integer inputs: every intersection is a lattice point, so the laws
 #     hold with no tolerance (`≐`, or `region_same` where the kernel may split or merge
 #     contours that touch at a vertex);
-#   * commutativity, identities, self-union, and single-rule fill laws hold with no
-#     tolerance on every family — one operation, one rounding, same inputs;
+#   * identities, self-union, and single-rule fill laws hold with no tolerance on
+#     every family — one operation, one rounding, same inputs. Commutativity is also one
+#     operation per side, but it needs a tolerance on stars (B1 explains why);
 #   * laws that compose operations (associativity, duality, absorption, mixed fill
 #     rules, tiling) hold within one lattice unit on integer and float stars, because
 #     each side rounds intersection vertices independently.
@@ -404,10 +405,12 @@ end
     # a warning (ledger L14), so validity is checked separately from the region, and a
     # hole after a warned cut can fail to attach (L15), which leaves no output to check.
     @lawcheck function keyhole_multi(cp=int_multi_holed_polygon)
+        event!("tree", togrid(cp))
         out, _ = keyholes_warned(cp)
         return isnothing(out) || first(region_within(out, togrid(cp), 1))
     end
     @law :B11_multi @lawcheck function keyhole_multi_valid(cp=int_multi_holed_polygon)
+        event!("tree", togrid(cp))
         out, warned = keyholes_warned(cp)
         return warned || valid_keyholes(out)
     end
@@ -417,6 +420,7 @@ end
             floating && (polys = [Polygon(Point{Float64}.(p.p)) for p in polys])
             c = union2d(polys)
             valid_output(c; weak=true, nested=true) || reject!()
+            event!("tree", togrid(c))
             out, _ = keyholes_warned(c)
             return isnothing(out) || first(region_within(out, togrid(c), 1))
         end

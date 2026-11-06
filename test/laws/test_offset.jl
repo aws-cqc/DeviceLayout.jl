@@ -27,7 +27,8 @@ end
 @testitem "GeomLaws O2: monotonicity" setup = [CommonTestSetup, LawsSetup] tags =
     [:geomlaws] begin
     # offset(A, δ₁) ⊆ offset(A, δ₂) for δ₁ < δ₂, including δ = 0 (A itself), for every
-    # join type. Containment is checked at one lattice unit: each side rounds once.
+    # join type. Containment is checked within two lattice units, one for each side's
+    # rounding.
     joins = (Clipper.JoinTypeMiter, Clipper.JoinTypeSquare, Clipper.JoinTypeRound)
     @lawcheck function monotone_int(
         A=int_thick_polygon,
@@ -255,19 +256,25 @@ end
 @testitem "GeomLaws O7: path halos" setup = [CommonTestSetup, LawsSetup] tags = [:geomlaws] begin
     # `halo(pa, δ)` is documented as equivalent to offsetting the path's geometry by δ
     # (`halo_is_offset`). Halos of polygons are `offset` itself and need no law.
+    # A `Path` prints without its segments, so each check records them for the
+    # counterexample.
+    record(pa) = event!("path", [(n.seg, n.sty) for n in pa])
     @lawcheck function halo_offsets(case=path_case)
         pa, fp, δ, _ = case
+        record(pa)
         return halo_is_offset(pa, fp, δ)
     end
     # A taper's halo is a taper with both widths increased by 2δ, which keeps δ only
     # along the path's normal: the slanted sides are δ·cos α from the taper, and the
     # square end extension at the narrow end overhangs the miter corner (ledger L12).
     @law :O7_taper @lawcheck function halo_offsets_taper(case=taper_case)
+        record(first(case))
         return halo_is_offset(case...)
     end
     # With an inner offset, the halo is the region between the two offsets (ledger L13).
     @law :O7_inner @lawcheck function halo_inner(case=path_case)
         pa, _, δ, δi = case
+        record(pa)
         return inner_halo_is_difference(pa, δ, δi)
     end
 end

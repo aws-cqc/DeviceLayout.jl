@@ -37,7 +37,7 @@ tag takes about two minutes at the default budget.
 | Variable              | Default    | Effect                                                              |
 |:--------------------- |:---------- |:------------------------------------------------------------------- |
 | `GEOMLAWS_EXAMPLES`   | `50`       | Valid generated inputs per check                                    |
-| `GEOMLAWS_SEED`       | `20260908` | Generator seed; `random` draws a fresh one                          |
+| `GEOMLAWS_SEED`       | `20260908` | Generator seed (`explore.jl` also takes `random`)                   |
 | `GEOMLAWS_RUN_BROKEN` | `0`        | `1` runs the checks that are known to fail instead of skipping them |
 
 ### Exploration
@@ -81,7 +81,10 @@ and D1 are algebraic laws.
 **Oracle laws** compare the kernel's output with the true answer, computed exactly from
 the operands without the kernel: point membership for the boolean operations (B7, B12),
 and distance from the operand for round offsets (O3, O8) and path halos (O7). They
-catch wrong answers that are self-consistent.
+catch wrong answers that are self-consistent. O7 is the exception: the footprint it
+measures distance from is the kernel's `union2d` of the path's pieces, and its upper
+bound on the halo is the kernel's miter `offset` of the footprint. Other laws cover
+both operations.
 
 **Validity laws** check the structure of the output: contours that don't cross
 themselves, outer/hole winding, holes inside their parents (B8), and well-formed keyhole
@@ -115,9 +118,9 @@ and path halos, and records which checks then fail. At the default budget and se
 
 | Mutant                      | Defect                                                            | Checks that fail                    |
 |:--------------------------- |:----------------------------------------------------------------- |:----------------------------------- |
-| `fill_hole_near_parent`     | A hole with a vertex within one grid unit of its parent is filled | B5, B6, B7, B9, B12, ledger         |
+| `fill_hole_near_parent`     | A hole with a vertex within one grid unit of its parent is filled | B5, B7, B9, B12, ledger             |
 | `fill_small_holes`          | Holes under 5 % of their parent's area are filled                 | B5, B6, B7, B12, O3, ledger         |
-| `drop_small_components`     | Output components under 5 % of the largest one's area are dropped | B2, B5, B6, B7, B9, B10, B12        |
+| `drop_small_components`     | Output components under 5 % of the largest one's area are dropped | B2, B5, B6, B7, B10, B12            |
 | `xor_touch_is_union`        | `xor2d` of operands that share a vertex returns their union       | B4, B5, B7, B9, B12, ledger         |
 | `evenodd_subjects`          | Subjects are filled even-odd instead of positive                  | B2, B3, B9, B10                     |
 | `hole_orientation`          | Holes are returned counterclockwise                               | B2, B3, B5, B6, B8, B9, B11, ledger |
@@ -212,7 +215,7 @@ Clipper returns them.
 | `int_pair`, `degenerate_pair`                  | Two thick integer stars, the second shifted by up to 10 units each way; or a rectangle with a partner that is a translated copy (identical, overlapping, or disjoint), shares an edge, touches a corner, has an extra collinear vertex, or is a one-unit strip along its edge |
 | `float_star_pair`                              | Two float stars of the same size, the second shifted by up to half that size                                                                                                                                                                                                  |
 | `float_perturbed_pair`                         | A float star and a copy with one vertex moved by k = 1–10 fm, or a sliver k fm wide along one edge. Their edges nearly coincide, which makes every intersection ill-conditioned, so laws on these pairs hold within k + 2                                                     |
-| `float_far_pair`                               | A float star pair moved up to 1 cm from the origin, where `Float64` resolves only about 2 fm                                                                                                                                                                                  |
+| `float_far_pair`                               | A float star pair moved up to 1 cm from the origin, about 10¹³ grid units                                                                                                                                                                                                     |
 | triples, `*_polygon_set`                       | Three operands; sets of 2–6 polygons spread over an area a few times their size                                                                                                                                                                                               |
 | `int_necked_polygon`, `int_cavity_polygon`     | Rectilinear dumbbells and cavities, whose offsets change topology: erosion splits a dumbbell at its neck, growth closes a cavity's mouth into a hole                                                                                                                          |
 | `int_holed_polygon`, `int_multi_holed_polygon` | `ClippedPolygon` trees built directly (not by clipping): one hole; or 2–6 holes in a grid of cells, some with islands, so that one hole's keyhole cut runs into another hole                                                                                                  |

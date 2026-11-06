@@ -13,9 +13,10 @@
 # GEOMLAWS_EXAMPLES and draws a fresh seed per run.
 # ---------------------------------------------------------------------------------
 const GEOMLAWS_EXAMPLES = parse(Int, get(ENV, "GEOMLAWS_EXAMPLES", "50"))
-const GEOMLAWS_SEED = let s = get(ENV, "GEOMLAWS_SEED", "20260908")
-    s == "random" ? rand(UInt32) : parse(UInt32, s)
-end
+# `explore.jl` resolves GEOMLAWS_SEED=random and prints the seed it draws. Here the seed
+# must be a number: this file is evaluated once per test item, so a seed drawn here
+# would differ between items and could not be reproduced.
+const GEOMLAWS_SEED = parse(UInt32, get(ENV, "GEOMLAWS_SEED", "20260908"))
 # Database recording of failing examples is handled by graduation into fixed
 # testitems instead; keep the test directory clean.
 const LAWS = Supposition.CheckConfig(;
@@ -39,9 +40,22 @@ function check_budget(report)
 end
 # `rng` must be passed to `@check` explicitly: `SuppositionReport` defaults it to a
 # fresh `RandomDevice` seed and merges that over `config`, so `LAWS.rng` alone would be
-# ignored and every run would be randomly seeded. `TestState` copies the RNG per check.
+# ignored and every run would be randomly seeded. Each check draws its own stream,
+# seeded from GEOMLAWS_SEED and the check's name, so that checks on one generator see
+# different inputs. The name is hashed with FNV-1a because `hash` is not guaranteed to
+# be the same across Julia versions.
+function check_seed(name::String)
+    h = 0x811c9dc5 ⊻ GEOMLAWS_SEED
+    for c in codeunits(name)
+        h = (h ⊻ c) * 0x01000193
+    end
+    return h
+end
 macro lawcheck(def)
-    return esc(:(check_budget(@check config = LAWS rng = LAWS.rng $def)))
+    name = string(def.args[1].args[1])
+    return esc(
+        :(check_budget(@check config = LAWS rng = Random.Xoshiro(check_seed($name)) $def))
+    )
 end
 
 # Laws known to fail on the current kernel, keyed by law id and generator family.
@@ -151,7 +165,7 @@ region_area_exact(polys::GridRegion) =
     sum(signed_area2_exact(v) for v in polys; init=Int128(0)) // 2
 
 # Squared distance from q to segment ab compared against tol², exactly. The cross
-# product fits Int128 at the generated coordinate ranges (≤ 1e11 lattice units); its
+# product fits Int128 at the generated coordinate ranges (≤ about 1e13 lattice units); its
 # square does not, so the final comparison is done in BigInt.
 function within_segment_distance_exact(q::GridPt, a::GridPt, b::GridPt, tol::Integer)
     tol >= 0 || return false
@@ -491,7 +505,7 @@ end
 # memberships in the operands, which are contour lists read under the even-odd rule
 # (for a valid tree, the same region as the positive rule the operations use). The
 # right-hand side never touches the clipping kernel. Examples where no probe lands
-# inside both operands are rejected rather than passed.
+# inside one of the operands are rejected rather than passed.
 function boolean_oracle_holds(As::Vector{<:Polygon}, Bs::Vector{<:Polygon}; tol=1)
     gA, gB = togrid(As), togrid(Bs)
     results = (
@@ -895,7 +909,7 @@ float_perturbed_pair = @composed function _float_perturbed_pair(
 end
 
 # A float star pair moved to where layouts live: up to 1 cm from the origin, about
-# 1e13 lattice units, where Float64 resolves only about 2 fm. The exact predicates stay
+# 1e13 lattice units, where Float64 still resolves about 0.002 fm. The exact predicates stay
 # exact in Int128 up to about 1e18 lattice units.
 float_far_pair = @composed function _float_far_pair(
     pair=float_star_pair,
@@ -1111,9 +1125,9 @@ function apply_exact(t, p::Polygon{Int})
     return Polygon(Point{Int}[Point(round(Int, q.x), round(Int, q.y)) for q in t(p).p])
 end
 
-# Lengths: fixed unit choices for the unit-invariance law. The nm/μm/mm images of
-# one integer polygon are exactly representable, and `clipperize` maps all three to
-# the same fm lattice.
+# Lengths: fixed unit choices for the unit-invariance law. The nm and μm images of
+# one integer polygon are exact, and the mm image (x/1000) is off by far less than half
+# a lattice unit, so `clipperize` maps all three to the same fm lattice points.
 const UNIT_CHOICES = (Unitful.nm, Unitful.μm, Unitful.mm)
 with_unit(p::Polygon{Int}, u) = Polygon([
     Point(

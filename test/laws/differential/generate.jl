@@ -172,7 +172,8 @@ const FAMILIES = [
     "int_holed" =>
         () -> begin
             outer, hole = contour_polygons(example(int_holed_polygon))
-            # The tree stores the hole clockwise; `keyhole` reverses its operand itself.
+            # The tree stores the hole clockwise. The case stores it counterclockwise:
+            # `keyhole` subtracts it as given, and compare.jl reads it as `a & !b`.
             hole = rev(hole)
             fouter = Polygon(Point{Float64}.(outer.p))
             fhole = Polygon(Point{Float64}.(hole.p))

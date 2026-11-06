@@ -8,7 +8,7 @@
     # rounded twice (by the kernel, then onto the lattice after rotating) where the
     # union of the rotated inputs is rounded once, so the float variants are within two
     # lattice units. Arbitrary rotations are float-only; the far variant also moves the
-    # pair up to 1 cm from the origin, where Float64 resolves about 2 fm.
+    # pair up to 1 cm from the origin, where Float64 still resolves about 0.002 fm.
     # Transform the tree contours, not the keyhole polygons, so the comparison is
     # contour-to-contour.
     transformed(t, cp::ClippedPolygon) = [t(p) for p in contour_polygons(cp)]
@@ -59,9 +59,10 @@ end
 
 @testitem "GeomLaws T2: coordinate-unit invariance" setup = [CommonTestSetup, LawsSetup] tags =
     [:geomlaws] begin
-    # One integer polygon expressed in nm, μm, and mm (all exactly representable) must
-    # give lattice-identical results, and identical to the unitless Float64 (μm) path:
-    # `clipperize` maps every one of them to the same fm lattice.
+    # One integer polygon expressed in nm, μm, and mm must give lattice-identical
+    # results, and identical to the unitless Float64 (μm) path: `clipperize` maps every
+    # one of them to the same fm lattice points. The mm coordinates are not exact, but
+    # they are off by far less than half a lattice unit.
     @lawcheck function unit_invariant(pair=int_pair, δ=Data.Integers(1, 4))
         A, B = pair
         Af, Bf = Polygon(Point{Float64}.(A.p)), Polygon(Point{Float64}.(B.p))
