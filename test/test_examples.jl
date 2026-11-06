@@ -163,3 +163,110 @@ end
     @test length(metal_comp_tags[2]) == 2 # Transmon island + junction top lead
     @test length(metal_comp_tags[3]) == 4 # Ground plane + bottom lead + TL ends
 end
+
+@testitem "Single Transmon (experimental)" setup = [CommonTestSetup, QuietGmshSetup] begin
+    import JSON
+    using JSONSchema
+    include("../examples/SingleTransmon/SingleTransmonExperimental.jl")
+    schema = Schema(
+        JSON.parsefile(joinpath(@__DIR__, "..", "schemas", "sm_metadata.schema.json"))
+    )
+    no_warnings = log -> log.level < Logging.Warn
+
+    floorplan, sm, metadata_path = with_test_logger(no_warnings) do
+        return SingleTransmonExperimental.single_transmon(;
+            save_mesh=true,
+            mesh_order=1,
+            dir=tdir
+        )
+    end
+    metadata = JSON.parsefile(metadata_path)
+    @test isvalid(schema, metadata)
+
+    layer_entities(name) =
+        sum(metadata["layers"][name]["pgs"]) do pg_name
+            return length(
+                SolidModels.entitytags(sm[pg_name, metadata["layers"][name]["dim"]])
+            )
+        end
+    # 3*4 sides of chip and vacuum boxes + top + bottom
+    @test layer_entities("exterior_boundary") == 14
+    @test layer_entities("vacuum") == 2
+    @test layer_entities("substrate") == 1
+    @test layer_entities("lumped_element") == 1
+    @test layer_entities("port") == 2
+    # Ground, island, and transmission line
+    @test sort([only(t["locators"]) for t in values(metadata["terminals"])]) == ["p_ro.feedline", "qubit.island"]
+    @test length(metadata["ground"]) == 1
+    @test Set(keys(metadata["ports"])) ==
+          Set(["p_ro.port_1", "p_ro.port_2", "qubit.junction"])
+
+    config = SingleTransmonExperimental.configfile(metadata_path)
+    boundaries = config["Boundaries"]
+    port_attributes = [only(p["Attributes"]) for p in boundaries["LumpedPort"]]
+    @test allunique(port_attributes)
+    @test [p["Direction"] for p in boundaries["LumpedPort"]] == [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+
+    @testset "Palace mesh boundary attributes" begin
+        # Save the generated mesh again as text, to parse it.
+        gmsh = SolidModels.gmsh
+        mesh_path = joinpath(tdir, "single_transmon_experimental.msh2")
+        original_binary = gmsh.option.get_number("Mesh.Binary")
+        try
+            gmsh.option.set_number("Mesh.Binary", 0)
+            save(mesh_path, sm)
+        finally
+            gmsh.option.set_number("Mesh.Binary", original_binary)
+        end
+
+        # MSH2 writes a boundary element for each physical group containing a surface.
+        # Palace requires a single boundary record per non-periodic face.
+        mesh_lines = readlines(mesh_path)
+        elements_start = findfirst(==("\$Elements"), mesh_lines)
+        element_count = parse(Int, mesh_lines[elements_start + 1])
+        boundary_faces = NTuple{3, Int}[]
+        boundary_attributes = Set{Int}()
+        volume_elements = 0
+        for line in mesh_lines[(elements_start + 2):(elements_start + 1 + element_count)]
+            fields = parse.(Int, split(line))
+            if fields[2] == 2 # Linear triangles
+                num_tags = fields[3]
+                push!(boundary_faces, Tuple(sort(fields[(num_tags + 4):(num_tags + 6)])))
+                push!(boundary_attributes, fields[4])
+            elseif fields[2] == 4 # Linear tetrahedra
+                volume_elements += 1
+            end
+        end
+        @test volume_elements > 0
+        @test allunique(boundary_faces)
+        @test boundary_attributes == Set([
+            boundaries["PEC"]["Attributes"]...,
+            boundaries["Absorbing"]["Attributes"]...,
+            port_attributes...
+        ])
+    end
+
+    @testset "Wave ports" begin
+        _, wave_sm, wave_metadata_path = with_test_logger(no_warnings) do
+            return SingleTransmonExperimental.single_transmon(; wave_ports=true, dir=tdir)
+        end
+        wave_metadata = JSON.parsefile(wave_metadata_path)
+        @test isvalid(schema, wave_metadata)
+        @test Set(keys(wave_metadata["ports"])) ==
+              Set(["qubit.junction", "p_ro_wave_port_1", "p_ro_wave_port_2"])
+        # Each patch is split where the substrate surface meets it
+        for name in ("p_ro_wave_port_1", "p_ro_wave_port_2")
+            @test sum(wave_metadata["ports"][name]["pgs"]) do pg_name
+                return length(SolidModels.entitytags(wave_sm[pg_name, 2]))
+            end == 2
+        end
+        wave_config = SingleTransmonExperimental.configfile(wave_metadata_path)
+        wave_attributes = [
+            only(p["Attributes"]) for p in [
+                wave_config["Boundaries"]["WavePort"]
+                wave_config["Boundaries"]["LumpedPort"]
+            ]
+        ]
+        @test allunique(wave_attributes)
+    end
+end

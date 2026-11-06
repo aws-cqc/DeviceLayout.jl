@@ -62,6 +62,10 @@ The format of this changelog is based on
     last, and the `ExamplePDK` single-chip target defines `prerender_ops`. The method,
     `prerender_ops` and their operations are experimental: their API may change in minor
     versions, for example as 3D construction is added.
+  - `SchematicDrivenLayout.ExamplePDKExperimental`, a version of `ExamplePDK`'s single-transmon
+    components and single-chip target for `SolidModelsExperimental`, and the
+    `SingleTransmonExperimental` example, whose `configfile` builds a Palace configuration
+    from the saved metadata.
 
 ### Changed
 
