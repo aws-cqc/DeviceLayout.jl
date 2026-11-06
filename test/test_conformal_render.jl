@@ -754,3 +754,601 @@
         gmsh.finalize()
     end
 end
+
+@testitem "render_conformal!(sm, sch, target)" setup = [CommonTestSetup, QuietGmshSetup] begin
+    using .SchematicDrivenLayout
+    using DeviceLayout: Point, Rectangle, centered, coordinatetype, LineSegment
+    using DeviceLayout: CurvilinearRegion, to_polygons
+    using DeviceLayout.Polygons: Circle, signed_area
+    using DeviceLayout.SolidModels: gmsh, hasgroup, entitytags
+    const SDL = SchematicDrivenLayout
+
+    tech = ProcessTechnology((;), (; thickness=(; chip_area=525μm)))
+    function schematic_of(cs)
+        g = SchematicGraph("test")
+        add_node!(g, BasicComponent(cs))
+        sch = plan(g; log_dir=nothing)
+        check!(sch)
+        return sch
+    end
+    um2(a) = ustrip(μm^2, a)
+    area2d(regs) =
+        sum(regs; init=0.0) do r
+            return abs(um2(signed_area(to_polygons(r.exterior)))) -
+                   sum(h -> abs(um2(signed_area(to_polygons(h)))), r.holes; init=0.0)
+        end
+    occ_area(sm, name) = sum(t -> gmsh.model.occ.getMass(2, t), entitytags(sm[name, 2]))
+
+    # A writeable ground area with a circle cut from it (curved feature), and a
+    # fabrication-only `not_simulated` square that must be dropped from the simulation model.
+    # `prerender_ops` form `metal = writeable_area − metal_negative`.
+    function conformal_target_schematic()
+        cs = CoordinateSystem("test")
+        place!(cs, centered(Rectangle(200μm, 200μm)), :writeable_area)
+        place!(cs, Circle(Point(0.0μm, 0.0μm), 40μm), :metal_negative)
+        place!(
+            cs,
+            not_simulated(centered(Rectangle(20μm, 20μm)) + Point(70μm, 70μm)),
+            :metal_negative
+        )
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            prerender_ops=[(
+                "metal",
+                difference_geom2d!,
+                ("writeable_area", "metal_negative")
+            )],
+            retained_physical_groups=[("metal", 2)]
+        )
+        return schematic_of(cs), target
+    end
+
+    @testset "forms metal group with prerender_ops, keeping an uncut arc" begin
+        sch, target = conformal_target_schematic()
+        sm = SolidModel("conformal_target"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            @test_nowarn render_conformal!(sm, sch, target)
+            # One surface: the ground with one hole, which OpenCASCADE subtracts
+            @test hasgroup(sm, "metal", 2)
+            @test length(entitytags(sm["metal", 2])) == 1
+            @test occ_area(sm, "metal") ≈ 200^2 - π * 40^2 rtol = 1e-6
+            # 2D scope: no 3D volumes built here
+            @test isempty(gmsh.model.getEntities(3))
+            # The circular cut stays a native arc
+            @test any(
+                ((d, t),) -> gmsh.model.getType(d, t) == "Circle",
+                gmsh.model.getEntities(1)
+            )
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "renders into its own model when another is current" begin
+        sch, target = conformal_target_schematic()
+        sm = SolidModel("conformal_own"; overwrite=true)
+        other = SolidModel("conformal_other"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm, sch, target)
+            gmsh.model.set_current(SolidModels.name(sm))
+            @test length(gmsh.model.getEntities(2)) == 1
+            gmsh.model.set_current(SolidModels.name(other))
+            @test isempty(gmsh.model.getEntities(2))
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "drops fabrication-only (not_simulated) fill" begin
+        sch, target = conformal_target_schematic()
+        sm = SolidModel("conformal_nosim"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm, sch, target)
+            # Had the fill been kept, it would cut a second hole: the metal surface has
+            # just the outer loop and the circular hole
+            tags = entitytags(sm["metal", 2])
+            @test length(tags) == 1
+            @test sum(length(gmsh.model.occ.getCurveLoops(t)[1]) for t in tags) == 2
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "SolidModelTarget carries prerender_ops through the constructor" begin
+        target = SolidModelTarget(
+            tech;
+            prerender_ops=[("metal", union_geom2d!, ("metal_negative",))]
+        )
+        @test length(target.prerenderer) == 1
+        @test target.prerenderer[1][1] == "metal"
+        @test isempty(target.postrenderer)
+        # The positional form without a `prerenderer` still works
+        positional = SolidModelTarget(tech, [], [], [], [], [], [], [], (;), [])
+        @test isempty(positional.prerenderer)
+        # As with `postrender_ops`, a tuple works, and helpers can add any operation
+        target = SolidModelTarget(tech; prerender_ops=(("metal", union_geom2d!, ("a",)),))
+        push!(target.prerenderer, ("metal", difference_geom2d!, ("metal", ["b", "c"])))
+        @test length(target.prerenderer) == 2
+    end
+
+    @testset "prerender ops: union_geom2d! and difference_geom2d!" begin
+        square(x) = centered(Rectangle(20μm, 20μm)) + Point(x, 0μm)
+        groups() = Dict{String, Any}(
+            "a" => Any[square(0μm), square(10μm)], # overlapping entities
+            "b" => Any[square(30μm)],
+            "c" => Any[centered(Rectangle(4μm, 4μm))]
+        )
+        # A self-union merges a group's overlapping entities
+        @test area2d(union_geom2d!(groups(), "a")) ≈ 600
+        # Dimensions as in `postrender_ops` are accepted; only 2D is supported
+        @test area2d(union_geom2d!(groups(), "a", "b", 2, 2)) ≈ 1000
+        @test_throws ArgumentError union_geom2d!(groups(), "a", "b", 3, 3)
+        # As with `union_geom!`, a single dimension is a self-union that removes the object
+        g = groups()
+        @test area2d(union_geom2d!(g, "a", 2)) ≈ 600
+        @test !haskey(g, "a")
+        @test_throws ArgumentError union_geom2d!(groups(), "a", 3)
+        # A vector of group names stands for their union
+        @test area2d(difference_geom2d!(groups(), ["a", "b"], "c")) ≈ 1000 - 16
+        # A missing tool is logged and the object is used alone, merged into regions
+        @test_logs (:info, r"not a group") match_mode = :any begin
+            @test area2d(difference_geom2d!(groups(), "a", "missing")) ≈ 600
+            @test area2d(union_geom2d!(groups(), "missing", "b")) ≈ 400
+        end
+        @test_logs (:error, r"not a group") match_mode = :any difference_geom2d!(
+            groups(),
+            "missing",
+            "a"
+        )
+        # A missing name in a vector of names is logged too
+        @test_logs (:info, r"typo is not a group") match_mode = :any difference_geom2d!(
+            groups(),
+            "a",
+            ["b", "typo"]
+        )
+        # remove_object / remove_tool delete the inputs after they are read
+        g = groups()
+        @test area2d(
+            difference_geom2d!(g, "a", "c"; remove_object=true, remove_tool=true)
+        ) ≈ 600 - 16
+        @test !haskey(g, "a") && !haskey(g, "c") && haskey(g, "b")
+    end
+
+    @testset "ExamplePDK prerender_ops remove the ports from the metal" begin
+        # As its postrender ops do, the conformal metal excludes the ports
+        groups = Dict{String, Any}(
+            "writeable_area" => Any[centered(Rectangle(100μm, 100μm))],
+            "metal_negative" => Any[centered(Rectangle(20μm, 20μm))],
+            "metal_positive" => Any[centered(Rectangle(4μm, 4μm))],
+            "port" => Any[centered(Rectangle(10μm, 10μm)) + Point(30μm, 30μm)]
+        )
+        target = SchematicDrivenLayout.ExamplePDK.SINGLECHIP_SOLIDMODEL_TARGET
+        SDL._run_prerender_ops!(
+            groups,
+            target.prerenderer;
+            zs_by_group=Dict{String, Vector{Any}}(),
+            boolean_out=Set{String}()
+        )
+        @test area2d(groups["metal"]) ≈ 100^2 - 20^2 + 4^2 - 10^2
+        @test !haskey(groups, "writeable_area") && !haskey(groups, "metal_positive")
+    end
+
+    @testset "render_conformal! emits a retained group no prerender op formed" begin
+        # Such a group is unioned: overlapping elements merge into one surface
+        cs = CoordinateSystem("test")
+        place!(cs, Circle(Point(0.0μm, 0.0μm), 30μm), :metal_negative)
+        place!(cs, Circle(Point(20.0μm, 0.0μm), 30μm), :metal_negative)
+        sch = schematic_of(cs)
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            retained_physical_groups=[("metal_negative", 2)]
+        )
+        sm = SolidModel("conformal_raw"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm, sch, target)
+            @test length(entitytags(sm["metal_negative", 2])) == 1
+            expected = area2d(
+                union2d_curved(
+                    Any[
+                        Circle(Point(0.0μm, 0.0μm), 30μm),
+                        Circle(Point(20.0μm, 0.0μm), 30μm)
+                    ]
+                )
+            )
+            @test occ_area(sm, "metal_negative") ≈ expected rtol = 1e-3
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "render_conformal! emits every group if none is retained" begin
+        cs = CoordinateSystem("test")
+        place!(cs, centered(Rectangle(10μm, 10μm)), :a)
+        place!(cs, centered(Rectangle(10μm, 10μm)) + Point(20μm, 0μm), :b)
+        sch = schematic_of(cs)
+        sm = SolidModel("conformal_all"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            render_conformal!(sm, sch, SolidModelTarget(tech; simulation=true))
+            @test hasgroup(sm, "a", 2) && hasgroup(sm, "b", 2)
+            # As in `render!`, a list without 2D groups keeps none of them
+            sm = SolidModel("conformal_none"; overwrite=true)
+            target = SolidModelTarget(tech; retained_physical_groups=[("substrate", 3)])
+            render_conformal!(sm, sch, target)
+            @test isempty(SolidModels.dimgroupdict(sm, 2))
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "render_conformal! ignores skip_unused_layers and auto_union" begin
+        # The groups are selected and unioned before they are emitted, so these rendering
+        # options change nothing, even with no retained groups and no operations. The render
+        # logs nothing, while a union of the emitted groups would log that each is a single
+        # entity.
+        cs = CoordinateSystem("test")
+        place!(cs, centered(Rectangle(10μm, 10μm)), :a)
+        place!(cs, centered(Rectangle(10μm, 10μm)) + Point(5μm, 0μm), :a)
+        place!(cs, centered(Rectangle(10μm, 10μm)) + Point(30μm, 0μm), :b)
+        for opts in ((;), (; skip_unused_layers=true), (; auto_union=true))
+            sm = SolidModel("conformal_options"; overwrite=true)
+            SolidModels.set_gmsh_option("General.Verbosity", 0)
+            try
+                @test_logs render_conformal!(
+                    sm,
+                    schematic_of(cs),
+                    SolidModelTarget(tech; opts...)
+                )
+                @test hasgroup(sm, "a", 2) && length(entitytags(sm["a", 2])) == 1
+                @test hasgroup(sm, "b", 2) && length(entitytags(sm["b", 2])) == 1
+            finally
+                gmsh.finalize()
+            end
+        end
+    end
+
+    @testset "render_conformal! doesn't run post_fragment_ops" begin
+        # Neither the target's nor those given as a keyword
+        cs = CoordinateSystem("test")
+        place!(cs, centered(Rectangle(10μm, 10μm)), :a)
+        place!(cs, centered(Rectangle(10μm, 10μm)) + Point(30μm, 0μm), :b)
+        ops = [("extra", SolidModels.union_geom!, ("a", "b"))]
+        for (target, kw) in (
+            (SolidModelTarget(tech; post_fragment_ops=ops), (;)),
+            (SolidModelTarget(tech), (; post_fragment_ops=ops))
+        )
+            sm = SolidModel("conformal_post_fragment"; overwrite=true)
+            SolidModels.set_gmsh_option("General.Verbosity", 0)
+            try
+                render_conformal!(sm, schematic_of(cs), target; kw...)
+                @test hasgroup(sm, "a", 2) && hasgroup(sm, "b", 2)
+                @test !hasgroup(sm, "extra", 2)
+            finally
+                gmsh.finalize()
+            end
+        end
+    end
+
+    @testset "render_conformal! takes atol as a rendering option" begin
+        # The BSpline fit to an offset trace follows `atol`, given as a keyword or in the
+        # target's rendering options
+        cs = CoordinateSystem("atol", nm)
+        p = Path(0nm, 0nm)
+        bspline!(p, [Point(500μm, 50μm), Point(1000μm, 0μm)], 0°, Paths.SimpleTrace(10.0μm))
+        p[1].seg = Paths.offset(p[1].seg, 5μm)
+        place!(cs, p, :a)
+        retained = [("a", 2)]
+        areas = map((
+            (SolidModelTarget(tech; retained_physical_groups=retained), (;)),
+            (SolidModelTarget(tech; retained_physical_groups=retained), (; atol=5μm)),
+            (SolidModelTarget(tech; retained_physical_groups=retained, atol=5μm), (;))
+        )) do (target, kw)
+            sm = SolidModel("conformal_atol"; overwrite=true)
+            SolidModels.set_gmsh_option("General.Verbosity", 0)
+            try
+                render_conformal!(sm, schematic_of(cs), target; kw...)
+                return occ_area(sm, "a")
+            finally
+                gmsh.finalize()
+            end
+        end
+        @test areas[2] ≈ areas[3]
+        @test !isapprox(areas[1], areas[2]; rtol=1e-6)
+    end
+
+    @testset "render_conformal! throws for a group at several heights" begin
+        flipchip = SchematicDrivenLayout.ExamplePDK.EXAMPLE_FLIPCHIP_TECHNOLOGY
+        cs = CoordinateSystem("test")
+        place!(cs, centered(Rectangle(10μm, 10μm)), SemanticMeta(:a; level=1))
+        place!(cs, centered(Rectangle(10μm, 10μm)), SemanticMeta(:a; level=2))
+        sch = schematic_of(cs)
+        sm = SolidModel("conformal_levels"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        try
+            @test_throws ArgumentError render_conformal!(
+                sm,
+                sch,
+                SolidModelTarget(flipchip)
+            )
+            # A levelwise layer gives each level its own group and plane
+            render_conformal!(sm, sch, SolidModelTarget(flipchip; levelwise_layers=[:a]))
+            @test hasgroup(sm, "a_L1", 2) && hasgroup(sm, "a_L2", 2)
+            # A prerender operation can't combine groups at different heights
+            merged = SolidModelTarget(
+                flipchip;
+                levelwise_layers=[:a],
+                prerender_ops=[("a", union_geom2d!, ("a_L1", "a_L2"))]
+            )
+            sm = SolidModel("conformal_levels_merged"; overwrite=true)
+            @test_throws ArgumentError render_conformal!(sm, sch, merged)
+            # A group at several heights that is neither emitted nor read is fine
+            sm = SolidModel("conformal_levels_unused"; overwrite=true)
+            render_conformal!(
+                sm,
+                sch,
+                SolidModelTarget(flipchip; retained_physical_groups=[("b", 2)])
+            )
+            @test !hasgroup(sm, "a", 2)
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "render_conformal! passes its context to the render" begin
+        sch, target = conformal_target_schematic()
+        sm = SolidModel("conformal_context"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        ctx = SolidModels.ConformalRenderContext()
+        try
+            render_conformal!(sm, sch, target; context=ctx)
+            @test !isempty(ctx.point_coords)
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "render_conformal! resolves optional styles with the rendering options" begin
+        using DeviceLayout: OptionalStyle, NoRender, Plain
+        # The second square renders unless the rendering option `keep` is false
+        cs = CoordinateSystem("optional")
+        place!(cs, centered(Rectangle(10μm, 10μm)), :a)
+        keep = OptionalStyle(Plain(), NoRender(), :keep, true)
+        place!(cs, keep(centered(Rectangle(10μm, 10μm)) + Point(30μm, 0μm)), :a)
+        target = SolidModelTarget(tech; retained_physical_groups=[("a", 2)])
+        for (opts, nfaces) in (((;), 2), ((; keep=false), 1))
+            sm = SolidModel("conformal_optional"; overwrite=true)
+            SolidModels.set_gmsh_option("General.Verbosity", 0)
+            try
+                render_conformal!(sm, schematic_of(cs), target; opts...)
+                @test length(entitytags(sm["a", 2])) == nfaces
+            finally
+                gmsh.finalize()
+            end
+        end
+    end
+
+    @testset "render_conformal! nodes at the context's vertex merge tolerance" begin
+        # `b`'s top-left corner is 3 nm from the middle of `a`'s right edge. Noded and merged
+        # at 5 nm, that edge is split at the corner and its lower half is shared with `b`; at
+        # the default 2 nm the faces share no curve.
+        cs = CoordinateSystem("merge_tol", nm)
+        place!(cs, Rectangle(Point(0.0μm, 0.0μm), Point(10.0μm, 10.0μm)), :a)
+        place!(cs, Rectangle(Point(10.003μm, 0.0μm), Point(20.0μm, 5.0μm)), :b)
+        target = SolidModelTarget(tech; retained_physical_groups=[("a", 2), ("b", 2)])
+        edges(f) = Set(abs(t) for (_, t) in gmsh.model.getBoundary([(2, f)], false, false))
+        for (merge_atol, nshared) in ((2e-3, 0), (5e-3, 1))
+            sm = SolidModel("conformal_merge_tol"; overwrite=true)
+            SolidModels.set_gmsh_option("General.Verbosity", 0)
+            context = SolidModels.ConformalRenderContext(; vertex_merge_atol=merge_atol)
+            try
+                render_conformal!(sm, schematic_of(cs), target; context)
+                fa, fb = only(entitytags(sm["a", 2])), only(entitytags(sm["b", 2]))
+                @test length(intersect(edges(fa), edges(fb))) == nshared
+            finally
+                gmsh.finalize()
+            end
+        end
+    end
+
+    @testset "render_conformal! warns that it doesn't import SolidModelComponent parts" begin
+        import DeviceLayout.SchematicDrivenLayout: SolidModelComponent
+        # A 10 μm cube as external CAD
+        SolidModel("conformal_smc_author"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        brep = joinpath(tdir, "conformal_smc_cube.brep")
+        gmsh.model.add("conformal_smc_cad")
+        gmsh.model.occ.addBox(-5, -5, -5, 10, 10, 10)
+        gmsh.model.occ.synchronize()
+        gmsh.write(brep)
+        gmsh.model.remove()
+        function smc_schematic()
+            g = SchematicGraph("conformal_smc")
+            add_node!(g, SolidModelComponent(brep, SemanticMeta(:chip_outline); name="cad"))
+            sch = plan(g; log_dir=nothing)
+            check!(sch)
+            return sch
+        end
+        sm = SolidModel("conformal_smc"; overwrite=true)
+        try
+            # The schematic's logger forwards to the logger current when it is made
+            @test_logs (:warn, r"SolidModelComponent") match_mode = :any render_conformal!(
+                sm,
+                smc_schematic(),
+                SolidModelTarget(tech);
+                strict=:no
+            )
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "render_conformal! samples mesh sizes as render! does" begin
+        using DeviceLayout: MeshSized
+        cs = CoordinateSystem("test")
+        place!(cs, centered(Rectangle(200μm, 200μm)), :writeable_area)
+        place!(cs, MeshSized(5μm)(Circle(Point(0.0μm, 0.0μm), 40μm)), :metal_negative)
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            prerender_ops=[(
+                "metal",
+                difference_geom2d!,
+                ("writeable_area", "metal_negative")
+            )],
+            postrender_ops=[(
+                "metal",
+                SolidModels.difference_geom!,
+                ("writeable_area", "metal_negative")
+            )],
+            retained_physical_groups=[("metal", 2)]
+        )
+        try
+            sm = SolidModel("stock_sized"; overwrite=true)
+            SolidModels.set_gmsh_option("General.Verbosity", 0)
+            # `render!` logs that the target's chip area extrusion has nothing to extrude
+            stock, conformal = with_expected_info(r"\(chip_area, 2\) is not a physical") do
+                sch = schematic_of(cs)
+                render!(sm, sch, target)
+                points = deepcopy(SolidModels.mesh_control_points())
+                render_conformal!(
+                    SolidModel("conformal_sized"; overwrite=true),
+                    sch,
+                    target
+                )
+                return points, SolidModels.mesh_control_points()
+            end
+            @test !isempty(stock)
+            @test conformal == stock
+        finally
+            gmsh.finalize()
+        end
+    end
+
+    @testset "render_conformal! strict modes, indexed layers and 1D elements" begin
+        # A port on an indexed layer exercises index_layer!, and a 1D element is skipped
+        function port_schematic()
+            cs = CoordinateSystem("test")
+            place!(cs, centered(Rectangle(200μm, 200μm)), :writeable_area)
+            place!(cs, centered(Rectangle(4μm, 4μm)) + Point(60μm, 60μm), :port)
+            sch = schematic_of(cs)
+            # A wave port, added as `ExamplePDK` adds them
+            T = coordinatetype(sch.coordinate_system)
+            line = LineSegment(Point{T}(-90μm, 0μm), Point{T}(-90μm, 20μm))
+            render!(sch.coordinate_system, only_simulated(line), SemanticMeta(:wave_port))
+            return sch
+        end
+        prerender_ops = [("metal", difference_geom2d!, ("writeable_area", "port"))]
+        target = SolidModelTarget(
+            tech;
+            simulation=true,
+            indexed_layers=[:port],
+            prerender_ops,
+            retained_physical_groups=[("metal", 2), ("port_1", 2), ("wave_port", 2)]
+        )
+        # Each schematic is made inside its `@test_logs`, since the schematic's logger forwards
+        # to the logger current when it is made
+        try
+            sm = SolidModel("conformal_strict"; overwrite=true)
+            SolidModels.set_gmsh_option("General.Verbosity", 0)
+            @test_logs (:info, r"skipping the 1D elements of group wave_port") match_mode =
+                :any render_conformal!(sm, port_schematic(), target; strict=:warn)
+            @test hasgroup(sm, "metal", 2) && hasgroup(sm, "port_1", 2)
+            @test !hasgroup(sm, "wave_port", 2)
+
+            # A target with postrender_ops but no prerender_ops warns, which strict=:warn
+            # turns into an error and strict=:no lets through
+            stock_only = SolidModelTarget(
+                tech;
+                postrender_ops=[(
+                    "metal",
+                    SolidModels.difference_geom!,
+                    ("writeable_area", "port")
+                )]
+            )
+            no_prerender = (:warn, r"`postrender_ops` but no `prerender_ops`")
+            sm = SolidModel("conformal_strict_warn"; overwrite=true)
+            @test_logs no_prerender match_mode = :any begin
+                @test_throws r"encountered warnings while rendering" render_conformal!(
+                    sm,
+                    port_schematic(),
+                    stock_only;
+                    strict=:warn
+                )
+            end
+            sm = SolidModel("conformal_strict_no"; overwrite=true)
+            @test_logs no_prerender match_mode = :any render_conformal!(
+                sm,
+                port_schematic(),
+                stock_only;
+                strict=:no
+            )
+            # The metal its postrender_ops would form isn't rendered, the other groups are
+            @test !hasgroup(sm, "metal", 2)
+            @test hasgroup(sm, "writeable_area", 2) && hasgroup(sm, "port", 2)
+            # An unrecognized `strict` value warns and proceeds as though :no
+            sm = SolidModel("conformal_strict_bad"; overwrite=true)
+            @test_logs (:warn, r"got `:bogus`") match_mode = :any render_conformal!(
+                sm,
+                port_schematic(),
+                target;
+                strict=:bogus
+            )
+            @test hasgroup(sm, "metal", 2)
+        finally
+            gmsh.finalize()
+        end
+    end
+end
+
+@testitem "render_conformal!(sm, sch, target) geometry resolution recovery" setup =
+    [CommonTestSetup, QuietGmshSetup] begin
+    using .SchematicDrivenLayout
+    using DeviceLayout.SolidModels: entitytags, gmsh
+
+    @compdef struct FlakyComponent <: Component
+        name = "flaky"
+        fails::Bool = false
+    end
+    function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, c::FlakyComponent)
+        place!(cs, centered(Rectangle(10μm, 10μm)), :metal)
+        c.fails && throw(ErrorException("geometry failed"))
+        return cs
+    end
+    SchematicDrivenLayout.hooks(::FlakyComponent) = (; origin=PointHook(0μm, 0μm, 0°))
+
+    # Plan under a TestLogger so the schematic logger tees render logs into it
+    function flaky_schematic(logger)
+        g = SchematicGraph("flaky")
+        add_node!(g, FlakyComponent())
+        add_node!(g, FlakyComponent(; fails=true))
+        sch = with_logger(() -> plan(g; log_dir=nothing), logger)
+        check!(sch)
+        return sch
+    end
+    tech = ProcessTechnology((; metal=GDSMeta()), (; height=(; metal=0μm)))
+    target =
+        SolidModelTarget(tech; simulation=true, retained_physical_groups=[("metal", 2)])
+    try
+        # As in `render!`, the failing component renders empty and its error is logged
+        logger = TestLogger()
+        sm = SolidModel("conformal_recovered"; overwrite=true)
+        SolidModels.set_gmsh_option("General.Verbosity", 0)
+        render_conformal!(sm, flaky_schematic(logger), target; strict=:no)
+        @test length(entitytags(sm["metal", 2])) == 1
+        @test count(log -> log.level == Logging.Error, logger.logs) == 1
+        # With the default `strict=:error`, the logged error throws
+        @test_throws r"encountered errors while rendering" render_conformal!(
+            SolidModel("conformal_unrecovered"; overwrite=true),
+            flaky_schematic(TestLogger()),
+            target
+        )
+    finally
+        gmsh.finalize()
+    end
+end

@@ -10,6 +10,7 @@
         retained_physical_groups::Vector{Tuple{String, Int}}
         rendering_options
         postrenderer
+        prerenderer
     end
 
 Contains information about how to render a `Schematic` to a 3D `SolidModel`.
@@ -50,6 +51,18 @@ The `postrenderer` is a list of geometry kernel commands that create new named g
 entities from other groups, for example by geometric Boolean operations like intersection.
 These follow the extrusions and `bounding_layers` intersections generated according to
 the `technology` and `rendering_options`.
+
+The `prerenderer`, given by the `prerender_ops` keyword, is a list of 2D operations that
+[`render_conformal!`](@ref)`(sm, sch, target)` uses instead of the `postrenderer` to form
+2D groups, such as the metal, from other groups before they are emitted. It is authored
+like the `postrenderer`, with the operations [`union_geom2d!`](@ref) and
+[`difference_geom2d!`](@ref), which act on 2D region groups rather than on entities in
+the solid model. `render!` doesn't use the `prerenderer`.
+
+!!! warning "Experimental API"
+
+    `prerender_ops`, its operations and `render_conformal!(sm, sch, target)` are experimental
+    and may change in minor versions, for example as 3D construction is added.
 """
 struct SolidModelTarget <: Target
     technology::ProcessTechnology
@@ -62,7 +75,33 @@ struct SolidModelTarget <: Target
     retained_physical_groups::Vector{Tuple{String, Int}}
     rendering_options
     postrenderer
+    prerenderer
 end
+# The positional form without a `prerenderer`
+SolidModelTarget(
+    technology,
+    bounding_layers,
+    levelwise_layers,
+    indexed_layers,
+    substrate_layers,
+    wave_port_layers,
+    ignored_layers,
+    retained_physical_groups,
+    rendering_options,
+    postrenderer
+) = SolidModelTarget(
+    technology,
+    bounding_layers,
+    levelwise_layers,
+    indexed_layers,
+    substrate_layers,
+    wave_port_layers,
+    ignored_layers,
+    retained_physical_groups,
+    rendering_options,
+    postrenderer,
+    []
+)
 
 SolidModelTarget(
     tech;
@@ -72,6 +111,7 @@ SolidModelTarget(
     substrate_layers=[],
     wave_port_layers=[],
     ignored_layers=[],
+    prerender_ops=[],
     postrender_ops=[],
     retained_physical_groups=[],
     kwargs...
@@ -85,7 +125,8 @@ SolidModelTarget(
     ignored_layers,
     retained_physical_groups,
     (; solidmodel=true, retained_physical_groups=retained_physical_groups, kwargs...),
-    postrender_ops
+    postrender_ops,
+    collect(Any, prerender_ops) # so that helpers can add any operation
 )
 
 function extrusion_ops(t::SolidModelTarget, sch::Schematic)
@@ -473,4 +514,306 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
         close_logfile(sch)
     end
     return check_render_strict(sch, strict, :render_solidmodel)
+end
+
+# ─── Conformal schematic render ──────────────────────────────────────────────
+
+# 1D elements (wave ports) are extruded only in 3D, so the 2D conformal render skips them
+_is_1d(e) = e isa LineSegment || (e isa DeviceLayout.StyledEntity && _is_1d(e.ent))
+
+# ── Prerender operations ─────────────────────────────────────────────────────
+#
+# A prerender op is a tuple `(dest, op_fn, args, op_kwargs...)`, as in `postrender_ops`.
+# `op_fn(groups, args...; op_kwargs...)` is called with `groups`, a `Dict` from group name
+# to geometry, and returns the new `Vector{CurvilinearRegion}` for `dest`. A group holds the
+# primitives of its layer's elements, as `to_primitives` gives them with their curves, until
+# an op replaces it with regions.
+
+_names(x) = x isa AbstractVector ? string.(x) : [string(x)]
+_group_geom(groups, x) = reduce(vcat, (get(groups, n, []) for n in _names(x)); init=[])
+_missing_groups(groups, x) = filter(n -> !haskey(groups, n), _names(x))
+_not_groups(names) =
+    length(names) == 1 ? "$(only(names)) is not a group" :
+    "$(join(names, ", ")) are not groups"
+
+function _check_2d(op, d1, d2)
+    return d1 == d2 == 2 || throw(
+        ArgumentError(
+            "$op: prerender operations act on 2D groups, got dimensions $d1, $d2"
+        )
+    )
+end
+
+"""
+    union_geom2d!(groups, object, tool=object, d1=2, d2=2;
+        remove_object=false, remove_tool=false)
+    union_geom2d!(groups, object, d; remove_object=true)
+
+Prerender operation: the union of the groups `object` and `tool`, or of `object` with
+itself, each a group name or a vector of names. Returns the merged
+`Vector{CurvilinearRegion}` from [`union2d_curved`](@ref), which keeps the curves it doesn't
+cut. As in `SolidModels.union_geom!`, missing groups are logged and the others are used,
+`remove_object` / `remove_tool` remove the inputs, and the form with a single dimension `d`
+is a self-union that removes `object`. The dimensions must be 2. See `prerender_ops` in
+[`SolidModelTarget`](@ref).
+
+!!! warning "Experimental API"
+
+    Prerender operations are experimental; see [`render_conformal!`](@ref).
+"""
+function union_geom2d!(groups::AbstractDict, object, tool=object, d1=2, d2=2; kwargs...)
+    _check_2d(:union_geom2d!, d1, d2)
+    missing = unique([_missing_groups(groups, object); _missing_groups(groups, tool)])
+    if length(missing) == length(unique([_names(object); _names(tool)]))
+        @error "union_geom2d!(groups, $object, $tool): $(_not_groups(missing))."
+    elseif !isempty(missing)
+        @info "union_geom2d!(groups, $object, $tool): $(_not_groups(missing)), using the rest."
+    end
+    operand = _group_geom(groups, object)
+    _names(tool) == _names(object) || append!(operand, _group_geom(groups, tool))
+    _consume!(groups, object, tool; kwargs...)
+    return isempty(operand) ? CurvilinearRegion[] : union2d_curved(operand)
+end
+union_geom2d!(groups::AbstractDict, object, d::Integer; remove_object=true, kwargs...) =
+    union_geom2d!(groups, object, object, d, d; remove_object, kwargs...)
+
+"""
+    difference_geom2d!(groups, object, tool, d1=2, d2=2;
+        remove_object=false, remove_tool=false)
+
+Prerender operation: the difference of the groups `object` and `tool`, each a group name or
+a vector of names. Returns the resulting `Vector{CurvilinearRegion}` from
+[`difference2d_curved`](@ref), which keeps the curves it doesn't cut. As in
+`SolidModels.difference_geom!`, a missing `object` is an error, other missing groups are
+logged and the rest are used, and `remove_object` / `remove_tool` remove the inputs. The
+dimensions `d1` and `d2` must be 2. See `prerender_ops` in [`SolidModelTarget`](@ref).
+
+!!! warning "Experimental API"
+
+    Prerender operations are experimental; see [`render_conformal!`](@ref).
+"""
+function difference_geom2d!(groups::AbstractDict, object, tool, d1=2, d2=2; kwargs...)
+    _check_2d(:difference_geom2d!, d1, d2)
+    missing_object = _missing_groups(groups, object)
+    missing = unique([missing_object; _missing_groups(groups, tool)])
+    if length(missing_object) == length(_names(object))
+        @error "difference_geom2d!(groups, $object, $tool): $(_not_groups(missing_object))."
+    elseif !isempty(missing)
+        @info "difference_geom2d!(groups, $object, $tool): $(_not_groups(missing)), using the rest."
+    end
+    obj = _group_geom(groups, object)
+    result =
+        isempty(obj) ? CurvilinearRegion[] :
+        collect(difference2d_curved(obj, _group_geom(groups, tool)))
+    _consume!(groups, object, tool; kwargs...)
+    return result
+end
+
+# Honor `remove_object` / `remove_tool`, after the op has read its inputs
+function _consume!(groups, object, tool; remove_object=false, remove_tool=false)
+    remove_object && foreach(n -> delete!(groups, n), _names(object))
+    remove_tool && foreach(n -> delete!(groups, n), _names(tool))
+    return nothing
+end
+
+# Run `ops` over `groups`, storing each op's result at its destination. `boolean_out` collects
+# the names of the groups the ops produced. `zs_by_group` holds the heights of each group's
+# elements; a destination gets those of its inputs, which must agree, since each group is
+# rendered in one plane.
+function _run_prerender_ops!(groups::AbstractDict{String}, ops; zs_by_group, boolean_out)
+    for op in ops
+        dest, op_fn, args, op_kwargs = string(op[1]), op[2], op[3], op[4:end]
+        inputs = filter(a -> !(a isa Integer), collect(args[1:min(2, length(args))]))
+        zs = []
+        for name in reduce(vcat, _names.(inputs); init=String[]),
+            z in get(zs_by_group, name, [])
+
+            _push_z!(zs, z)
+        end
+        length(zs) > 1 && throw(
+            ArgumentError(
+                "render_conformal!: the prerender operation forming $dest reads groups at " *
+                "z = $(join(zs, ", ")), but each group is rendered in one plane"
+            )
+        )
+        isempty(zs) || (zs_by_group[dest] = zs)
+        groups[dest] = op_fn(groups, args...; op_kwargs...)
+        push!(boolean_out, dest)
+    end
+    return groups
+end
+_push_z!(zs, z) = any(==(z), zs) ? zs : push!(zs, z)
+
+"""
+    render_conformal!(sm::SolidModel, sch::Schematic, target::SolidModelTarget;
+        strict=:error, context=SolidModels.ConformalRenderContext(), kwargs...)
+
+Render `sch` to `sm` using `target`, as [`render!`](@ref)`(sm, sch, target)` does, but through
+the conformal render: shared boundaries resolve to a single OpenCASCADE curve through an
+edge cache rather than a fragment pass.
+
+!!! warning "Experimental API"
+
+    This method, the target's `prerender_ops` and the operations [`union_geom2d!`](@ref) and
+    [`difference_geom2d!`](@ref) are experimental and may change in minor versions, for
+    example as 3D construction is added and as they are harmonized with the experimental
+    solid-model pipeline. Current limitations:
+
+      - Only 2D geometry is rendered, each group in the plane at its layer's height, so an
+        emitted group, or the inputs of a prerender operation, at several heights throw.
+      - `postrender_ops`, `post_fragment_ops` and the target's 3D operations (extrusions,
+        `bounding_layers` intersections, bridges) are not run.
+      - 1D elements such as wave ports are skipped.
+      - `SolidModelComponent` parts are not imported; a warning says so.
+      - A curve that a prerender operation cuts, or that an overlapping element of its group
+        crosses, comes out as a polyline, where `render!` keeps it a curve (see
+        [`recover_curves`](@ref)).
+      - The emitted groups must not overlap, as
+        [`SolidModels.render_conformal!`](@ref)`(sm, cs)` requires.
+
+The target's layers, levels, indices, `rendering_options` and physical-group names are used
+as in `render!`. Each element is converted with `to_primitives` and the rendering options, as
+in `render!`, so optional styles resolve the same way: with `simulation=true`,
+fabrication-only elements (`not_simulated`) are dropped. The 2D geometry is formed from these
+primitives by the target's `prerender_ops` instead of its `postrender_ops`:
+[`union_geom2d!`](@ref) and [`difference_geom2d!`](@ref) operations on 2D groups, authored
+like `postrender_ops` but run before emission. Shared boundaries between groups are then
+noded with [`split_t_junctions!`](@ref), self-touching contours are split with
+[`split_pinches`](@ref), and the groups are emitted with
+[`SolidModels.render_conformal!`](@ref)`(sm, cs)`.
+
+The groups emitted are the target's `retained_physical_groups` of dimension 2, or all groups
+if `retained_physical_groups` is empty. Only these groups are emitted, and each group no
+operation formed is unioned, so the rendering options `skip_unused_layers` and `auto_union`
+have no effect. Mesh-size control points are sampled from all the elements,
+as `render!` does without `skip_unused_layers`, and the mesh-size callback is installed.
+
+`context` is the edge cache passed to `render_conformal!(sm, cs)`, and its
+`vertex_merge_atol` is also the tolerance for noding and for splitting pinches. Other
+keyword arguments, such as `atol`, are rendering options, overridden by the target's
+`rendering_options` as in `render!`.
+"""
+function SolidModels.render_conformal!(
+    sm::SolidModel,
+    sch::Schematic,
+    target::SolidModelTarget;
+    strict=:error,
+    context::SolidModels.ConformalRenderContext=SolidModels.ConformalRenderContext(),
+    kwargs...
+)
+    sch.checked[] || error(
+        "cannot render an unchecked Schematic. Run check!(sch::Schematic), or override by setting sch.checked[] = true (not recommended!)"
+    )
+    reopen_logfile(sch, :render_solidmodel)
+    try
+        with_logger(sch.logger) do
+            with_geometry_resolution_context() do
+                for ly in indexed_layers(target)
+                    !haskey(sch.index_dict, ly) && index_layer!(sch::Schematic, ly)
+                end
+                return _render_conformal!(sm, sch, target; context, kwargs...)
+            end
+        end
+    finally
+        close_logfile(sch)
+    end
+    return check_render_strict(sch, strict, :render_solidmodel)
+end
+
+function _render_conformal!(sm, sch, target; context, kwargs...)
+    ropts = merge(
+        _without_schematic_options(kwargs),
+        _without_schematic_options(target.rendering_options)
+    )
+    if isempty(target.prerenderer) && !isempty(target.postrenderer)
+        @warn "render_conformal!: the target has `postrender_ops` but no `prerender_ops`, " *
+              "so the groups its `postrender_ops` form (such as the metal) are not rendered."
+    end
+    component_ops = component_solidmodel_ops(sch, target)
+    if !isempty(component_ops.postrender) || !isempty(component_ops.post_fragment)
+        @warn "render_conformal!: the schematic has `SolidModelComponent` parts, which the " *
+              "2D conformal render doesn't import."
+    end
+    mapf = _map_meta_fn(target)
+    zmap = Base.Fix1(layer_z, target)
+    flat = flatten(sch.coordinate_system)
+    T = coordinatetype(flat)
+    # Elements that render to a group, for sampling mesh sizes as `render!` does
+    mapped = CoordinateSystem{T}(uniquename("render_conformal"))
+    by_group = Dict{String, Vector{Any}}()
+    zs_by_group = Dict{String, Vector{Any}}()
+    skipped_1d = Set{String}()
+    for (e, m) in zip(elements(flat), element_metadata(flat))
+        name = mapf(m)
+        isnothing(name) && continue
+        name = string(name)
+        place!(mapped, e, m)
+        _is_1d(e) && (push!(skipped_1d, name); continue)
+        # The primitive form `render!` emits, with optional styles resolved, `NoRender` dropped
+        # and curves kept
+        prims = SolidModels.to_primitives(sm, e; ropts...)
+        prims = prims isa AbstractVector ? prims : [prims]
+        isempty(prims) && continue
+        _push_z!(get!(zs_by_group, name, []), zmap(m))
+        append!(get!(by_group, name, Any[]), prims)
+    end
+    for name in sort!(collect(skipped_1d))
+        @info "render_conformal!: skipping the 1D elements of group $name, which only 3D rendering extrudes."
+    end
+
+    boolean_out = Set{String}()
+    _run_prerender_ops!(by_group, target.prerenderer; zs_by_group, boolean_out)
+    emit_all = isempty(target.retained_physical_groups)
+    retained =
+        Set(string(name) for (name, dim) in target.retained_physical_groups if dim == 2)
+    regions = Dict{String, Vector{CurvilinearRegion{T}}}()
+    z_of = Dict{String, Any}()
+    for (name, geom) in by_group
+        emit_all || name in retained || continue
+        zs = get(zs_by_group, name, [])
+        length(zs) > 1 && throw(
+            ArgumentError(
+                "render_conformal!: group $name has elements at z = $(join(zs, ", ")), but " *
+                "each group is rendered in one plane; make its layer levelwise in the target"
+            )
+        )
+        # A group no op formed is unioned, which merges overlapping elements
+        regs = name in boolean_out ? geom : union2d_curved(geom)
+        isempty(regs) && continue
+        regions[name] = CurvilinearRegion{T}[r for r in regs]
+        z_of[name] = isempty(zs) ? zero(T) : only(zs)
+    end
+    # Node and split at the tolerance the edge cache merges vertices at
+    merge_atol = context.vertex_merge_atol * DeviceLayout.onemicron(T)
+    split_t_junctions!(regions; atol=merge_atol)
+    regions = split_pinches(regions; atol=merge_atol)
+    # Emit the groups through the coordinate-system render, one metadata entry per group
+    formed = CoordinateSystem{T}(uniquename("render_conformal_formed"))
+    for (name, regs) in regions
+        meta = SemanticMeta(Symbol(name))
+        foreach(r -> place!(formed, r, meta), regs)
+    end
+    # The groups are already selected and unioned. `skip_unused_layers` would skip them all
+    # if the target retains none, since this render runs no operations, and `auto_union`
+    # would union them again.
+    SolidModels.render_conformal!(
+        sm,
+        formed;
+        ropts...,
+        zmap=m -> z_of[string(layer(m))],
+        map_meta=m -> string(layer(m)),
+        skip_unused_layers=false,
+        auto_union=false,
+        context
+    )
+    # That render samples mesh sizes from the formed regions, which carry no `MeshSized`
+    # styles, so sample them again from the original elements, as `render!` does
+    SolidModels.populate_size_fields!(
+        mapped;
+        primitives_of=(el; kw...) -> SolidModels.to_primitives(sm, el; kw...),
+        zmap,
+        ropts...
+    )
+    SolidModels.set_mesh_size_callback!()
+    return nothing
 end

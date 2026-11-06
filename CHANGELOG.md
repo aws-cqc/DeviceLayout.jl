@@ -52,6 +52,16 @@ The format of this changelog is based on
     following `schemas/sm_metadata.schema.json`. `render!(cell, cs, stack)` renders the
     matching artwork. The API may change before DeviceLayout 2.0.
   - `SolidModels.render!` accepts `preflattened=true` to skip flattening `cs`.
+  - `render_conformal!(sm, sch, target::SolidModelTarget)` renders a schematic like
+    `render!(sm, sch, target)`, but through the conformal render, which resolves shared
+    boundaries with an edge cache instead of a fragment pass. Its 2D groups are formed
+    before emission by the target's new `prerender_ops`, authored like `postrender_ops`:
+    `union_geom2d!` and `difference_geom2d!` operations that keep the curves they don't
+    cut. It renders 2D geometry only; see `examples/DemoQPU17/solidmodel_conformal.jl`.
+    `SolidModelTarget` gains a `prerender_ops` keyword and a `prerenderer` field, added
+    last, and the `ExamplePDK` single-chip target defines `prerender_ops`. The method,
+    `prerender_ops` and their operations are experimental: their API may change in minor
+    versions, for example as 3D construction is added.
 
 ### Changed
 
