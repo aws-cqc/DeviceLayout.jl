@@ -3,9 +3,8 @@
 # Supposition.jl generators, exact lattice predicates, and the region comparisons used
 # by the laws in test/laws/. Generators do not call the clipping kernel, and laws
 # compare regions rather than vertex order. This file is included by the `LawsSetup`
-# testsnippet and by the differential harness in test/laws/differential/, so it must
-# not depend on TestItemRunner; it expects `Supposition`, `Data`, `Random`, `Test`,
-# `Unitful`, `Clipper`, `DeviceLayout`, and `Polygons` to be in scope.
+# testsnippet; it expects `Supposition`, `Data`, `Random`, `Test`, `Unitful`, `Clipper`,
+# `DeviceLayout`, and `Polygons` to be in scope.
 
 # ---------------------------------------------------------------------------------
 # Budget. PR runs use a fixed seed and a small example count so they are deterministic

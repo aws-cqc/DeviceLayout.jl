@@ -283,7 +283,7 @@ end
     [CommonTestSetup, LawsSetup] tags = [:geomlaws] begin
     # Erosion of a convex polygon does not depend on the join type: q ∈ offset(A, −δ)
     # iff q ∈ A and dist(q, ∂A) ≥ δ, so the inset of a thin triangle is the triangle
-    # bounded by the three inset edges. The differential harness found Clipper2
+    # bounded by the three inset edges. Comparing Clipper1 with Clipper2 found Clipper2
     # misclassifying tips sharper than acos(0.999) ≈ 2.6° in its concavity test: the
     # inset's tip vertex lands 0.5 δ short of the exact one (a sub-unit-thick sliver,
     # inside the region tolerance) or, on the second triangle, the inset vanishes for
