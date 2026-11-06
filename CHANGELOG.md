@@ -212,6 +212,13 @@ The format of this changelog is based on
     Such a segment rendered as zero-area polygons, and whether it appeared depended on
     floating-point details such as whether the CPU fused multiply-adds, so the same layout
     could render with different fingerprints on different machines.
+  - `SolidModels.meshsize` and `meshgrading` of a styled entity use the entity's own size when
+    the style doesn't set one. Previously a style other than `MeshSized` applied directly to
+    an entity reported no sizing, so a CPW under `only_simulated`, `Plain` or `WithDirection`
+    lost its trace and gap refinement in `render!`. The outermost `MeshSized` still wins, now
+    including one selected by an `OptionalStyle` wrapping an already sized entity. A custom
+    style sets a size by implementing `meshsize(::GeometryEntity, ::MyStyle)`; a style-only
+    `meshsize(::MyStyle)` is no longer used.
 
 ## 1.20.0 (2026-10-06)
 
