@@ -287,19 +287,12 @@ end
 
 meshsize(::GeometryEntity{T}; kwargs...) where {T} = float(ustrip(STP_UNIT, zero(T)))
 meshsize(::GeometryEntity{<:Real}; kwargs...) = 0.0
-meshsize(ent::StyledEntity{T, StyledEntity{T, R, U}, S}; kwargs...) where {T, R, U, S} =
-    meshsize(ent.ent; kwargs...)
-# Always choose outermost MeshSized
-meshsize(
-    ent::StyledEntity{T, StyledEntity{T, R, U}, S};
-    kwargs...
-) where {T, R, U, S <: MeshSized} = meshsize(ent.sty; kwargs...)
-meshsize(ent::StyledEntity; kwargs...) = meshsize(ent.sty; kwargs...)
-meshsize(s::GeometryEntityStyle; kwargs...) = 0.0
-meshsize(s::MeshSized{T}; kwargs...) where {T} = ustrip(STP_UNIT, s.h)
-meshsize(s::OptionalStyle; kwargs...) =
-    get(kwargs, s.flag, s.default) ? meshsize(s.true_style; kwargs...) :
-    meshsize(s.false_style; kwargs...)
+# The outermost style that sets a size wins; other styles defer to the entity they wrap.
+meshsize(ent::StyledEntity; kwargs...) = meshsize(ent.ent, ent.sty; kwargs...)
+meshsize(ent::GeometryEntity, ::GeometryEntityStyle; kwargs...) = meshsize(ent; kwargs...)
+meshsize(::GeometryEntity, s::MeshSized; kwargs...) = ustrip(STP_UNIT, s.h)
+meshsize(ent::GeometryEntity, s::OptionalStyle; kwargs...) =
+    meshsize(ent, get(kwargs, s.flag, s.default) ? s.true_style : s.false_style; kwargs...)
 # Path node mesh depends only on style
 meshsize(node::Paths.Node{T}; kwargs...) where {T} =
     ustrip(STP_UNIT, meshsize(node.seg, node.sty; kwargs...))
@@ -335,19 +328,16 @@ function meshsize(seg::Paths.CompoundSegment, sty::Paths.CompoundStyle; kwargs..
 end
 # There should be no DecoratedStyles at SolidModel rendering
 meshgrading(::GeometryEntity{T}; kwargs...) where {T} = -1.0
-meshgrading(ent::StyledEntity{T, StyledEntity{T, R, U}, S}; kwargs...) where {T, R, U, S} =
-    meshgrading(ent.ent; kwargs...)
-# Always choose outermost MeshSized
-meshgrading(
-    ent::StyledEntity{T, StyledEntity{T, R, U}, S};
+# Grading comes from the same place as the size.
+meshgrading(ent::StyledEntity; kwargs...) = meshgrading(ent.ent, ent.sty; kwargs...)
+meshgrading(ent::GeometryEntity, ::GeometryEntityStyle; kwargs...) =
+    meshgrading(ent; kwargs...)
+meshgrading(::GeometryEntity, s::MeshSized; kwargs...) = s.α
+meshgrading(ent::GeometryEntity, s::OptionalStyle; kwargs...) = meshgrading(
+    ent,
+    get(kwargs, s.flag, s.default) ? s.true_style : s.false_style;
     kwargs...
-) where {T, R, U, S <: MeshSized} = meshgrading(ent.sty; kwargs...)
-meshgrading(ent::StyledEntity; kwargs...) = meshgrading(ent.sty; kwargs...)
-meshgrading(::GeometryEntityStyle; kwargs...) = -1.0
-meshgrading(s::OptionalStyle; kwargs...) =
-    get(kwargs, s.flag, s.default) ? meshgrading(s.true_style; kwargs...) :
-    meshgrading(s.false_style; kwargs...)
-meshgrading(s::MeshSized{T}; kwargs...) where {T} = s.α
+)
 # All paths default to background grading
 meshgrading(node::Paths.Node; kwargs...) = -1.0
 
