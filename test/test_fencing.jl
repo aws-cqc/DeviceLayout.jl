@@ -240,9 +240,9 @@ end
         # A post due where a straight ends, before a turn whose row lies past its center,
         # stays on the straight, as after `simplify!`. The left row is 21 μm from the
         # centerline, past the 10 μm turn's center.
-        function straight_turn(last_straight, simplified)
+        function straight_turn(last_straight, simplified; l=60μm)
             p = Path(μm)
-            straight!(p, 60μm, Paths.CPW(10μm, 6μm))
+            straight!(p, l, Paths.CPW(10μm, 6μm))
             turn!(p, 90°, 10μm)
             last_straight && straight!(p, 60μm)
             simplified && simplify!(p)
@@ -263,6 +263,17 @@ end
             # Not dropped if nothing follows the turn, or if the window ends inside it
             @test left_fence(straight_turn(false, simplified)) ≈ on_straight
             @test left_fence(straight_turn(true, simplified); stop=65μm) ≈ on_straight
+            # A row starting there begins after the turn, exactly, so its last post is at the
+            # end of the path
+            @test left_fence(straight_turn(true, simplified); start=60μm) ≈
+                  [Point(49μm, y) for y in (10:20:70)μm]
+            # A post due just past the end of the straight goes after the turn. After
+            # `simplify!`, the turn starts too close to the end of the interval integrated
+            # for that post to be found unless the integral is split there.
+            @test left_fence(straight_turn(true, simplified; l=59.999μm)) ≈ [
+                [Point(x, 21μm) for x in (0:20:40)μm]
+                [Point(48.999μm, y) for y in (10.001:20:50.001)μm]
+            ]
         end
     end
 

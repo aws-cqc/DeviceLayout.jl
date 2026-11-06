@@ -130,9 +130,10 @@ function _fence_row(pa::Path{T}, o::T, σ, pitch::T, s0::T, s1::T) where {T}
         ℓ = t -> extent(sty, t) + o
         degenerate = Ref(false)
         v = t -> _row_speed(seg, ℓ, σ, t, degenerate)
+        bps = _breakpoints(seg)
         s = a
         while true
-            s_next, traveled = _advance_along_row(v, s, b, need, tol)
+            s_next, traveled = _advance_along_row(v, s, b, need, tol, bps)
             if isnothing(s_next)
                 need -= traveled
                 break
@@ -196,22 +197,49 @@ function _row_tangential_speed(seg::CompoundSegment, d, t)
     return _row_tangential_speed(sub, d, t_sub)
 end
 
+# Pathlengths along `seg` where its row speed may jump: the ends of the subsegments of compound
+# segments, at any depth
+_breakpoints(::Segment{T}) where {T} = T[]
+_breakpoints(seg::OffsetSegment) = _breakpoints(seg.seg)
+function _breakpoints(seg::CompoundSegment{T}) where {T}
+    bps, l0 = T[], zero(T)
+    for sub in seg.segments
+        append!(bps, l0 .+ _breakpoints(sub))
+        l0 += pathlength(sub)
+        push!(bps, l0)
+    end
+    return bps
+end
+
+# Distance along the row from pathlength `a` to `x`, split at the breakpoints `bps` between
+# them so that `quadgk` doesn't miss a jump in the speed `v` close to either end
+_row_distance(v, a, x, bps) = quadgk(v, a, filter(p -> a < p < x, bps)..., x)[1]
+
 # Pathlength in [s, b] after which the row has advanced by `need` beyond the row point at `s`,
 # along with `need`; or `nothing` and the distance traveled along the row up to `b`
-function _advance_along_row(v, s, b, need, tol)
+function _advance_along_row(v, s, b, need, tol, bps)
     if need <= tol
         v(s) > 0 && return s, need
-        # The row doesn't exist at `s`, so the post goes where it begins (within `3tol`
-        # along it), and the row stays without posts if it doesn't begin before `b`
-        x, _ = _advance_along_row(v, s, b, 2tol, tol)
-        return x, isnothing(x) ? zero(need) : need
+        # The row doesn't exist at `s`, so the post goes where it begins, and the row stays
+        # without posts if it doesn't begin before `b`. The row runs at most `3tol` before
+        # `x`, so bisect for where it begins. Where that is the start of a subsegment, this
+        # puts the post exactly where it is without `simplify!`.
+        x, _ = _advance_along_row(v, s, b, 2tol, tol, bps)
+        isnothing(x) && return nothing, zero(need)
+        lo = s
+        while true
+            m = (lo + x) / 2
+            lo < m < x || break
+            v(m) > 0 ? (x = m) : (lo = m)
+        end
+        return x, need
     end
     # Bracket the solution locally, so the cost per post doesn't grow with segment length
     h = need
     hi, total = s, zero(need)
     while true
         hi = min(s + h, b)
-        total = quadgk(v, s, hi)[1]
+        total = _row_distance(v, s, hi, bps)
         (total >= need - tol || hi == b) && break
         h *= 2
     end
@@ -222,7 +250,7 @@ function _advance_along_row(v, s, b, need, tol)
     vs = v(s)
     x = vs > 0 ? min(s + need / vs, hi) : (lo + hi) / 2
     for _ = 1:100
-        f = quadgk(v, s, x)[1] - need
+        f = _row_distance(v, s, x, bps) - need
         abs(f) <= tol && break
         f < zero(f) ? (lo = x) : (hi = x)
         vx = v(x)
