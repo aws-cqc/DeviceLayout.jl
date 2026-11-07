@@ -147,19 +147,6 @@
         r1 = Rectangle(2.0, 2.0)
         r2 = Rectangle(2.0, 2.0) + Point(1.0, 1.0)
         @test xor2d(r1, r2) == union2d(difference2d(r2, r1), difference2d(r1, r2))
-
-        # Trees with different numbers of children, at the top level or below, are unequal
-        a = union2d(Rectangle(10, 10))
-        b = union2d([Rectangle(10, 10), Rectangle(Point(20, 0), Point(30, 10))])
-        holed = difference2d(Rectangle(10, 10), Rectangle(Point(2, 2), Point(8, 8)))
-        for (p, q) in ((a, b), (a, holed))
-            @test p != q
-            @test q != p
-            @test !isapprox(p, q)
-            @test !isapprox(q, p)
-        end
-        @test a == union2d(Rectangle(10, 10))
-        @test holed ≈ difference2d(Rectangle(10, 10), Rectangle(Point(2, 2), Point(8, 8)))
     end
 
     @testset "> ClippedPolygon operations w/o units" begin
@@ -427,6 +414,23 @@
             @test d2 == difference2d(d2, [d1])
             @test d2 == difference2d([d2], d1)
             @test d2 == difference2d([d2], [d1])
+
+            # Trees with different numbers of children, at the top level or below, are unequal
+            sq = Rectangle(T(10), T(10))
+            a = union2d(sq)
+            b = union2d([sq, Rectangle(Point(T(20), T(0)), Point(T(30), T(10)))])
+            hole = Rectangle(Point(T(2), T(2)), Point(T(8), T(8)))
+            holed = difference2d(sq, hole)
+            e = intersect2d(d1, d2) # empty
+            for (p, q) in ((a, b), (a, holed), (a, e))
+                @test p != q
+                @test q != p
+                @test !isapprox(p, q)
+                @test !isapprox(q, p)
+            end
+            @test a == union2d(sq)
+            @test holed ≈ difference2d(sq, hole)
+            @test e == intersect2d(r1, r2 + Point(T(5), T(5)))
         end
 
         r1 = Rectangle(2, 2)
