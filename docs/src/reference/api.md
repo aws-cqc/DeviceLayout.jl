@@ -346,21 +346,6 @@ See [Shapes](./shapes.md).
     SolidModels.staple_bridge_postrendering
 ```
 
-### [Design velocities and mesh morphing](@id api-design-velocities)
-
-See [Design Velocities and Mesh Morphing](@ref concept-design-velocities).
-
-```@docs
-    SolidModels.design_velocities
-    SolidModels.DesignVelocity
-    SolidModels.parameter_unit
-    SolidModels.design_displacement
-    SolidModels.DesignDisplacement
-    SolidModels.morph_mesh
-    SolidModels.morph_quality
-    SolidModels.MorphQuality
-```
-
 ### Meshing
 
 ```@docs
