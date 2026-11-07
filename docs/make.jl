@@ -69,6 +69,7 @@ makedocs(
             "Rendering and Export" => "concepts/render.md",
             "Solid Models (3D Geometry)" => "concepts/solidmodels.md",
             "Solid Models (Experimental)" => "concepts/solidmodels_experimental.md",
+            "Design Velocities and Mesh Morphing" => "concepts/design_velocities.md",
             "Schematic-Driven Design" => "concepts/schematic_driven_design.md",
             "Components" => "concepts/components.md",
             "Autofill" => "concepts/autofill.md",
@@ -86,6 +87,7 @@ makedocs(
             "Path API Reference" => "reference/path_api.md",
             "Schematic API Reference" => "reference/schematic_api.md",
             "Experimental Solid Model API Reference" => "reference/solidmodels_experimental_api.md",
+            "Design Velocity API Reference" => "reference/design_velocities_api.md",
             "ParameterSet API Reference" => "reference/parameter_set_api.md",
             "Shape Reference" => "reference/shapes.md"
         ],
