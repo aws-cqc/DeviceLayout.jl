@@ -437,6 +437,7 @@ ClippedPolygon{T}(x::Clipper.PolyNode{Point}) where {T} =
 function ==(p1::ClippedPolygon, p2::ClippedPolygon)
     function children_equal(l, r)
         # recursively check contours of all children in the tree
+        length(Clipper.children(l)) == length(Clipper.children(r)) || return false
         for (x, y) in zip(Clipper.children(l), Clipper.children(r))
             (!circularequality(x.contour, y.contour) || !children_equal(x, y)) &&
                 return false
@@ -449,6 +450,7 @@ end
 function isapprox(p1::ClippedPolygon, p2::ClippedPolygon; kwargs...)
     function children_approx(l, r)
         # recursively check contours of all children in the tree
+        length(Clipper.children(l)) == length(Clipper.children(r)) || return false
         for (x, y) in zip(Clipper.children(l), Clipper.children(r))
             (!circularapprox(x.contour, y.contour; kwargs...) || !children_approx(x, y)) &&
                 return false
