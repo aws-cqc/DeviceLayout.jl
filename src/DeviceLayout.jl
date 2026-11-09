@@ -648,6 +648,11 @@ export SchematicDrivenLayout
 # Load the opt-in simulation-agnostic solid-model pipeline after both of its dependencies.
 include("solidmodels/solidmodels_experimental.jl")
 export SolidModelsExperimental
+# ExamplePDKExperimental needs SolidModelsExperimental, so it joins SchematicDrivenLayout here.
+Base.include(
+    SchematicDrivenLayout,
+    "schematics/ExamplePDKExperimental/ExamplePDKExperimental.jl"
+)
 
 include("precompile.jl")
 
