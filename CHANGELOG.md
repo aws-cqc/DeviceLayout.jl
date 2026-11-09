@@ -144,7 +144,10 @@ The format of this changelog is based on
 
   - `isapprox` on arrays of `Point`s, and so on `Polygon`s, returns `false` when the
     arrays differ in size. Previously it compared only the elements both arrays have, so
-    an empty array was approximately equal to any other. (#300)
+    an empty array was approximately equal to any other.
+  - `==` and `isapprox` on `ClippedPolygon`s return `false` when the polygon trees have
+    different numbers of children at any level, such as an extra disjoint shape or an extra
+    hole. Previously, extra children on either side were ignored.
   - Schematic `render!` to a `Cell` or a `SolidModel` with `strict=:no` logs a component
     whose geometry fails to build and renders it as empty geometry, instead of throwing.
     (#287)
