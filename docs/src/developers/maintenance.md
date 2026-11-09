@@ -74,6 +74,7 @@ Workflows live in `.github/workflows/`.
 | `TagBot.yml` | comment by `JuliaTagBot`, manual | Creates the GitHub release after a version is registered in General. |
 | `CompatHelper.yaml` | daily, manual | Checks for new dependency versions outside `[compat]` (see [Dependency compatibility](@ref dev-compathelper)). |
 | `Benchmark.yml` | manual | Runs the benchmark suite and uploads `benchmark.md`. |
+| `GeomLaws.yml` | weekly, manual | Runs the `:geomlaws` test items with a fresh seed and 2000 examples per check, one job per law file, with shrinking off (see [GeomLaws exploration](@ref dev-geomlaws-exploration)). Manual runs can set the seed and the number of examples. |
 
 All jobs run on `ubuntu-latest` x64 only; macOS, Windows, and ARM are not covered.
 
@@ -141,6 +142,24 @@ Upgrades that need more than a green test run:
 
 `Aqua.test_deps_compat` in the test suite ensures every non-stdlib dependency has a compat
 entry, so adding a dependency without one fails CI.
+
+### [GeomLaws exploration](@id dev-geomlaws-exploration)
+
+`GeomLaws.yml` runs every Monday with a fresh seed, searching for counterexamples that the
+fixed-seed `:geomlaws` items in CI can't find. It blocks nothing, and GitHub emails a failed
+scheduled run only to whoever last changed the workflow's `cron` line, so check the Actions
+tab after each run. When a job fails:
+
+1. Reproduce the failure with the seed and budget printed at the top of its log, and shrink
+   it to a minimal counterexample, as described under "Exploration" in `test/laws/README.md`.
+   Shrinking can take hours, since the shrinker has no time limit. If it runs long, interrupt
+   it and reduce the counterexample by hand, so a long run isn't mistaken for a hang.
+2. Add the counterexample to the ledger (`test/laws/test_ledger.jl`) before changing the law
+   or the code. If the code is wrong, also open an issue. If the law is wrong, for example
+   too strict in a regime that the CI budget rarely reaches, fix the law and say why in its
+   comment.
+3. A job that reaches its 180-minute timeout may be a hung kernel call: the laws bound the
+   work of their own comparisons, not the time spent in Clipper.
 
 ### Documentation previews
 
