@@ -136,7 +136,7 @@ fail:
 
 Upgrades that need more than a green test run:
 
-- **`gmsh_jll`** can change fragmentation behavior and mesh output. The "Single Transmon" test
+- **`gmsh_jll`** can change fragmentation behavior and mesh output. The "Single Transmon example schematic" test
   item and `test_solidmodel.jl` are the main guards in CI, but these primarily test physical groups. Meshing changes should be tested against Palace simulations.
 
 `Aqua.test_deps_compat` in the test suite ensures every non-stdlib dependency has a compat
