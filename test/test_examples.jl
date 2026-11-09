@@ -30,140 +30,6 @@
     @test ("port_2", 2) in fc_target.rendering_options.retained_physical_groups # Backwards compatibility
 end
 
-@testitem "Single Transmon" setup = [CommonTestSetup, QuietGmshSetup] begin
-    # Single transmon example file requires CSV, JSON, JSONSchema, DataFrames
-    # Just test the components
-    using .SchematicDrivenLayout
-    q = SchematicDrivenLayout.ExamplePDK.Transmons.ExampleRectangleTransmon()
-    rr = SchematicDrivenLayout.ExamplePDK.ReadoutResonators.ExampleClawedMeanderReadout()
-    @test geometry(q) isa CoordinateSystem{typeof(1.0DeviceLayout.nm)}
-    @test geometry(rr) isa CoordinateSystem{typeof(1.0DeviceLayout.nm)}
-    @test issubset([:readout, :xy, :z], keys(hooks(q)))
-    @test abs(hooks(rr).qubit.p.y - hooks(rr).feedline.p.y) ≈ rr.total_y_length
-
-    import .SchematicDrivenLayout.ExamplePDK: LayerVocabulary
-    g = SchematicGraph("single-transmon")
-    qubit_node = add_node!(g, q)
-    rres_node = fuse!(g, qubit_node, rr)
-    # Readout path
-    p_readout = Path(
-        Point(0μm, 0μm);
-        α0=π / 2,
-        name="p_ro",
-        metadata=LayerVocabulary.METAL_NEGATIVE
-    )
-    straight!(p_readout, 2mm, Paths.CPW(10μm, 6μm))
-    straight!(p_readout, 2mm, Paths.CPW(10μm, 6μm))
-    # Ports
-    csport = CoordinateSystem(uniquename("port"), nm)
-    render!(csport, only_simulated(centered(Rectangle(10μm, 10μm))), LayerVocabulary.PORT)
-    # Attach with port center `cpw_width` from the end (instead of `cpw_width/2`) to avoid corner effects
-    attach!(p_readout, sref(csport), 10μm, i=1) # @ start
-    attach!(p_readout, sref(csport), 2mm - 10μm, i=2) # @ end
-    p_readout_node = add_node!(g, p_readout)
-    attach!(g, p_readout_node, rres_node => :feedline, 0mm, location=:right)
-    logger = TestLogger()
-    floorplan = with_logger(logger) do
-        return plan(g; log_dir=nothing)
-    end
-    # Define bounds for bounding simulation box
-    chip = offset(bounds(floorplan), 2mm)[1]
-    sim_area = chip
-    render!(floorplan.coordinate_system, sim_area, LayerVocabulary.SIMULATED_AREA)
-    # postrendering operations in solidmodel target define metal = (WRITEABLE_AREA - METAL_NEGATIVE) + METAL_POSITIVE
-    render!(floorplan.coordinate_system, sim_area, LayerVocabulary.WRITEABLE_AREA)
-    # Define rectangle that gets extruded to generate substrate volume
-    render!(floorplan.coordinate_system, chip, LayerVocabulary.CHIP_AREA)
-    check!(floorplan)
-    sm = SolidModel("test", overwrite=true)
-    render!(
-        sm,
-        floorplan,
-        SchematicDrivenLayout.ExamplePDK.singlechip_solidmodel_target([
-            "port_1",
-            "port_2",
-            "lumped_element"
-        ]);
-        strict=:no
-    )
-    expected_error_groups = ("bridge", "_shadow", "_leg")
-    @test all(logger.logs) do log
-        return log.level < Logging.Warn || (
-            log.level == Logging.Error &&
-            any(group -> occursin(group, log.message), expected_error_groups)
-        )
-    end
-    # Ensure fragment and map found all the exterior boundaries: 3*4 sides of chip and vacuum boxes + top + bottom = 14
-    @test length(SolidModels.dimtags(sm["exterior_boundary", 2])) == 14
-    @test length(SolidModels.dimtags(sm["metal", 2])) == 7 # Island + ground + 2x leads + 2x mesh control partitions of ground + CPW trace between ports
-    @test length(SolidModels.dimtags(sm["vacuum", 3])) == 2
-    @test length(SolidModels.dimtags(sm["substrate", 3])) == 1
-    @test length(SolidModels.dimtags(sm["port_1", 2])) == 1
-    @test length(SolidModels.dimtags(sm["port_2", 2])) == 1
-    @test length(SolidModels.dimtags(sm["lumped_element", 2])) == 1
-    metal_conn_comps = SolidModels.connected_components(sm, "metal")
-    active_conn_comps = SolidModels.connected_components(
-        sm,
-        ["metal", "lumped_element", "port_1", "port_2"]
-    )
-    @test length(metal_conn_comps) == 3  # Ground, island, transmission line
-    @test length(active_conn_comps) == 1 # Ports and lumped elements connect metal components
-
-    @testset "Palace mesh boundary attributes" begin
-        gmsh = SolidModels.gmsh
-        mesh_path = joinpath(tdir, "single_transmon.msh2")
-        option_names = ("Mesh.Binary", "Mesh.ElementOrder")
-        original_options = gmsh.option.get_number.(option_names)
-        try
-            gmsh.option.set_number("Mesh.Binary", 0)
-            gmsh.option.set_number("Mesh.ElementOrder", 2)
-            gmsh.model.mesh.generate(3)
-            save(mesh_path, sm)
-        finally
-            for (option, value) in zip(option_names, original_options)
-                gmsh.option.set_number(option, value)
-            end
-        end
-
-        # MSH2 writes a boundary element for each physical group containing a surface.
-        # Palace requires a single boundary record per non-periodic face.
-        mesh_lines = readlines(mesh_path)
-        elements_start = findfirst(==("\$Elements"), mesh_lines)
-        element_count = parse(Int, mesh_lines[elements_start + 1])
-        boundary_faces = NTuple{3, Int}[]
-        boundary_attributes = Set{Int}()
-        volume_elements = 0
-        for line in mesh_lines[(elements_start + 2):(elements_start + 1 + element_count)]
-            fields = parse.(Int, split(line))
-            if fields[2] in (2, 9) # Linear and quadratic triangles
-                num_tags = fields[3]
-                push!(boundary_faces, Tuple(sort(fields[(num_tags + 4):(num_tags + 6)])))
-                push!(boundary_attributes, fields[4])
-            elseif fields[2] in (4, 11) # Linear and quadratic tetrahedra
-                volume_elements += 1
-            end
-        end
-        attributes = SolidModels.attributes(sm)
-        expected_boundaries =
-            ("exterior_boundary", "metal", "lumped_element", "port_1", "port_2")
-        @test volume_elements > 0
-        @test !isempty(boundary_faces)
-        @test allunique(boundary_faces)
-        @test boundary_attributes == Set(attributes[name] for name in expected_boundaries)
-    end
-
-    # Assign to new groups
-    metal_comp_tags = []
-    for i in eachindex(metal_conn_comps)
-        sm["metal_island_$i"] = metal_conn_comps[i]
-        push!(metal_comp_tags, SolidModels.entitytags(sm["metal_island_$i", 2]))
-    end
-    sort!(metal_comp_tags, by=length)
-    @test length(metal_comp_tags[1]) == 1 # Transmission line
-    @test length(metal_comp_tags[2]) == 2 # Transmon island + junction top lead
-    @test length(metal_comp_tags[3]) == 4 # Ground plane + bottom lead + TL ends
-end
-
 @testitem "Single Transmon (experimental)" setup = [CommonTestSetup, QuietGmshSetup] begin
     import JSON
     using JSONSchema
@@ -276,11 +142,90 @@ end
     # tested here; the SolidModel benchmarks also include it
     using .SchematicDrivenLayout
     include("../examples/SingleTransmon/schematic.jl")
-    floorplan, target = single_transmon_schematic(; log_dir=nothing)
+
+    # Components used by the schematic
+    q = ExampleRectangleTransmon()
+    rr = ExampleClawedMeanderReadout()
+    @test geometry(q) isa CoordinateSystem{typeof(1.0DeviceLayout.nm)}
+    @test geometry(rr) isa CoordinateSystem{typeof(1.0DeviceLayout.nm)}
+    @test issubset([:readout, :xy, :z], keys(hooks(q)))
+    @test abs(hooks(rr).qubit.p.y - hooks(rr).feedline.p.y) ≈ rr.total_y_length
+
+    no_warnings = log -> log.level < Logging.Warn
+    floorplan, target = with_test_logger(no_warnings) do
+        return single_transmon_schematic(; log_dir=nothing)
+    end
     sm = SolidModel("single_transmon_schematic", overwrite=true)
-    render!(sm, floorplan, target)
+    with_test_logger(no_warnings) do
+        return render!(sm, floorplan, target)
+    end
+    # 3*4 sides of chip and vacuum boxes + top + bottom = 14
+    @test length(SolidModels.dimtags(sm["exterior_boundary", 2])) == 14
+    @test length(SolidModels.dimtags(sm["metal", 2])) == 19
+    @test length(SolidModels.dimtags(sm["vacuum", 3])) == 2
     @test length(SolidModels.dimtags(sm["substrate", 3])) == 1
     @test length(SolidModels.dimtags(sm["port_1", 2])) == 1
     @test length(SolidModels.dimtags(sm["port_2", 2])) == 1
     @test length(SolidModels.dimtags(sm["lumped_element", 2])) == 1
+    metal_conn_comps = SolidModels.connected_components(sm, "metal")
+    active_conn_comps = SolidModels.connected_components(
+        sm,
+        ["metal", "lumped_element", "port_1", "port_2"]
+    )
+    @test length(metal_conn_comps) == 3  # Transmission line, island, ground
+    @test length(active_conn_comps) == 1 # Ports and lumped elements connect metal components
+
+    @testset "Palace mesh boundary attributes" begin
+        gmsh = SolidModels.gmsh
+        mesh_path = joinpath(tdir, "single_transmon_schematic.msh2")
+        option_names = ("Mesh.Binary", "Mesh.ElementOrder")
+        original_options = gmsh.option.get_number.(option_names)
+        try
+            gmsh.option.set_number("Mesh.Binary", 0)
+            gmsh.option.set_number("Mesh.ElementOrder", 2)
+            gmsh.model.mesh.generate(3)
+            save(mesh_path, sm)
+        finally
+            for (option, value) in zip(option_names, original_options)
+                gmsh.option.set_number(option, value)
+            end
+        end
+
+        # MSH2 writes a boundary element for each physical group containing a surface.
+        # Palace requires a single boundary record per non-periodic face.
+        mesh_lines = readlines(mesh_path)
+        elements_start = findfirst(==("\$Elements"), mesh_lines)
+        element_count = parse(Int, mesh_lines[elements_start + 1])
+        boundary_faces = NTuple{3, Int}[]
+        boundary_attributes = Set{Int}()
+        volume_elements = 0
+        for line in mesh_lines[(elements_start + 2):(elements_start + 1 + element_count)]
+            fields = parse.(Int, split(line))
+            if fields[2] in (2, 9) # Linear and quadratic triangles
+                num_tags = fields[3]
+                push!(boundary_faces, Tuple(sort(fields[(num_tags + 4):(num_tags + 6)])))
+                push!(boundary_attributes, fields[4])
+            elseif fields[2] in (4, 11) # Linear and quadratic tetrahedra
+                volume_elements += 1
+            end
+        end
+        attributes = SolidModels.attributes(sm)
+        expected_boundaries =
+            ("exterior_boundary", "metal", "lumped_element", "port_1", "port_2")
+        @test volume_elements > 0
+        @test !isempty(boundary_faces)
+        @test allunique(boundary_faces)
+        @test boundary_attributes == Set(attributes[name] for name in expected_boundaries)
+    end
+
+    # Assign to new groups
+    metal_comp_tags = []
+    for i in eachindex(metal_conn_comps)
+        sm["metal_island_$i"] = metal_conn_comps[i]
+        push!(metal_comp_tags, SolidModels.entitytags(sm["metal_island_$i", 2]))
+    end
+    sort!(metal_comp_tags, by=length)
+    @test length(metal_comp_tags[1]) == 1 # Transmission line
+    @test length(metal_comp_tags[2]) == 2 # Transmon island
+    @test length(metal_comp_tags[3]) == 16 # Ground
 end
