@@ -503,8 +503,8 @@ end
 # boundary, membership in each result must equal the Boolean combination of
 # memberships in the operands, which are contour lists read under the even-odd rule
 # (for a valid tree, the same region as the positive rule the operations use). The
-# right-hand side never touches the clipping kernel. Examples where no probe lands
-# inside one of the operands are rejected rather than passed.
+# right-hand side never touches the clipping kernel. Examples where either operand
+# contains no probe are rejected rather than passed.
 function boolean_oracle_holds(As::Vector{<:Polygon}, Bs::Vector{<:Polygon}; tol=1)
     gA, gB = togrid(As), togrid(Bs)
     results = (

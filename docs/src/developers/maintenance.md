@@ -152,6 +152,8 @@ tab after each run. When a job fails:
 
 1. Reproduce the failure with the seed and budget printed at the top of its log, and shrink
    it to a minimal counterexample, as described under "Exploration" in `test/laws/README.md`.
+   Shrinking can take hours, since the shrinker has no time limit. If it runs long, interrupt
+   it and reduce the counterexample by hand, so a long run isn't mistaken for a hang.
 2. Add the counterexample to the ledger (`test/laws/test_ledger.jl`) before changing the law
    or the code. If the code is wrong, also open an issue. If the law is wrong, for example
    too strict in a regime that the CI budget rarely reaches, fix the law and say why in its

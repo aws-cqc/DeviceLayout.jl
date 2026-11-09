@@ -35,7 +35,7 @@ tag takes about two minutes at the default budget.
 | Variable              | Default    | Effect                                                              |
 |:--------------------- |:---------- |:------------------------------------------------------------------- |
 | `GEOMLAWS_EXAMPLES`   | `50`       | Valid generated inputs per check                                    |
-| `GEOMLAWS_SEED`       | `20260908` | Generator seed (`explore.jl` also takes `random`)                   |
+| `GEOMLAWS_SEED`       | `20260908` | Generator seed (`explore.jl` defaults to `random`)                  |
 | `GEOMLAWS_RUN_BROKEN` | `0`        | `1` runs the checks that are known to fail instead of skipping them |
 
 ### Exploration
