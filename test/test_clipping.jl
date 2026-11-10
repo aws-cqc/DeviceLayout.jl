@@ -414,6 +414,23 @@
             @test d2 == difference2d(d2, [d1])
             @test d2 == difference2d([d2], d1)
             @test d2 == difference2d([d2], [d1])
+
+            # Trees with different numbers of children, at the top level or below, are unequal
+            sq = Rectangle(T(10), T(10))
+            a = union2d(sq)
+            b = union2d([sq, Rectangle(Point(T(20), T(0)), Point(T(30), T(10)))])
+            hole = Rectangle(Point(T(2), T(2)), Point(T(8), T(8)))
+            holed = difference2d(sq, hole)
+            e = intersect2d(d1, d2) # empty
+            for (p, q) in ((a, b), (a, holed), (a, e))
+                @test p != q
+                @test q != p
+                @test !isapprox(p, q)
+                @test !isapprox(q, p)
+            end
+            @test a == union2d(sq)
+            @test holed ≈ difference2d(sq, hole)
+            @test e == intersect2d(r1, r2 + Point(T(5), T(5)))
         end
 
         r1 = Rectangle(2, 2)

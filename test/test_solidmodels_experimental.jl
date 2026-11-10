@@ -1475,6 +1475,17 @@ end
     place!(local_cs, Locator(0μm, 0μm), local_meta)
     @test direction_map(local_cs)[local_meta] ≈ [cospi(1 / 6), 0.5, 0.0]
 
+    # A port entity hidden by default still gives its locator a direction.
+    hidden_cs = CoordinateSystem("hidden_port", μm)
+    hidden_meta = LumpedPort(:port, "hidden")
+    place!(
+        hidden_cs,
+        optional_entity(WithDirection(90°)(Rectangle(2μm, 1μm)), :port; default=false),
+        LayerRef(:port)
+    )
+    place!(hidden_cs, Locator(1μm, 0.5μm), hidden_meta)
+    @test direction_map(hidden_cs)[hidden_meta] ≈ [0.0, 1.0, 0.0] atol = 1e-12
+
     transformed = CoordinateSystem("transformed_ports", μm)
     addref!(transformed, local_cs; rot=90°)
     rotated = direction_map(transformed)[local_meta]

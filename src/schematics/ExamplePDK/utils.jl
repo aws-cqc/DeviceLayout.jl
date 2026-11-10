@@ -61,11 +61,18 @@ function tap!(path::Path, sty::Paths.SimpleCPW=laststyle(path); location=1)
 end
 
 """
-    bridge_geometry(style::Paths.SimpleCPW)
+    bridge_geometry(style::Paths.SimpleCPW;
+        air_bridge_meta=LayerVocabulary.BRIDGE, scaffold_meta=LayerVocabulary.BRIDGE_BASE)
 
 Return a `CoordinateSystem` with a simple scaffolded bridge that spans `style`.
+
+The bridge is placed in `air_bridge_meta` and its scaffold in `scaffold_meta`.
 """
-function bridge_geometry(style::Paths.SimpleCPW)
+function bridge_geometry(
+    style::Paths.SimpleCPW;
+    air_bridge_meta=LayerVocabulary.BRIDGE,
+    scaffold_meta=LayerVocabulary.BRIDGE_BASE
+)
     cs = CoordinateSystem(uniquename("bridge"))
     h_ground_ground = 2 * Paths.extent(style)
     bridge_width = 10μm
@@ -76,8 +83,8 @@ function bridge_geometry(style::Paths.SimpleCPW)
         Rectangle(bridge_width, h_ground_ground + 2 * (scaffold_gap + foot_length))
     )
     rect_scaffold = centered(Rectangle(scaffold_width, h_ground_ground + 2 * scaffold_gap))
-    place!(cs, rect_bridge, LayerVocabulary.BRIDGE)
-    place!(cs, rect_scaffold, LayerVocabulary.BRIDGE_BASE)
+    place!(cs, rect_bridge, air_bridge_meta)
+    place!(cs, rect_scaffold, scaffold_meta)
     return cs
 end
 
@@ -129,6 +136,8 @@ end
 Add wave port line segments where the path or route component `nodes` intersect `sim_area`. The line
 segments will have a length of `wave_port_width` and will be placed in the `wave_port_layer` layer. No
 wave port is placed for nodes that do not intersect `sim_area`.
+
+See also `wave_port_segments`.
 """
 function add_wave_ports!(
     floorplan::Schematic,
@@ -137,7 +146,33 @@ function add_wave_ports!(
     wave_port_width::T,
     wave_port_layer::SemanticMeta
 ) where {T}
+    for (; segment) in wave_port_segments(floorplan, nodes, sim_area, wave_port_width)
+        render!(floorplan.coordinate_system, only_simulated(segment), wave_port_layer)
+    end
+end
+
+"""
+    wave_port_segments(floorplan::Schematic, nodes::Vector{ComponentNode},
+        sim_area::Rectangle, wave_port_width)
+
+Return the wave port line segments where the path or route component `nodes` intersect
+`sim_area`, as named tuples `(; node, index, location, segment)`.
+
+`location` is the intersection, and `segment` is a `LineSegment` of length `wave_port_width`
+centered on it along the edge of `sim_area`. `index` numbers the intersections of each node
+in the order they are found, since a path may cross `sim_area` more than once.
+
+Warns for nodes that are not paths or routes or that do not intersect `sim_area`, and for
+intersections in curved segments or not perpendicular to the edge.
+"""
+function wave_port_segments(
+    floorplan::Schematic,
+    nodes::Vector{ComponentNode},
+    sim_area::Rectangle,
+    wave_port_width
+)
     angle_tol = 1e-1
+    segments = []
     for node in nodes
         # Check component type
         node_component = component(node)
@@ -157,7 +192,7 @@ function add_wave_ports!(
             @warn "Cannot place a wave port for node $(node.id) since it does not intersect the simulation area."
 
         # Create a line segment for each wave port along the domain x or y boundaries
-        for (loc, dir, node_idx, t) in intersections
+        for (index, (loc, dir, node_idx, t)) in enumerate(intersections)
             # Warn if the intersection is in a curved segment
             if path.nodes[node_idx].seg isa Paths.BSpline ||
                !(Paths.curvature(path.nodes[node_idx].seg, t) ≈ Point(0 / nm, 0 / nm))
@@ -177,19 +212,20 @@ function add_wave_ports!(
                 @warn "Placing a wave port in segment of node $(node.id) which is not perpendicular to the domain boundary can lead to erroneous results."
             end
             if dir == :x
-                line = LineSegment(
+                segment = LineSegment(
                     Point(loc.x - wave_port_width / 2, loc.y),
                     Point(loc.x + wave_port_width / 2, loc.y)
                 )
             else
-                line = LineSegment(
+                segment = LineSegment(
                     Point(loc.x, loc.y - wave_port_width / 2),
                     Point(loc.x, loc.y + wave_port_width / 2)
                 )
             end
-            render!(floorplan.coordinate_system, only_simulated(line), wave_port_layer)
+            push!(segments, (; node, index, location=loc, segment))
         end
     end
+    return segments
 end
 
 """

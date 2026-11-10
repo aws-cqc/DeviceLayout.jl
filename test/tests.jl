@@ -84,6 +84,26 @@
               [Point(99000000000nm2nm // 100, 198000000000nm2nm // 100)]
     end
 
+    @testset "> Point array isapprox" begin
+        p, q = Point(1.0, 2.0), Point(3.0, 4.0)
+        @test !isapprox(Point{Float64}[], [p])
+        @test !isapprox([p], Point{Float64}[])
+        @test !isapprox([p], [p, q, q])
+        @test !isapprox(reshape([p, q], 1, 2), [p, q])
+        @test isapprox(Point{Float64}[], Point{Float64}[])
+        @test isapprox([p, q], [p, q + Point(1e-12, 0)])
+        @test !isapprox([p, q], [p, q + Point(1e-3, 0)])
+        @test isapprox([p, q], [p, q + Point(1e-3, 0)]; atol=1e-2)
+        @test !isapprox([Point(1.0μm, 2.0μm)], Point{typeof(1.0μm)}[])
+        @test isapprox([Point(1.0μm, 2.0μm)], [Point(1000.0nm, 2000.0nm)])
+        @test !isapprox([Point(1.0μm, 2.0μm)], [Point(1000.0nm, 2000.0nm), p * μm])
+        @test isapprox([Point(1, 2)], [Point(1.0, 2.0)])
+        @test !isapprox([Point(1, 2)], [Point(1.0, 2.0), q])
+        tri = [Point(0.0, 0.0), Point(1.0, 0.0), Point(1.0, 1.0)]
+        @test !isapprox(Polygon(tri), Polygon([tri..., Point(0.0, 1.0)]))
+        @test isapprox(Polygon(tri), Polygon([tri[1], tri[2], tri[3] + Point(1e-12, 0)]))
+    end
+
     @testset "> Point accessors" begin
         @test getx(Point(1, 2)) == 1
         @test gety(Point(1, 2)) == 2

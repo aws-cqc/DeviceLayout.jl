@@ -310,6 +310,8 @@ See [Shapes](./shapes.md).
     SolidModels.render_conformal!
     SolidModels.ConformalRenderContext
     SolidModels.add_conformal_loop!
+    SchematicDrivenLayout.union_geom2d!
+    SchematicDrivenLayout.difference_geom2d!
 ```
 
 ### Physical Groups

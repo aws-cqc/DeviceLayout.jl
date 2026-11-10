@@ -8,6 +8,14 @@ The format of this changelog is based on
 
 ### Added
 
+  - Property-based tests of the 2D polygon operations (`test/laws/`, test item tag
+    `:geomlaws`), with Supposition.jl as a new test-only dependency. Laws for the boolean
+    operations, `offset`, the keyhole cuts of `to_polygons`, path `halo`s, rigid-transform
+    equivariance, and unit invariance are checked on generated inputs, comparing outputs
+    as regions with exact arithmetic that doesn't use the clipping library. They run at
+    a fixed seed in the regular suite and with fresh seeds in a weekly GeomLaws workflow,
+    and known failures are kept as minimal reproducers. `test/laws/README.md` describes
+    what the laws cover and what they don't.
   - `SolidModels.exclude_groups` returns the entities of a physical group that belong to none of
     a list of other groups, a membership difference with the postrender-operation signature.
     A group left with no entities is removed (its entities stay in the model).
@@ -52,6 +60,31 @@ The format of this changelog is based on
     following `schemas/sm_metadata.schema.json`. `render!(cell, cs, stack)` renders the
     matching artwork. The API may change before DeviceLayout 2.0.
   - `SolidModels.render!` accepts `preflattened=true` to skip flattening `cs`.
+  - `render_conformal!(sm, sch, target::SolidModelTarget)` renders a schematic like
+    `render!(sm, sch, target)`, but through the conformal render, which resolves shared
+    boundaries with an edge cache instead of a fragment pass. Its 2D groups are formed
+    before emission by the target's new `prerender_ops`, authored like `postrender_ops`:
+    `union_geom2d!` and `difference_geom2d!` operations that keep the curves they don't
+    cut. It renders 2D geometry only; see `examples/DemoQPU17/solidmodel_conformal.jl`.
+    `SolidModelTarget` gains a `prerender_ops` keyword and a `prerenderer` field, added
+    last, and the `ExamplePDK` single-chip target defines `prerender_ops`. The method,
+    `prerender_ops` and their operations are experimental: their API may change in minor
+    versions, for example as 3D construction is added.
+  - `SchematicDrivenLayout.ExamplePDKExperimental`, a version of `ExamplePDK`'s single-transmon
+    components and single-chip target for `SolidModelsExperimental`, and the
+    `SingleTransmonExperimental` example, whose `configfile` builds a Palace configuration
+    from the saved metadata.
+  - `render!(::SolidModel, ...)` accepts `verbose=true` (also usable as a `SolidModelTarget`
+    rendering option), which logs each physical group created while rendering and each
+    postrendering operation, along with the resulting entity count, bounding box, and elapsed
+    time. Operations are logged before they run, so the operation responsible for a failure is
+    the last one logged. (#266)
+  - Single-shot SolidModel rendering and meshing benchmarks in `benchmark/solidmodel/` for the
+    single-transmon and DemoQPU17 workloads, with a comparison script and a manual
+    `Benchmark SolidModel` GitHub workflow. The examples expose their schematic construction
+    for reuse: `examples/SingleTransmon/schematic.jl` defines `single_transmon_schematic`
+    (included by `SingleTransmon.jl`), and `examples/DemoQPU17/solidmodel.jl` wraps its setup
+    in `qpu17_solidmodel_setup` instead of running it at include time.
 
 ### Changed
 
@@ -78,6 +111,9 @@ The format of this changelog is based on
     it is applied, so transforming an entity computes `cos`/`sin` once rather than once per
     point. Results are unchanged; `flatten` of the DemoQPU17 example's artwork takes about
     40 ms instead of 66 ms. Constructing a `ScaledIsometry` costs about 55 ns more.
+  - Messages logged to the console while planning, building, or rendering a `Schematic` no
+    longer carry a `stage` keyword, so the console no longer prints `└ stage = ...` beneath
+    each one. The stage still prefixes each line of the schematic's log file.
 
 ### Deprecated
 
@@ -106,6 +142,12 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - `isapprox` on arrays of `Point`s, and so on `Polygon`s, returns `false` when the
+    arrays differ in size. Previously it compared only the elements both arrays have, so
+    an empty array was approximately equal to any other.
+  - `==` and `isapprox` on `ClippedPolygon`s return `false` when the polygon trees have
+    different numbers of children at any level, such as an extra disjoint shape or an extra
+    hole. Previously, extra children on either side were ignored.
   - Schematic `render!` to a `Cell` or a `SolidModel` with `strict=:no` logs a component
     whose geometry fails to build and renders it as empty geometry, instead of throwing.
     (#287)
@@ -178,6 +220,13 @@ The format of this changelog is based on
     Such a segment rendered as zero-area polygons, and whether it appeared depended on
     floating-point details such as whether the CPU fused multiply-adds, so the same layout
     could render with different fingerprints on different machines.
+  - `SolidModels.meshsize` and `meshgrading` of a styled entity use the entity's own size when
+    the style doesn't set one. Previously a style other than `MeshSized` applied directly to
+    an entity reported no sizing, so a CPW under `only_simulated`, `Plain` or `WithDirection`
+    lost its trace and gap refinement in `render!`. The outermost `MeshSized` still wins, now
+    including one selected by an `OptionalStyle` wrapping an already sized entity. A custom
+    style sets a size by implementing `meshsize(::GeometryEntity, ::MyStyle)`; a style-only
+    `meshsize(::MyStyle)` is no longer used.
 
 ## 1.20.0 (2026-10-06)
 

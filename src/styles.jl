@@ -29,6 +29,13 @@ of a styled entity will use the underlying entity's bounds. Similarly, `footprin
 style, in which case the entity is treated as a zero-area `Rectangle`
 (ignored in collective `bounds` calculations), as well as `OptionalStyle`, in which
 case the default style is used (in case it has special behavior).
+
+Mesh sizing for `SolidModel` rendering falls back to the underlying entity unless the style
+sets a size. The outermost style that sets one wins, and an `OptionalStyle` uses the branch
+selected by the rendering options. A style that sets a mesh size implements
+`SolidModels.meshsize(::GeometryEntity, ::MyStyle; kwargs...)`, returning a unitless size in
+microns, and `SolidModels.meshgrading(::GeometryEntity, ::MyStyle; kwargs...)`, returning the
+grading exponent `α` (negative for the global default), as `MeshSized` does.
 """
 abstract type GeometryEntityStyle end
 
