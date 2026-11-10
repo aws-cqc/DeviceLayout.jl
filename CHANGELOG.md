@@ -6,16 +6,10 @@ The format of this changelog is based on
 
 ## Unreleased
 
+## 1.21.0 (2026-11-10)
+
 ### Added
 
-  - Property-based tests of the 2D polygon operations (`test/laws/`, test item tag
-    `:geomlaws`), with Supposition.jl as a new test-only dependency. Laws for the boolean
-    operations, `offset`, the keyhole cuts of `to_polygons`, path `halo`s, rigid-transform
-    equivariance, and unit invariance are checked on generated inputs, comparing outputs
-    as regions with exact arithmetic that doesn't use the clipping library. They run at
-    a fixed seed in the regular suite and with fresh seeds in a weekly GeomLaws workflow,
-    and known failures are kept as minimal reproducers. `test/laws/README.md` describes
-    what the laws cover and what they don't.
   - `SolidModels.exclude_groups` returns the entities of a physical group that belong to none of
     a list of other groups, a membership difference with the postrender-operation signature.
     A group left with no entities is removed (its entities stay in the model).
@@ -85,6 +79,14 @@ The format of this changelog is based on
     for reuse: `examples/SingleTransmon/schematic.jl` defines `single_transmon_schematic`
     (included by `SingleTransmon.jl`), and `examples/DemoQPU17/solidmodel.jl` wraps its setup
     in `qpu17_solidmodel_setup` instead of running it at include time.
+  - Property-based tests of the 2D polygon operations (`test/laws/`, test item tag
+    `:geomlaws`), with Supposition.jl as a new test-only dependency. Laws for the boolean
+    operations, `offset`, the keyhole cuts of `to_polygons`, path `halo`s, rigid-transform
+    equivariance, and unit invariance are checked on generated inputs, comparing outputs
+    as regions with exact arithmetic that doesn't use the clipping library. They run at
+    a fixed seed in the regular suite and with fresh seeds in a weekly GeomLaws workflow,
+    and known failures are kept as minimal reproducers. `test/laws/README.md` describes
+    what the laws cover and what they don't.
 
 ### Changed
 
