@@ -6,16 +6,10 @@ The format of this changelog is based on
 
 ## Unreleased
 
+## 1.21.0 (2026-11-10)
+
 ### Added
 
-  - Property-based tests of the 2D polygon operations (`test/laws/`, test item tag
-    `:geomlaws`), with Supposition.jl as a new test-only dependency. Laws for the boolean
-    operations, `offset`, the keyhole cuts of `to_polygons`, path `halo`s, rigid-transform
-    equivariance, and unit invariance are checked on generated inputs, comparing outputs
-    as regions with exact arithmetic that doesn't use the clipping library. They run at
-    a fixed seed in the regular suite and with fresh seeds in a weekly GeomLaws workflow,
-    and known failures are kept as minimal reproducers. `test/laws/README.md` describes
-    what the laws cover and what they don't.
   - `SolidModels.exclude_groups` returns the entities of a physical group that belong to none of
     a list of other groups, a membership difference with the postrender-operation signature.
     A group left with no entities is removed (its entities stay in the model).
@@ -85,6 +79,14 @@ The format of this changelog is based on
     for reuse: `examples/SingleTransmon/schematic.jl` defines `single_transmon_schematic`
     (included by `SingleTransmon.jl`), and `examples/DemoQPU17/solidmodel.jl` wraps its setup
     in `qpu17_solidmodel_setup` instead of running it at include time.
+  - Property-based tests of the 2D polygon operations (`test/laws/`, test item tag
+    `:geomlaws`), with Supposition.jl as a new test-only dependency. Laws for the boolean
+    operations, `offset`, the keyhole cuts of `to_polygons`, path `halo`s, rigid-transform
+    equivariance, and unit invariance are checked on generated inputs, comparing outputs
+    as regions with exact arithmetic that doesn't use the clipping library. They run at
+    a fixed seed in the regular suite and with fresh seeds in a weekly GeomLaws workflow,
+    and known failures are kept as minimal reproducers. `test/laws/README.md` describes
+    what the laws cover and what they don't.
 
 ### Changed
 
@@ -227,6 +229,15 @@ The format of this changelog is based on
     including one selected by an `OptionalStyle` wrapping an already sized entity. A custom
     style sets a size by implementing `meshsize(::GeometryEntity, ::MyStyle)`; a style-only
     `meshsize(::MyStyle)` is no longer used.
+  - `create_component(T, ps, address)` and `set_parameters(c, ps, address)` read `NamedTuple`
+    and `Dict` parameters from nested namespaces, as written by `extract_parameter_set`, and
+    reject namespace keys that are not fields of a non-empty `NamedTuple` parameter. Required
+    parameters declared as a `NamedTuple` or `Dict` are read from namespaces too. (#335)
+  - `@variant` and `@composite_variant` constructors reject unknown keyword arguments. (#336)
+  - A `@composite_variant` created from a `ParameterSet` passes it on to
+    `_build_subcomponents`. (#337)
+  - `create_component` and `set_parameters` give clearer errors for invalid `ParameterSet`
+    addresses and namespaces, and `set_parameters` on a composite keeps its `ParameterSet`.
 
 ## 1.20.0 (2026-10-06)
 
@@ -252,15 +263,6 @@ The format of this changelog is based on
 
 ### Fixed
 
-  - `create_component(T, ps, address)` and `set_parameters(c, ps, address)` read `NamedTuple`
-    and `Dict` parameters from nested namespaces, as written by `extract_parameter_set`, and
-    reject namespace keys that are not fields of a non-empty `NamedTuple` parameter. Required
-    parameters declared as a `NamedTuple` or `Dict` are read from namespaces too. (#335)
-  - `@variant` and `@composite_variant` constructors reject unknown keyword arguments. (#336)
-  - A `@composite_variant` created from a `ParameterSet` passes it on to
-    `_build_subcomponents`. (#337)
-  - `create_component` and `set_parameters` give clearer errors for invalid `ParameterSet`
-    addresses and namespaces, and `set_parameters` on a composite keeps its `ParameterSet`.
   - `uniquename(str, dlm)` dropped the delimiter when reconstructing the base name of a
     `str0 * dlm * n` input containing several delimiters (`uniquename("x_3_1", '_')` returned
     `"x3_1"`), and a bare number was treated as a suffix. `uniquename` also takes a new keyword
