@@ -32,8 +32,31 @@ function to_primitives(::SolidModel, node::Paths.Node, ::Val{true}; kwargs...)
     return to_polygons(node; kwargs...)
 end
 
+# A style without a SolidModel method of its own is applied through `to_polygons`, as when
+# rendering to a `Cell`. That is correct for any style that renders in 2D, at the cost of
+# discretizing curves, so warn when curves are lost.
 to_primitives(sm::SolidModel, ent::StyledEntity{T, U, S}; kwargs...) where {T, U, S} =
-    to_primitives(sm, ent.ent; kwargs...)
+    _apply_style(sm, ent; kwargs...)
+function _apply_style(::SolidModel, ent::StyledEntity; kwargs...)
+    DeviceLayout.Curvilinear._maybe_warn_curve_loss(ent; context=:solidmodel)
+    return to_polygons(ent; kwargs...)
+end
+# GmshNative discretizes every curve anyway, so there is nothing to warn about.
+_apply_style(::SolidModel{GmshNative}, ent::StyledEntity; kwargs...) =
+    to_polygons(ent; kwargs...)
+# Styles that leave the geometry unchanged pass through, so native curves survive.
+to_primitives(
+    sm::SolidModel,
+    ent::StyledEntity{T, U, <:Union{Plain, MeshSized, DeviceLayout.WithDirection}};
+    kwargs...
+) where {T, U} = to_primitives(sm, ent.ent; kwargs...)
+# `ToTolerance` means rendering the entity with its `atol`, which also keeps native curves.
+to_primitives(
+    sm::SolidModel,
+    ent::StyledEntity{T, U, <:DeviceLayout.ToTolerance};
+    kwargs...
+) where {T, U} = to_primitives(sm, ent.ent; kwargs..., atol=ent.sty.atol)
+
 function to_primitives(
     sm::SolidModel{OpenCascade},
     ent::StyledEntity{T, U, S};
@@ -43,7 +66,27 @@ function to_primitives(
     if inner_prim isa Vector
         return to_primitives(sm, ent.sty.(inner_prim); kwargs...)
     end
+    # An ellipse has no corners to round, so the kernel's exact ellipse is already the result.
+    inner_prim isa Ellipse && return inner_prim
+    # Any other primitive the kernel keeps as is has no rounding method and would come
+    # straight back here, so round it through `to_curvilinear` instead.
+    inner_prim === ent.ent &&
+        return to_primitives(sm, to_curvilinear(inner_prim, ent.sty; kwargs...); kwargs...)
     return to_primitives(sm, ent.sty(inner_prim); kwargs...)
+end
+
+# An entity without a contour tree is styled as a single contour, `[1]`, as in
+# `to_polygons`. Applying that style directly keeps native curves on OpenCascade.
+function to_primitives(
+    sm::SolidModel,
+    ent::StyledEntity{T, U, <:StyleDict};
+    kwargs...
+) where {T, U}
+    return to_primitives(
+        sm,
+        DeviceLayout.Polygons._single_contour_style(ent.sty)(ent.ent);
+        kwargs...
+    )
 end
 
 function to_primitives(sm::SolidModel, ent::Vector{<:GeometryEntity}; kwargs...)
@@ -80,6 +123,12 @@ to_primitives(
     ent::StyledEntity{T, ClippedPolygon{T}, <:StyleDict};
     kwargs...
 ) where {T} = to_polygons(ent.ent, ent.sty; kwargs...)
+# `to_polygons` has no `StyleDict` method for regions, so apply the styles first.
+to_primitives(
+    ::SolidModel{GmshNative},
+    ent::StyledEntity{T, CurvilinearRegion{T}, <:StyleDict};
+    kwargs...
+) where {T} = to_polygons(to_curvilinear(ent.ent, ent.sty; kwargs...); kwargs...)
 
 function to_primitives(::SolidModel, ent::Ellipse; rounded=nothing, Δθ=nothing, kwargs...)
     if !isnothing(rounded)

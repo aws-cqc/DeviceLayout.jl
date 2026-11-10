@@ -14,6 +14,12 @@ polygons before applying the style.
 A style should implement `styled_loop` and `to_curvilinear` methods to allow rounding and curve
 recovery with nested styles.
 
+When rendering to an OpenCascade `SolidModel`, a style is applied through `to_polygons`, which
+discretizes curves, unless it implements
+`SolidModels.to_primitives(::SolidModel{SolidModels.OpenCascade}, ::StyledEntity{T, U, MyStyle}; kwargs...)`
+returning curve-bearing geometry such as a `CurvilinearPolygon`. A styled `CurvilinearRegion` is
+the exception: it is rendered by applying `styled_loop` to each of its loops.
+
 A style should implement `transform(::MyStyle, f)` if it holds information in a local coordinate
 frame (like `WithDirection` does).
 

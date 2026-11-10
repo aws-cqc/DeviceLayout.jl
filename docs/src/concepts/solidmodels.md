@@ -44,6 +44,8 @@ flatten --> to_primitives --> physical groups --> postrender ops --> fragment & 
 
 Each element is converted to kernel-native geometry via `to_primitives(sm, entity)`. OpenCascade represents curves and ellipses as exact geometry. Exact arcs produce smoother meshes with fewer elements—see the example [here](./geometry.md#Solid-Models).
 
+Styles are applied to styled entities. Styles that don't change the geometry, such as [`MeshSized`](@ref), keep native curves, and `Rounded` keeps exact arcs on OpenCascade. Any other style, including a user-defined one, is applied through `to_polygons` as in 2D rendering, which discretizes curves; OpenCascade warns when that happens.
+
 ### 3. Physical group creation
 
 Rendered entities are grouped by their mapped layer name. The `map_meta` function controls this mapping; when rendering through a `SolidModelTarget`, it applies rules for levelwise layers (appending `_L1`, `_L2`, etc.) and indexed layers (appending `_1`, `_2`, etc.). At this stage, entities also receive mesh sizing information from [`MeshSized`](@ref) metadata.

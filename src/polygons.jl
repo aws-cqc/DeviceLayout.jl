@@ -1672,6 +1672,9 @@ Style used for applying differing styles to different Polygons at different leve
 `ClippedPolygon` or `CurvilinearRegion`. Styles are stored by the sequence of child indices
 required to find the corresponding `Clipper.PolyNode` within the `ClippedPolygon`. For a
 `CurvilinearRegion` only dictionaries of depth 2 (a single parent and one set of holes) are valid.
+
+Any other entity, such as a `Rectangle` or a path node, is styled as a single contour with the
+style at `[1]` (the default unless set), and styles at other indices throw an `ArgumentError`.
 """
 struct StyleDict{S} <: GeometryEntityStyle where {S}
     styles::Dict{Vector{Int}, GeometryEntityStyle}
@@ -1744,6 +1747,23 @@ Base.setindex!(d::StyleDict, s::GeometryEntityStyle, indices::Int...) =
     addstyle!(d, s, indices...)
 Base.setindex!(d::StyleDict, s::GeometryEntityStyle, n::Clipper.PolyNode) =
     addstyle!(d, s, getkey(n))
+
+function _single_contour_style(s::StyleDict)
+    others = sort!([k for k in keys(s.styles) if k != [1]])
+    isempty(others) || throw(
+        ArgumentError(
+            "this `StyleDict` has styles at $(join(others, ", ")), but only a " *
+            "`ClippedPolygon` or `CurvilinearRegion` has contours to index. Other entities " *
+            "are styled as a single contour, `[1]`. To style contours separately, convert " *
+            "the entity to a `ClippedPolygon` first, for example with `union2d`."
+        )
+    )
+    return s[1]
+end
+
+# Without this, the generic fallback hands the polygon straight back to itself.
+to_polygons(p::Polygon, s::StyleDict; kwargs...) =
+    to_polygons(p, _single_contour_style(s); kwargs...)
 
 function to_polygons(p::ClippedPolygon, s::StyleDict; kwargs...)
     p = deepcopy(p) # deepcopy so as not to modify

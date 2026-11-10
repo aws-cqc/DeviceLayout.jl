@@ -1957,6 +1957,9 @@ styled_loop(n::PolyNode, sty; kwargs...) = styled_loop(Polygon(contour(n)), sty;
 styled_loop(l::CurvilinearPolygon, sty::Plain; kwargs...) = l
 styled_loop(::CurvilinearPolygon{T}, ::NoRender; kwargs...) where {T} =
     CurvilinearPolygon(Point{T}[])
+# A lone loop is styled as a single contour, `[1]`, as in `to_polygons`.
+styled_loop(l::Union{Polygon, CurvilinearPolygon}, sty::StyleDict; kwargs...) =
+    styled_loop(l, Polygons._single_contour_style(sty); kwargs...)
 
 # Expand a styled entity into curve-bearing geometry. Entry points accept a bare style
 # (single style applied to the whole entity) and dispatch by entity type below.
@@ -2108,13 +2111,20 @@ end
 _carries_curves(e::StyledEntity{T, U}) where {T, U} = _carries_curves(e.ent)
 
 # Entities without a curve-preserving method are discretized.
-# Warn once per entity type so the loss is observable.
+# Warn once per entity type per context so the loss is observable.
 const _curve_loss_warned = Set{Symbol}()
-function _maybe_warn_curve_loss(e)
+function _maybe_warn_curve_loss(e; context=:recover_curves)
     _carries_curves(e) || return nothing
-    key = Symbol("$(typeof(e))")
+    key = Symbol(context, " ", typeof(e))
     key in _curve_loss_warned && return nothing
     push!(_curve_loss_warned, key)
+    if context === :solidmodel
+        @warn "Rendering entities of type $(typeof(e)) to an OpenCascade SolidModel " *
+              "discretizes their curves, because they have no OpenCascade " *
+              "`SolidModels.to_primitives` method and are rendered via to_polygons. (This " *
+              "warning is shown once per entity type.)"
+        return nothing
+    end
     @warn "recover_curves: entities of type $(typeof(e)) have no curve-recovery method " *
           "and are discretized via to_polygons — any curves they carry will not be " *
           "recovered. (This warning is shown once per entity type.)"
