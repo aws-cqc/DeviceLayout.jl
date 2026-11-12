@@ -1519,8 +1519,11 @@ end
 
 Return a `Path` forming the halo of `pa`, equivalent to offsetting the geometry by `outer_delta`, then subtracting the offset by `inner_delta` if it is not `nothing`.
 
-Extends the start and/or end by `delta` (for each inner/outer offset) when `pa` has nonzero extent at the endpoints.
-Each segment's style is the halo style of the original segment.
+Extends the start and/or end by `outer_delta` when the halo has nonzero extent at the endpoints.
+Each segment's style is the halo style of the original segment. `inner_delta` is not supported
+for paths with sharp corners (`corner!` with `Paths.SimpleTraceCorner`). If `pa` ends in a
+corner turning by more than 90°, the halo reaches `outer_delta * (tan(|α|/2) - 1)` past the
+offset of the end.
 
 For the segments of the `Path` and any attached references,
 any entities in layers in `ignore_layers` will be skipped. Note that even if the segments
@@ -1547,19 +1550,23 @@ function halo(
         memoized_halos[pa] = halopath
         return halopath
     end
+    # check if path's halo should be excluded
+    exclude = !(DeviceLayout.layer_included(pa.metadata, only_layers, ignore_layers))
+    # Throw before `handle_generic_tapers!` modifies `pa`
+    !exclude &&
+        !isnothing(inner_delta) &&
+        any(node -> node.sty isa SimpleTraceCorner, pa) &&
+        throw(corner_ring_error())
     taper_inds = handle_generic_tapers!(pa)
 
-    # If initial extent is nonzero, add delta to halo before start
-    ext0 = Paths.extent(pa[1].sty, zero(outer_delta))
+    # If the halo has nonzero extent at the start, extend it before the start
+    cap0 = halo_cap(pa[1], zero(outer_delta), outer_delta, inner_delta)
     p0 = (
-        iszero(ext0) ? pa.p0 :
+        isnothing(cap0) ? pa.p0 :
         pa.p0 - Point{T}(outer_delta * cos(pa.α0), outer_delta * sin(pa.α0))
     )
 
     halopath = Path(p0, α0=pa.α0, metadata=pa.metadata, name=uniquename("halo" * name(pa)))
-
-    # check if path's halo should be excluded
-    exclude = !(DeviceLayout.layer_included(pa.metadata, only_layers, ignore_layers))
 
     if exclude # path metadata is excluded, but still compute halos of path's decorations
         # compute halos of decorations
@@ -1582,10 +1589,7 @@ function halo(
         return halopath
     end
 
-    if !iszero(ext0)
-        extsty = halo(Paths.SimpleTrace(2 * ext0), outer_delta, inner_delta)
-        straight!(halopath, outer_delta, extsty)
-    end
+    isnothing(cap0) || straight!(halopath, cap0...)
 
     # Create the halo of each original path segment
     dup_path = deepcopy(pa)
@@ -1593,7 +1597,9 @@ function halo(
     for node in dup_path
         # Set the style to the halo style
         # Convert any NoRender halo to ContinuousStyle or DiscreteStyle as appropriate
-        node.sty = if node.sty isa DiscreteStyle
+        node.sty = if before_terminal_corner(node)
+            SimpleNoRender(2 * (extent(node.sty) + outer_delta), virtual=true)
+        elseif node.sty isa DiscreteStyle
             convert(
                 DiscreteStyle,
                 halo(
@@ -1621,59 +1627,113 @@ function halo(
     end
     append!(halopath, dup_path)
 
-    # If final extent is nonzero, add termination to halo
-    ext1 = Paths.extent(pa[end].sty, pathlength(pa[end]))
+    # If the halo has nonzero extent at the end, add termination to halo
+    cap1 = halo_cap(pa[end], pathlength(pa[end]), outer_delta, inner_delta)
 
     restore_generic_tapers!(pa, taper_inds)
 
-    if !iszero(ext1)
-        extsty = halo(Paths.SimpleTrace(2 * ext1), outer_delta, inner_delta)
-        straight!(halopath, outer_delta, extsty)
-    end
+    isnothing(cap1) || straight!(halopath, cap1...)
     memoized_halos[pa] = halopath
     return halopath
 end
 
 function halo(node::Paths.Node{T}, outer_delta, inner_delta=nothing; kwargs...) where {T}
-    halosty = if node.sty isa DiscreteStyle
+    if node.seg isa Corner
+        # Without neighbors to reconcile against, the corner's extent comes from the original
+        seg = copy(node.seg)
+        seg.extent += outer_delta
+        halonode = Node{T}(seg, halo(node.sty, outer_delta, inner_delta; kwargs...))
+        node.next === node || return [halonode]
+        cap1 = halo_cap(node, pathlength(node.seg), outer_delta, inner_delta)
+        isnothing(cap1) && return [halonode]
+        # Start where the halo's corner ends
+        w = seg.extent * tan(abs(seg.α) / 2)
+        post_halo = Path(p1(seg) + Point{T}(w * cos(α1(seg)), w * sin(α1(seg))), α0=α1(seg))
+        straight!(post_halo, cap1[1] - w, cap1[2])
+        return [halonode, elements(post_halo)...]
+    end
+    halosty = if before_terminal_corner(node)
+        SimpleNoRender(2 * (extent(node.sty) + outer_delta), virtual=true)
+    elseif node.sty isa DiscreteStyle
         convert(DiscreteStyle, halo(node.sty, outer_delta, inner_delta; kwargs...))
     else
         convert(ContinuousStyle, halo(node.sty, outer_delta, inner_delta; kwargs...))
     end
     # Add front/back halos if necessary
-    ext0 = Paths.extent(node.sty, zero(outer_delta))
+    cap0 = halo_cap(node, zero(outer_delta), outer_delta, inner_delta)
     pre_halo_start = (
-        iszero(ext0) ? p0(node.seg) :
+        isnothing(cap0) ? p0(node.seg) :
         p0(node.seg) -
         Point{T}(outer_delta * cos(α0(node.seg)), outer_delta * sin(α0(node.seg)))
     )
     pre_halo = Path(pre_halo_start, α0=α0(node.seg))
     post_halo = Path(p1(node.seg), α0=α1(node.seg))
-    if node.prev === node
-        if !iszero(ext0)
-            extsty = halo(Paths.SimpleTrace(2 * ext0), outer_delta, inner_delta)
-            straight!(pre_halo, outer_delta, extsty)
-        end
+    if node.prev === node && !isnothing(cap0)
+        straight!(pre_halo, cap0...)
     end
     if node.next === node
-        ext1 = Paths.extent(node.sty, pathlength(node.seg))
-        if !iszero(ext1)
-            extsty = halo(Paths.SimpleTrace(2 * ext1), outer_delta, inner_delta)
-            straight!(post_halo, outer_delta, extsty)
-        end
+        cap1 = halo_cap(node, pathlength(node.seg), outer_delta, inner_delta)
+        isnothing(cap1) || straight!(post_halo, cap1...)
     end
     halonode = Node{T}(node.seg, halosty)
     reconcilefields!(halonode)
     return [elements(pre_halo)..., halonode, elements(post_halo)...]
 end
 
+# Length and style of the halo's extension past `node` at `t` (its start or end), or
+# `nothing` if the halo needs none. A taper from zero width still gets an extension.
+function halo_cap(node::Paths.Node, t, outer_delta, inner_delta)
+    if node.seg isa Corner
+        # With no offset, the halo's corner already reaches the end
+        (corner_has_cap(node) && outer_delta > zero(outer_delta)) || return nothing
+        ext = node.seg.extent
+        return (
+            ext * tan(abs(node.seg.α) / 2) + outer_delta,
+            Paths.SimpleTrace(2 * (ext + outer_delta))
+        )
+    end
+    ext = extent(node.sty, t)
+    if iszero(ext)
+        halosty = halo(undecorated(node.sty), outer_delta, inner_delta)
+        iszero(extent(halosty, t)) && return nothing
+    end
+    isnothing(inner_delta) && return outer_delta, Paths.SimpleTrace(2 * (ext + outer_delta))
+    return outer_delta, Paths.SimpleCPW(2 * (ext + inner_delta), outer_delta - inner_delta)
+end
+
+# Whether the halo of a path ending in the corner `node` needs an extension. The path ends
+# `ext * tan(|α|/2)` past the corner point. The halo's corner reaches
+# `(ext + outer_delta) * tan(|α|/2)`, far enough when |α| ≥ 90°. For |α| > 90° that is
+# `outer_delta * (tan(|α|/2) - 1)` too far, but no `Path` style gives the exact end.
+corner_has_cap(node::Paths.Node) = node.sty isa SimpleTraceCorner && abs(node.seg.α) < 90°
+
+# Whether `node` is the piece `corner!` leaves before a path's final corner, when that corner
+# gets an extension. On the inside of the turn, a halo for the piece would reach past the
+# extension's end; the corner's halo covers the piece without it.
+function before_terminal_corner(node::Paths.Node)
+    corner = node.next
+    return corner !== node &&
+           corner.next === corner &&
+           corner.seg isa Corner &&
+           node.sty isa SimpleNoRender &&
+           corner_has_cap(corner)
+end
+
+corner_ring_error() = ArgumentError(
+    "`halo` with an `inner_delta` is not supported for paths with sharp corners (`Paths.SimpleTraceCorner`). Use `turn!` instead of `corner!`, or take the difference of the halos for `outer_delta` and `inner_delta`."
+)
+
 """
     halo(sty::Paths.Style, outer_delta, inner_delta=nothing; kwargs...)
 
 Return a `Trace` or `CPW` style covering the extent of `sty` from an offset of `inner_delta` to `outer_delta`.
+
+A `SimpleTraceCorner` is its own halo: its extent comes from the previous segment's halo style.
 """
 function halo(sty::Union{TaperTrace, TaperCPW}, outer_delta, inner_delta=nothing; kwargs...)
-    iszero(extent(sty, zero(outer_delta))) && return Paths.NoRender()
+    iszero(extent(sty, zero(outer_delta))) &&
+        iszero(extent(sty, sty.length)) &&
+        return Paths.NoRender()
     if isnothing(inner_delta)
         return _withlength!(
             Paths.TaperTrace(
@@ -1713,14 +1773,17 @@ function halo(
 end
 
 function halo(sty::Style, outer_delta, inner_delta=nothing; kwargs...)
-    # If it starts with zero extent then no halo
-    # Could be a problem if we allow tapers that start at zero
-    iszero(extent(sty, zero(outer_delta))) && return Paths.NoRender()
     isnothing(inner_delta) && return Paths.Trace(t -> 2 * (extent(sty, t) + outer_delta))
     return Paths.CPW(
         t -> 2 * (extent(sty, t) + inner_delta),
         t -> outer_delta - inner_delta
     )
+end
+
+# The corner's extent is reconciled from the previous node's halo style
+function halo(sty::SimpleTraceCorner, outer_delta, inner_delta=nothing; kwargs...)
+    isnothing(inner_delta) || throw(corner_ring_error())
+    return sty
 end
 
 halo(
