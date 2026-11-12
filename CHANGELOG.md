@@ -6,6 +6,17 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Fixed
+
+  - `halo` of a path style with zero extent at its start covers the rest of the style, and
+    a path's halo extends past such an endpoint like any other. A `TaperTrace` or `TaperCPW`
+    starting from zero width, or a `Trace` with a width function that is zero at the start,
+    previously got no halo. A style without its own `halo` method, such as a `Trace` with a
+    width function, now gets a halo of width `2 * outer_delta` where its extent is zero.
+  - `halo` of a path with sharp corners (`corner!` with `Paths.SimpleTraceCorner`), including
+    a path ending in a corner, gives a mitered halo around each corner instead of throwing a
+    `MethodError`. With an `inner_delta`, it throws an `ArgumentError`.
+
 ## 1.21.0 (2026-11-10)
 
 ### Added

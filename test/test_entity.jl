@@ -283,6 +283,149 @@
         @test nbridges(attach_halo) == 5
         @test nbridges(overlay_halo) == nbridges(attach_halo)
         @test bounds(overlay_halo) ≈ bounds(attach_halo)
+
+        function halo_polys(x)
+            c = Cell(uniquename("halo"), nm)
+            for el in (x isa AbstractVector ? x : [x])
+                render!(c, el, GDSMeta())
+            end
+            return union2d(elements(c))
+        end
+        # Area of `inner` outside `outer`; `covers` allows for clipping roundoff
+        excess_area(inner, outer) = sum(
+            abs.(DeviceLayout.Polygons.area.(to_polygons(difference2d(inner, outer))));
+            init=0.0nm^2
+        )
+        covers(outer, inner) = excess_area(inner, outer) < 1e-3μm^2
+
+        # Styles with zero extent at t = 0 still get a halo over the rest of their length,
+        # extended before the start like any other
+        taper_from_zero = Path(μm)
+        straight!(taper_from_zero, 100μm, Paths.TaperTrace(0μm, 10μm))
+        @test bounds(halo(taper_from_zero, 2μm)) ≈
+              Rectangle(Point(-2μm, -7μm), Point(102μm, 7μm))
+        ring_from_zero = halo(taper_from_zero, 2μm, 1μm)
+        @test ring_from_zero[1].sty isa Paths.SimpleCPW
+        @test Paths.trace(ring_from_zero[1].sty) ≈ 2μm
+        @test Paths.gap(ring_from_zero[1].sty) ≈ 1μm
+        @test pathlength(ring_from_zero[1]) ≈ 2μm
+        taper_cs = CoordinateSystem(uniquename("taper"), nm)
+        place!(taper_cs, taper_from_zero, SemanticMeta(:base))
+        flatten!(taper_cs)
+        @test bounds(halo_polys(halo(elements(taper_cs), 2μm))) ≈
+              Rectangle(Point(-2μm, -7μm), Point(102μm, 7μm))
+        @test halo(Paths.TaperTrace{typeof(1.0μm)}(0.0μm, 0.0μm, 10.0μm), 2μm) isa
+              Paths.NoRender
+        @test halo(
+            Paths.TaperCPW{typeof(1.0μm)}(0.0μm, 0.0μm, 10.0μm, 6.0μm, 10.0μm),
+            2μm,
+            1μm
+        ) == Paths.TaperCPW{typeof(1.0μm)}(2μm, 1μm, 24μm, 1μm, 10μm)
+        trace_from_zero = Path(μm)
+        straight!(trace_from_zero, 100μm, Paths.Trace(t -> t / 10))
+        @test Paths.extent(halo(Paths.Trace(t -> t / 10), 2μm), 50μm) ≈ 4.5μm
+        @test covers(halo_polys(halo(trace_from_zero, 2μm)), halo_polys(trace_from_zero))
+
+        # A sharp corner's halo is the miter-joined offset of the corner
+        function cornered_path(α; terminal=false)
+            pa = Path(μm)
+            straight!(pa, 50μm, Paths.Trace(10μm))
+            corner!(pa, α, Paths.SimpleTraceCorner())
+            terminal || straight!(pa, 50μm)
+            return pa
+        end
+        for α in (30°, -30°, -90°, 90°, 135°), terminal in (false, true)
+            cornered = cornered_path(α; terminal)
+            cornered_halo = halo_polys(halo(cornered, 2μm))
+            miter_offset = union2d(offset(to_polygons(halo_polys(cornered)), 2μm))
+            @test covers(cornered_halo, halo_polys(cornered))
+            @test covers(cornered_halo, miter_offset)
+            # Clipper's miter limit squares off the sharper corner
+            abs(α) <= 90° && !terminal && @test covers(miter_offset, cornered_halo)
+            # A path ending in a corner gets a rectangular end cap, which over-covers at most
+            # a triangle of area (√2 - 1)²δ² on the inside of the turn
+            abs(α) <= 90° &&
+                terminal &&
+                @test excess_area(cornered_halo, miter_offset) <= 0.18 * (2μm)^2
+            # Past an obtuse end corner, the halo reaches δ(tan(|α|/2) - 1) too far across
+            # its width
+            abs(α) > 90° &&
+                terminal &&
+                @test excess_area(cornered_halo, miter_offset) <=
+                      2 * (5μm + 2μm) * 2μm * (tan(abs(α) / 2) - 1) + 0.25 * (2μm)^2
+            # Halos of a flattened path's nodes cover the same region
+            cornered_cs = CoordinateSystem(uniquename("cornered"), nm)
+            place!(cornered_cs, cornered, SemanticMeta(:base))
+            flatten!(cornered_cs)
+            corner_node = only(filter(n -> n.seg isa Paths.Corner, elements(cornered_cs)))
+            corner_extent = corner_node.seg.extent
+            node_halo = halo_polys(halo(elements(cornered_cs), 2μm))
+            @test corner_node.seg.extent == corner_extent
+            @test covers(cornered_halo, node_halo)
+            @test covers(node_halo, cornered_halo)
+        end
+        @test bounds(halo(cornered_path(90°), 2μm)) ≈
+              Rectangle(Point(-2μm, -7μm), Point(57μm, 52μm))
+        @test_throws ArgumentError halo(cornered_path(90°), 4μm, 2μm)
+        # The error comes before generic tapers are made concrete in the original path
+        tapered = Path(μm)
+        straight!(tapered, 50μm, Paths.Trace(10μm))
+        straight!(tapered, 20μm, Paths.Taper())
+        straight!(tapered, 20μm, Paths.Trace(4μm))
+        corner!(tapered, 90°, Paths.SimpleTraceCorner())
+        straight!(tapered, 10μm)
+        @test_throws ArgumentError halo(tapered, 4μm, 2μm)
+        @test tapered[2].sty isa Paths.Taper
+        # Excluded paths with corners only contribute their attachments' halos
+        cornered_cs = CoordinateSystem(uniquename("cornered"), nm)
+        place!(cornered_cs, cornered_path(90°), SemanticMeta(:metal))
+        @test isempty(
+            to_polygons(
+                halo_polys(
+                    elements(flatten(halo(cornered_cs, 4μm, 2μm; ignore_layers=[:metal])))
+                )
+            )
+        )
+        @test isempty(
+            to_polygons(
+                halo_polys(
+                    elements(flatten(halo(cornered_cs, 4μm, 2μm; only_layers=[:other])))
+                )
+            )
+        )
+        # Over-coverage at an acute end corner doesn't grow with the trace width
+        wide = Path(μm)
+        straight!(wide, 100μm, Paths.Trace(100μm))
+        corner!(wide, 60°, Paths.SimpleTraceCorner())
+        wide_offset = union2d(offset(to_polygons(halo_polys(wide)), 2μm))
+        @test excess_area(halo_polys(halo(wide, 2μm)), wide_offset) <= 0.18 * (2μm)^2
+        wide_obtuse = Path(μm)
+        straight!(wide_obtuse, 500μm, Paths.Trace(100μm))
+        corner!(wide_obtuse, 135°, Paths.SimpleTraceCorner())
+        wide_obtuse_offset = union2d(offset(to_polygons(halo_polys(wide_obtuse)), 2μm))
+        @test excess_area(halo_polys(halo(wide_obtuse, 2μm)), wide_obtuse_offset) <=
+              2 * (50μm + 2μm) * 2μm * (tan(135° / 2) - 1) + 0.25 * (2μm)^2
+        # With no offset, a path ending in an acute corner needs no end extension
+        @test bounds(halo(cornered_path(60°; terminal=true), 0μm)) ≈
+              bounds(halo_polys(cornered_path(60°; terminal=true)))
+        # Unitless paths
+        unitless = Path(Point(0.0, 0.0))
+        straight!(unitless, 50.0, Paths.Trace(10.0))
+        corner!(unitless, 30°, Paths.SimpleTraceCorner())
+        cap_length = 5 * tan(15°) + 2
+        @test bounds(halo(unitless, 2.0)) ≈ Rectangle(
+            Point(-2.0, -7.0),
+            Point(
+                50 + cap_length * cos(30°) + 7 * sin(30°),
+                cap_length * sin(30°) + 7 * cos(30°)
+            )
+        )
+        # A corner that doesn't render gets no end extension
+        unrendered = Path(μm)
+        straight!(unrendered, 50μm, Paths.Trace(10μm))
+        corner!(unrendered, 30°, Paths.NoRender())
+        @test bounds(halo(unrendered, 2μm)) ≈ Rectangle(Point(-2μm, -7μm), Point(50μm, 7μm))
+        @test all(n -> n.sty isa Paths.SimpleCPW, halo(unrendered, 2μm, 1μm)[1:(end - 1)])
     end
 end
 
