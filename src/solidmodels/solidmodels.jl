@@ -517,6 +517,11 @@ end
 include("render.jl")
 include("postrender.jl")
 include("import.jl")
+include("design_geometry.jl")
+include("design_derivatives.jl")
+include("design_field.jl")
+include("design_velocity.jl")
+include("morph.jl")
 include("conformal/conformal.jl")
 
 using .ConformalRender: render_conformal!, ConformalRenderContext, add_conformal_loop!

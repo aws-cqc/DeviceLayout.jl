@@ -267,6 +267,8 @@ Physical groups are the interface between DeviceLayout.jl and electromagnetic so
 
 For a complete worked example, see the [Single Transmon tutorial](@ref single-transmon-example).
 
+To optimize a design's parameters against simulated targets, [design velocities](@ref concept-design-velocities) give the derivative of the rendered geometry with respect to each parameter, and mesh morphing moves an existing mesh to a new design without re-meshing.
+
 ## See also
 
 - [Concepts: Geometry](@ref geometry-concepts) and [Concepts: rendering](@ref concept-rendering), which focus on 2D geometry but have content relevant to 3D
