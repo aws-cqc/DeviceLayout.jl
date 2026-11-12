@@ -232,6 +232,59 @@ end
     end
 end
 
+@testitem "BSpline offset cusps" setup = [CommonTestSetup] begin
+    # Inner edge of a trace following a 90° B-spline bend
+    function inner_edge(sty; kwargs...)
+        pa = Path()
+        bspline!(pa, [Point(500.0μm, 500.0μm)], 90°, sty; kwargs...)
+        return Curvilinear.pathtopolys(pa[1]).curves[2]
+    end
+    # Minimum curvature radius of this bend is about 337.5μm
+    bend = (; endpoints_speed=800.0μm, auto_curvature=true)
+
+    # Half the trace width stays below the minimum radius: no cusp, no warning
+    c = inner_edge(Paths.Trace(600.0μm); bend...)
+    @test c isa Paths.ConstantOffset
+    @test_logs min_level = Logging.Warn DeviceLayout.discretize_curve(c, 1.0nm)
+
+    # Half the trace width exceeds the minimum radius: one warning for the curve
+    c = inner_edge(Paths.Trace(680.0μm); bend...)
+    @test_logs (:warn, r"cusp") DeviceLayout.discretize_curve(c, 1.0nm)
+
+    # Same for a general offset
+    c = inner_edge(Paths.Trace(x -> 680.0μm); bend...)
+    @test c isa Paths.GeneralOffset
+    @test_logs (:warn, r"cusp") DeviceLayout.discretize_curve(c, 1.0nm)
+
+    # Fast-varying offset: tangential speed reverses sign but |offset′| is large,
+    # so the reversal is smooth sideways motion, not a cusp
+    c = inner_edge(Paths.Trace(x -> 600.0μm + 0.5 * x); bend...)
+    @test_logs min_level = Logging.Warn DeviceLayout.discretize_curve(c, 1.0nm)
+
+    # Offset within 5% of the base curvature radius (about 500μm) along the whole bend
+    # without exceeding it: the edge is tight everywhere but has no cusp
+    c = inner_edge(Paths.Trace(970.0μm); endpoints_speed=824.0μm)
+    @test_logs min_level = Logging.Warn DeviceLayout.discretize_curve(c, 1.0nm)
+
+    # Unitless coordinates
+    pa = Path{Float64}()
+    bspline!(
+        pa,
+        [Point(500.0, 500.0)],
+        90°,
+        Paths.Trace(680.0);
+        endpoints_speed=800.0,
+        auto_curvature=true
+    )
+    c = Curvilinear.pathtopolys(pa[1]).curves[2]
+    @test_logs (:warn, r"cusp") DeviceLayout.discretize_curve(c, 1e-3)
+
+    # The warning reaches the user once per affected edge when rendering
+    pa = Path()
+    bspline!(pa, [Point(500.0μm, 500.0μm)], 90°, Paths.Trace(680.0μm); bend...)
+    @test_logs (:warn, r"cusp") render!(Cell("cusp", nm), pa, GDSMeta())
+end
+
 @testitem "BSpline approximation" setup = [CommonTestSetup] begin
     pa = Path(Point(0.0, 0.0)nm, α0=90°)
     bspline!(

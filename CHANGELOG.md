@@ -29,6 +29,13 @@ The format of this changelog is based on
     or `Schematic` and a `LayoutTarget` record per-call semantic-to-GDS mappings without
     serializing the target's mutable mapping cache, and return the rendered `Cell` so it can
     be saved as GDS without rendering again.
+  - Rendering warns when an offset of a B-spline segment has a cusp, which happens when the
+    offset exceeds the B-spline's radius of curvature somewhere along the segment (for
+    example, when half the width of a `Paths.Trace` or the outer edge of a `Paths.CPW` is
+    larger than the tightest bend radius of a `bspline!` segment). Such an edge
+    self-intersects, and later operations like `union2d_curved` may not handle it as
+    expected. One warning is logged for each affected edge each time it is discretized,
+    naming the offset and a nearby point on the B-spline. Rendered geometry is unchanged.
 
 ### Fixed
 
@@ -43,6 +50,7 @@ The format of this changelog is based on
   - Graphics export now clips viewport content to the top-left content rectangle when explicit
     canvas dimensions have a different aspect ratio from the viewport, preventing geometry from
     painting into the unused canvas area.
+
 
 ## 1.22.0 (2026-11-16)
 
