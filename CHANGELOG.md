@@ -6,6 +6,11 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - `SolidModelsExperimental.Extrude` accepts the `num_elements`, `heights`, and `recombine`
+    keywords of `SolidModels.extrude_z!`, meshing the extrusion as structured layers.
+
 ### Fixed
 
   - `halo` of a path style with zero extent at its start covers the rest of the style, and
