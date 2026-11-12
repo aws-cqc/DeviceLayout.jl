@@ -234,9 +234,9 @@ function configfile(
     dir = dirname(metadata_path)
     tags(pg_names) = [metadata["physical_groups"][pg_name]["tag"] for pg_name in pg_names]
     layer_attributes(layer_name) = tags(metadata["layers"][layer_name]["pgs"])
-    port = name -> metadata["ports"][name]
+    port = name -> metadata["selections"]["ports"][name]
     port_attributes(name) = tags(port(name)["pgs"])
-    wave_ports = any(p -> p["type"] == "WavePort", values(metadata["ports"]))
+    wave_ports = any(p -> p["type"] == "WavePort", values(metadata["selections"]["ports"]))
 
     config = Dict(
         "Problem" => Dict(

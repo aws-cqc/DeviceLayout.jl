@@ -214,23 +214,25 @@ the structure of the data and the information that gets recorded:
         "vacuum": { "type": "generated", "dim": 3, "pgs": ["vacuum"] },
         "exterior_boundary": { "type": "generated", "dim": 2, "pgs": ["exterior_boundary"] }
     },
-    "ports": {
-        "imon.jj": {
-            "type": "LumpedPort", "name": "imon.jj", "index": 1, "layer": "ports",
-            "direction": [0.0, 1.0, 0.0],
-            "pgs": ["__d8d680a0ae2f5cfd"]
-        }
-    },
-    "terminals": {
-        "METAL_CC__592bac94fb8108ba": {
-            "locators": ["imon.island"],
-            "pgs": ["__592bac94fb8108ba"]
-        }
-    },
-    "ground": {
-        "METAL_CC__d45f9082fcee6bf5": { "pgs": ["__d45f9082fcee6bf5"] }
-    },
-    "tagged": {}
+    "selections": {
+        "ports": {
+            "imon.jj": {
+                "type": "LumpedPort", "name": "imon.jj", "index": 1, "layer": "ports",
+                "direction": [0.0, 1.0, 0.0],
+                "pgs": ["__d8d680a0ae2f5cfd"]
+            }
+        },
+        "terminals": {
+            "METAL_CC__592bac94fb8108ba": {
+                "locators": ["imon.island"],
+                "pgs": ["__592bac94fb8108ba"]
+            }
+        },
+        "ground": {
+            "METAL_CC__d45f9082fcee6bf5": { "pgs": ["__d45f9082fcee6bf5"] }
+        },
+        "tagged": {}
+    }
 }
 ```
 

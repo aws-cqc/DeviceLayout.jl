@@ -93,10 +93,12 @@ function serialize_metadata(
         "metadata" => metadata,
         "physical_groups" => physical_groups,
         "layers" => layers_dict,
-        "tagged" => sections.tagged,
-        "ports" => sections.ports,
-        "terminals" => sections.terminals,
-        "ground" => sections.ground
+        "selections" => Dict{String, Any}(
+            "tagged" => sections.tagged,
+            "ports" => sections.ports,
+            "terminals" => sections.terminals,
+            "ground" => sections.ground
+        )
     )
 end
 

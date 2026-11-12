@@ -1776,14 +1776,14 @@ end
         @test_throws ErrorException render("selection_default")
     end
     with_test_logger(no_metal; required=no_metal) do
-        @test isempty(render("selection_nonstrict"; strict=:no)["terminals"])
+        @test isempty(render("selection_nonstrict"; strict=:no)["selections"]["terminals"])
     end
     metadata = with_test_logger(_ -> false) do
         return render("selection_no_terminals"; select_terminals=false)
     end
-    @test isempty(metadata["terminals"])
-    @test haskey(metadata["tagged"], "q1.pad")
-    @test haskey(metadata["ports"], "q1.drive")
+    @test isempty(metadata["selections"]["terminals"])
+    @test haskey(metadata["selections"]["tagged"], "q1.pad")
+    @test haskey(metadata["selections"]["ports"], "q1.drive")
     metadata = with_test_logger(_ -> false) do
         return render(
             "selection_no_selections";
@@ -1792,8 +1792,8 @@ end
             select_ports=false
         )
     end
-    @test isempty(metadata["tagged"])
-    @test isempty(metadata["ports"])
+    @test isempty(metadata["selections"]["tagged"])
+    @test isempty(metadata["selections"]["ports"])
 end
 
 @testitem "SolidModel end-to-end" begin
@@ -2130,8 +2130,8 @@ end
         end
 
         @testset "Terminal identification" begin
-            terminals = solid_model_metadata["terminals"]
-            ground = solid_model_metadata["ground"]
+            terminals = solid_model_metadata["selections"]["terminals"]
+            ground = solid_model_metadata["selections"]["ground"]
 
             # One ground plane
             @test length(ground) == 1
@@ -2178,7 +2178,7 @@ end
         end
 
         @testset "Port locator metadata" begin
-            ports = solid_model_metadata["ports"]
+            ports = solid_model_metadata["selections"]["ports"]
             @test length(ports) == 4
             for (port_name, port_data) in ports
                 @test !isempty(port_data["pgs"])
@@ -2230,17 +2230,17 @@ end
             for (pg_name, pg_data) in solid_model_metadata["physical_groups"]
                 meta_pgs[pg_name] = pg_data["dim"]
             end
-            for (_, cc_info) in solid_model_metadata["terminals"]
+            for (_, cc_info) in solid_model_metadata["selections"]["terminals"]
                 for pg_name in cc_info["pgs"]
                     meta_pgs[pg_name] = 2
                 end
             end
-            for (_, cc_info) in solid_model_metadata["ground"]
+            for (_, cc_info) in solid_model_metadata["selections"]["ground"]
                 for pg_name in cc_info["pgs"]
                     meta_pgs[pg_name] = 2
                 end
             end
-            for (_, port_info) in solid_model_metadata["ports"]
+            for (_, port_info) in solid_model_metadata["selections"]["ports"]
                 for pg_name in port_info["pgs"]
                     meta_pgs[pg_name] = 2
                 end
@@ -2264,7 +2264,7 @@ end
         end
 
         @testset "Tag locator serialized in tagged section" begin
-            tagged = solid_model_metadata["tagged"]
+            tagged = solid_model_metadata["selections"]["tagged"]
 
             # Each MockTransmon places a Tag locator on its island → 2 tagged entries
             @test length(tagged) == 2
@@ -2396,8 +2396,8 @@ end
     pg_name = only(metadata["layers"]["metal"]["pgs"])
     @test collect(SolidModels.bounds3d(sm[pg_name, 2])) ≈ [0.0, 0.0, 0.0, 10.0, 10.0, 0.0] atol =
         1e-6
-    @test length(metadata["ground"]) == 1
-    @test isempty(metadata["terminals"])
+    @test length(metadata["selections"]["ground"]) == 1
+    @test isempty(metadata["selections"]["terminals"])
 
     cell = Cell("legacy_in_experimental", nm)
     with_test_logger(_ -> false) do
