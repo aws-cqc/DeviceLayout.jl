@@ -18,7 +18,7 @@ number of tracks as necessary to route all nets.
 
 Routing proceeds in two steps. The first is "channel assignment", which proceeds net by net,
 choosing which channels the net's wire passes through on its way from one pin to the other. The second step
-is "track assigment", which proceeds channel by channel. Wire segments are assigned to
+is "track assignment", which proceeds channel by channel. Wire segments are assigned to
 tracks within the channel such that wire segments in the same track do not overlap.
 
 !!! warning "Experimental API"
@@ -32,7 +32,6 @@ struct ChannelRouter{T <: Coordinate} <: AbstractChannelProblem{T}
     net_wires::Vector{NetWire}        # Wire segments connecting pins for each net
     pins::Vector{PointHook{T}}        # Position and orientation of pins
     channels::Vector{RouteChannel{T}}   # List of channels
-    # channel_capacities::Vector{Int}   # Maximum number of tracks per channel, not used
     # For each edge, information to find the intersection point
     channel_intersections::Dict{Tuple{Int, Int}, IntersectionInfo{T}}
     # Vector of vectors of all segments in each channel
@@ -111,7 +110,6 @@ end
 Base.broadcastable(x::ChannelRouter) = Ref(x)
 num_channels(ar::ChannelRouter) = length(ar.channels)
 num_nets(ar::ChannelRouter) = length(ar.net_pins)
-num_pins(ar::ChannelRouter) = length(ar.pins)
 
 channel_graph(ar::ChannelRouter) = ar.channel_graph
 net_pins(ar::ChannelRouter, net) = ar.net_pins[net]
@@ -124,7 +122,6 @@ function channel_width(ar::ChannelRouter{T}, channel, s...) where {T}
 end
 channel_segments(ar::ChannelRouter, channel) = ar.channel_segments[channel]
 channel_tracks(ar::ChannelRouter, channel) = ar.channel_tracks[channel]
-num_tracks(ar::ChannelRouter, channel) = length(ar.channel_tracks[channel])
 
 channel_intersection(ar, s1, s2) = ar.channel_intersections[_swap(s1, s2)]
 
@@ -152,25 +149,6 @@ function direction_at_intersection(ar::ChannelRouter, running_channel, intersect
     return rem2pi(uconvert(NoUnits, angle_unitful), RoundNearest)
 end
 
-function segment_offset(
-    ar::ChannelRouter{T},
-    ws::TrackWireSegment,
-    s...;
-    use_wire_direction=true
-) where {T}
-    channel_idx = running_channel(ws)
-    is_pin(ar, channel_idx) && return zero(T)
-    track_idx = segment_track(ar, ws)
-    isnothing(track_idx) && return zero(T)
-    reversed = use_wire_direction && against_channel(ar, ws)
-    return track_section_offset(
-        length(ar.channel_tracks[channel_idx]),
-        channel_width(ar, channel_idx, s...),
-        track_idx;
-        reversed
-    )
-end
-
 # ──── DL-dependent geometry functions ────────────────────────────────────────
 
 pathlength_from_start(channel, node, s) = pathlength(channel[1:(node - 1)]) + s
@@ -181,7 +159,7 @@ function build_channel_graph(pins, channels, T)
     intersection_dict = Dict{Tuple{Int, Int}, IntersectionInfo{T}}()
 
     # Create segments extending from pins
-    bbox = bounds(bounds(channels), bounds(Polygon(DeviceLayout.getp.(pins))))
+    bbox = bounds(bounds(channels), bounds(Polygon([pin.p for pin in pins])))
     ray_length = max(DeviceLayout.width(bbox), DeviceLayout.height(bbox)) * sqrt(2)
     pin_rays = Path{T}[]
     for pin in pins
@@ -246,26 +224,6 @@ function build_channel_graph(pins, channels, T)
 end
 
 """
-    print_segments(ar::ChannelRouter, net)
-
-Print the information for the wire segments in `net` in a human-readable format.
-"""
-function print_segments(ar::ChannelRouter, net)
-    for (i, ws) in pairs(net_wire(ar, net))
-        s1, s2 = bounding_channels(ws)
-        channel_names = [
-            is_pin(ar, s1) ? "Pin $(graphidx_to_pin(ar, s1))" : "Channel $s1",
-            is_pin(ar, s2) ? "Pin $(graphidx_to_pin(ar, s2))" : "Channel $s2"
-        ]
-        println("""
-        Segment $i:
-            Runs along Channel $(running_channel(ws)), Track $(segment_track(ar, ws))
-            From $(channel_names[1]) to $(channel_names[2])
-        """)
-    end
-end
-
-"""
     autoroute!(ar::ChannelRouter, transition_rule, margin; net_indices, fixed_channel_paths, max_refinement_passes=2, min_leg_spacing=zero(T), verbose)
 
 Perform channel and track assignment, then make routes.
@@ -307,19 +265,10 @@ function autoroute!(
     routes = make_routes!(ar, rule)
 
     if verbose
-        n_routed = count(!isempty, ar.net_wires[collect(net_indices)])
-        n_total = length(net_indices)
-        max_tracks = maximum(num_tracks(ar, ch) for ch = 1:num_channels(ar))
-        @info "Autorouting complete" nets_routed = n_routed nets_total = n_total max_tracks_per_channel =
+        n_routed = length(net_indices)
+        max_tracks = maximum(ch -> num_tracks(ar, ch), 1:num_channels(ar))
+        @info "Autorouting complete" nets_routed = n_routed max_tracks_per_channel =
             max_tracks
-        for idx in net_indices
-            for (seg_i, ws) in enumerate(net_wire(ar, idx))
-                if isnothing(segment_track(ar, ws))
-                    @warn "Net $idx segment $seg_i: no track assigned" channel =
-                        running_channel(ws)
-                end
-            end
-        end
     end
 
     return routes
@@ -520,7 +469,7 @@ function track_paths(ar::ChannelRouter)
     return [track_path(ar, s, c) for s = 1:num_channels(ar) for c = 1:num_tracks(ar, s)]
 end
 
-channel_paths(ar::ChannelRouter) = [channel_path(ar, s) for s = 1:num_channels(ar)]
+channel_paths(ar::ChannelRouter) = [ch.path for ch in ar.channels]
 
 function track_labels(ar::ChannelRouter{T}, tracks) where {T}
     return [
@@ -541,19 +490,14 @@ function pin_labels(ar::ChannelRouter)
     ]
 end
 
-function channel_path(ar::ChannelRouter, channel_idx)
-    return ar.channels[channel_idx].path
-end
-
 function track_path(ar::ChannelRouter{T}, channel_idx, track_idx) where {T}
-    n_tracks = length(channel_tracks(ar, channel_idx))
+    n_tracks = num_tracks(ar, channel_idx)
     seg = track_path_segment(n_tracks, ar.channels[channel_idx].node, track_idx)
     w = channel_width(ar, channel_idx, zero(T)) # Just illustrative, assume constant width
-    pa = Path(
+    return Path(
         [Paths.Node(seg, Paths.Trace(0.9 * w / (n_tracks + 1)))];
         name="$channel_idx.$track_idx"
     )
-    return pa
 end
 
 ######## Actually doing the path construction
@@ -645,45 +589,34 @@ function track_path_segments(rule::AutoChannelRouting, pa::Path, _)
     )
     net_idx = only(matching_idx)
     return [
-        track_path_segment(rule.router, channel, net_idx; margin=rule.transition_margin) for
-        channel in channels_taken(rule.router, net_idx)
+        track_path_segment(rule.router, ws; margin=rule.transition_margin) for
+        ws in net_wire(rule.router, net_idx)
     ]
 end
 
 function track_path_segment(
     ar::ChannelRouter{T},
-    channel_idx::Int,
-    net_idx::Int;
+    wireseg::TrackWireSegment;
     margin=zero(T)
 ) where {T}
-    ch = ar.channels[channel_idx]
-    # Get the track wire segment from the router
-    # Assume there is exactly one wire segment belonging to this path in the channel
-    wireseg_idx = findfirst(ws -> running_channel(ws) == channel_idx, net_wire(ar, net_idx))
-    wireseg = net_wire(ar, net_idx)[wireseg_idx]
-    track_idx = segment_track(ar, wireseg)
-    # Get the starting and ending pathlengths
-    # Accounting for track offsets
+    channel_idx = running_channel(wireseg)
+    # Pathlengths accounting for track offsets
     wireseg_start, wireseg_stop = unsorted_interval(ar, wireseg)
-    prev_width = zero(T) # Autorouter just uses margin
-    next_width = zero(T) # Interval already takes into account actual neighbor track offsets so we don't need this precaution
+    # No `prev_width` or `next_width`: the autorouter just uses margin, and the interval
+    # already takes into account actual neighbor track offsets
     channel_section = segment_channel_section(
-        ch,
+        ar.channels[channel_idx],
         wireseg_start,
         wireseg_stop,
-        prev_width,
-        next_width;
+        zero(T),
+        zero(T);
         margin
     )
     # Return channel section segment offset by width according to track
     return track_path_segment(
-        length(channel_tracks(ar, channel_idx)),
+        num_tracks(ar, channel_idx),
         channel_section,
-        track_idx;
+        segment_track(ar, wireseg);
         reversed=against_channel(ar, wireseg)
     )
-end
-
-function channels_taken(ar::ChannelRouter, net_idx::Int)
-    return [running_channel(wireseg) for wireseg in net_wire(ar, net_idx)]
 end

@@ -138,7 +138,7 @@ schematic to find their global coordinates. Channels must be provided to the aut
 
 ## Limitations
 
-  - A pin's outward ray must hit exactly one channel. If no channel is in the ray's
+  - A pin's outward ray must hit a channel. If no channel is in the ray's
     path, or the pin points the wrong way, graph construction fails.
   - Channels are assumed not to self-intersect; self-intersections are ignored with an
     `@info` message.
