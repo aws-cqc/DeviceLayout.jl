@@ -468,7 +468,10 @@ function example_fanout100()
     p1s = [PointHook(x, -ly_inner / 2, 90°) for x in x1s]
     mynets = [(i, i + n_nets) for i = 1:n_nets]
     ar = ChannelRouter(mynets, vcat(p0s, p1s), [RouteChannel(fanout_space_bottom)])
-    routes = autoroute!(ar, Paths.StraightAnd90(10μm), 10μm; min_leg_spacing=step(x1s) / 2)
+    # The legs of the two center nets run half the inner pin pitch from their neighbors'
+    # unless they go on a track below them. A minimum leg spacing of the inner pin pitch
+    # puts them there.
+    routes = autoroute!(ar, Paths.StraightAnd90(10μm), 10μm; min_leg_spacing=step(x1s))
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     paths = Path.(routes, Ref(Paths.Trace(10μm)))
     c = Cell("fanout100")

@@ -650,6 +650,26 @@ end
     @test Paths._shared_track_overlaps(ar) == 0
     @test Paths.num_tracks(ar, 1) == 3
 
+    # Ten nets fan out from inner pins above a channel at a pitch of 1 to outer pins below
+    # it at a pitch of 2. Each half is a staircase of tracks, and the halves share them. The
+    # legs of the center nets 5 and 6 are half a pitch from those of nets 4 and 7 unless
+    # they go below them. With `min_leg_spacing` 1 they do, on a fifth track that they
+    # share, and the halves still share the other four.
+    function fanout_router()
+        channel = Path(-11.0, 0.0)
+        straight!(channel, 22.0, Paths.Trace(4.0))
+        outer = [PointHook(Point(2.0 * i - 11, -3.0), -90°) for i = 1:10]
+        inner = [PointHook(Point(i - 5.5, 3.0), 90°) for i = 1:10]
+        nets = [(i, i + 10) for i = 1:10]
+        ar = ChannelRouter(nets, [outer; inner], [RouteChannel(channel)])
+        Paths.assign_channels!(ar)
+        return ar
+    end
+    ar = fanout_router()
+    @test_logs Paths.assign_tracks!(ar; min_leg_spacing=1.0)
+    @test Paths.num_tracks(ar, 1) == 5
+    @test [Paths.segment_track(ar, only(Paths.net_wire(ar, n))) for n = 4:7] == [4, 5, 5, 4]
+
     # A 3×3 grid of channels 4 wide at a pitch of 10, with nets between consecutive pins
     # given as `(x, y, direction in degrees)`
     function grid_router(pins)

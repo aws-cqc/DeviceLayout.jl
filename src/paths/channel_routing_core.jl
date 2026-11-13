@@ -776,6 +776,7 @@ function assign_tracks_matching!(ar, channel, inputs)
                 overlap || add_edge!(merging_graph, l, r)
             end
         end
+        _keep_shortest_merges!(merging_graph, vcg, high_to_low, R)
         # Find max cardinality valid matching, removing edges as necessary
         matching = best_matching!(merging_graph, vcg, L, R)
     end
@@ -788,6 +789,44 @@ function assign_tracks_matching!(ar, channel, inputs)
         _merged_group_topological_order(vcg, merged_groups, channel, wiresegs_ascending)
         push!(tracks, wiresegs_ascending[group])
     end
+end
+
+# Removes each of `R`'s candidate merges in `merging_graph` that lengthens the longest VCG
+# path through the merged pair more than another of its candidates does. The matching only
+# maximizes the number of merges, and one merge can order a whole group of segments above
+# another, ruling out every later merge between them. For example, in a fan-out where each
+# half of the channel is a staircase, merging a center segment that must go below one half
+# with the top segment of the other half puts all of the first half above all of the
+# other, so the halves can no longer share tracks. Yoshimura and Kuh's Algorithm #1
+# likewise chooses merges that limit this increase.
+function _keep_shortest_merges!(merging_graph, vcg, high_to_low, R)
+    above, below = _longest_path_lengths(vcg, high_to_low)
+    for r in R
+        candidates = copy(neighbors(merging_graph, r))
+        isempty(candidates) && continue
+        increase = map(candidates) do l
+            merged = max(above[l], above[r]) + max(below[l], below[r])
+            return merged - max(above[l] + below[l], above[r] + below[r])
+        end
+        least = minimum(increase)
+        for (l, inc) in zip(candidates, increase)
+            inc > least && rem_edge!(merging_graph, l, r)
+        end
+    end
+end
+
+# Number of vertices above and below each vertex of `vcg` on the longest path through it,
+# given its vertices from highest to lowest
+function _longest_path_lengths(vcg, high_to_low)
+    above = zeros(Int, nv(vcg))
+    below = zeros(Int, nv(vcg))
+    for v in high_to_low, child in outneighbors(vcg, v)
+        above[child] = max(above[child], above[v] + 1)
+    end
+    for v in Iterators.reverse(high_to_low), child in outneighbors(vcg, v)
+        below[v] = max(below[v], below[child] + 1)
+    end
+    return above, below
 end
 
 function _merged_group_topological_order(vcg, merged_groups, channel, wiresegs)

@@ -132,7 +132,7 @@ save("autoroute_bspline.png", c); nothing # hide
 
 ## 100-net fan-out
 
-100 nets fan out through a single wide channel from an inner row of pins to an outer row with twice the spacing.
+100 nets fan out through a single wide channel from an inner row of pins to an outer row with twice the spacing. Passing `min_leg_spacing` equal to the inner pin pitch to `autoroute!` puts the two center wires on a track below their neighbors, instead of running their legs half a pitch from their neighbors' legs.
 
 ```@example autorouter
 c, ar = ChannelAutorouter.example_fanout100()
