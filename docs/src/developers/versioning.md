@@ -40,6 +40,7 @@ Not breaking:
   may change. If the user depends on an exact name downstream, they should set it explicitly,
   both for this reason and because these names are already not stable for the same code run
   multiple times in a Julia session (unless `reset_uniquename!()` is called before each run).
+- Changes to autorouting solutions (`ChannelRouter`/`AutoChannelRouting`) are not breaking.
 
 For component packages in user PDKs rather than DeviceLayout itself, see
 [Component and package creation and versioning](@ref style-package) in the Style Guide.
