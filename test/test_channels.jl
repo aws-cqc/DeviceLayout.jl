@@ -618,4 +618,134 @@ end
         :warn,
         r"Nets 2 and 1 leave channel 1 1.0 apart .* `min_leg_spacing` 5.0. .* conflicts"
     ) Paths._warn_close_legs(ar, 5.0)
+
+    # Zones are ordered left to right by their maximal elements, which are distinct. Net 4's
+    # segment (20–117) is the minimal element of several zones, so ordering by minimal
+    # elements would leave those unordered and merge overlapping nets 3 (96–103) and 5
+    # (101–188) onto one track.
+    function zone_order_router()
+        channel = Path(0.0, 0.0)
+        straight!(channel, 200.0, Paths.Trace(100.0))
+        top(x) = PointHook(Point(x, 60.0), 90°)
+        bottom(x) = PointHook(Point(x, -60.0), -90°)
+        pins = [
+            bottom(142.0),
+            bottom(185.0),
+            top(59.0),
+            bottom(37.0),
+            top(96.0),
+            top(103.0),
+            top(20.0),
+            bottom(117.0),
+            top(101.0),
+            bottom(188.0)
+        ]
+        nets = [(2i - 1, 2i) for i = 1:5]
+        ar = ChannelRouter(nets, pins, [RouteChannel(channel)])
+        Paths.assign_channels!(ar)
+        return ar
+    end
+    ar = zone_order_router()
+    Paths.assign_tracks!(ar)
+    @test Paths._shared_track_overlaps(ar) == 0
+    @test Paths.num_tracks(ar, 1) == 3
+
+    # A 3×3 grid of channels 4 wide at a pitch of 10, with nets between consecutive pins
+    # given as `(x, y, direction in degrees)`
+    function grid_router(pins)
+        channels = Path{Float64}[]
+        for y in (0.0, 10.0, 20.0)
+            pa = Path(-5.0, y)
+            straight!(pa, 30.0, Paths.Trace(4.0))
+            push!(channels, pa)
+        end
+        for x in (0.0, 10.0, 20.0)
+            pa = Path(x, -5.0, α0=90°)
+            straight!(pa, 30.0, Paths.Trace(4.0))
+            push!(channels, pa)
+        end
+        hooks = [PointHook(Point(x, y), α * °) for (x, y, α) in pins]
+        nets = [(2i - 1, 2i) for i = 1:(length(pins) ÷ 2)]
+        ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
+        Paths.assign_channels!(ar)
+        return ar
+    end
+    # Channels whose constraints depend on each other's tracks can trade assignments from
+    # pass to pass without settling. From the second refinement pass on, a channel keeps
+    # tracks that still satisfy its constraints, which here settles on three tracks in
+    # channel 1. The initial pass also satisfies its constraints, but with four.
+    ar = grid_router([
+        (26.0, 20.44, 0),
+        (0.2, 26.0, 90),
+        (26.0, 6.53, 0),
+        (9.82, -6.0, -90),
+        (5.16, 26.0, 90),
+        (26.0, 24.11, 0),
+        (19.65, -6.0, -90),
+        (26.0, 16.46, 0),
+        (-0.51, -6.0, -90),
+        (26.0, -4.33, 0),
+        (6.03, -6.0, -90),
+        (26.0, 6.9, 0)
+    ])
+    @test_logs Paths.assign_tracks!(ar)
+    @test isempty(Paths._violating_channels(ar, 0.0))
+    @test Paths.num_tracks(ar, 1) == 3
+    # If refinement doesn't settle, the assignment tried with the fewest violations is
+    # kept. Here the last pass leaves two wires overlapping on a shared track, but the
+    # initial pass satisfies all constraints, so it is kept without a warning.
+    ar = grid_router([
+        (-0.73, -6.0, -90),
+        (20.45, -6.0, -90),
+        (6.93, -6.0, -90),
+        (23.65, 26.0, 90),
+        (26.0, 9.18, 0),
+        (-6.0, 0.14, 180),
+        (-6.0, 10.47, 180),
+        (0.03, -6.0, -90),
+        (2.31, -6.0, -90),
+        (15.67, 26.0, 90),
+        (3.36, -6.0, -90),
+        (-6.0, 23.97, 180)
+    ])
+    @test_logs Paths.assign_tracks!(ar)
+    @test isempty(Paths._violating_channels(ar, 0.0))
+    # Refinement can also cycle between assignments, which more passes won't settle. The
+    # warning says which, and the assignment kept has no wires overlapping on a track.
+    cycling_pins = [
+        (-6.0, -0.64, 180),
+        (-6.0, 4.03, 180),
+        (-6.0, 17.58, 180),
+        (-6.0, 4.14, 180),
+        (26.0, 7.81, 0),
+        (21.62, -6.0, -90),
+        (26.0, 5.8, 0),
+        (-1.09, 26.0, 90),
+        (-6.0, 19.81, 180),
+        (7.27, 26.0, 90),
+        (9.03, 26.0, 90),
+        (-6.0, 21.17, 180),
+        (26.0, 7.2, 0),
+        (-6.0, -2.78, 180),
+        (-4.19, 26.0, 90),
+        (14.47, 26.0, 90),
+        (26.0, 9.99, 0),
+        (-1.59, 26.0, 90)
+    ]
+    ar = grid_router(cycling_pins)
+    @test_logs (:warn, r"in 2 refinement passes.* channels \[3\] .* may help") Paths.assign_tracks!(
+        ar
+    )
+    ar = grid_router(cycling_pins)
+    @test_logs (:warn, r"in 3 refinement passes.* cycle between assignments") Paths.assign_tracks!(
+        ar;
+        max_refinement_passes=4
+    )
+    @test Paths._shared_track_overlaps(ar) == 0
+    @test_throws ArgumentError Paths.AutoChannelRouting(
+        ar,
+        Paths.StraightAnd90(0.1),
+        0.1;
+        max_refinement_passes=-1
+    )
 end
