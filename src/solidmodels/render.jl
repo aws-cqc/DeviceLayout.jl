@@ -1152,6 +1152,25 @@ function populate_size_fields!(
     curvature_sizing=true,
     kwargs...
 )
+    DeviceLayout.warn_unknown_render_kwargs(kwargs, :populate_size_fields!)
+    return populate_size_fields_unchecked!(
+        cs;
+        primitives_of,
+        zmap,
+        curvature_sizing,
+        kwargs...
+    )
+end
+
+# For `render_conformal!(sm, sch, target)`, which passes all the target's rendering options,
+# including those `render!` declares, after its own render has checked them
+function populate_size_fields_unchecked!(
+    cs::AbstractCoordinateSystem;
+    primitives_of,
+    zmap,
+    curvature_sizing=true,
+    kwargs...
+)
     flat = flatten(cs)
     clear_mesh_control_points!()
     mesh_seen = Set{_MeshControlPointRecord}()
@@ -1296,6 +1315,8 @@ Available postrendering operations include [`translate!`](@ref), [`extrude_z!`](
 Additional keyword arguments are passed to [`DeviceLayout.SolidModels.to_primitives`](@ref) (which falls back to
 [`to_polygons`](@ref)) and may be used for
 certain entity types to control how entities of `cs` are converted to primitives and added to `sm`.
+A keyword argument that is not a known rendering option gives a warning; see
+[`DeviceLayout.register_render_kwarg!`](@ref).
 """
 function render!(
     sm::SolidModel,
@@ -1425,6 +1446,7 @@ function _render_orchestrator!(
     verbose=false,
     kwargs...
 ) where {T}
+    DeviceLayout.warn_unknown_render_kwargs(kwargs)
     t_render = time_ns()
     reporter = _step_reporter(verbose)
     gmsh.model.set_current(name(sm))

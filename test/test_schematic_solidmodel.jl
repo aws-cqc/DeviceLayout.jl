@@ -466,10 +466,10 @@ end
 
         SolidModels.clear_mesh_control_points!()
         cp_schematic = deepcopy(
-            SolidModels.populate_size_fields!(floorplan.coordinate_system; fine_mesh=true)
+            SolidModels.populate_size_fields!(floorplan.coordinate_system; finemesh=true)
         )
         @test !isempty(cp_schematic)
-        @test (1.0, 0.8) in keys(cp_schematic) || (10.0, 0.9) in keys(cp_schematic)
+        @test (1.0, 0.8) in keys(cp_schematic)
 
         # Render to a solid model
         tech = ProcessTechnology(
@@ -547,7 +547,7 @@ end
             ],
             simulation=true,
             solidmodel=true,
-            fine_mesh=true
+            finemesh=true
         )
 
         sm = SolidModel("test", overwrite=true)

@@ -271,6 +271,11 @@ to_polygons(ent::GeometryEntity, ::MeshSized; kwargs...) = to_polygons(ent; kwar
 
 Style that depends on a Boolean rendering option `flag` with default `default`.
 
+Constructing an `OptionalStyle` registers `flag` as a rendering option, so `render!` doesn't
+warn about it. A package that constructs one at top level should call
+[`DeviceLayout.register_render_kwarg!`](@ref) for its flag in `__init__`, because
+registrations made while precompiling are not kept.
+
 `lowerleft`, `upperright`, `bounds`, `footprint`, and `halo` are forwarded to the
 underlying entity styled with the default style.
 
@@ -288,7 +293,10 @@ struct OptionalStyle <: GeometryEntityStyle
     false_style::GeometryEntityStyle
     flag::Symbol
     default::Bool
-    OptionalStyle(a::GeometryEntityStyle, b, c, d) = new(a, b, c, d) # Silence Aqua
+    function OptionalStyle(a::GeometryEntityStyle, b, c, d)
+        register_render_kwarg!(c) # So `render!(...; flag=...)` doesn't warn
+        return new(a, b, c, d) # Silence Aqua
+    end
 end
 function OptionalStyle(
     true_style::GeometryEntityStyle,
