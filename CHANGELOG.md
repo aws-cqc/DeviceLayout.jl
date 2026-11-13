@@ -6,6 +6,15 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - Added experimental channel autorouting through predefined `RouteChannel`s, including
+    automatic channel assignment, crossing-aware track assignment refined against the tracks
+    of neighboring channels, an optional minimum spacing between wires leaving a channel to
+    opposite sides, partial rerouting, fixed channel paths, schematic-driven routing with
+    `AutoChannelRouting`, diagnostics, examples, and documentation. Its API and its solutions
+    for a given problem may change in minor versions.
+
 ### Fixed
 
   - `halo` of a path style with zero extent at its start covers the rest of the style, and
@@ -16,6 +25,8 @@ The format of this changelog is based on
   - `halo` of a path with sharp corners (`corner!` with `Paths.SimpleTraceCorner`), including
     a path ending in a corner, gives a mitered halo around each corner instead of throwing a
     `MethodError`. With an `inner_delta`, it throws an `ArgumentError`.
+  - Channel sections used by `SingleChannelRouting` and channel autorouting now clamp to the
+    available channel extent and handle exact B-spline endpoints without an out-of-range split.
 
 ## 1.21.0 (2026-11-10)
 
