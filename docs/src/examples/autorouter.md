@@ -145,7 +145,7 @@ save("autoroute_fanout100.svg", c; width=8DeviceLayout.Unitful.inch); nothing # 
 
 ## Perimeter-to-edge escape
 
-40 nets fan out from all four sides of an inner die to a row of pins along the bottom outer edge, through a channel along each side. Many outer pins lie under the side channels, so their wires make short jogs in the bottom channel. Passing `enforce_leg_spacing=true` to `autoroute!` keeps wires that leave a channel closer together than the track pitch from running side by side.
+40 nets fan out from all four sides of an inner die to a row of pins along the bottom outer edge, through a channel along each side. Many outer pins lie under the side channels, so their wires make short jogs in the bottom channel. Passing `min_leg_spacing=100μm` to `autoroute!` keeps wires that leave a channel to opposite sides closer together than that from running side by side.
 
 ```@example autorouter
 c, ar = ChannelAutorouter.example_perimeter_to_edge_escape()

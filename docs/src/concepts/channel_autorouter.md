@@ -123,7 +123,9 @@ sch = plan(g)
 
 Pin positions and directions are pulled from the component hooks at each route's
 endpoints during `plan`, and channel assignment + track assignment run once these have
-been set for the last route that uses `rule`. Schematic-level autorouting does not allow the user to
+been set for the last route that uses `rule`. Track assignment options
+(`max_refinement_passes`, `min_leg_spacing`) are keyword arguments of the rule's
+constructor, as they are of `autoroute!`. Schematic-level autorouting does not allow the user to
 pre-assign tracks—while [`Paths.SingleChannelRouting`](@ref) uses the `track` keyword in `route!`
 (defaulting to incrementing by 1 for each new route), `AutoChannelRouting` makes all
 track assignments automatically during `plan`.
@@ -144,12 +146,12 @@ schematic to find their global coordinates. Channels must be provided to the aut
     cycle, track assignment reports the channel and nets involved.
   - Every net in a single `AutoChannelRouting` rule must start at a distinct pin. Nets
     that share a source pin should be split into separate rules (or merged upstream).
-  - Wires leaving a channel to opposite sides closer together than the track pitch of a
-    bounding channel can be put in an order that runs their legs side by side, for example
-    a pin lying just beside the track of a crossing channel. `autoroute!` warns about each
-    such pair. Passing `enforce_leg_spacing=true` orders them apart instead, at the cost of
-    extra tracks where the pair could otherwise have shared one; this option is not
-    available for schematic-level `AutoChannelRouting`.
+  - Wires leaving a channel to opposite sides near the same point can be put in an order
+    that runs their legs side by side, for example a pin lying just beside the track of a
+    crossing channel. `autoroute!` and schematic planning warn about each such pair closer
+    than the track pitch of a bounding channel. Setting the `min_leg_spacing` option of
+    `autoroute!` or `AutoChannelRouting` orders pairs closer than that apart instead, at
+    the cost of extra tracks where a pair could otherwise have shared one.
 
 ## References
 

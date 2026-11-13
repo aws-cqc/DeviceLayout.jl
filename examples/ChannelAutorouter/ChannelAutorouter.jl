@@ -516,9 +516,9 @@ function example_perimeter_to_edge_escape()
     channels =
         [fanout_space_bottom, fanout_space_left, fanout_space_right, fanout_space_top]
     ar = ChannelRouter(mynets, vcat(p0s, p1s), RouteChannel.(channels))
-    # Pin 7 is within a left-channel track pitch of net 6's leg into the left channel, so
-    # net 7 must go below net 6 in the bottom channel for their legs not to run side by side
-    routes = Paths.autoroute!(ar, Paths.StraightAnd90(10μm), 10μm; enforce_leg_spacing=true)
+    # Pin 7 is about 85μm from net 6's leg into the left channel. A minimum leg spacing of
+    # 100μm puts net 7 below net 6 in the bottom channel so their legs don't run side by side
+    routes = Paths.autoroute!(ar, Paths.StraightAnd90(10μm), 10μm; min_leg_spacing=100μm)
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     paths = Path.(routes, Ref(Paths.Trace(10μm)))
     c = Cell("perimeter_to_edge")

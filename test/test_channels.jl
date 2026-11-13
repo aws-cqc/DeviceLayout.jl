@@ -395,8 +395,9 @@ end
     # pins per die side and 4q outer pins along the bottom edge, offset by `shift` pin
     # pitches. Many outer pins lie under the side channels, so their segments in B are
     # short jogs whose direction depends on side channel track assignment.
-    function perimeter_to_edge(q, shift; kwargs...)
-        lo, li, m = 10.0, 2.0, 1.5
+    # Lengths are in units of `u`.
+    function perimeter_to_edge_problem(q, shift, u=1)
+        lo, li, m = 10.0u, 2.0u, 1.5u
         w_h = lo / 2 - li / 2 - 2m
         w_v = lo / 2 - li / 2 - m
         y_b = -lo / 2 + (lo - li) / 4
@@ -420,11 +421,11 @@ end
             [PointHook(x, -li / 2, 90°) for x in side]
             [PointHook(li / 2, y, 180°) for y in side]
         ]
-        ar = ChannelRouter(
-            [(i, i + n) for i = 1:n],
-            [outer; inner],
-            RouteChannel.([bottom, left, right, top])
-        )
+        nets = [(i, i + n) for i = 1:n]
+        return nets, [outer; inner], RouteChannel.([bottom, left, right, top])
+    end
+    function perimeter_to_edge(q, shift; kwargs...)
+        ar = ChannelRouter(perimeter_to_edge_problem(q, shift)...)
         routes = Paths.autoroute!(ar, Paths.StraightAnd90(0.01), 0.01; kwargs...)
         paths = Path.(routes, Ref(Paths.Trace(0.01)))
         return filter(Intersect.prepared_intersections(paths)) do ixn
@@ -452,6 +453,12 @@ end
     #                p₅    p₆                   p₅    p₆
     #          first pass               after refinement
     @test isempty(@test_logs min_level = Logging.Error perimeter_to_edge(7, 0.2))
+    # Without refinement, the outdated order is reported
+    @test_logs (:warn, r"did not converge in 0 refinement passes") match_mode = :any perimeter_to_edge(
+        7,
+        0.2;
+        max_refinement_passes=0
+    )
 
     # Refinement must keep a crossing-free order that neighbor tracks don't constrain.
     # After the first pass nets 5 and 6 run along disjoint stretches of B, so B is free
@@ -486,18 +493,62 @@ end
     @test isempty(@test_logs min_level = Logging.Error perimeter_to_edge(5, -0.2))
 
     # Wires leaving closer together than the track pitch run side by side in the wrong
-    # order. That is reported, and `enforce_leg_spacing=true` orders them instead.
+    # order. That is reported, and those closer than `min_leg_spacing` are ordered instead.
     @test_logs (:warn, r"Nets 6 and 5 leave channel 1 .* opposite sides") match_mode = :any perimeter_to_edge(
         6,
         -0.4
+    )
+    @test_logs (:warn, r"Nets 3 and 4 .* Set `min_leg_spacing` greater than") perimeter_to_edge(
+        6,
+        -0.4;
+        min_leg_spacing=0.1
     )
     @test isempty(
         @test_logs min_level = Logging.Warn perimeter_to_edge(
             6,
             -0.4;
-            enforce_leg_spacing=true
+            min_leg_spacing=0.12
         )
     )
+    # Schematic-level routing takes the options from the rule
+    function perimeter_to_edge_schematic(q, shift; kwargs...)
+        nets, pins, channels = perimeter_to_edge_problem(q, shift, 1mm)
+        g = SchematicGraph("perimeter_to_edge")
+        hook_name(α) = only(
+            name for (name, β) in
+            ((:p1_east, 0°), (:p1_north, 90°), (:p1_west, 180°), (:p1_south, 270°)) if
+            Paths.isapprox_angle(α, β)
+        )
+        nodes = [add_node!(g, Spacer(; p1=pin.p)) for pin in pins]
+        rule = Paths.AutoChannelRouting(
+            channels,
+            Paths.StraightAnd90(0.01mm),
+            0.01mm;
+            kwargs...
+        )
+        for (i, j) in nets
+            route!(
+                g,
+                rule,
+                nodes[i] => hook_name(pins[i].in_direction),
+                nodes[j] => hook_name(pins[j].in_direction),
+                Paths.Trace(0.01mm),
+                GDSMeta()
+            )
+        end
+        plan(g; log_dir=nothing)
+        return rule
+    end
+    @test_logs (:warn, r"Nets 6 and 5 .* Set `min_leg_spacing` greater than") match_mode =
+        :any perimeter_to_edge_schematic(6, -0.4)
+    rule = @test_logs min_level = Logging.Warn perimeter_to_edge_schematic(
+        6,
+        -0.4;
+        max_refinement_passes=3,
+        min_leg_spacing=120μm
+    )
+    @test rule.max_refinement_passes == 3
+    @test rule.min_leg_spacing ≈ 0.12mm
 
     # A pin offset from a crossing channel's track by less than StraightAnd90 can jog is
     # reported by net, since the resulting route errors only give coordinates

@@ -261,7 +261,7 @@ function print_segments(ar::ChannelRouter, net)
 end
 
 """
-    autoroute!(ar::ChannelRouter, transition_rule, margin; net_indices, fixed_channel_paths, enforce_leg_spacing=false, verbose)
+    autoroute!(ar::ChannelRouter, transition_rule, margin; net_indices, fixed_channel_paths, max_refinement_passes=2, min_leg_spacing=zero(T), verbose)
 
 Perform channel and track assignment, then make routes.
 
@@ -271,9 +271,8 @@ takes. Each channel may appear at most once in a fixed path. For example,
 `fixed_channel_paths=Dict(1 => [2, 4, 1, 5])` will force net 1 to be routed from its source
 pin, through channels 2, 4, 1, 5 in order, then to its destination pin.
 
-With `enforce_leg_spacing=true`, wires leaving a channel to opposite sides closer together
-than the track pitch of a bounding channel there are ordered so their legs don't run side by
-side (see `Paths.assign_tracks!`). This can increase the number of tracks.
+`max_refinement_passes` and `min_leg_spacing` set the options of the
+[`AutoChannelRouting`](@ref) rule used for routing.
 
 If `verbose=true`, prints a summary of routing results including net count and track usage.
 
@@ -289,13 +288,11 @@ function autoroute!(
     margin;
     net_indices=1:num_nets(ar),
     fixed_channel_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}(),
-    enforce_leg_spacing=false,
-    verbose=false
+    verbose=false,
+    kwargs...
 )
-    reroute_nets!(ar, net_indices; fixed_paths=fixed_channel_paths, enforce_leg_spacing)
-    _warn_short_jogs(ar, transition_rule, margin)
-    _warn_close_legs(ar, enforce_leg_spacing)
-    rule = AutoChannelRouting(ar, transition_rule, margin)
+    rule = AutoChannelRouting(ar, transition_rule, margin; kwargs...)
+    _assign_and_check!(rule, net_indices, fixed_channel_paths)
     routes = make_routes!(ar, rule)
 
     if verbose
@@ -315,6 +312,21 @@ function autoroute!(
     end
 
     return routes
+end
+
+# Channel and track assignment with `rule`'s options, followed by warnings about results
+# that would otherwise show up only as route errors or as wires too close in the layout
+function _assign_and_check!(rule, net_indices, fixed_paths)
+    ar = rule.router
+    reroute_nets!(
+        ar,
+        net_indices;
+        fixed_paths,
+        rule.max_refinement_passes,
+        rule.min_leg_spacing
+    )
+    _warn_short_jogs(ar, rule.transition_rule, rule.transition_margin)
+    return _warn_close_legs(ar, rule.min_leg_spacing)
 end
 
 ######## Route construction
@@ -359,16 +371,17 @@ _min_jog(::RouteRule) = nothing
 
 _vertex_name(ar, v) = is_pin(ar, v) ? "pin $(graphidx_to_pin(ar, v))" : "channel $v"
 
-# Warn about each pair of wires whose legs leaving a channel run side by side closer than
-# the track pitch there, or overlap (see `_facing_end_pairs`). Close pairs are expected
-# unless `enforce_leg_spacing`; overlapping pairs and any remaining close pairs conflict
-# with other track constraints. `can_enforce` is false where the caller can't pass
-# `enforce_leg_spacing`, so the warning doesn't suggest it.
-function _warn_close_legs(ar::ChannelRouter, enforce_leg_spacing; can_enforce=true)
+# Warn about each pair of wires whose legs leaving a channel overlap or run side by side
+# closer than `min_leg_spacing` or the track pitch there (see `_facing_end_pairs`). Pairs
+# closer than the pitch alone are expected, and the warning suggests `min_leg_spacing` to
+# separate them. Track assignment orders the others, so they remain only where that order
+# conflicts with other track constraints.
+function _warn_close_legs(ar::ChannelRouter, min_leg_spacing)
     for channel = 1:num_channels(ar)
         wiresegs_ascending =
             sort(channel_segments(ar, channel), by=(ws) -> interval(ar, ws))
-        for (; top, bottom, gap, clearance) in _facing_end_pairs(ar, wiresegs_ascending)
+        facing = _facing_end_pairs(ar, wiresegs_ascending, min_leg_spacing)
+        for (; top, bottom, gap, pitch) in facing
             top_ws, bottom_ws = wiresegs_ascending[top], wiresegs_ascending[bottom]
             top_track, bottom_track =
                 segment_track(ar, top_ws), segment_track(ar, bottom_ws)
@@ -376,21 +389,23 @@ function _warn_close_legs(ar::ChannelRouter, enforce_leg_spacing; can_enforce=tr
             (top_track > bottom_track || (iszero(gap) && top_track == bottom_track)) ||
                 continue
             nets = "Nets $(net_index(top_ws)) and $(net_index(bottom_ws))"
+            enforced = iszero(gap) || _closer(gap, min_leg_spacing)
             problem = if iszero(gap)
                 "$nets leave channel $channel at the same point to opposite sides, in an \
                 order that overlaps their wires."
             else
+                limit =
+                    enforced ? "`min_leg_spacing` $min_leg_spacing" :
+                    "the track pitch $pitch"
                 "$nets leave channel $channel $gap apart to opposite sides, in an order \
-                that runs their wires side by side closer than the track pitch $clearance."
+                that runs their wires side by side closer than $limit."
             end
-            remedy = if iszero(gap) || enforce_leg_spacing
+            remedy = if enforced
                 "The other order conflicts with other track constraints; move a pin or \
                 channel to separate them."
-            elseif can_enforce
-                "Pass `enforce_leg_spacing=true` to reorder them, or move a pin or \
-                channel to separate them."
             else
-                "Move a pin or channel to separate them."
+                "Set `min_leg_spacing` greater than $gap to reorder them, or move a pin or \
+                channel to separate them."
             end
             @warn "$problem $remedy"
         end
@@ -529,8 +544,10 @@ end
 ######## Actually doing the path construction
 """
     struct AutoChannelRouting{T <: Coordinate} <: AbstractChannelRouting
-    AutoChannelRouting(router::ChannelRouter, transition_rule::RouteRule, margin)
-    AutoChannelRouting(channels::Vector{<:RouteChannel}, transition_rule::RouteRule, margin)
+    AutoChannelRouting(router::ChannelRouter, transition_rule::RouteRule, margin;
+        max_refinement_passes=2, min_leg_spacing=zero(T))
+    AutoChannelRouting(channels::Vector{<:RouteChannel}, transition_rule::RouteRule, margin;
+        max_refinement_passes=2, min_leg_spacing=zero(T))
 
 A `RouteRule` that delegates routing decisions to a shared [`ChannelRouter`](@ref).
 
@@ -544,26 +561,51 @@ underlying `router` sees all nets before channel and track assignment run during
 between adjacent channels. It is typically [`Paths.StraightAnd90`](@ref),
 [`Paths.StraightAnd45`](@ref), or [`Paths.BSplineRouting`](@ref). `margin`
 reserves arclength at each end of a channel segment for the transition bends.
+
+Track assignment options:
+
+  - `max_refinement_passes`: maximum number of passes that reassign tracks in each
+    channel once all neighboring channels have tracks. Passes stop as soon as no channel
+    needs reassignment, so a larger maximum costs time only where refinement is needed.
+    A warning suggests increasing it if tracks are still outdated after the last pass.
+  - `min_leg_spacing`: minimum spacing between wires that leave a channel to opposite
+    sides near the same point. Closer pairs are ordered so their legs separate instead of
+    running side by side across the channel. The default of zero orders only pairs at the
+    same point, whose legs would overlap. A positive value can increase the number of
+    tracks, since such pairs could otherwise share a track.
+
+See [`Paths.assign_tracks!`](@ref).
 """
 struct AutoChannelRouting{T <: Coordinate} <: AbstractChannelRouting
     router::ChannelRouter{T}
     transition_rule::RouteRule
     transition_margin::T
+    max_refinement_passes::Int
+    min_leg_spacing::T
 end
 
-function AutoChannelRouting(router::ChannelRouter{T}, transition_rule, margin) where {T}
-    return AutoChannelRouting{T}(router, transition_rule, convert(T, margin))
+function AutoChannelRouting(
+    router::ChannelRouter{T},
+    transition_rule,
+    margin;
+    max_refinement_passes=2,
+    min_leg_spacing=zero(T)
+) where {T}
+    return AutoChannelRouting{T}(
+        router,
+        transition_rule,
+        convert(T, margin),
+        max_refinement_passes,
+        convert(T, min_leg_spacing)
+    )
 end
 function AutoChannelRouting(
     channels::Vector{RouteChannel{T}},
     transition_rule,
-    margin
+    margin;
+    kwargs...
 ) where {T}
-    return AutoChannelRouting{T}(
-        ChannelRouter(channels),
-        transition_rule,
-        convert(T, margin)
-    )
+    return AutoChannelRouting(ChannelRouter(channels), transition_rule, margin; kwargs...)
 end
 entry_rules(r::AutoChannelRouting) = Iterators.repeated(r.transition_rule)
 exit_rule(r::AutoChannelRouting) = r.transition_rule
