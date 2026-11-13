@@ -7,12 +7,11 @@ counterpart to the [`Paths.SingleChannelRouting`](@ref) rule described in
 channel and a track by hand, the autorouter decides which channels each wire passes
 through and which track it occupies within each channel.
 
-!!! warning
+!!! warning "Experimental API"
 
-    Autorouting solutions may change between minor DeviceLayout.jl versions. Only breaking
-    changes to the autorouter API, not its output, will force major version bumps.
-    Autorouting is under active development, so upcoming minor versions are especially
-    likely to see changes in solutions for fixed routing problems.
+    The channel autorouter is experimental. Its API and its solutions for a given routing
+    problem may change in minor DeviceLayout.jl versions while it is under active
+    development.
 
 ## Problem setup
 
@@ -50,7 +49,8 @@ Routing happens in two stages:
     segments onto shared tracks when compatible. A segment's constraints depend on the
     tracks of the channels it turns into and out of, so after a first pass over all
     channels, refinement passes reassign any channel whose constraints have changed (see
-    [`Paths.assign_tracks!`](@ref)).
+    [`Paths.assign_tracks!`](@ref)). Refinement can fail to settle, as described under
+    [Limitations](#Limitations).
 
 The algorithms follow the classical channel-routing literature (Hashimoto & Stevens;
 Yoshimura & Kuh), with a crossing-aware variant due to Condrat, Kalla, & Blair to
@@ -147,6 +147,12 @@ schematic to find their global coordinates. Channels must be provided to the aut
   - Fixed channel paths may not revisit a channel.
   - Cyclic vertical constraint graphs are not supported. If track constraints form a
     cycle, track assignment reports the channel and nets involved.
+  - Track refinement can fail to settle when channels' constraints depend on each other's
+    tracks, leaving some channel's tracks in violation of its constraints: wires
+    overlapping on a shared track, or crossings that a different order would avoid.
+    `autoroute!` and schematic planning warn about the channels involved and say whether
+    a larger `max_refinement_passes` could help. Otherwise, moving pins or channels
+    changes the constraints.
   - Every net in a single `AutoChannelRouting` rule must start at a distinct pin. Nets
     that share a source pin should be split into separate rules (or merged upstream).
   - Wires leaving a channel to opposite sides near the same point can be put in an order

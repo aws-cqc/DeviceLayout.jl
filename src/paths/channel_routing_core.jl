@@ -507,10 +507,18 @@ Track assignment operates on **all** channels, not a subset. Re-running after mo
 a single net will reassign tracks globally in every channel that contains wire segments.
 
 After an initial pass over channels in index order, up to `max_refinement_passes`
-additional passes reassign each channel using the tracks assigned in all other channels.
-A channel is reassigned only if the tracks of its neighbors have changed its constraints,
-and passes stop once no channel needs reassignment. Warns if some channel still does after
-the last pass, since its tracks can then have avoidable crossings.
+additional passes reassign each channel whose constraints have changed, since a segment's
+constraints depend on the tracks of the channels at its ends. From the second refinement
+pass on, a channel keeps its tracks if they still satisfy its changed constraints. Passes
+stop once every channel's tracks satisfy its constraints.
+
+If that doesn't happen within `max_refinement_passes`, track assignment keeps the
+assignment, from the initial pass or any refinement pass, with the fewest wires overlapping
+on a shared track, and then the fewest channels whose tracks violate their constraints. If
+that assignment has violations, it warns about the channels with them, which can have
+wires overlapping on a shared track or crossings that a different order would avoid. The
+warning also says whether the passes were cycling between assignments, in which case more
+passes won't help.
 
 Two wires leaving a channel to opposite sides at the same point are put in the order that
 keeps their legs from overlapping, unless that order would make the vertical constraint
@@ -518,17 +526,18 @@ graph cyclic (`autoroute!` then warns about the pair). The same order is imposed
 leaving closer together than `min_leg_spacing`, so their legs don't run side by side
 across the channel closer than that. This can increase the number of tracks, since such
 pairs could otherwise share a track.
+
+!!! warning "Experimental API"
+
+    The channel autorouter is experimental. Its API and its solutions for a given problem
+    may change in minor versions.
 """
 function assign_tracks!(
     ar::AbstractChannelProblem{T};
     max_refinement_passes=2,
     min_leg_spacing=zero(T)
 ) where {T}
-    max_refinement_passes >= 0 || throw(
-        ArgumentError(
-            "`max_refinement_passes` must be nonnegative, got $max_refinement_passes."
-        )
-    )
+    validate_max_refinement_passes(max_refinement_passes)
     for channel = 1:num_channels(ar)
         empty!(channel_tracks(ar, channel))
     end
@@ -549,32 +558,125 @@ function assign_tracks!(
     # channels with all neighboring tracks known. Reassignment must not discard a
     # consistent order on the basis of unconstrained neighbor tracks; see
     # `_outer_of_disjoint_neighbors`.
-    for _ = 1:max_refinement_passes
+    #
+    # Channels whose constraints depend on each other's tracks can keep trading
+    # assignments, so from the second refinement pass on, a channel keeps tracks that still
+    # satisfy its constraints. The first refinement pass reassigns regardless: the initial
+    # pass's tracks often still satisfy the constraints but use more tracks than needed
+    # once the neighbors' tracks are known.
+    states = [_track_state(ar)]
+    cycled = false
+    for pass = 1:max_refinement_passes
         reassigned = false
         for channel = 1:num_channels(ar)
             # Old tracks stay in place while inputs and new tracks are computed so that
             # offsets of this channel's segments remain available to neighbor intervals
             inputs = _track_inputs(ar, channel; min_leg_spacing)
             inputs == used_inputs[channel] && continue
+            used_inputs[channel] = inputs
+            pass > 1 && _tracks_satisfy(ar, channel, inputs) && continue
             tracks = channel_tracks(ar, channel)
             n_old = length(tracks)
             assign_tracks_matching!(ar, channel, inputs)
             deleteat!(tracks, 1:n_old)
-            used_inputs[channel] = inputs
             reassigned = true
         end
         reassigned || return
+        state = _track_state(ar)
+        # Passes after the first depend only on the tracks they start from. So if a pass
+        # ends with the tracks that an earlier pass after the first started from, the
+        # passes cycle. Ending with the tracks this pass started from instead means the
+        # next pass would change nothing.
+        cycled = state in states[2:(end - 1)]
+        push!(states, state)
+        cycled && break
     end
-    stale = filter(1:num_channels(ar)) do channel
-        return _track_inputs(ar, channel; min_leg_spacing) != used_inputs[channel]
+    isempty(_violating_channels(ar, min_leg_spacing)) ||
+        _keep_least_violating!(ar, states, cycled; min_leg_spacing)
+    return
+end
+
+# After refinement passes that didn't settle, restores the assignment in `states` with the
+# fewest violations and warns about any channels whose tracks violate their constraints
+function _keep_least_violating!(ar, states, cycled; min_leg_spacing)
+    scores = map(states) do state
+        _restore_track_state!(ar, state)
+        return (
+            _shared_track_overlaps(ar),
+            length(_violating_channels(ar, min_leg_spacing))
+        )
     end
-    isempty(stale) || @warn """
-        Track assignment did not converge in $max_refinement_passes refinement passes. \
-        Channels $stale were assigned using outdated tracks of their neighbors, which \
-        can cause avoidable crossings. Increase `max_refinement_passes` to refine \
-        further.\
+    _restore_track_state!(ar, states[argmin(scores)])
+    violating = _violating_channels(ar, min_leg_spacing)
+    # The initial pass's assignment, which the first refinement pass replaces regardless,
+    # can satisfy all constraints
+    isempty(violating) && return
+    remedy = if cycled
+        "The passes cycle between assignments, so more passes won't help."
+    else
+        "Increasing `max_refinement_passes` may help."
+    end
+    @warn """
+        Track assignment did not converge in $(length(states) - 1) refinement passes. \
+        Tracks in channels $violating violate their constraints, which can leave wires \
+        overlapping on a shared track or crossing where a different order would avoid \
+        it. Of the assignments tried, the one with the fewest violations is kept. \
+        $remedy\
         """
     return
+end
+
+# Throws unless `n` is a valid `max_refinement_passes`. `AutoChannelRouting` checks too,
+# so that a bad value fails before any routing work.
+function validate_max_refinement_passes(n)
+    n >= 0 || throw(ArgumentError("`max_refinement_passes` must be nonnegative, got $n."))
+    return n
+end
+
+# The tracks of all channels, to compare and restore assignments
+_track_state(ar) = [copy.(channel_tracks(ar, channel)) for channel = 1:num_channels(ar)]
+
+function _restore_track_state!(ar, state)
+    for channel = 1:num_channels(ar)
+        tracks = channel_tracks(ar, channel)
+        empty!(tracks)
+        append!(tracks, state[channel])
+    end
+end
+
+# Whether the current tracks of `channel` satisfy the constraints in `inputs` (see
+# `_track_inputs`): no overlapping segments on one track, and every vertical constraint
+# respected by the track order
+function _tracks_satisfy(ar, channel, inputs)
+    seg_idx = Dict(ws => idx for (idx, ws) in pairs(inputs.segs))
+    track_of = zeros(Int, length(inputs.segs))
+    for (track_idx, track) in pairs(channel_tracks(ar, channel)), ws in track
+        haskey(seg_idx, ws) || return false
+        track_of[seg_idx[ws]] = track_idx
+    end
+    any(iszero, track_of) && return false
+    # Lower track index is higher in the channel, and the VCG has edges from higher to lower
+    all(e -> track_of[e.src] < track_of[e.dst], edges(inputs.vcg)) || return false
+    all(e -> track_of[e.src] != track_of[e.dst], edges(inputs.zone_ig)) || return false
+    return all(((a, b),) -> track_of[a] != track_of[b], inputs.touching_overlaps)
+end
+
+# Channels whose current tracks violate their constraints
+function _violating_channels(ar, min_leg_spacing)
+    return filter(1:num_channels(ar)) do channel
+        return !_tracks_satisfy(ar, channel, _track_inputs(ar, channel; min_leg_spacing))
+    end
+end
+
+# Number of pairs of segments that overlap on a shared track, in any channel
+function _shared_track_overlaps(ar)
+    n = 0
+    for channel = 1:num_channels(ar), track in channel_tracks(ar, channel)
+        for (idx, ws) in pairs(track), other in track[(idx + 1):end]
+            n += segments_overlap(ar, ws, other)
+        end
+    end
+    return n
 end
 
 # Everything `assign_tracks_matching!` reads from `channel`'s current state. Equal inputs

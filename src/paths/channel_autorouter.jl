@@ -20,6 +20,11 @@ Routing proceeds in two steps. The first is "channel assignment", which proceeds
 choosing which channels the net's wire passes through on its way from one pin to the other. The second step
 is "track assigment", which proceeds channel by channel. Wire segments are assigned to
 tracks within the channel such that wire segments in the same track do not overlap.
+
+!!! warning "Experimental API"
+
+    The channel autorouter is experimental. Its API and its solutions for a given problem
+    may change in minor versions.
 """
 struct ChannelRouter{T <: Coordinate} <: AbstractChannelProblem{T}
     channel_graph::SimpleGraph{Int}   # Channels/pins are vertices, intersections are edges
@@ -282,6 +287,11 @@ pair of wires whose legs run side by side closer than `min_leg_spacing`, or than
 pitch if `min_leg_spacing` is zero. The jog check is exact for `StraightAnd90`. For
 `StraightAnd45` it catches jogs too short for a single 45° turn on each side, but longer
 jogs (up to `2 * margin`) can also fail to route.
+
+!!! warning "Experimental API"
+
+    The channel autorouter is experimental. Its API and its solutions for a given problem
+    may change in minor versions.
 """
 function autoroute!(
     ar::ChannelRouter,
@@ -388,8 +398,9 @@ function _warn_close_legs(ar::ChannelRouter, min_leg_spacing)
             top_ws, bottom_ws = wiresegs_ascending[top], wiresegs_ascending[bottom]
             top_track, bottom_track =
                 segment_track(ar, top_ws), segment_track(ar, bottom_ws)
-            # Sharing a track keeps legs apart unless the ends coincide. The ends are then
-            # `gap` apart along the track, as for any two segments sharing a track.
+            # On a shared track, the legs leave on opposite sides of it, and the track ends
+            # are `gap` apart, as for any two segments on one track. Only coinciding ends
+            # are a problem there.
             (top_track > bottom_track || (iszero(gap) && top_track == bottom_track)) ||
                 continue
             nets = "Nets $(net_index(top_ws)) and $(net_index(bottom_ws))"
@@ -569,9 +580,10 @@ reserves arclength at each end of a channel segment for the transition bends.
 Track assignment options:
 
   - `max_refinement_passes`: maximum number of passes that reassign tracks in each
-    channel once all neighboring channels have tracks. Passes stop as soon as no channel
-    needs reassignment, so a larger maximum costs time only where refinement is needed.
-    A warning suggests increasing it if tracks are still outdated after the last pass.
+    channel once all neighboring channels have tracks. Passes stop as soon as every
+    channel's tracks satisfy its constraints, so a larger maximum costs time only where
+    refinement is needed. If they don't by the last pass, routing warns, and says whether
+    more passes could help. Must be nonnegative.
   - `min_leg_spacing`: minimum spacing between wires that leave a channel to opposite
     sides near the same point. Closer pairs are ordered so their legs separate instead of
     running side by side across the channel. The default of zero orders only pairs at the
@@ -580,6 +592,11 @@ Track assignment options:
     left side by side closer than `min_leg_spacing`, or than the track pitch if it is zero.
 
 See [`Paths.assign_tracks!`](@ref).
+
+!!! warning "Experimental API"
+
+    The channel autorouter is experimental. Its API and its solutions for a given problem
+    may change in minor versions.
 """
 struct AutoChannelRouting{T <: Coordinate} <: AbstractChannelRouting
     router::ChannelRouter{T}
@@ -600,7 +617,7 @@ function AutoChannelRouting(
         router,
         transition_rule,
         convert(T, margin),
-        max_refinement_passes,
+        validate_max_refinement_passes(max_refinement_passes),
         convert(T, min_leg_spacing)
     )
 end

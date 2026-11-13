@@ -6,6 +6,15 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - Added experimental channel autorouting through predefined `RouteChannel`s, including
+    automatic channel assignment, crossing-aware track assignment refined against the tracks
+    of neighboring channels, an optional minimum spacing between wires leaving a channel to
+    opposite sides, partial rerouting, fixed channel paths, schematic-driven routing with
+    `AutoChannelRouting`, diagnostics, examples, and documentation. Its API and its solutions
+    for a given problem may change in minor versions.
+
 ### Fixed
 
   - `halo` of a path style with zero extent at its start covers the rest of the style, and
@@ -16,6 +25,8 @@ The format of this changelog is based on
   - `halo` of a path with sharp corners (`corner!` with `Paths.SimpleTraceCorner`), including
     a path ending in a corner, gives a mitered halo around each corner instead of throwing a
     `MethodError`. With an `inner_delta`, it throws an `ArgumentError`.
+  - Channel sections used by `SingleChannelRouting` and channel autorouting now clamp to the
+    available channel extent and handle exact B-spline endpoints without an out-of-range split.
 
 ## 1.21.0 (2026-11-10)
 
@@ -371,9 +382,6 @@ The format of this changelog is based on
 
 ### Added
 
-  - Added channel autorouting through predefined `RouteChannel`s, including automatic channel
-    assignment, crossing-aware track assignment, partial rerouting, fixed channel paths,
-    schematic-driven routing with `AutoChannelRouting`, diagnostics, examples, and documentation.
   - OpenCascade SolidModel rendering adds radius-sized mesh control points at the centers of
     exact circular arcs by default, locally capping rounded-corner and path-turn mesh sizes
     at the radius when `mesh_scale() <= 1`, without refining their entire enclosing entities.
@@ -386,8 +394,6 @@ The format of this changelog is based on
 
 ### Fixed
 
-  - Channel sections used by `SingleChannelRouting` and channel autorouting now clamp to the
-    available channel extent and handle exact B-spline endpoints without an out-of-range split.
   - Mesh control-point sets that resolve to the same `(h, α)` no longer overwrite one another
     when the default grading parameter is applied.
   - Graphics export now preserves aspect ratio when only `width` or `height` is supplied, rather than
