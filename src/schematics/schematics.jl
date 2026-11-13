@@ -1709,6 +1709,7 @@ function render!(
     sch.checked[] || error(
         "Cannot render an unchecked Schematic. Run check!(sch::Schematic), or override by setting sch.checked[] = true (not recommended!)"
     )
+    DeviceLayout.reset_render_kwarg_warnings!()
     reopen_logfile(sch, :render)
     try
         with_logger(sch.logger) do

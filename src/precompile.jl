@@ -126,6 +126,7 @@ else
         end
         # Reset any DeviceLayout-owned globals touched by workload
         reset_uniquename!()
+        reset_render_kwarg_warnings!()
         # Don't bake stale Clipper handles into the package image
         global _clip = nothing
     end

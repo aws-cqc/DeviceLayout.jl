@@ -215,6 +215,9 @@ export GeometryEntity,
 export transform,
     translate, rotate, rotate90, magnify, reflect_across_xaxis, reflect_across_line
 
+# Before styles.jl: the `OptionalStyle` constructor registers its flag
+include("render_kwargs.jl")
+
 # Entity styles
 include("styles.jl")
 export OptionalStyle,

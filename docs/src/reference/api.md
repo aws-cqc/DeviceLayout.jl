@@ -288,6 +288,7 @@ See [Shapes](./shapes.md).
 
 ```@docs
     render!
+    DeviceLayout.register_render_kwarg!
     DeviceLayout.discretize_curve
 ```
 
