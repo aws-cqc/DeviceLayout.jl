@@ -1,6 +1,6 @@
 @testitem "Autorouter internals" setup = [CommonTestSetup] begin
     import DeviceLayout.Paths: ChannelRouter, RouteChannel, autoroute!
-    # ── Helpers (shared with autoroute_examples.jl) ──────────────────────────────
+    # ── Helpers (as in examples/ChannelAutorouter) ───────────────────────────────
 
     hchannel(x0, x1, y; width=2.0) =
         let pa = Path(x0, y)
@@ -31,12 +31,10 @@
     Paths.channel_graph(prob::InterfaceOnlyProblem) = prob.graph
     Paths.num_channels(::InterfaceOnlyProblem) = 1
     Paths.num_nets(prob::InterfaceOnlyProblem) = length(prob.pin_pairs)
-    Paths.num_pins(::InterfaceOnlyProblem) = 2
     Paths.net_pins(prob::InterfaceOnlyProblem, net) = prob.pin_pairs[net]
     Paths.net_wire(prob::InterfaceOnlyProblem, net) = prob.wires[net]
     Paths.channel_segments(prob::InterfaceOnlyProblem, channel) = prob.segments[channel]
     Paths.channel_tracks(prob::InterfaceOnlyProblem, channel) = prob.tracks[channel]
-    Paths.num_tracks(prob::InterfaceOnlyProblem, channel) = length(prob.tracks[channel])
     function Paths.pathlength_at_intersection(
         ::InterfaceOnlyProblem,
         channel,
@@ -65,6 +63,38 @@
     function _route_channels(channels, hooks, nets)
         ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
         Paths.assign_channels!(ar)
+        return ar
+    end
+
+    # Two nets that cross in a vertical channel between two horizontal channels
+    function routed_crossing()
+        channels = [vchannel(5, -1, 7), hchannel(-1, 9, 0), hchannel(-1, 9, 6)]
+        hooks = [bpin(2, -0.5), bpin(8, -0.5), tpin(2, 6.5), tpin(8, 6.5)]
+        ar = ChannelRouter([(1, 4), (2, 3)], hooks, RouteChannel.(channels))
+        autoroute!(ar, Paths.StraightAnd90(0.1), 0.1)
+        return ar
+    end
+
+    # Three nets routed left to right at matching heights through two vertical and three
+    # horizontal channels
+    function routed_parallel()
+        channels = [
+            vchannel(0, -1, 9),
+            vchannel(10, -1, 9),
+            hchannel(-1, 11, 0),
+            hchannel(-1, 11, 4),
+            hchannel(-1, 11, 8)
+        ]
+        hooks = [
+            lpin(-0.5, 0),
+            lpin(-0.5, 4),
+            lpin(-0.5, 8),
+            rpin(10.5, 0),
+            rpin(10.5, 4),
+            rpin(10.5, 8)
+        ]
+        ar = ChannelRouter([(1, 4), (2, 5), (3, 6)], hooks, RouteChannel.(channels))
+        autoroute!(ar, Paths.StraightAnd90(0.1), 0.1)
         return ar
     end
 
@@ -166,10 +196,6 @@
         @test !Paths.is_cyclic(vcg)
     end
 
-    # ── segments_overlap: boundary case with tendency ────────────────────────────
-    # The knock-knee relaxation (strict < instead of <=) should NOT apply when
-    # segments at a shared endpoint face the same direction.
-
     @testset "merged track groups respect all VCG constraints" begin
         vcg = Graphs.SimpleDiGraph(6)
         Graphs.add_edge!(vcg, 6, 5)
@@ -186,6 +212,10 @@
         @test position_a < position_b
         @test sort!(reduce(vcat, groups)) == collect(1:6)
     end
+
+    # ── segments_overlap: boundary case with tendency ────────────────────────────
+    # The knock-knee relaxation (strict < instead of <=) should NOT apply when
+    # segments at a shared endpoint face the same direction.
 
     @testset "segments_overlap boundary" begin
         # Crossing setup: 2H + 1V, two nets that cross in the vertical channel.
@@ -225,7 +255,7 @@
             vchannel(5, -1, 10),     # idx 1: v_mid
             hchannel(-1, 9, 0),     # idx 2: h_bot
             hchannel(-1, 9, 6),     # idx 3: h_mid
-            hchannel(-1, 9, 9)     # idx 3: h_top
+            hchannel(-1, 9, 9)     # idx 4: h_top
         ]
         hooks = [
             bpin(2, -0.5),   # p1
@@ -248,10 +278,7 @@
     # Verify that track counts match expectations after full routing.
 
     @testset "track assignment: crossing" begin
-        channels = [vchannel(5, -1, 7), hchannel(-1, 9, 0), hchannel(-1, 9, 6)]
-        hooks = [bpin(2, -0.5), bpin(8, -0.5), tpin(2, 6.5), tpin(8, 6.5)]
-        ar = ChannelRouter([(1, 4), (2, 3)], hooks, RouteChannel.(channels))
-        autoroute!(ar, Paths.StraightAnd90(0.1), 0.1)
+        ar = routed_crossing()
 
         # v_mid gets 2 tracks (full overlap)
         @test length(ar.channel_tracks[1]) == 2
@@ -262,23 +289,7 @@
     end
 
     @testset "track assignment: parallel" begin
-        channels = [
-            vchannel(0, -1, 9),
-            vchannel(10, -1, 9),
-            hchannel(-1, 11, 0),
-            hchannel(-1, 11, 4),
-            hchannel(-1, 11, 8)
-        ]
-        hooks = [
-            lpin(-0.5, 0),
-            lpin(-0.5, 4),
-            lpin(-0.5, 8),
-            rpin(10.5, 0),
-            rpin(10.5, 4),
-            rpin(10.5, 8)
-        ]
-        ar = ChannelRouter([(1, 4), (2, 5), (3, 6)], hooks, RouteChannel.(channels))
-        autoroute!(ar, Paths.StraightAnd90(0.1), 0.1)
+        ar = routed_parallel()
 
         @test all(length.(ar.net_wires) .> 0)
         # No channel should need more than 1 track (non-crossing parallel routes)
@@ -287,10 +298,7 @@
 
     # ── routing_summary ──────────────────────────────────────────────────────
     @testset "routing_summary" begin
-        channels = [vchannel(5, -1, 7), hchannel(-1, 9, 0), hchannel(-1, 9, 6)]
-        hooks = [bpin(2, -0.5), bpin(8, -0.5), tpin(2, 6.5), tpin(8, 6.5)]
-        ar = ChannelRouter([(1, 4), (2, 3)], hooks, RouteChannel.(channels))
-        autoroute!(ar, Paths.StraightAnd90(0.1), 0.1)
+        ar = routed_crossing()
 
         output = sprint(Paths.routing_summary, ar)
         @test occursin("Net 1:", output)
@@ -300,10 +308,7 @@
 
     # ── validate_routes ──────────────────────────────────────────────────────
     @testset "validate_routes" begin
-        channels = [vchannel(5, -1, 7), hchannel(-1, 9, 0), hchannel(-1, 9, 6)]
-        hooks = [bpin(2, -0.5), bpin(8, -0.5), tpin(2, 6.5), tpin(8, 6.5)]
-        ar = ChannelRouter([(1, 4), (2, 3)], hooks, RouteChannel.(channels))
-        autoroute!(ar, Paths.StraightAnd90(0.1), 0.1)
+        ar = routed_crossing()
 
         ok = Paths.validate_routes(ar, Paths.Trace(0.05))
         @test ok isa BitVector
@@ -325,10 +330,7 @@
 
     # ── reroute_nets! ────────────────────────────────────────────────────────
     @testset "reroute_nets!" begin
-        channels = [vchannel(5, -1, 7), hchannel(-1, 9, 0), hchannel(-1, 9, 6)]
-        hooks = [bpin(2, -0.5), bpin(8, -0.5), tpin(2, 6.5), tpin(8, 6.5)]
-        ar = ChannelRouter([(1, 4), (2, 3)], hooks, RouteChannel.(channels))
-        autoroute!(ar, Paths.StraightAnd90(0.1), 0.1)
+        ar = routed_crossing()
 
         # Record original track assignments
         orig_tracks_net1 = [Paths.segment_track(ar, ws) for ws in Paths.net_wire(ar, 1)]
@@ -357,23 +359,7 @@
     end
 
     @testset "partial reroute rebuilds every channel's tracks" begin
-        channels = [
-            vchannel(0, -1, 9),
-            vchannel(10, -1, 9),
-            hchannel(-1, 11, 0),
-            hchannel(-1, 11, 4),
-            hchannel(-1, 11, 8)
-        ]
-        hooks = [
-            lpin(-0.5, 0),
-            lpin(-0.5, 4),
-            lpin(-0.5, 8),
-            rpin(10.5, 0),
-            rpin(10.5, 4),
-            rpin(10.5, 8)
-        ]
-        ar = ChannelRouter([(1, 4), (2, 5), (3, 6)], hooks, RouteChannel.(channels))
-        autoroute!(ar, Paths.StraightAnd90(0.1), 0.1)
+        ar = routed_parallel()
         original_track_counts = length.(ar.channel_tracks)
 
         Paths.reroute_nets!(ar, [1]; fixed_paths=Dict(1 => [1, 3, 2]))
@@ -389,16 +375,14 @@
 
     # ── best_matching! bipartite shape ───────────────────────────────────────
     @testset "best_matching! bipartite shape" begin
-        import Graphs: SimpleGraph, SimpleDiGraph, add_edge!
-
         # 4 vertices, L={1,2}, R={3,4}, edges (1,3), (1,4), (2,3).
         # True max bipartite matching has 2 R→L pairs (e.g. 3→2, 4→1).
-        g = SimpleGraph(4)
-        add_edge!(g, 1, 3)
-        add_edge!(g, 1, 4)
-        add_edge!(g, 2, 3)
+        g = Graphs.SimpleGraph(4)
+        Graphs.add_edge!(g, 1, 3)
+        Graphs.add_edge!(g, 1, 4)
+        Graphs.add_edge!(g, 2, 3)
         # Empty VCG preserves all merging edges (no ancestor constraints).
-        vcg = SimpleDiGraph(4)
+        vcg = Graphs.SimpleDiGraph(4)
 
         m = Paths.best_matching!(g, vcg, Set([1, 2]), Set([3, 4]))
         @test length(m) == 2

@@ -76,7 +76,7 @@ const MARGIN = 0.1
 # Filter prepared_intersections to only inter-path crossings (different path indices)
 function inter_path_intersections(paths)
     return filter(Intersect.prepared_intersections(paths)) do ixn
-        ixn[1][1] != ixn[2][1]
+        return ixn[1][1] != ixn[2][1]
     end
 end
 
@@ -147,10 +147,15 @@ end
 # 2 horizontal channels + 1 vertical channel. 2 nets cross in the shared
 # vertical channel, forcing multiple tracks.
 #
-#  p3 ←  ═══════╪═══  → p4    h_top (y=6)
-#               ║
-#  p1 ←  ═══════╪═══  → p2    h_bot (y=0)
-#             v_mid (x=5)
+#        p3          p4
+#        ↓           ↓
+#  ════════════╪════════  h_top (y=6)
+#              ║
+#              ║  v_mid (x=5)
+#              ║
+#  ════════════╪════════  h_bot (y=0)
+#        ↑           ↑
+#        p1          p2
 
 function example_crossing()
     channels = [
@@ -185,11 +190,14 @@ end
 # Left and right pins spread out, must fan in/out asymmetrically to horizontal channel
 # 2 vertical + 1 horizontal channels.
 #
-#            v_left                    v_right
-#  p4 → (-0.5, 6)  ║                    ║  (10.5, 9) ← p8
-#  p3 → (-0.5, 5)  ║════════════════════║  (10.5, 6) ← p7   h_mid (y=7)
-#  p2 → (-0.5, 4)  ║                    ║  (10.5, 3) ← p6
-#  p1 → (-0.5, 3)  ║                    ║  (10.5, 0) ← p5
+#             v_left               v_right
+#                ║                    ║  (11, 9) ← p8
+#                ║════════════════════║                 h_mid (y=7)
+#  p4 → (-1, 6)  ║                    ║  (11, 6) ← p7
+#  p3 → (-1, 5)  ║                    ║
+#  p2 → (-1, 4)  ║                    ║
+#  p1 → (-1, 3)  ║                    ║  (11, 3) ← p6
+#                ║                    ║  (11, 0) ← p5
 function example_fanin_fanout()
     channels = [
         vchannel(0, -2, 11),     # v_left
@@ -225,11 +233,17 @@ end
 # Left pins clustered (simulating component outputs), right pins spread out.
 # 2 vertical + 4 horizontal channels.
 #
-#            v_left                    v_right
-#  p4 → (-0.5, 6)  ║════════════════════║  (10.5, 9) ← p8   h4 (y=9)
-#  p3 → (-0.5, 5)  ║════════════════════║  (10.5, 6) ← p7   h3 (y=6)
-#  p2 → (-0.5, 4)  ║════════════════════║  (10.5, 3) ← p6   h2 (y=3)
-#  p1 → (-0.5, 3)  ║════════════════════║  (10.5, 0) ← p5   h1 (y=0)
+#             v_left               v_right
+#                ║                    ║  (11, 9) ← p8
+#                ║════════════════════║                 h_4 (y=7.5)
+#  p4 → (-1, 6)  ║                    ║  (11, 6) ← p7
+#                ║════════════════════║                 h_3 (y=5.5)
+#  p3 → (-1, 5)  ║                    ║
+#  p2 → (-1, 4)  ║                    ║
+#                ║════════════════════║                 h_2 (y=3.5)
+#  p1 → (-1, 3)  ║                    ║  (11, 3) ← p6
+#                ║════════════════════║                 h_1 (y=1.5)
+#                ║                    ║  (11, 0) ← p5
 function example_multichannel_fanout()
     channels = [
         vchannel(0, -2, 11),     # v_left
@@ -270,16 +284,16 @@ end
 #
 #            v1   v2   v3   v4
 #             |    |    |    |
-#   p5 →  ════╪════╪════╪════╪════  ← p6    h4 (y=9)
+#   p5 →  ════╪════╪════╪════╪════          h4 (y=9)
 #             |    |    |    |
-#         ════╪════╪════╪════╪════          h3 (y=6)
+#         ════╪════╪════╪════╪════  ← p2    h3 (y=6)
 #             |    |    |    |
 #   p1 →  ════╪════╪════╪════╪════          h2 (y=3)
 #             |    |    |    |
-#         ════╪════╪════╪════╪════          h1 (y=0)
+#         ════╪════╪════╪════╪════  ← p6    h1 (y=0)
 #             |    |    |    |
-#            p3                p4
-#           (bottom)        (bottom)
+#               p3        p4
+#            (bottom)  (bottom)
 
 function example_grid()
     channels = [
@@ -313,9 +327,7 @@ function example_grid()
     c = visualize_router_state(ar; wire_width=WW)
 
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
-    # At least one net should traverse 3+ wire segments (multi-hop path)
-    max_segs = maximum(length.(ar.net_wires))
-    @assert max_segs >= 2 "Grid routing should produce multi-segment paths"
+    @assert maximum(length.(ar.net_wires)) >= 2 "Grid routing should produce multi-segment paths"
     return c, ar
 end
 
@@ -341,8 +353,8 @@ function example_angled()
     hooks = [
         bpin(0, -1),     # p1: below d1, left side
         bpin(8, -1),     # p2: below d2, right side
-        rpin(11, 1),     # p4: above d2, right side
-        lpin(-3, 1)     # p3: below d1, left side
+        rpin(11, 1),     # p3: above d2, right side
+        lpin(-3, 1)     # p4: above d1, left side
     ]
     # Net 1 goes left→right via h1 and diagonals
     # Net 2 goes right→left via h1 and diagonals
@@ -363,20 +375,19 @@ end
 # 6 nets sharing just 2 horizontal + 2 vertical channels.
 # Forces multiple tracks per channel.
 #
-#  p1-p6 on left    p7-p12 on right
-#    →  ║════════════════║  ←
-#       ║    h1 (y=0)    ║
-#       ║════════════════║
-#       ║    h2 (y=5)    ║
-#    →  ║════════════════║  ←
+#       ║════════════════║         h2 (y=6)
+#  p6 → ║                ║ ← p12   (y=5)
+#   ⋮   ║                ║   ⋮
+#  p1 → ║                ║ ← p7    (y=0)
+#       ║════════════════║         h1 (y=-1)
 #     v_left           v_right
 
 function example_dense()
     channels = [
-        vchannel(0, -2, 7),      # v_left  (idx 1)
-        hchannel(-2, 10, -1),     # h1      (idx 3)
-        hchannel(-2, 10, 6),     # h2      (idx 4)
-        vchannel(8, -2, 7)      # v_right (idx 2)
+        vchannel(0, -2, 7),      # v_left
+        hchannel(-2, 10, -1),     # h1
+        hchannel(-2, 10, 6),     # h2
+        vchannel(8, -2, 7)      # v_right
     ]
     # 6 left pins, tightly spaced, all crossing v_left
     # 6 right pins, same y-positions, all crossing v_right
@@ -405,7 +416,7 @@ end
 function example_bspline()
     channels = [
         bchannel(0, -2, 30°, 1, 12),     # v_left
-        bchannel(-1, 2, -30°, 12, 9; width=s -> 2.0 + s/10),    # h_mid
+        bchannel(-1, 2, -30°, 12, 9; width=s -> 2.0 + s / 10),    # h_mid
         bchannel(10, -2, 30°, 11, 12)   # v_right
     ]
     # Left pins clustered at y=3,4,5,6 — all cross v_left
@@ -422,7 +433,7 @@ function example_bspline()
     ]
     nets = [(1, 5), (2, 6), (3, 7), (4, 8)]
 
-    ar = Paths.ChannelRouter(nets, hooks, RouteChannel.(channels))
+    ar = ChannelRouter(nets, hooks, RouteChannel.(channels))
     transition_rule = Paths.BSplineRouting(
         auto_speed=true,
         auto_curvature=true,
@@ -431,7 +442,7 @@ function example_bspline()
     )
 
     routes = autoroute!(ar, transition_rule, 1.0)
-    c = visualize_router_state(ar, wire_width=WW)
+    c = visualize_router_state(ar; wire_width=WW)
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     paths = Path.(routes, Ref(Paths.Trace(WW)))
     @assert isempty(inter_path_intersections(paths)) "No crossings"
@@ -457,14 +468,13 @@ function example_fanout100()
     p1s = [PointHook(x, -ly_inner / 2, 90°) for x in x1s]
     mynets = [(i, i + n_nets) for i = 1:n_nets]
     ar = ChannelRouter(mynets, vcat(p0s, p1s), [RouteChannel(fanout_space_bottom)])
-    routes = Paths.autoroute!(ar, Paths.StraightAnd90(10μm), 10μm)
-    # c = Paths.visualize_router_state(ar, wire_width=1μm)
+    routes = autoroute!(ar, Paths.StraightAnd90(10μm), 10μm; min_leg_spacing=step(x1s) / 2)
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     paths = Path.(routes, Ref(Paths.Trace(10μm)))
     c = Cell("fanout100")
     render!.(c, paths, GDSMeta())
     @assert isempty(inter_path_intersections(paths)) "No crossings"
-    @assert length(ar.channel_tracks[1]) <= n_nets/2 "Left and right halves share tracks"
+    @assert length(ar.channel_tracks[1]) <= n_nets / 2 "Left and right halves share tracks"
     return c, ar
 end
 
@@ -518,7 +528,7 @@ function example_perimeter_to_edge_escape()
     ar = ChannelRouter(mynets, vcat(p0s, p1s), RouteChannel.(channels))
     # Pin 7 is about 85μm from net 6's leg into the left channel. A minimum leg spacing of
     # 100μm puts net 7 below net 6 in the bottom channel so their legs don't run side by side
-    routes = Paths.autoroute!(ar, Paths.StraightAnd90(10μm), 10μm; min_leg_spacing=100μm)
+    routes = autoroute!(ar, Paths.StraightAnd90(10μm), 10μm; min_leg_spacing=100μm)
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     paths = Path.(routes, Ref(Paths.Trace(10μm)))
     c = Cell("perimeter_to_edge")
@@ -531,11 +541,11 @@ end
 # Same as `example_crossing` but using the schematic interface to set up the routing problem.
 
 function example_crossing_schematic()
-    channels = RouteChannel.([
+    channels = [
         vchannel(5mm, -1mm, 7mm, width=2.0mm),     # v_mid
         hchannel(-1mm, 9mm, 0mm, width=2.0mm),     # h_bot
         hchannel(-1mm, 9mm, 6mm, width=2.0mm)     # h_top
-    ])
+    ]
 
     hooks = [
         bpin(2mm, -0.5mm),   # p1: below h_bot, left side
@@ -550,15 +560,23 @@ function example_crossing_schematic()
     # Start/end components
     comps = [Spacer(; p1=h.p) for h in hooks]
     comp_nodes = add_node!.(g, comps)
-    ar = ChannelRouter(channels)
-    rule = AutoChannelRouting(ar, Paths.StraightAnd90(MARGIN*1mm), MARGIN*1mm)
-    r1 = route!(g, rule, comp_nodes[1]=>:p1_south, comp_nodes[4]=>:p1_north, Paths.Trace(WW*1mm), GDSMeta())
-    r2 = route!(g, rule, comp_nodes[2]=>:p1_south, comp_nodes[3]=>:p1_north, Paths.Trace(WW*1mm), GDSMeta())
+    ar = ChannelRouter(RouteChannel.(channels))
+    rule = AutoChannelRouting(ar, Paths.StraightAnd90(MARGIN * 1mm), MARGIN * 1mm)
+    # Each net goes from a bottom pin's south hook to a top pin's north hook
+    route_nodes = [
+        route!(
+            g,
+            rule,
+            comp_nodes[i] => :p1_south,
+            comp_nodes[j] => :p1_north,
+            Paths.Trace(WW * 1mm),
+            GDSMeta()
+        ) for (i, j) in nets
+    ]
 
     sch = plan(g)
-    paths = [SchematicDrivenLayout.path(r1.component), SchematicDrivenLayout.path(r2.component)]
+    paths = [SchematicDrivenLayout.path(r.component) for r in route_nodes]
     c = Cell(sch.coordinate_system)
-    # c = visualize_router_state(ar; wire_width=WW)
 
     @assert all(length.(ar.net_wires) .> 0) "All nets should be routed"
     # Both nets traverse v_mid, so it needs ≥2 tracks
@@ -583,7 +601,7 @@ const ALL_EXAMPLES = [
     "bspline" => example_bspline,
     "fanout100" => example_fanout100,
     "perimeter_to_edge" => example_perimeter_to_edge_escape,
-    "crossing_schematic" => example_crossing_schematic,
+    "crossing_schematic" => example_crossing_schematic
 ]
 
 function run_all_examples(; save_gds=true, save_png=true, dir=@__DIR__)
@@ -592,17 +610,9 @@ function run_all_examples(; save_gds=true, save_png=true, dir=@__DIR__)
         @info "Running $name..."
         push!(results, name => fn())
     end
-    if save_gds
-        for (name, (c, _)) in results
-            save(joinpath(dir, "autoroute_$(name).gds"), c; spec_warnings=false)
-        end
-        @info "Saved $(length(results)) GDS files"
-    end
-    if save_png
-        for (name, (c, _)) in results
-            save(joinpath(dir, "autoroute_$(name).png"), c; spec_warnings=false)
-        end
-        @info "Saved $(length(results)) PNG files"
+    for (name, (c, _)) in results
+        save_gds && save(joinpath(dir, "autoroute_$(name).gds"), c; spec_warnings=false)
+        save_png && save(joinpath(dir, "autoroute_$(name).png"), c; spec_warnings=false)
     end
     return results
 end

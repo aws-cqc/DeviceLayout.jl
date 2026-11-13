@@ -22,7 +22,6 @@ import Graphs:
     maximal_cliques,
     dijkstra_shortest_paths,
     enumerate_paths,
-    topological_sort_by_dfs,
     is_cyclic
 import SparseArrays: sparse
 import BipartiteMatching
@@ -66,34 +65,26 @@ geometry representation:
   - `channel_graph(prob)::SimpleGraph{Int}`
   - `num_channels(prob)::Int`
   - `num_nets(prob)::Int`
-  - `num_pins(prob)::Int`
   - `net_pins(prob, net)::Tuple{Int,Int}`
   - `net_wire(prob, net)::NetWire`
   - `channel_segments(prob, ch)::Vector{TrackWireSegment}`
   - `channel_tracks(prob, ch)::Vector{Track}`
-  - `num_tracks(prob, ch)::Int`
   - `pathlength_at_intersection(prob, ch1, ch2)::T`
   - `direction_at_intersection(prob, ch1, ch2)::Float64` (radians)
   - `channel_width(prob, ch, s...)::T`
-  - `is_pin(prob, idx)::Bool`
-  - `segment_offset(prob, ws, s...; use_wire_direction)::T`
 """
 abstract type AbstractChannelProblem{T} end
 
 function channel_graph end
 function num_channels end
 function num_nets end
-function num_pins end
 function net_pins end
 function net_wire end
 function channel_segments end
 function channel_tracks end
-function num_tracks end
 function pathlength_at_intersection end
 function direction_at_intersection end
 function channel_width end
-function is_pin end
-function segment_offset end
 
 # ──── Pure utility functions ─────────────────────────────────────────────────
 
@@ -112,6 +103,7 @@ graphidx_to_pin(ar::AbstractChannelProblem, graphidx::Int) = graphidx - num_chan
 is_pin(ar::AbstractChannelProblem, graphidx) = graphidx > num_channels(ar)
 adjoining_channel(ar::AbstractChannelProblem, pin) =
     neighbors(channel_graph(ar), pin_to_graphidx(ar, pin))[1]
+num_tracks(ar::AbstractChannelProblem, channel) = length(channel_tracks(ar, channel))
 
 # Offset coordinate or function for the section of track with given width
 function track_section_offset(n_tracks, section_width::Number, track_idx; reversed=false)
@@ -121,13 +113,8 @@ function track_section_offset(n_tracks, section_width::Number, track_idx; revers
     return sgn * spacing * ((1 + n_tracks) / 2 - track_idx)
 end
 
-function track_section_offset(n_tracks, section_width::Function, track_idx; reversed=false)
-    # (spacing) * number of tracks away from middle track
-    return t ->
-        (reversed ? -1 : 1) *
-        (section_width(t) / (n_tracks + 1)) *
-        ((1 + n_tracks) / 2 - track_idx)
-end
+track_section_offset(n_tracks, section_width::Function, track_idx; reversed=false) =
+    t -> track_section_offset(n_tracks, section_width(t), track_idx; reversed)
 
 # ──── Track/segment queries ──────────────────────────────────────────────────
 
@@ -136,11 +123,29 @@ end
 
 The track index of `ws`, or `nothing` if no track has been assigned.
 """
-function segment_track(ar::AbstractChannelProblem, ws::TrackWireSegment)
+segment_track(ar::AbstractChannelProblem, ws::TrackWireSegment) =
+    findfirst(track -> ws in track, channel_tracks(ar, running_channel(ws)))
+
+# Offset of `ws`'s track from its channel's centerline at pathlength `s`, or zero if `ws` has
+# no track. With `use_wire_direction`, the sign is relative to `ws`'s direction rather than
+# its channel's.
+function segment_offset(
+    ar::AbstractChannelProblem{T},
+    ws::TrackWireSegment,
+    s...;
+    use_wire_direction=true
+) where {T}
     channel_idx = running_channel(ws)
-    tracks = channel_tracks(ar, channel_idx)
-    track_idx = findfirst((c) -> ws in c, tracks)
-    return track_idx
+    is_pin(ar, channel_idx) && return zero(T)
+    track_idx = segment_track(ar, ws)
+    isnothing(track_idx) && return zero(T)
+    reversed = use_wire_direction && against_channel(ar, ws)
+    return track_section_offset(
+        num_tracks(ar, channel_idx),
+        channel_width(ar, channel_idx, s...),
+        track_idx;
+        reversed
+    )
 end
 
 """
@@ -192,17 +197,17 @@ taken into account. Otherwise, the start and stop are at the centre line of the 
 
 The interval is always a tuple with the lower bound as the first element.
 """
-function interval(ar::AbstractChannelProblem, ws::TrackWireSegment; use_track=true)
-    return _swap(unsorted_interval(ar, ws; use_track)...)
+function interval(ar::AbstractChannelProblem, ws::TrackWireSegment)
+    return _swap(unsorted_interval(ar, ws)...)
 end
 
-function unsorted_interval(ar::AbstractChannelProblem, ws::TrackWireSegment; use_track=true)
+function unsorted_interval(ar::AbstractChannelProblem, ws::TrackWireSegment)
     start_channel, stop_channel = bounding_channels(ws)
     channel_idx = running_channel(ws)
 
     s1 = pathlength_at_intersection(ar, channel_idx, start_channel)
     s2 = pathlength_at_intersection(ar, channel_idx, stop_channel)
-    (!use_track || is_pin(ar, channel_idx)) && return _swap(s1, s2)
+    is_pin(ar, channel_idx) && return _swap(s1, s2)
     # Could just do that for all cases
     # But if we want to break ties we use offsets from previous/next segments
     # Offset sign needs to take into account relative directions of segments in channels
@@ -255,7 +260,7 @@ end
 # ──── Tendency computation ───────────────────────────────────────────────────
 
 # +1 if segment crosses over low track index in ws's channel
-function prev_next_tendency(ar, ws; use_wire_direction=true)
+function prev_next_tendency(ar, ws)
     channel_idx = running_channel(ws)
     start_channel, stop_channel = bounding_channels(ws)
     # Directions of bounding and running channels (Float64 radians from interface)
@@ -269,7 +274,6 @@ function prev_next_tendency(ar, ws; use_wire_direction=true)
     ### Signs of angles made by channel intersections
     sgn_bend1 = sign(rem2pi(dir1 - start_dir, RoundNearest))
     sgn_bend2 = sign(rem2pi(stop_dir - dir2, RoundNearest))
-    !use_wire_direction && return (sgn_bend1, sgn_bend2)
     ### Need to multiply according to direction in channel
     ### Neighbor directions come from track-aware intervals. A neighbor ending within the
     ### width of ws's channel can run the opposite way from what ws's centerline implies.
@@ -307,10 +311,10 @@ end
 function _same_tendency_at_boundary(ar, seg1, seg2)
     p1, n1 = bounding_channels(seg1)
     p2, n2 = bounding_channels(seg2)
-    shared_boundary = [2 - 1 * (p1 == p2 || p1 == n2), 2 - 1 * (p2 == p1 || p2 == n1)]
-    t1 = prev_next_tendency(ar, seg1)
-    t2 = prev_next_tendency(ar, seg2)
-    return t1[shared_boundary[1]] == t2[shared_boundary[2]]
+    # Index of the shared end in each segment's (prev, next) tendency
+    i1 = p1 in (p2, n2) ? 1 : 2
+    i2 = p2 in (p1, n1) ? 1 : 2
+    return prev_next_tendency(ar, seg1)[i1] == prev_next_tendency(ar, seg2)[i2]
 end
 
 function is_avoidable(
@@ -408,13 +412,12 @@ function build_auxiliary_graph(ar::AbstractChannelProblem{T}) where {T}
 end
 
 """
-    shortest_path_between_pins(ar::AbstractChannelProblem, pin_1::Int, pin_2::Int, aux::AuxiliaryGraph)
+    shortest_path_between_pins(ar::AbstractChannelProblem, p0::Int, p1::Int, aux::AuxiliaryGraph)
 
 A shortest path minimizing physical distance (sum of arclengths along channels between
 intersection points), using a precomputed [`AuxiliaryGraph`](@ref).
 
-In both cases, the returned path is a list of vertex indices
-`[pin_gidx, ch1, ..., chN, pin_gidx]`.
+The returned path is a list of vertex indices `[pin_gidx, ch1, ..., chN, pin_gidx]`.
 """
 function shortest_path_between_pins(
     ar::AbstractChannelProblem,
@@ -475,12 +478,10 @@ function assign_channels!(
         else
             shortest_path_between_pins(ar, p0, p1, aux)
         end
-        ixns = [(path[i], path[i + 1]) for i = 1:(length(path) - 1)]
-        segs = [(ixns[i], ixns[i + 1]) for i = 1:(length(ixns) - 1)]
-        for (channel, seg) in zip(path[2:(end - 1)], segs)
-            ws = TrackWireSegment(idx_net, channel, first(seg[1]), last(seg[2]))
+        for i = 2:(length(path) - 1)
+            ws = TrackWireSegment(idx_net, path[i], path[i - 1], path[i + 1])
             push!(net_wire(ar, idx_net), ws)
-            push!(channel_segments(ar, channel), ws)
+            push!(channel_segments(ar, path[i]), ws)
         end
     end
 end
@@ -730,31 +731,26 @@ function assign_tracks_matching!(ar, channel, inputs)
     L = Set{Int}()
     active = Set(zones[1])
     merged_groups = Dict{Int, Vector{Int}}()
-    merged_into = Dict{Int, Int}() # merged_into[x] = y means y was merged into x with y > x
-    merging_graph = SimpleGraph(length(wiresegs_ascending))
     matching = Dict{Int, Int}()
     R = Set{Int}()
 
     for (zone, nextzone) in zip(zones, [zones[2:end]..., Int[]]) # Extra empty zone at end
         # Merge nets terminating in current zone to left side
-        if length(zones) > 1
-            for v in collect(active) # v was in nextzone last round
-                if !(v in nextzone) # v terminates in current zone
-                    pop!(active, v) # no longer active
-                    push!(L, v)     # add to left side
-                    if haskey(matching, v)
-                        # Matched in previous round, so update VCG
-                        merge_in_vcg!(vcg, matching[v], v)
-                        # Record merge
-                        merged_into[matching[v]] = v
-                        group = get!(merged_groups, matching[v], Int[matching[v]])
-                        push!(group, v)
-                        merged_groups[v] = group
-                        # Replace match with v as representative of merged group in L
-                        pop!(L, matching[v]) # match must have been in L
-                    end
-                    v in R && pop!(R, v)
+        for v in collect(active) # v was in nextzone last round
+            if !(v in nextzone) # v terminates in current zone
+                delete!(active, v) # no longer active
+                push!(L, v)        # add to left side
+                if haskey(matching, v)
+                    # Matched in previous round, so update VCG
+                    merge_in_vcg!(vcg, matching[v], v)
+                    # Record merge
+                    group = get!(merged_groups, matching[v], Int[matching[v]])
+                    push!(group, v)
+                    merged_groups[v] = group
+                    # Replace match with v as representative of merged group in L
+                    pop!(L, matching[v]) # match must have been in L
                 end
+                delete!(R, v)
             end
         end
         # Add nets starting in next zone to right side
@@ -764,14 +760,11 @@ function assign_tracks_matching!(ar, channel, inputs)
                 push!(active, v)
             end
         end
-        # Remove all edges in merging graph, start fresh this iteration
-        merging_graph = SimpleGraph(length(wiresegs_ascending))
         # Add edges between left and right when they can be merged
+        merging_graph = SimpleGraph(length(wiresegs_ascending))
         high_to_low = _topological_order(vcg, channel, wiresegs_ascending)
         dists_from_r = Dict(r => dag_shortest_paths(vcg, high_to_low, r) for r in R)
         for l in L
-            # Only use rightmost in any merged group
-            haskey(merged_into, l) && continue
             dists_from_l = dag_shortest_paths(vcg, high_to_low, l)
             for r in R
                 mergeable = dists_from_l[r] >= nv(vcg) && dists_from_r[r][l] >= nv(vcg)
@@ -789,9 +782,7 @@ function assign_tracks_matching!(ar, channel, inputs)
     # Assign merged groups to tracks according to VCG
     tracks = channel_tracks(ar, channel)
     for v = 1:nv(vcg)
-        if !haskey(merged_groups, v)
-            merged_groups[v] = [v]
-        end
+        get!(merged_groups, v, [v])
     end
     for group in
         _merged_group_topological_order(vcg, merged_groups, channel, wiresegs_ascending)
@@ -826,38 +817,33 @@ function _merged_group_topological_order(vcg, merged_groups, channel, wiresegs)
         )
         add_edge!(group_vcg, source_group, destination_group)
     end
-    group_wiresegs = [wiresegs[first(group)] for group in groups]
-    is_cyclic(group_vcg) && _topological_order(group_vcg, channel, group_wiresegs)
-
-    # Preserve interval order when the VCG leaves groups incomparable instead of
-    # inheriting DFS traversal order as an arbitrary track-order tie-break.
-    indegrees = length.(inneighbors.(Ref(group_vcg), 1:nv(group_vcg)))
-    available = findall(iszero, indegrees)
-    high_to_low = Int[]
-    while !isempty(available)
-        group_idx = popfirst!(available)
-        push!(high_to_low, group_idx)
-        for child in outneighbors(group_vcg, group_idx)
-            indegrees[child] -= 1
-            if iszero(indegrees[child])
-                push!(available, child)
-                sort!(available)
-            end
-        end
-    end
-    return groups[high_to_low]
+    return groups[_topological_order(group_vcg, channel, wiresegs)]
 end
 
+# Vertices of `vcg` from the highest track to the lowest. Where the VCG leaves vertices
+# incomparable, lower indices come first, so tracks of merged groups keep interval order
+# instead of an arbitrary traversal order. Throws if `vcg` is cyclic, naming `channel` and
+# the nets of `wiresegs`.
 function _topological_order(vcg, channel, wiresegs)
-    if is_cyclic(vcg)
-        nets = sort!(unique(net_index.(wiresegs)))
-        throw(
-            ArgumentError(
-                "Vertical constraint graph for channel $channel contains a cycle. Nets routed in this channel: $nets."
-            )
-        )
+    indegrees = length.(inneighbors.(Ref(vcg), 1:nv(vcg)))
+    available = findall(iszero, indegrees) # sorted
+    high_to_low = Int[]
+    while !isempty(available)
+        v = popfirst!(available)
+        push!(high_to_low, v)
+        for child in outneighbors(vcg, v)
+            indegrees[child] -= 1
+            iszero(indegrees[child]) &&
+                insert!(available, searchsortedfirst(available, child), child)
+        end
     end
-    return topological_sort_by_dfs(vcg)
+    length(high_to_low) == nv(vcg) && return high_to_low
+    nets = sort!(unique(net_index.(wiresegs)))
+    throw(
+        ArgumentError(
+            "Vertical constraint graph for channel $channel contains a cycle. Nets routed in this channel: $nets."
+        )
+    )
 end
 
 function best_matching!(merging_graph, vcg, L, R)
@@ -889,8 +875,7 @@ function best_matching!(merging_graph, vcg, L, R)
             no_ancestors = Int[]
             for v = 1:nv(edge_selection_graph)
                 v in ignored && continue
-                if isempty(inneighbors(working_vcg, v)) ||
-                   all([w in ignored for w in inneighbors(working_vcg, v)])
+                if all(in(ignored), inneighbors(working_vcg, v))
                     # v has no surviving ancestors, remove edges to other such vertices
                     for w in no_ancestors
                         rem_edge!(edge_selection_graph, v, w)
@@ -912,12 +897,7 @@ function best_matching!(merging_graph, vcg, L, R)
                     orphans = true
                     push!(ignored, v)
                     # No need to remove edges from edge_selection_graph because it doesn't have any
-                    # "Removing" v from working VCG means merging edges betwen its parents and children
-                    for parent in inneighbors(working_vcg, v)
-                        for child in outneighbors(working_vcg, v)
-                            add_edge!(working_vcg, parent, child)
-                        end
-                    end
+                    _bypass_vertex!(working_vcg, v)
                 end
             end
         end
@@ -928,12 +908,7 @@ function best_matching!(merging_graph, vcg, L, R)
                 push!(to_remove, (v_min_neighbors, nb))
             end
             push!(ignored, v_min_neighbors)
-            # "Removing" v from working VCG means merging edges betwen its parents and children
-            for parent in inneighbors(working_vcg, v_min_neighbors)
-                for child in outneighbors(working_vcg, v_min_neighbors)
-                    add_edge!(working_vcg, parent, child)
-                end
-            end
+            _bypass_vertex!(working_vcg, v_min_neighbors)
         end
     end
     # Remove marked edges
@@ -943,27 +918,27 @@ function best_matching!(merging_graph, vcg, L, R)
     # Any matching is feasible now that we've removed marked edges.
     # Rows are R so the returned row→col dict is keyed by R, matching how the
     # caller looks up `matching[v]` when v crosses from R into L next iteration.
-    R_vec = collect(R)
-    L_vec = collect(L)
-    sort!(R_vec) # For determinism
-    sort!(L_vec)
-    bip = falses(length(R_vec), length(L_vec))
-    for (i, r) in pairs(R_vec), (j, l) in pairs(L_vec)
-        bip[i, j] = has_edge(merging_graph, r, l)
-    end
-    row_to_col, _ = BipartiteMatching.findmaxcardinalitybipartitematching(BitMatrix(bip))
+    R_vec = sort!(collect(R)) # For determinism
+    L_vec = sort!(collect(L))
+    bip = BitMatrix([has_edge(merging_graph, r, l) for r in R_vec, l in L_vec])
+    row_to_col, _ = BipartiteMatching.findmaxcardinalitybipartitematching(bip)
     return Dict{Int, Int}(R_vec[i] => L_vec[j] for (i, j) in row_to_col)
+end
+
+# "Removes" `v` from `vcg` for `best_matching!` by connecting its parents to its children
+function _bypass_vertex!(vcg, v)
+    for parent in inneighbors(vcg, v), child in outneighbors(vcg, v)
+        add_edge!(vcg, parent, child)
+    end
 end
 
 function dag_shortest_paths(dag, v_sorted, s)
     d = fill(nv(dag), nv(dag))
     d[s] = 0
-    for i = findfirst(v -> v == s, v_sorted):nv(dag)
+    for i = findfirst(==(s), v_sorted):nv(dag)
         u = v_sorted[i]
         for v in outneighbors(dag, u)
-            if d[v] > d[u] + 1
-                d[v] = d[u] + 1
-            end
+            d[v] = min(d[v], d[u] + 1)
         end
     end
     return d
@@ -991,15 +966,13 @@ function channel_problem_graphs(
             # Now check if crossing is unavoidable
             (i1, l1, h1, lt1, ht1), (i2, l2, h2, lt2, ht2) =
                 _avoidability_args(idx1, end1, idx2, end2)
-            avoidable = is_avoidable(l1, h1, l2, h2, lt1, ht1, lt2, ht2)
-            !avoidable && continue
+            is_avoidable(l1, h1, l2, h2, lt1, ht1, lt2, ht2) || continue
 
             # Crossing is avoidable, so add a constraint
             # Determine which goes on top based on the lower bound tendency of seg2
             # Is prev or next the lower bound?
             # top is rightmost segment iff its lower bound tends towards higher (lower index) tracks
-            top = (i1, i2)[1 + (lt2 == 1)]
-            bottom = (i1, i2)[2 - (lt2 == 1)]
+            top, bottom = lt2 == 1 ? (i2, i1) : (i1, i2)
             add_edge!(vcg, top, bottom) # VCG has edge from higher to lower tracks
         end
     end
@@ -1224,32 +1197,20 @@ end
 
 # ──── Segment deletion / reset ───────────────────────────────────────────────
 
-function _delete_segment!(ar, ws; reset_tracks=true, from_net=true)
-    # Deletes the wire segment `ws` from `ar`.
-
-    # Delete the wire segment in channel_segments
+# Deletes the wire segment `ws` from its channel's segments and tracks, but not from its net
+function _delete_segment!(ar, ws; reset_tracks=true)
     s = running_channel(ws)
     deleteat!(channel_segments(ar, s), findfirst(isequal(ws), channel_segments(ar, s)))
 
-    # Delete the segment from its track
     c_idx = segment_track(ar, ws)
-    if !isnothing(c_idx)
-        if reset_tracks # by default, reset all track assignments in this channel
-            empty!(channel_tracks(ar, s))
-        else
-            deleteat!(
-                channel_tracks(ar, s)[c_idx],
-                findfirst(isequal(ws), channel_tracks(ar, s)[c_idx])
-            )
-        end
+    isnothing(c_idx) && return
+    if reset_tracks # by default, reset all track assignments in this channel
+        empty!(channel_tracks(ar, s))
+    else
+        track = channel_tracks(ar, s)[c_idx]
+        deleteat!(track, findfirst(isequal(ws), track))
     end
-
-    # if from_net, delete ws from net_wires
-    # We set from_net to false when looping over net segments so it's not changing under us
-    return from_net && deleteat!(
-        net_wire(ar, net_index(ws)),
-        findfirst(isequal(ws), net_wire(ar, net_index(ws)))
-    )
+    return
 end
 
 """
@@ -1266,9 +1227,7 @@ function reset_nets!(ar; net_indices=1:num_nets(ar), reset_tracks=true)
     for idx in net_indices
         segs = net_wire(ar, idx)
         for ws in segs
-            # delete segment from the router
-            # don't delete it from net yet, we'll do that after this loop
-            _delete_segment!(ar, ws, reset_tracks=reset_tracks, from_net=false)
+            _delete_segment!(ar, ws; reset_tracks)
         end
         empty!(segs)
     end
