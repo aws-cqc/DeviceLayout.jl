@@ -47,7 +47,10 @@ Routing happens in two stages:
     vertical-constraint graph (which segment must be "above" which, given the crossings
     that occur entering or leaving the channel at the interval endpoints) and picks a
     feasible track order that uses as few tracks as possible, merging non-overlapping
-    segments onto shared tracks when compatible.
+    segments onto shared tracks when compatible. A segment's constraints depend on the
+    tracks of the channels it turns into and out of, so after a first pass over all
+    channels, refinement passes reassign any channel whose constraints have changed (see
+    [`Paths.assign_tracks!`](@ref)).
 
 The algorithms follow the classical channel-routing literature (Hashimoto & Stevens;
 Yoshimura & Kuh), with a crossing-aware variant due to Condrat, Kalla, & Blair to
@@ -150,8 +153,10 @@ schematic to find their global coordinates. Channels must be provided to the aut
     that runs their legs side by side, for example a pin lying just beside the track of a
     crossing channel. `autoroute!` and schematic planning warn about each such pair closer
     than the track pitch of a bounding channel. Setting the `min_leg_spacing` option of
-    `autoroute!` or `AutoChannelRouting` orders pairs closer than that apart instead, at
-    the cost of extra tracks where a pair could otherwise have shared one.
+    `autoroute!` or `AutoChannelRouting` puts every pair closer together than
+    `min_leg_spacing` in the order that separates their legs, and the warnings are then
+    about such pairs only. This costs extra tracks where a pair could otherwise have
+    shared one.
 
 ## References
 

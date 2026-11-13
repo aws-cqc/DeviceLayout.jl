@@ -494,22 +494,19 @@ end
 
     # Wires leaving closer together than the track pitch run side by side in the wrong
     # order. That is reported, and those closer than `min_leg_spacing` are ordered instead.
+    # A positive `min_leg_spacing` replaces the pitch as the limit for reporting, so nets 3
+    # and 4, about 0.113 apart, are reported by default but not with 0.1.
     @test_logs (:warn, r"Nets 6 and 5 leave channel 1 .* opposite sides") match_mode = :any perimeter_to_edge(
         6,
         -0.4
     )
-    @test_logs (:warn, r"Nets 3 and 4 .* Set `min_leg_spacing` greater than") perimeter_to_edge(
-        6,
-        -0.4;
-        min_leg_spacing=0.1
-    )
-    @test isempty(
-        @test_logs min_level = Logging.Warn perimeter_to_edge(
-            6,
-            -0.4;
-            min_leg_spacing=0.12
+    @test_logs (:warn, r"Nets 3 and 4 .* Set `min_leg_spacing` greater than") match_mode =
+        :any perimeter_to_edge(6, -0.4)
+    for min_leg_spacing in (0.1, 0.12)
+        @test isempty(
+            @test_logs min_level = Logging.Warn perimeter_to_edge(6, -0.4; min_leg_spacing)
         )
-    )
+    end
     # Schematic-level routing takes the options from the rule
     function perimeter_to_edge_schematic(q, shift; kwargs...)
         nets, pins, channels = perimeter_to_edge_problem(q, shift, 1mm)
@@ -568,6 +565,13 @@ end
     for offset in (0.0, 0.2)
         @test_logs Paths.autoroute!(pin_jog_router(offset), Paths.StraightAnd90(0.1), 0.1)
     end
+    # StraightAnd45 makes the jog with a 45° turn on each side, so its minimum is shorter
+    @test_logs (:warn, r"Net 1 jogs .* StraightAnd45 needs a jog of zero or at least") Paths.autoroute!(
+        pin_jog_router(0.03),
+        Paths.StraightAnd45(0.1),
+        0.3
+    )
+    @test_logs Paths.autoroute!(pin_jog_router(0.1), Paths.StraightAnd45(0.1), 0.3)
 
     # Pins in the same column on opposite sides of a channel keep their order through
     # refinement passes, which see each segment's own track. In a wide channel, its offset
@@ -591,4 +595,27 @@ end
         @test_logs Paths.assign_tracks!(ar; max_refinement_passes=passes)
         @test [Paths.segment_track(ar, only(Paths.net_wire(ar, n))) for n = 1:2] == [2, 1]
     end
+    @test_throws ArgumentError Paths.assign_tracks!(
+        aligned_column_router(0.0);
+        max_refinement_passes=-1
+    )
+
+    # A pair that track assignment orders but that ends up in the wrong order is reported
+    # as conflicting with other track constraints. Reversing the tracks stands in for such
+    # a conflict.
+    ar = aligned_column_router(0.0)
+    Paths.assign_tracks!(ar)
+    reverse!(Paths.channel_tracks(ar, 1))
+    @test_logs (
+        :warn,
+        r"Nets 2 and 1 leave channel 1 at the same point .* overlaps .* conflicts with other"
+    ) Paths._warn_close_legs(ar, 0.0)
+    ar = aligned_column_router(1.0)
+    Paths.assign_tracks!(ar; min_leg_spacing=5.0)
+    @test [Paths.segment_track(ar, only(Paths.net_wire(ar, n))) for n = 1:2] == [2, 1]
+    reverse!(Paths.channel_tracks(ar, 1))
+    @test_logs (
+        :warn,
+        r"Nets 2 and 1 leave channel 1 1.0 apart .* `min_leg_spacing` 5.0. .* conflicts"
+    ) Paths._warn_close_legs(ar, 5.0)
 end

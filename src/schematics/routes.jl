@@ -321,7 +321,7 @@ function _update_with_plan!(rule::Paths.AutoChannelRouting{T}, route_node, sch) 
             Paths.add_edge!(ar_g, e.src, e.dst)
         end
         merge!(rule.router.channel_intersections, ixns)
-        Paths._assign_and_check!(
+        Paths.assign_and_check!(
             rule,
             1:Paths.num_nets(rule.router),
             Dict{Int, Vector{Int}}()
