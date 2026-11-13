@@ -40,6 +40,7 @@ function render!(
     meta::GDSMeta=GDSMeta();
     kwargs...
 ) where {S}
+    warn_unknown_render_kwargs(kwargs)
     render!.(cell, to_polygons(obj; kwargs...), meta; kwargs...)
     return cell
 end
@@ -104,6 +105,7 @@ function _render!(
     map_meta=default_meta_map,
     kwargs...
 ) where {S}
+    warn_unknown_render_kwargs(kwargs)
     stack = Vector{Tuple{Cell, GeometryReference}}()
     _render_elements!(cell, cs; map_meta=map_meta, memoized_cells=memoized_cells, kwargs...)
 
@@ -222,6 +224,7 @@ Rendering a `GeometryStructure` to a `Cell` uses the optional keyword arguments
     its reference hierarchy) to render as `prerendered_cell`.
 
 Additional keyword arguments are passed to [`to_polygons`](@ref) for each entity and may be used for
-certain entity types to control how they are converted to polygons.
+certain entity types to control how they are converted to polygons. A keyword argument that is
+not a known rendering option gives a warning; see [`DeviceLayout.register_render_kwarg!`](@ref).
 """
 render!(c::Cell, s::GeometryStructure; kwargs...) = _render!(c, s; kwargs...)

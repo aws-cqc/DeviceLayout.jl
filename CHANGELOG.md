@@ -6,6 +6,12 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Added
+
+  - `render!` warns about each keyword argument it doesn't recognize, which it would otherwise
+    ignore silently, once per session and once per `Schematic` render. `OptionalStyle` flags are recognized automatically, and
+    `DeviceLayout.register_render_kwarg!` registers other custom rendering options.
+
 ### Fixed
 
   - `halo` of a path style with zero extent at its start covers the rest of the style, and

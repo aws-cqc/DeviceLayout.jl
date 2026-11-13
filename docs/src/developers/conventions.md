@@ -49,9 +49,12 @@ otherwise. Throw an error rather than guess at what the user intended
   until changed.
 - The `uniquename` counter, the `Memoization` cache for B-spline tangent optimization, and the
   PolyText font caches are process-global.
+- `render_kwargs.jl` keeps the set of keyword arguments `render!` recognizes, to which each
+  `OptionalStyle` adds its flag, and the set of unknown keyword arguments `render!` has
+  already warned about.
 - Some warnings are shown once per session: deprecation warnings with `maxlog=1` (see
-  [Deprecations](@ref dev-deprecations)), and `recover_curves` warns once per entity type
-  about lost curves. Test items share a process, so a test asserting such a warning
+  [Deprecations](@ref dev-deprecations)), `recover_curves` warns once per entity type
+  about lost curves, and `render!` warns once about each unknown keyword argument (until the next `Schematic` render). Test items share a process, so a test asserting such a warning
   depends on nothing earlier having triggered it.
 
 ## Style

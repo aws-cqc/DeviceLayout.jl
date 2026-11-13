@@ -20,6 +20,8 @@ The behavior of [`render!`](@ref) can be customized with keyword arguments. Many
 
 Additional rendering options can be provided for user-defined [conditional rendering](#Conditional-Rendering).
 
+When rendering to a `Cell` or `SolidModel`, `render!` warns about a keyword argument it doesn't recognize, since a misspelled option would otherwise be ignored. Flags of `OptionalStyle`s are recognized automatically; register other custom options with [`DeviceLayout.register_render_kwarg!`](@ref).
+
 ## Targets
 
 Rendering options and the `map_meta` function can also be provided using a `Target` instead of keywords: `render!(cell, coordsys, target)`. This is especially useful in schematic-driven design, where various `Target`s can be specified as part of your [PDK](./pdks.md), allowing you to target different process technologies or simulation backends given a single design. (The name "Target" is meant to evoke "compilation target".)
