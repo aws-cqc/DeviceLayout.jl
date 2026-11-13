@@ -321,9 +321,10 @@ function _update_with_plan!(rule::Paths.AutoChannelRouting{T}, route_node, sch) 
             Paths.add_edge!(ar_g, e.src, e.dst)
         end
         merge!(rule.router.channel_intersections, ixns)
-        Paths.assign_channels!(rule.router)
-        Paths.assign_tracks!(rule.router)
-        Paths._warn_short_jogs(rule.router, rule.transition_rule, rule.transition_margin)
-        Paths._warn_close_legs(rule.router, false; can_enforce=false)
+        Paths._assign_and_check!(
+            rule,
+            1:Paths.num_nets(rule.router),
+            Dict{Int, Vector{Int}}()
+        )
     end
 end

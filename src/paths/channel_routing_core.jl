@@ -499,7 +499,7 @@ end
 # ──── Track assignment ───────────────────────────────────────────────────────
 
 """
-    assign_tracks!(ar::AbstractChannelProblem; max_refinement_passes=4, enforce_leg_spacing=false)
+    assign_tracks!(ar::AbstractChannelProblem; max_refinement_passes=2, min_leg_spacing=zero(T))
 
 Performs track assignment for all channels in `ar`.
 
@@ -507,22 +507,23 @@ Track assignment operates on **all** channels, not a subset. Re-running after mo
 a single net will reassign tracks globally in every channel that contains wire segments.
 
 After an initial pass over channels in index order, up to `max_refinement_passes`
-additional passes reassign each channel using the tracks assigned in all other channels,
-stopping early once a pass leaves every assignment unchanged. Warns if the last pass still
-changed an assignment.
+additional passes reassign each channel using the tracks assigned in all other channels.
+A channel is reassigned only if the tracks of its neighbors have changed its constraints,
+and passes stop once no channel needs reassignment. Warns if some channel still does after
+the last pass, since its tracks can then have avoidable crossings.
 
 Two wires leaving a channel to opposite sides at the same point are put in the order that
 keeps their legs from overlapping, unless that order would make the vertical constraint
-graph cyclic (`autoroute!` then warns about the pair). With `enforce_leg_spacing=true`, the
-same order is imposed on wires leaving closer together than the track pitch of a bounding
-channel there, so their legs don't run side by side closer than that. This can increase
-the number of tracks, since such pairs could otherwise share a track.
+graph cyclic (`autoroute!` then warns about the pair). The same order is imposed on wires
+leaving closer together than `min_leg_spacing`, so their legs don't run side by side
+across the channel closer than that. This can increase the number of tracks, since such
+pairs could otherwise share a track.
 """
 function assign_tracks!(
-    ar::AbstractChannelProblem;
-    max_refinement_passes=4,
-    enforce_leg_spacing=false
-)
+    ar::AbstractChannelProblem{T};
+    max_refinement_passes=2,
+    min_leg_spacing=zero(T)
+) where {T}
     for channel = 1:num_channels(ar)
         empty!(channel_tracks(ar, channel))
     end
@@ -531,34 +532,66 @@ function assign_tracks!(
     # Or fewer non-pinned segments
     # Because those channels will inform constraints on later channels
     # For now the user can worry about that
-    for channel = 1:num_channels(ar)
-        assign_tracks_matching!(ar, channel; enforce_leg_spacing)
+    used_inputs = map(1:num_channels(ar)) do channel
+        inputs = _track_inputs(ar, channel; min_leg_spacing)
+        assign_tracks_matching!(ar, channel, inputs)
+        return inputs
     end
     # The initial pass measures each segment to the centerline of any bounding channel not
     # yet assigned. A segment whose endpoint is near that centerline can turn out to run
     # the other way once the bounding channel has tracks, invalidating the order chosen
     # here (see the "Channel Autorouter" tests for an example). Refinement passes reassign
-    # every channel with all neighboring tracks known. Reassignment must not discard a
+    # channels with all neighboring tracks known. Reassignment must not discard a
     # consistent order on the basis of unconstrained neighbor tracks; see
     # `_outer_of_disjoint_neighbors`.
-    for pass = 1:max_refinement_passes
-        changed = false
+    for _ = 1:max_refinement_passes
+        reassigned = false
         for channel = 1:num_channels(ar)
+            # Old tracks stay in place while inputs and new tracks are computed so that
+            # offsets of this channel's segments remain available to neighbor intervals
+            inputs = _track_inputs(ar, channel; min_leg_spacing)
+            inputs == used_inputs[channel] && continue
             tracks = channel_tracks(ar, channel)
-            old_tracks = copy(tracks)
-            # Old tracks stay in place while new ones are computed so that offsets
-            # of this channel's segments remain available to neighbor intervals
-            assign_tracks_matching!(ar, channel; enforce_leg_spacing)
-            deleteat!(tracks, 1:length(old_tracks))
-            changed |= tracks != old_tracks
+            n_old = length(tracks)
+            assign_tracks_matching!(ar, channel, inputs)
+            deleteat!(tracks, 1:n_old)
+            used_inputs[channel] = inputs
+            reassigned = true
         end
-        changed || break
-        pass == max_refinement_passes && @warn """
-            Track assignment did not converge in $max_refinement_passes refinement passes. \
-            Some channels were assigned using outdated tracks of their neighbors, which \
-            can cause avoidable crossings.\
-            """
+        reassigned || return
     end
+    stale = filter(1:num_channels(ar)) do channel
+        return _track_inputs(ar, channel; min_leg_spacing) != used_inputs[channel]
+    end
+    isempty(stale) || @warn """
+        Track assignment did not converge in $max_refinement_passes refinement passes. \
+        Channels $stale were assigned using outdated tracks of their neighbors, which \
+        can cause avoidable crossings. Increase `max_refinement_passes` to refine \
+        further.\
+        """
+    return
+end
+
+# Everything `assign_tracks_matching!` reads from `channel`'s current state. Equal inputs
+# give equal tracks, so a channel whose inputs are unchanged needs no reassignment.
+# Intervals enter only through the graphs and through the pairs that touch exactly, where
+# `segments_overlap` decides whether a knock-knee is possible. Comparing those rather than
+# raw intervals keeps rounding error in track offsets from counting as a change.
+function _track_inputs(ar, channel; min_leg_spacing)
+    segs = sort(channel_segments(ar, channel), by=(ws) -> interval(ar, ws))
+    vcg, zone_ig = channel_problem_graphs(ar, channel; min_leg_spacing)
+    knock_knees = Tuple{Int, Int}[]
+    for (idx1, seg1) in pairs(segs)
+        high1 = last(interval(ar, seg1))
+        for idx2 = (idx1 + 1):length(segs)
+            low2 = first(interval(ar, segs[idx2]))
+            low2 > high1 && break
+            low2 == high1 &&
+                segments_overlap(ar, seg1, segs[idx2]) &&
+                push!(knock_knees, (idx1, idx2))
+        end
+    end
+    return (; segs, vcg, zone_ig, knock_knees)
 end
 
 function merge_in_vcg!(vcg, v1, v2)
@@ -578,17 +611,16 @@ function merge_in_vcg!(vcg, v1, v2)
     end
 end
 
-function assign_tracks_matching!(ar, channel; enforce_leg_spacing=false)
+function assign_tracks_matching!(ar, channel, inputs)
     # Yoshimura and Kuh Algorithm #2
-    vcg, zone_ig = channel_problem_graphs(ar, channel; enforce_leg_spacing)
-    zones = maximal_cliques(zone_ig)
+    vcg = copy(inputs.vcg) # Merging edits it, and `inputs` is kept for comparison
+    zones = maximal_cliques(inputs.zone_ig)
     isempty(zones) && return
     # Need to sort zones left to right. Segments are indexed in order of their low ends,
     # so a zone's common overlap starts at its maximal element. Its minimal element can be
     # a long segment shared by many zones, which leaves them unordered.
     sort!(zones, by=maximum)
-    # Same with wire segments, to follow same indexing as graphs
-    wiresegs_ascending = sort(channel_segments(ar, channel), by=(ws) -> interval(ar, ws))
+    wiresegs_ascending = inputs.segs
     L = Set{Int}()
     active = Set(zones[1])
     merged_groups = Dict{Int, Vector{Int}}()
@@ -830,10 +862,10 @@ function dag_shortest_paths(dag, v_sorted, s)
 end
 
 function channel_problem_graphs(
-    ar::AbstractChannelProblem,
+    ar::AbstractChannelProblem{T},
     channel;
-    enforce_leg_spacing=false
-)
+    min_leg_spacing=zero(T)
+) where {T}
     wiresegs_ascending = sort(channel_segments(ar, channel), by=(ws) -> interval(ar, ws))
     # Y&K zone representation as interval graph
     # Edge between each pair of segments that overlap
@@ -901,9 +933,10 @@ function channel_problem_graphs(
             add_edge!(vcg, top, bottom) # VCG has edge from higher to lower tracks
         end
     end
-    # Exactly aligned ends first, since they would overlap rather than just be close
-    for pair in sort(_facing_end_pairs(ar, wiresegs_ascending), by=pair -> pair.gap)
-        (iszero(pair.gap) || enforce_leg_spacing) || continue
+    # Closest ends first, and exactly aligned ones before all others, since they would
+    # overlap rather than just be close
+    facing = _facing_end_pairs(ar, wiresegs_ascending, min_leg_spacing; use_pitch=false)
+    for pair in sort(facing, by=pair -> pair.gap)
         has_edge(vcg, pair.top, pair.bottom) && continue
         add_edge!(vcg, pair.top, pair.bottom)
         is_cyclic(vcg) && rem_edge!(vcg, pair.top, pair.bottom)
@@ -972,9 +1005,10 @@ function _neighbor_reach(ar, ws, at_low)
 end
 
 # Pairs of non-overlapping segments whose facing ends leave the channel to opposite sides
-# at the same point or closer than the track pitch of a bounding channel there, as
-# `(; top, bottom, gap, clearance)` with `top` and `bottom` indices into
-# `wiresegs_ascending` in the order the pair must take unless it shares a track:
+# at the same point or closer than `min_spacing`, or, with `use_pitch`, closer than the
+# track pitch of the bounding channels there. Returned as `(; top, bottom, gap, pitch)`
+# with `top` and `bottom` indices into `wiresegs_ascending` in the order the pair must take
+# unless it shares a track:
 #
 #        a above b                 a below b
 #
@@ -989,42 +1023,55 @@ end
 # a on the higher track, their legs leaving the channel are on opposite sides of the
 # tracks. In the other order, they run side by side between the tracks, `gap` apart. That
 # is a collinear overlap if `gap` is zero (the classic vertical constraint between nets at
-# the same column), and closer than other wires there if `gap` is less than `clearance`.
+# the same column), and closer than other wires there if `gap` is less than `pitch`. Wires
+# near each end already run at the pitch of the bounding channel there, so `pitch` is the
+# smaller of the two, ignoring a pin or channel without tracks, which has none.
 #
 # Ends within rounding error of each other count as the same point, with `gap` zero. Pin
 # coordinates that come from transformations, for example, rarely align exactly.
-function _facing_end_pairs(ar::AbstractChannelProblem{T}, wiresegs_ascending) where {T}
-    pairs_found = @NamedTuple{top::Int, bottom::Int, gap::T, clearance::T}[]
+function _facing_end_pairs(
+    ar::AbstractChannelProblem{T},
+    wiresegs_ascending,
+    min_spacing;
+    use_pitch=true
+) where {T}
+    pairs_found = @NamedTuple{top::Int, bottom::Int, gap::T, pitch::T}[]
     isempty(wiresegs_ascending) && return pairs_found
     ends = map(wiresegs_ascending) do ws
         low, high = interval(ar, ws)
         pt, nt = prev_next_tendency(ar, ws)
         low_tend, high_tend = against_channel(ar, ws) ? (nt, pt) : (pt, nt)
-        low_pitch = _end_pitch(ar, ws, _end_vertex(ar, ws, true))
-        high_pitch = _end_pitch(ar, ws, _end_vertex(ar, ws, false))
+        low_pitch = use_pitch ? _end_pitch(ar, ws, _end_vertex(ar, ws, true)) : zero(T)
+        high_pitch =
+            use_pitch ? _end_pitch(ar, ws, _end_vertex(ar, ws, false)) : zero(T)
         # Rounding error in pathlengths and track offsets scales with these
         high_atol =
             sqrt(eps(Float64)) * (abs(high) + channel_width(ar, running_channel(ws), high))
         return (; low, high, low_tend, high_tend, low_pitch, high_pitch, high_atol)
     end
-    max_pitch = maximum(e -> max(e.low_pitch, e.high_pitch), ends)
+    max_clearance = max(min_spacing, maximum(e -> max(e.low_pitch, e.high_pitch), ends))
     for (idx1, end1) in pairs(ends)
         for (idx2, end2) in pairs(ends)
             # Segments are sorted by low end, so later ones are farther from end1.high
-            end2.low > end1.high + max_pitch + end1.high_atol && break
+            end2.low > end1.high + max_clearance + end1.high_atol && break
             gap = end2.low - end1.high
             # A zero-length segment's own ends coincide
             (idx1 == idx2 || gap < -end1.high_atol || end1.high_tend == end2.low_tend) &&
                 continue
             abs(gap) <= end1.high_atol && (gap = zero(gap))
-            clearance = max(end1.high_pitch, end2.low_pitch)
-            (iszero(gap) || (gap < clearance && !(gap ≈ clearance))) || continue
+            pitch = _smaller_nonzero(end1.high_pitch, end2.low_pitch)
+            (iszero(gap) || _closer(gap, min_spacing) || _closer(gap, pitch)) || continue
             top, bottom = end1.high_tend == 1 ? (idx1, idx2) : (idx2, idx1)
-            push!(pairs_found, (; top, bottom, gap, clearance))
+            push!(pairs_found, (; top, bottom, gap, pitch))
         end
     end
     return pairs_found
 end
+
+_smaller_nonzero(a, b) = iszero(a) ? b : iszero(b) ? a : min(a, b)
+
+# Whether `gap` is less than `clearance` by more than rounding error
+_closer(gap, clearance) = gap < clearance && !(gap ≈ clearance)
 
 # Bounding vertex at the low (`at_low`) or high end of `ws`
 _end_vertex(ar, ws, at_low) =
@@ -1091,10 +1138,11 @@ function reset_nets!(ar; net_indices=1:num_nets(ar), reset_tracks=true)
 end
 
 """
-    reroute_nets!(ar::AbstractChannelProblem, net_indices; fixed_paths=Dict{Int,Vector{Int}}(), enforce_leg_spacing=false)
+    reroute_nets!(ar::AbstractChannelProblem, net_indices; fixed_paths=Dict{Int,Vector{Int}}(), kwargs...)
 
 Reset and re-route specific nets, then reassign tracks globally.
-`enforce_leg_spacing` is passed to [`assign_tracks!`](@ref).
+Other keyword arguments (`max_refinement_passes`, `min_leg_spacing`) are passed to
+[`assign_tracks!`](@ref).
 
 Returns the set of all net indices affected by the track reassignment (i.e., nets that
 shared a channel with any re-routed net). This set always includes `net_indices` and may
@@ -1106,7 +1154,7 @@ function reroute_nets!(
     ar::AbstractChannelProblem,
     net_indices;
     fixed_paths::Dict{Int, Vector{Int}}=Dict{Int, Vector{Int}}(),
-    enforce_leg_spacing=false
+    kwargs...
 )
     _validate_fixed_paths(fixed_paths)
 
@@ -1117,7 +1165,7 @@ function reroute_nets!(
     reset_nets!(ar; net_indices=net_indices, reset_tracks=true)
     assign_channels!(ar; net_indices=net_indices, fixed_paths)
     _collect_affected_nets!(affected_nets, ar, net_indices)
-    assign_tracks!(ar; enforce_leg_spacing)
+    assign_tracks!(ar; kwargs...)
     return affected_nets
 end
 
