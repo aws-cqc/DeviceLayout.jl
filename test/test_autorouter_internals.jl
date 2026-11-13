@@ -150,6 +150,22 @@
         @test Paths.is_avoidable(0, 9, 3, 9, 1, -1, 1, 1) == true
     end
 
+    # ── facing-end constraints ───────────────────────────────────────────────────
+    # A facing pair is left unordered if ordering it would make the vertical constraint
+    # graph cyclic, and closer pairs are ordered first. Here 2 must be above 3 already.
+    @testset "facing-end constraints" begin
+        vcg = Paths.SimpleDiGraph(3)
+        Paths.add_edge!(vcg, 2, 3)
+        facing = [
+            (; top=1, bottom=2, gap=0.1, pitch=0.0),
+            (; top=3, bottom=1, gap=0.0, pitch=0.0)
+        ]
+        Paths._add_facing_constraints!(vcg, facing)
+        @test Paths.has_edge(vcg, 3, 1)
+        @test !Paths.has_edge(vcg, 1, 2)
+        @test !Paths.is_cyclic(vcg)
+    end
+
     # ── segments_overlap: boundary case with tendency ────────────────────────────
     # The knock-knee relaxation (strict < instead of <=) should NOT apply when
     # segments at a shared endpoint face the same direction.

@@ -118,6 +118,13 @@
     Paths.AutoChannelRouting
 ```
 
+### Channel autorouting
+
+```@docs
+    Paths.autoroute!
+    Paths.assign_tracks!
+```
+
 ### Route drawing
 
 ```@docs

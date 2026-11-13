@@ -333,7 +333,7 @@ end
 
 function example_angled()
     channels = [
-        dchannel(-3, -2, 45°, 12 * sqrt(2); width=2.0),   # d1: NE from (-1,0)
+        dchannel(-3, -2, 45°, 12 * sqrt(2); width=2.0),   # d1: NE from (-3,-2)
         hchannel(-4, 12, 3; width=2.0),                # h1 (y=3)
         dchannel(-1, 10, -45°, 12 * sqrt(2); width=2.0) # d2: SE from (-1,10)
     ]

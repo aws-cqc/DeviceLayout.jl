@@ -278,9 +278,10 @@ If `verbose=true`, prints a summary of routing results including net count and t
 
 Warns about any wire segment that is a sideways jog too short for `transition_rule` to
 route, such as from a pin nearly in line with a track of a crossing channel, and about any
-pair of wires whose legs run side by side closer than the track pitch. The jog check is
-exact for `StraightAnd90`. For `StraightAnd45` it catches jogs too short for a single 45°
-turn on each side, but longer jogs (up to `2 * margin`) can also fail to route.
+pair of wires whose legs run side by side closer than `min_leg_spacing`, or than the track
+pitch if `min_leg_spacing` is zero. The jog check is exact for `StraightAnd90`. For
+`StraightAnd45` it catches jogs too short for a single 45° turn on each side, but longer
+jogs (up to `2 * margin`) can also fail to route.
 """
 function autoroute!(
     ar::ChannelRouter,
@@ -292,7 +293,7 @@ function autoroute!(
     kwargs...
 )
     rule = AutoChannelRouting(ar, transition_rule, margin; kwargs...)
-    _assign_and_check!(rule, net_indices, fixed_channel_paths)
+    assign_and_check!(rule, net_indices, fixed_channel_paths)
     routes = make_routes!(ar, rule)
 
     if verbose
@@ -316,7 +317,7 @@ end
 
 # Channel and track assignment with `rule`'s options, followed by warnings about results
 # that would otherwise show up only as route errors or as wires too close in the layout
-function _assign_and_check!(rule, net_indices, fixed_paths)
+function assign_and_check!(rule, net_indices, fixed_paths)
     ar = rule.router
     reroute_nets!(
         ar,
@@ -372,24 +373,27 @@ _min_jog(::RouteRule) = nothing
 _vertex_name(ar, v) = is_pin(ar, v) ? "pin $(graphidx_to_pin(ar, v))" : "channel $v"
 
 # Warn about each pair of wires whose legs leaving a channel overlap or run side by side
-# closer than `min_leg_spacing` or the track pitch there (see `_facing_end_pairs`). Pairs
-# closer than the pitch alone are expected, and the warning suggests `min_leg_spacing` to
-# separate them. Track assignment orders the others, so they remain only where that order
-# conflicts with other track constraints.
+# too close (see `facing_end_pairs`). Track assignment orders pairs that overlap or are
+# closer than `min_leg_spacing`, so those remain only where that order conflicts with
+# other track constraints. With the default `min_leg_spacing` of zero, pairs closer than
+# the track pitch there are reported too, with a suggested `min_leg_spacing` to separate
+# them. A positive `min_leg_spacing` is the spacing the designer asked for, so it replaces
+# the pitch.
 function _warn_close_legs(ar::ChannelRouter, min_leg_spacing)
     for channel = 1:num_channels(ar)
-        wiresegs_ascending =
-            sort(channel_segments(ar, channel), by=(ws) -> interval(ar, ws))
-        facing = _facing_end_pairs(ar, wiresegs_ascending, min_leg_spacing)
+        wiresegs_ascending, ends = sorted_segments_and_ends(ar, channel)
+        facing =
+            facing_end_pairs(ar, ends, min_leg_spacing; use_pitch=iszero(min_leg_spacing))
         for (; top, bottom, gap, pitch) in facing
             top_ws, bottom_ws = wiresegs_ascending[top], wiresegs_ascending[bottom]
             top_track, bottom_track =
                 segment_track(ar, top_ws), segment_track(ar, bottom_ws)
-            # Sharing a track keeps legs apart unless the ends coincide
+            # Sharing a track keeps legs apart unless the ends coincide. The ends are then
+            # `gap` apart along the track, as for any two segments sharing a track.
             (top_track > bottom_track || (iszero(gap) && top_track == bottom_track)) ||
                 continue
             nets = "Nets $(net_index(top_ws)) and $(net_index(bottom_ws))"
-            enforced = iszero(gap) || _closer(gap, min_leg_spacing)
+            enforced = iszero(gap) || closer_than(gap, min_leg_spacing)
             problem = if iszero(gap)
                 "$nets leave channel $channel at the same point to opposite sides, in an \
                 order that overlaps their wires."
@@ -572,7 +576,8 @@ Track assignment options:
     sides near the same point. Closer pairs are ordered so their legs separate instead of
     running side by side across the channel. The default of zero orders only pairs at the
     same point, whose legs would overlap. A positive value can increase the number of
-    tracks, since such pairs could otherwise share a track.
+    tracks, since such pairs could otherwise share a track. Routing warns about pairs
+    left side by side closer than `min_leg_spacing`, or than the track pitch if it is zero.
 
 See [`Paths.assign_tracks!`](@ref).
 """

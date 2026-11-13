@@ -524,6 +524,11 @@ function assign_tracks!(
     max_refinement_passes=2,
     min_leg_spacing=zero(T)
 ) where {T}
+    max_refinement_passes >= 0 || throw(
+        ArgumentError(
+            "`max_refinement_passes` must be nonnegative, got $max_refinement_passes."
+        )
+    )
     for channel = 1:num_channels(ar)
         empty!(channel_tracks(ar, channel))
     end
@@ -574,24 +579,23 @@ end
 
 # Everything `assign_tracks_matching!` reads from `channel`'s current state. Equal inputs
 # give equal tracks, so a channel whose inputs are unchanged needs no reassignment.
-# Intervals enter only through the graphs and through the pairs that touch exactly, where
-# `segments_overlap` decides whether a knock-knee is possible. Comparing those rather than
-# raw intervals keeps rounding error in track offsets from counting as a change.
+# Intervals enter only through the graphs and through the pairs that touch exactly but
+# can't share a track (see `segments_overlap`). Comparing those rather than raw intervals
+# keeps rounding error in track offsets from counting as a change.
 function _track_inputs(ar, channel; min_leg_spacing)
-    segs = sort(channel_segments(ar, channel), by=(ws) -> interval(ar, ws))
-    vcg, zone_ig = channel_problem_graphs(ar, channel; min_leg_spacing)
-    knock_knees = Tuple{Int, Int}[]
-    for (idx1, seg1) in pairs(segs)
-        high1 = last(interval(ar, seg1))
-        for idx2 = (idx1 + 1):length(segs)
-            low2 = first(interval(ar, segs[idx2]))
-            low2 > high1 && break
-            low2 == high1 &&
-                segments_overlap(ar, seg1, segs[idx2]) &&
-                push!(knock_knees, (idx1, idx2))
+    segs, ends = sorted_segments_and_ends(ar, channel)
+    vcg, zone_ig = channel_problem_graphs(ar, ends; min_leg_spacing)
+    touching_overlaps = Set{Tuple{Int, Int}}()
+    for (idx1, end1) in pairs(ends)
+        for idx2 = (idx1 + 1):length(ends)
+            low2 = ends[idx2].low
+            low2 > end1.high && break
+            low2 == end1.high &&
+                segments_overlap(ar, segs[idx1], segs[idx2]) &&
+                push!(touching_overlaps, (idx1, idx2))
         end
     end
-    return (; segs, vcg, zone_ig, knock_knees)
+    return (; segs, vcg, zone_ig, touching_overlaps)
 end
 
 function merge_in_vcg!(vcg, v1, v2)
@@ -670,9 +674,11 @@ function assign_tracks_matching!(ar, channel, inputs)
             for r in R
                 mergeable = dists_from_l[r] >= nv(vcg) && dists_from_r[r][l] >= nv(vcg)
                 !mergeable && continue
-                if !segments_overlap(ar, wiresegs_ascending[l], wiresegs_ascending[r])
-                    add_edge!(merging_graph, l, r)
-                end
+                # `segments_overlap`, read from `inputs` so equal inputs give equal tracks
+                overlap =
+                    has_edge(inputs.zone_ig, l, r) ||
+                    _swap(l, r) in inputs.touching_overlaps
+                overlap || add_edge!(merging_graph, l, r)
             end
         end
         # Find max cardinality valid matching, removing edges as necessary
@@ -863,64 +869,26 @@ end
 
 function channel_problem_graphs(
     ar::AbstractChannelProblem{T},
-    channel;
+    ends;
     min_leg_spacing=zero(T)
 ) where {T}
-    wiresegs_ascending = sort(channel_segments(ar, channel), by=(ws) -> interval(ar, ws))
     # Y&K zone representation as interval graph
     # Edge between each pair of segments that overlap
-    zone_ig = SimpleGraph(length(wiresegs_ascending))
+    zone_ig = SimpleGraph(length(ends))
     # Condrat et al. VCG with avoidable crossings as constraints, plus constraints between
-    # non-overlapping segments with aligned ends (see `_facing_end_pairs`)
-    vcg = SimpleDiGraph(length(wiresegs_ascending)) # just a fresh graph
-    for (idx1, seg1) in pairs(wiresegs_ascending)
-        low1, high1 = interval(ar, seg1)
-        for (idx2, seg2) in collect(pairs(wiresegs_ascending))[(idx1 + 1):end]
-            low2, high2 = interval(ar, seg2)
-
+    # non-overlapping segments with aligned ends (see `facing_end_pairs`)
+    vcg = SimpleDiGraph(length(ends)) # just a fresh graph
+    for (idx1, end1) in pairs(ends)
+        for idx2 = (idx1 + 1):length(ends)
+            end2 = ends[idx2]
             # If there is no overlap, break and move on to next seg1
             # Use >= instead of > to potentially allow knock-knees
-            low2 >= high1 && break # All subsequent seg2 have low2 >= high1
+            end2.low >= end1.high && break # All subsequent seg2 have low2 >= high1
             # There is overlap, so add an edge to the interval graph
             add_edge!(zone_ig, idx1, idx2)
             # Now check if crossing is unavoidable
-            pt1, nt1 = prev_next_tendency(ar, seg1)
-            pt2, nt2 = prev_next_tendency(ar, seg2)
-            low1_tend, high1_tend = against_channel(ar, seg1) ? (nt1, pt1) : (pt1, nt1)
-            low2_tend, high2_tend = against_channel(ar, seg2) ? (nt2, pt2) : (pt2, nt2)
-            # `is_avoidable` treats each neighbor as extending indefinitely along its
-            # channel, so it orders the segments by their neighbors' tracks. Neighbors on
-            # disjoint runs from the same side have unconstrained tracks, and the order is
-            # instead set by the runs (see `_outer_of_disjoint_neighbors`). That order is
-            # presented to `is_avoidable` as adjacent endpoints, the outer one inward.
-            i1, i2 = idx1, idx2
-            l1, h1, l2, h2 = low1, high1, low2, high2
-            lt1, ht1, lt2, ht2 = low1_tend, high1_tend, low2_tend, high2_tend
-            if lt1 == lt2
-                outer = _outer_of_disjoint_neighbors(ar, seg1, seg2, true)
-                if outer == 1 # The outer segment must have the larger low, so swap roles
-                    i1, i2 = idx2, idx1
-                    h1, h2 = h2, h1
-                    ht1, ht2 = ht2, ht1
-                end
-                if outer != 0
-                    l1 = min(l1, l2)
-                    l2 = nextfloat(l1)
-                end
-            end
-            if ht1 == ht2
-                outer = _outer_of_disjoint_neighbors(
-                    ar,
-                    wiresegs_ascending[i1],
-                    wiresegs_ascending[i2],
-                    false
-                )
-                if outer != 0
-                    h_inner = max(h1, h2)
-                    h_outer = prevfloat(h_inner)
-                    h1, h2 = outer == 1 ? (h_outer, h_inner) : (h_inner, h_outer)
-                end
-            end
+            (i1, l1, h1, lt1, ht1), (i2, l2, h2, lt2, ht2) =
+                _avoidability_args(idx1, end1, idx2, end2)
             avoidable = is_avoidable(l1, h1, l2, h2, lt1, ht1, lt2, ht2)
             !avoidable && continue
 
@@ -933,19 +901,58 @@ function channel_problem_graphs(
             add_edge!(vcg, top, bottom) # VCG has edge from higher to lower tracks
         end
     end
-    # Closest ends first, and exactly aligned ones before all others, since they would
-    # overlap rather than just be close
-    facing = _facing_end_pairs(ar, wiresegs_ascending, min_leg_spacing; use_pitch=false)
+    facing = facing_end_pairs(ar, ends, min_leg_spacing; use_pitch=false)
+    _add_facing_constraints!(vcg, facing)
+    return vcg, zone_ig
+end
+
+# Segments `idx1` and `idx2`, with ends `end1` and `end2`, as arguments for `is_avoidable`:
+# `(index, low, high, low tendency, high tendency)` for each, the one with the lower low
+# first.
+#
+# `is_avoidable` treats each neighbor as extending indefinitely along its channel, so it
+# orders the segments by their neighbors' tracks. Neighbors on disjoint runs from the
+# same side have unconstrained tracks, and the order is instead set by the runs (see
+# `_outer_of_disjoint_neighbors`). That order is presented to `is_avoidable` as adjacent
+# endpoints, the outer one inward.
+function _avoidability_args(idx1, end1, idx2, end2)
+    l1, h1, l2, h2 = end1.low, end1.high, end2.low, end2.high
+    if end1.low_tend == end2.low_tend
+        outer = _outer_of_disjoint_neighbors(end1.low_neighbor, end2.low_neighbor)
+        if outer != 0 # Adjacent lows, the outer one larger
+            l_inner = min(l1, l2)
+            l1, l2 =
+                outer == 1 ? (nextfloat(l_inner), l_inner) : (l_inner, nextfloat(l_inner))
+        end
+    end
+    if end1.high_tend == end2.high_tend
+        outer = _outer_of_disjoint_neighbors(end1.high_neighbor, end2.high_neighbor)
+        if outer != 0 # Adjacent highs, the outer one smaller
+            h_inner = max(h1, h2)
+            h1, h2 =
+                outer == 1 ? (prevfloat(h_inner), h_inner) : (h_inner, prevfloat(h_inner))
+        end
+    end
+    args1 = (idx1, l1, h1, end1.low_tend, end1.high_tend)
+    args2 = (idx2, l2, h2, end2.low_tend, end2.high_tend)
+    return l1 <= l2 ? (args1, args2) : (args2, args1)
+end
+
+# Constrains each facing pair (see `facing_end_pairs`) to its order in `vcg` unless that
+# would make `vcg` cyclic. Closest ends first, and exactly aligned ones before all others,
+# since they would overlap rather than just be close.
+function _add_facing_constraints!(vcg, facing)
     for pair in sort(facing, by=pair -> pair.gap)
         has_edge(vcg, pair.top, pair.bottom) && continue
         add_edge!(vcg, pair.top, pair.bottom)
         is_cyclic(vcg) && rem_edge!(vcg, pair.top, pair.bottom)
     end
-    return vcg, zone_ig
+    return vcg
 end
 
-# Which of `seg1` and `seg2` (1 or 2) is fixed as the outer one at their low (`at_low`) or
-# high end by their neighbors there, or 0 if the neighbors don't fix an order.
+# Which of two segments (1 or 2) is fixed as the outer one at their low or high end by
+# their neighbors there, `nb1` and `nb2` (see `_neighbor_end`), or 0 if the neighbors
+# don't fix an order.
 #
 # The order is fixed when both neighbors run along the same bounding channel B, from the
 # same side, on assigned tracks, and occupy disjoint runs of B. Below, segments s₁ and s₂
@@ -978,37 +985,75 @@ end
 # The condition needs both neighbors on assigned tracks, so it only applies in refinement
 # passes. Before that, same-side neighbors both end at C's centerline, and their runs
 # overlap.
-function _outer_of_disjoint_neighbors(ar, seg1, seg2, at_low)
-    nb1, reach1 = _neighbor_reach(ar, seg1, at_low)
-    nb2, reach2 = _neighbor_reach(ar, seg2, at_low)
-    running_channel(nb1) != running_channel(nb2) && return 0
-    is_pin(ar, running_channel(nb1)) && return 0
-    (isnothing(segment_track(ar, nb1)) || isnothing(segment_track(ar, nb2))) && return 0
-    lo1, hi1 = interval(ar, nb1)
-    lo2, hi2 = interval(ar, nb2)
+function _outer_of_disjoint_neighbors(nb1, nb2)
+    nb1.channel != nb2.channel && return 0
+    (nb1.assigned && nb2.assigned) || return 0
+    lo1, hi1 = nb1.interval
+    lo2, hi2 = nb2.interval
     (hi1 <= lo2 || hi2 <= lo1) || return 0
-    reach1 > reach2 && return 1
-    reach2 > reach1 && return 2
+    nb1.reach > nb2.reach && return 1
+    nb2.reach > nb1.reach && return 2
     return 0
 end
 
-# The neighbor segment at `ws`'s low or high endpoint and its reach: the signed distance
-# from `ws`'s channel to the neighbor's far end, positive in the direction the neighbor
-# extends away from `ws`.
-function _neighbor_reach(ar, ws, at_low)
-    is_prev = xor(at_low, against_channel(ar, ws))
+# The neighbor segment at `ws`'s low (`at_low`) or high end, as
+# `_outer_of_disjoint_neighbors` needs it: the channel it runs along, whether it is on an
+# assigned track (never for a pin), its interval, and its reach, the signed distance from
+# `ws`'s channel to the neighbor's far end, positive in the direction the neighbor extends
+# away from `ws`. `against` is whether `ws` runs against its channel.
+function _neighbor_end(ar, ws, at_low, against)
+    is_prev = xor(at_low, against)
     nb = is_prev ? prev(ar, ws) : next(ar, ws)
-    s_ws = pathlength_at_intersection(ar, running_channel(nb), running_channel(ws))
+    channel = running_channel(nb)
+    assigned = !is_pin(ar, channel) && !isnothing(segment_track(ar, nb))
+    s_ws = pathlength_at_intersection(ar, channel, running_channel(ws))
     start, stop = unsorted_interval(ar, nb)
     far, near = is_prev ? (start, stop) : (stop, start)
-    return nb, (far - s_ws) * sign(far - near)
+    reach = (far - s_ws) * sign(far - near)
+    return (; channel, assigned, interval=_swap(start, stop), reach)
+end
+
+# What constraints between `ws` and other segments in its channel depend on: its interval,
+# the tendency at each end, the neighbor at each end (see `_neighbor_end`), the track
+# pitch of the bounding vertex at each end (see `_end_pitch`), and the tolerance for its
+# high end to count as aligned with another segment's low end. Computing these once per
+# segment rather than once per pair of segments keeps graph construction fast.
+function _segment_ends(ar::AbstractChannelProblem, ws)
+    s_start, s_stop = unsorted_interval(ar, ws)
+    low, high = _swap(s_start, s_stop)
+    against = s_start > s_stop
+    pt, nt = prev_next_tendency(ar, ws)
+    low_tend, high_tend = against ? (nt, pt) : (pt, nt)
+    # Rounding error in pathlengths and track offsets scales with these
+    high_atol =
+        sqrt(eps(Float64)) * (abs(high) + channel_width(ar, running_channel(ws), high))
+    return (;
+        low,
+        high,
+        low_tend,
+        high_tend,
+        low_neighbor=_neighbor_end(ar, ws, true, against),
+        high_neighbor=_neighbor_end(ar, ws, false, against),
+        low_pitch=_end_pitch(ar, ws, _end_vertex(ws, true, against)),
+        high_pitch=_end_pitch(ar, ws, _end_vertex(ws, false, against)),
+        high_atol
+    )
+end
+
+# Segments of `channel` in ascending order of their intervals, as the channel's graphs and
+# `facing_end_pairs` index them, and their ends (see `_segment_ends`)
+function sorted_segments_and_ends(ar, channel)
+    segs = channel_segments(ar, channel)
+    ends = [_segment_ends(ar, ws) for ws in segs]
+    order = sortperm(ends, by=e -> (e.low, e.high))
+    return segs[order], ends[order]
 end
 
 # Pairs of non-overlapping segments whose facing ends leave the channel to opposite sides
 # at the same point or closer than `min_spacing`, or, with `use_pitch`, closer than the
 # track pitch of the bounding channels there. Returned as `(; top, bottom, gap, pitch)`
-# with `top` and `bottom` indices into `wiresegs_ascending` in the order the pair must take
-# unless it shares a track:
+# with `top` and `bottom` indices into `ends` (see `sorted_segments_and_ends`) in the order
+# the pair must take unless it shares a track:
 #
 #        a above b                 a below b
 #
@@ -1029,27 +1074,16 @@ end
 #
 # Ends within rounding error of each other count as the same point, with `gap` zero. Pin
 # coordinates that come from transformations, for example, rarely align exactly.
-function _facing_end_pairs(
+function facing_end_pairs(
     ar::AbstractChannelProblem{T},
-    wiresegs_ascending,
+    ends,
     min_spacing;
     use_pitch=true
 ) where {T}
     pairs_found = @NamedTuple{top::Int, bottom::Int, gap::T, pitch::T}[]
-    isempty(wiresegs_ascending) && return pairs_found
-    ends = map(wiresegs_ascending) do ws
-        low, high = interval(ar, ws)
-        pt, nt = prev_next_tendency(ar, ws)
-        low_tend, high_tend = against_channel(ar, ws) ? (nt, pt) : (pt, nt)
-        low_pitch = use_pitch ? _end_pitch(ar, ws, _end_vertex(ar, ws, true)) : zero(T)
-        high_pitch =
-            use_pitch ? _end_pitch(ar, ws, _end_vertex(ar, ws, false)) : zero(T)
-        # Rounding error in pathlengths and track offsets scales with these
-        high_atol =
-            sqrt(eps(Float64)) * (abs(high) + channel_width(ar, running_channel(ws), high))
-        return (; low, high, low_tend, high_tend, low_pitch, high_pitch, high_atol)
-    end
-    max_clearance = max(min_spacing, maximum(e -> max(e.low_pitch, e.high_pitch), ends))
+    isempty(ends) && return pairs_found
+    max_pitch = use_pitch ? maximum(e -> max(e.low_pitch, e.high_pitch), ends) : zero(T)
+    max_clearance = max(min_spacing, max_pitch)
     for (idx1, end1) in pairs(ends)
         for (idx2, end2) in pairs(ends)
             # Segments are sorted by low end, so later ones are farther from end1.high
@@ -1059,8 +1093,9 @@ function _facing_end_pairs(
             (idx1 == idx2 || gap < -end1.high_atol || end1.high_tend == end2.low_tend) &&
                 continue
             abs(gap) <= end1.high_atol && (gap = zero(gap))
-            pitch = _smaller_nonzero(end1.high_pitch, end2.low_pitch)
-            (iszero(gap) || _closer(gap, min_spacing) || _closer(gap, pitch)) || continue
+            pitch = use_pitch ? _smaller_nonzero(end1.high_pitch, end2.low_pitch) : zero(T)
+            (iszero(gap) || closer_than(gap, min_spacing) || closer_than(gap, pitch)) ||
+                continue
             top, bottom = end1.high_tend == 1 ? (idx1, idx2) : (idx2, idx1)
             push!(pairs_found, (; top, bottom, gap, pitch))
         end
@@ -1071,11 +1106,11 @@ end
 _smaller_nonzero(a, b) = iszero(a) ? b : iszero(b) ? a : min(a, b)
 
 # Whether `gap` is less than `clearance` by more than rounding error
-_closer(gap, clearance) = gap < clearance && !(gap ≈ clearance)
+closer_than(gap, clearance) = gap < clearance && !(gap ≈ clearance)
 
-# Bounding vertex at the low (`at_low`) or high end of `ws`
-_end_vertex(ar, ws, at_low) =
-    xor(at_low, against_channel(ar, ws)) ? ws.start_vertex : ws.stop_vertex
+# Bounding vertex at the low (`at_low`) or high end of `ws`, which runs against its channel
+# if `against`
+_end_vertex(ws, at_low, against) = xor(at_low, against) ? ws.start_vertex : ws.stop_vertex
 
 # Track pitch of bounding vertex `v` where `ws` meets it; zero for a pin or a channel
 # without tracks yet
