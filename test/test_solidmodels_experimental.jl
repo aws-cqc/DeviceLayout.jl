@@ -298,6 +298,12 @@ end
             heights=[0.6, 0.4]
         )
         @test_throws ArgumentError Extrude(:solid, :metal; num_elements=[2], heights=[1.5])
+        @test_throws ArgumentError Extrude(
+            :solid,
+            :metal;
+            num_elements=[2, 3],
+            heights=[0.25, 0.5]
+        )
         ops, _, _ =
             compile_ops([Extrude(:solid, :metal; num_elements=[4])], stack, registry)
         @test only(ops)[4] == (:num_elements => [4])
