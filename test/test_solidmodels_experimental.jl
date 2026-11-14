@@ -279,7 +279,49 @@ end
         @test reg[:solid].dim == 3
         @test reg[:solid].dz == 2.0
         @test only(reg[:solid].pgs) == "solid"
-        @test only(ops) == ("solid", SolidModels.extrude_z!, ("metal", 2μm, 2))
+        @test only(ops) == (
+            "solid",
+            SolidModels.extrude_z!,
+            ("metal", 2μm, 2),
+            :num_elements => Int[],
+            :heights => Float64[],
+            :recombine => false
+        )
+
+        # Layered-mesh keywords pass through to `extrude_z!`.
+        @test_throws ArgumentError Extrude(:solid, :metal; num_elements=[0])
+        @test_throws ArgumentError Extrude(:solid, :metal; num_elements=[2, 3], heights=[1])
+        @test_throws ArgumentError Extrude(
+            :solid,
+            :metal;
+            num_elements=[2, 3],
+            heights=[0.6, 0.4]
+        )
+        @test_throws ArgumentError Extrude(:solid, :metal; num_elements=[2], heights=[1.5])
+        @test_throws ArgumentError Extrude(
+            :solid,
+            :metal;
+            num_elements=[2, 3],
+            heights=[0.25, 0.5]
+        )
+        ops, _, _ =
+            compile_ops([Extrude(:solid, :metal; num_elements=[4])], stack, registry)
+        @test only(ops)[4] == (:num_elements => [4])
+        ops, _, _ = compile_ops(
+            [Extrude(:metal, 2μm; num_elements=[2, 3], heights=[0.25, 1], recombine=true)],
+            stack,
+            registry
+        )
+        @test lowered(ops, SolidModels.extrude_z!)[4:end] ==
+              (:num_elements => [2, 3], :heights => [0.25, 1.0], :recombine => true)
+        generated = with(registry, :generated => LayerState(["generated"], 2))
+        ops, _, _ = compile_ops(
+            [Extrude(:generated; to_level=2, num_elements=[5])],
+            stack,
+            generated
+        )
+        @test lowered(ops, SolidModelsExperimental._extrude_to_z!)[4:end] ==
+              (:num_elements => [5], :heights => Float64[], :recombine => false)
 
         # Walls: extrude the 1D outline of a surface.
         ops, reg, _ =
@@ -1344,6 +1386,49 @@ end
             1e-6
         @test layers["outline"]["dim"] == 2
         @test layer_measure(result, :outline) ≈ 2.0 atol = 1e-8
+    end
+
+    @testset "Layered extrusion" begin
+        cs = CoordinateSystem("layered", μm)
+        place!(cs, _rectangle(0.0, 0.0, 4.0, 4.0), LayerRef(:box))
+        place!(cs, _rectangle(5.0, 0.0, 6.0, 1.0), LayerRef(:post))
+        stack = SourceStack(
+            :box => SourceLayer(NULL; level=1, thickness=2μm),
+            :post => SourceLayer(NULL; level=1);
+            levels=(1 => 0μm, 2 => 2μm)
+        )
+        render_case(
+            "compiler_geometry_layered",
+            cs,
+            stack,
+            [
+                Extrude(:box; num_elements=[4]),
+                # Executed through the deferred-distance path of `to_level`.
+                Translate(:moved, :post, 0μm, 2μm, 0μm),
+                Extrude(:moved; to_level=2, num_elements=[1, 2], heights=[0.5, 1])
+            ]
+        )
+        gmsh = SolidModels.gmsh
+        gmsh.model.mesh.generate(1)
+        # Count the mesh segments on the vertical edges of each extrusion.
+        function vertical_segment_counts(xmin, xmax)
+            counts = Int[]
+            for (_, tag) in gmsh.model.getEntities(1)
+                x0, y0, z0, x1, y1, z1 = gmsh.model.getBoundingBox(1, tag)
+                # OCC pads bounding boxes, so compare with a loose tolerance.
+                (x1 - x0 < 1e-3 && y1 - y0 < 1e-3 && z1 - z0 > 1e-3) || continue
+                xmin - 1e-3 <= x0 <= xmax + 1e-3 || continue
+                _, element_tags, _ = gmsh.model.mesh.getElements(1, tag)
+                push!(counts, length(only(element_tags)))
+            end
+            return counts
+        end
+        box_counts = vertical_segment_counts(0.0, 4.0)
+        @test length(box_counts) == 4
+        @test all(==(4), box_counts)
+        moved_counts = vertical_segment_counts(5.0, 6.0)
+        @test length(moved_counts) == 4
+        @test all(==(3), moved_counts)
     end
 
     @testset "Global restriction" begin
