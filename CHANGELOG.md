@@ -6,6 +6,8 @@ The format of this changelog is based on
 
 ## Unreleased
 
+## 1.22.0 (2026-11-16)
+
 ### Added
 
   - `SolidModelsExperimental.Extrude` accepts the `num_elements`, `heights`, and `recombine`
