@@ -7,14 +7,14 @@ const IntersectionInfo{T} = Tuple{T, T, typeof(1.0°), typeof(1.0°), Point{T}}
 """
     ChannelRouter{T <: Coordinate}
 
-A simple autorouter where wires can run on horizontal and vertical channels.
+A simple autorouter where wires run through a network of intersecting channels.
 
 The router will attempt to connect pairs of pins, each with coordinates and a direction.
 The indices of connected pins are specified by `nets`.
 
-The router is initialized with a number of vertical and horizontal "channels", characterized
-by a width and the coordinate of their center line. Each channel will be divided into some
-number of tracks as necessary to route all nets.
+The router is initialized with a list of [`RouteChannel`](@ref)s, which can be straight,
+curved, tapered, or compound paths. Each channel will be divided into some number of tracks
+as necessary to route all nets.
 
 Routing proceeds in two steps. The first is "channel assignment", which proceeds net by net,
 choosing which channels the net's wire passes through on its way from one pin to the other. The second step

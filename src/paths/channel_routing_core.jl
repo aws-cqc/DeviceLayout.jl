@@ -798,7 +798,8 @@ end
 # half of the channel is a staircase, merging a center segment that must go below one half
 # with the top segment of the other half puts all of the first half above all of the
 # other, so the halves can no longer share tracks. Yoshimura and Kuh's Algorithm #1
-# likewise chooses merges that limit this increase.
+# likewise chooses merges that limit this increase. This is just heuristic and in rare
+# cases results in fewer merges.
 function _keep_shortest_merges!(merging_graph, vcg, high_to_low, R)
     above, below = _longest_path_lengths(vcg, high_to_low)
     for r in R

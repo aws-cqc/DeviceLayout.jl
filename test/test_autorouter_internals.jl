@@ -322,8 +322,13 @@
         hooks = [bpin(2, -0.5), tpin(8, 0.5)]
         ar = ChannelRouter([(1, 2)], hooks, RouteChannel.(channels))
 
-        # verbose=true should not error and should produce log output
-        routes = autoroute!(ar, Paths.StraightAnd90(0.1), 0.1; verbose=true)
+        # verbose=true logs a summary
+        routes = @test_logs (:info, "Autorouting complete") autoroute!(
+            ar,
+            Paths.StraightAnd90(0.1),
+            0.1;
+            verbose=true
+        )
         @test length(routes) == 1
         @test all(length.(ar.net_wires) .> 0)
     end
