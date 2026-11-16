@@ -10,6 +10,12 @@ The format of this changelog is based on
 
   - `SolidModelsExperimental.Extrude` accepts the `num_elements`, `heights`, and `recombine`
     keywords of `SolidModels.extrude_z!`, meshing the extrusion as structured layers.
+  - Added experimental channel autorouting through predefined `RouteChannel`s, including
+    automatic channel assignment, crossing-aware track assignment refined against the tracks
+    of neighboring channels, an optional minimum spacing between wires leaving a channel to
+    opposite sides, partial rerouting, fixed channel paths, schematic-driven routing with
+    `AutoChannelRouting`, diagnostics, examples, and documentation. Its API and its solutions
+    for a given problem may change in minor versions.
 
 ### Fixed
 
@@ -21,6 +27,8 @@ The format of this changelog is based on
   - `halo` of a path with sharp corners (`corner!` with `Paths.SimpleTraceCorner`), including
     a path ending in a corner, gives a mitered halo around each corner instead of throwing a
     `MethodError`. With an `inner_delta`, it throws an `ArgumentError`.
+  - Channel sections used by `SingleChannelRouting` and channel autorouting now clamp to the
+    available channel extent and handle exact B-spline endpoints without an out-of-range split.
 
 ## 1.21.0 (2026-11-10)
 

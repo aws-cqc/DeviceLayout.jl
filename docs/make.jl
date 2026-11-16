@@ -66,6 +66,7 @@ makedocs(
             "Texts" => "concepts/texts.md",
             "Paths" => "concepts/paths.md",
             "Routes" => "concepts/routes.md",
+            "Channel Autorouter" => "concepts/channel_autorouter.md",
             "Rendering and Export" => "concepts/render.md",
             "Solid Models (3D Geometry)" => "concepts/solidmodels.md",
             "Solid Models (Experimental)" => "concepts/solidmodels_experimental.md",
@@ -78,7 +79,8 @@ makedocs(
         "Examples" => [
             "ExamplePDK" => "examples/examplepdk.md",
             "Quantum Processor" => "examples/qpu17.md",
-            "Single-Transmon Simulation" => "examples/singletransmon.md"
+            "Single-Transmon Simulation" => "examples/singletransmon.md",
+            "Channel Autorouter" => "examples/autorouter.md"
         ],
         "Reference" => [
             "Overview" => "reference/index.md",
