@@ -2,10 +2,12 @@
 # The names are not specific to the destination, so a built-in flag passed to a target that
 # ignores it does not warn.
 mutable struct _RenderKwargNames
-    # Each set is replaced rather than mutated, so `render!` reads them without the lock
-    @atomic known::Set{Symbol}
+    # Guarded by `_RENDER_KWARGS_LOCK`. Each set is replaced rather than mutated. These are
+    # plain fields: `@atomic` reference-typed fields crashed the GC during precompilation on
+    # Julia 1.11.
+    known::Set{Symbol}
     # Not `maxlog`: the file sink of a schematic's log ignores it, and the check runs per entity
-    @atomic warned::Set{Symbol}
+    warned::Set{Symbol}
 end
 const _RENDER_KWARG_NAMES = _RenderKwargNames(
     Set{Symbol}([
@@ -41,20 +43,19 @@ A package that constructs an `OptionalStyle` at top level should call this for t
 its `__init__`, because registrations made while precompiling are not kept.
 """
 function register_render_kwarg!(s::Symbol)
-    s in (@atomic _RENDER_KWARG_NAMES.known) && return nothing
     @lock _RENDER_KWARGS_LOCK begin
-        known = @atomic _RENDER_KWARG_NAMES.known
-        @atomic _RENDER_KWARG_NAMES.known = push!(copy(known), s)
+        s in _RENDER_KWARG_NAMES.known && return nothing
+        _RENDER_KWARG_NAMES.known = push!(copy(_RENDER_KWARG_NAMES.known), s)
     end
     return nothing
 end
 
 function warn_unknown_render_kwargs(kwargs, caller=:render!)
-    _all_known_or_warned(kwargs) && return nothing
     unknown = @lock _RENDER_KWARGS_LOCK begin
-        warned = @atomic _RENDER_KWARG_NAMES.warned
-        new = setdiff(keys(kwargs), @atomic(_RENDER_KWARG_NAMES.known), warned)
-        isempty(new) || @atomic _RENDER_KWARG_NAMES.warned = union(warned, new)
+        known = _RENDER_KWARG_NAMES.known
+        warned = _RENDER_KWARG_NAMES.warned
+        new = setdiff(keys(kwargs), known, warned)
+        isempty(new) || (_RENDER_KWARG_NAMES.warned = union(warned, new))
         new
     end
     for k in unknown
@@ -67,16 +68,7 @@ end
 # warning
 function reset_render_kwarg_warnings!()
     @lock _RENDER_KWARGS_LOCK begin
-        @atomic _RENDER_KWARG_NAMES.warned = Set{Symbol}()
+        _RENDER_KWARG_NAMES.warned = Set{Symbol}()
     end
     return nothing
-end
-
-function _all_known_or_warned(kwargs)
-    known = @atomic _RENDER_KWARG_NAMES.known
-    warned = @atomic _RENDER_KWARG_NAMES.warned
-    for k in keys(kwargs)
-        (k in known || k in warned) || return false
-    end
-    return true
 end
