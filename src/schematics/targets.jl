@@ -270,6 +270,15 @@ output = Cell(floorplan, target)
 """
 abstract type Target end
 
+"""
+    is_experimental_meta(meta::DeviceLayout.Meta)
+
+Whether `meta` belongs to the experimental solid model API (`SolidModelsExperimental.LayerRef`
+or `SolidModelsExperimental.LocatorMeta`), whose entities the legacy `LayoutTarget` and
+`SolidModelTarget` pipelines skip.
+"""
+is_experimental_meta(::DeviceLayout.Meta) = false
+
 function map_layer(target::Target, meta::DeviceLayout.Meta)
     # memoize - if it's not already in the dict, run _map_layer and store the result
     haskey(target.map_meta_dict, meta) && return target.map_meta_dict[meta]
@@ -282,6 +291,7 @@ end
 _map_layer(::Target, meta::GDSMeta) = meta
 
 function _map_layer(target::Target, meta)
+    is_experimental_meta(meta) && return nothing
     (layer(meta) == layer(DeviceLayout.NORENDER_META)) && return nothing
     !(level(meta) in target.levels) && return nothing
     if !haskey(layer_record(target.technology), layer(meta))
@@ -358,7 +368,7 @@ When rendering `ent::GeometryEntity` with `target::LayoutTarget`, its metadata `
 
  0. If `target.map_meta_dict[m]` exists (as a `GDSMeta` instance or `nothing`), use that. This can be manually assigned before rendering, overriding the default behavior for any metadata type, including `GDSMeta`. Otherwise, the result of the steps below will be stored in `target.map_meta_dict[m]`.
  1. If `m` is already a `GDSMeta` and not in `map_meta_dict`, use as is.
- 2. If `layer(m) == layer(DeviceLayout.NORENDER_META)` (that is, `:norender`), use `nothing`.
+ 2. If `m` is experimental solid model metadata (`SolidModelsExperimental.LayerRef` or `SolidModelsExperimental.LocatorMeta`), or if `layer(m) == layer(DeviceLayout.NORENDER_META)` (that is, `:norender`), use `nothing`.
  3. If `!(level(m) in target.levels)`, use `nothing`.
  4. If `layer(m)` is not present as a key in `layer_record(target.technology)` and is not of the form `:GDS<layer>_<datatype>`, then emit a warning and use `GDSMeta(0,0)`, ignoring level and layer index.
  5. If `layer(m)` is not present as a key in `layer_record(target.technology)` but is of the form `:GDS<layer>_<datatype>`, then take `GDSMeta(layer, datatype)` and add any increments according to `level(m)` and `layerindex(m)` as below.

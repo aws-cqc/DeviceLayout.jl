@@ -34,6 +34,34 @@ The format of this changelog is based on
 
 ## Unreleased
 
+## 1.22.0 (2026-11-16)
+
+### Added
+
+  - `SolidModelsExperimental.Extrude` accepts the `num_elements`, `heights`, and `recombine`
+    keywords of `SolidModels.extrude_z!`, meshing the extrusion as structured layers.
+  - Added experimental channel autorouting through predefined `RouteChannel`s, including
+    automatic channel assignment, crossing-aware track assignment refined against the tracks
+    of neighboring channels, an optional minimum spacing between wires leaving a channel to
+    opposite sides, partial rerouting, fixed channel paths, schematic-driven routing with
+    `AutoChannelRouting`, diagnostics, examples, and documentation. Its API and its solutions
+    for a given problem may change in minor versions.
+
+### Fixed
+
+  - `halo` of a path style with zero extent at its start covers the rest of the style, and
+    a path's halo extends past such an endpoint like any other. A `TaperTrace` or `TaperCPW`
+    starting from zero width, or a `Trace` with a width function that is zero at the start,
+    previously got no halo. A style without its own `halo` method, such as a `Trace` with a
+    width function, now gets a halo of width `2 * outer_delta` where its extent is zero.
+  - `halo` of a path with sharp corners (`corner!` with `Paths.SimpleTraceCorner`), including
+    a path ending in a corner, gives a mitered halo around each corner instead of throwing a
+    `MethodError`. With an `inner_delta`, it throws an `ArgumentError`.
+  - Channel sections used by `SingleChannelRouting` and channel autorouting now clamp to the
+    available channel extent and handle exact B-spline endpoints without an out-of-range split.
+
+## 1.21.0 (2026-11-10)
+
 ### Added
 
   - `SolidModels.exclude_groups` returns the entities of a physical group that belong to none of
@@ -48,9 +76,106 @@ The format of this changelog is based on
     `h_um`, `alpha`, `coords_um`) into the mesh-size field, and
     `SolidModels.set_mesh_size_callback!` installs the size callback for models assembled
     without `render!`.
+  - `split_pinches` splits self-touching contours of `CurvilinearRegion`s, which
+    OpenCASCADE can reject when rendering to a `SolidModel`, into simple regions. Pieces are
+    classified by winding, so keyholed islands and holes are kept. Run it after boolean
+    operations and `split_t_junctions!`.
+  - `render!` accepts `post_fragment_ops`, postrender operations executed after the global
+    fragmentation pass.
+  - `SolidModels.fragment_near!` makes one or more dim-3 physical groups (e.g. imported CAD
+    parts) conformal with nearby geometry by fragmenting only the entities that touch the
+    bounding boxes of their volumes, instead of the whole model.
+  - `SolidModels.import_solid!` imports an external CAD solid (STEP, BREP, or Gmsh `.xao`)
+    into a `SolidModel`, positioned by an in-plane `ScaledIsometry`, a `z` offset, and an
+    optional uniform `scale`, and registers it as a physical group. A `.xao` file's own
+    physical groups are registered too, renamed through `group_map`, and never collide with
+    groups already in the model. Requires the `OpenCascade` kernel. Can also be used as a
+    postrender operation.
+  - `SchematicDrivenLayout.SolidModelComponent` (not exported) places an imported CAD solid
+    in a schematic. It emits no 2D geometry; during solid-model rendering it contributes an
+    `import_solid!` operation at its solved transform and the z of its layer. `hooks` supplies
+    named mate points, defaulting to a `compass` at the CAD origin. The solid's physical
+    group is named after its node id, and a `.xao` file's own groups are prefixed with it.
+  - `render!(sm, sch, target)` accepts `component_fragment` and `post_fragment_ops`, as
+    keywords or in the target's rendering options. `component_fragment=:global` (default)
+    imports `SolidModelComponent` parts before the global fragmentation pass;
+    `component_fragment=:near` imports them afterwards and runs one `fragment_near!` over
+    all of them. `post_fragment_ops` run after the components' own operations.
+  - `import_solid!` and `SolidModelComponent` are experimental: their API, including the
+    names of generated physical groups, may change in minor versions.
+  - `SolidModelsExperimental` module, which renders a schematic to a solid model from
+    `LayerRef` geometry, locators, a `SourceStack`, and layer operations, and returns metadata
+    following `schemas/sm_metadata.schema.json`. `render!(cell, cs, stack)` renders the
+    matching artwork. The API may change before DeviceLayout 2.0.
+  - `SolidModels.render!` accepts `preflattened=true` to skip flattening `cs`.
+  - `render_conformal!(sm, sch, target::SolidModelTarget)` renders a schematic like
+    `render!(sm, sch, target)`, but through the conformal render, which resolves shared
+    boundaries with an edge cache instead of a fragment pass. Its 2D groups are formed
+    before emission by the target's new `prerender_ops`, authored like `postrender_ops`:
+    `union_geom2d!` and `difference_geom2d!` operations that keep the curves they don't
+    cut. It renders 2D geometry only; see `examples/DemoQPU17/solidmodel_conformal.jl`.
+    `SolidModelTarget` gains a `prerender_ops` keyword and a `prerenderer` field, added
+    last, and the `ExamplePDK` single-chip target defines `prerender_ops`. The method,
+    `prerender_ops` and their operations are experimental: their API may change in minor
+    versions, for example as 3D construction is added.
+  - `SchematicDrivenLayout.ExamplePDKExperimental`, a version of `ExamplePDK`'s single-transmon
+    components and single-chip target for `SolidModelsExperimental`, and the
+    `SingleTransmonExperimental` example, whose `configfile` builds a Palace configuration
+    from the saved metadata.
+  - `render!(::SolidModel, ...)` accepts `verbose=true` (also usable as a `SolidModelTarget`
+    rendering option), which logs each physical group created while rendering and each
+    postrendering operation, along with the resulting entity count, bounding box, and elapsed
+    time. Operations are logged before they run, so the operation responsible for a failure is
+    the last one logged. (#266)
+  - Single-shot SolidModel rendering and meshing benchmarks in `benchmark/solidmodel/` for the
+    single-transmon and DemoQPU17 workloads, with a comparison script and a manual
+    `Benchmark SolidModel` GitHub workflow. The examples expose their schematic construction
+    for reuse: `examples/SingleTransmon/schematic.jl` defines `single_transmon_schematic`
+    (included by `SingleTransmon.jl`), and `examples/DemoQPU17/solidmodel.jl` wraps its setup
+    in `qpu17_solidmodel_setup` instead of running it at include time.
+  - Property-based tests of the 2D polygon operations (`test/laws/`, test item tag
+    `:geomlaws`), with Supposition.jl as a new test-only dependency. Laws for the boolean
+    operations, `offset`, the keyhole cuts of `to_polygons`, path `halo`s, rigid-transform
+    equivariance, and unit invariance are checked on generated inputs, comparing outputs
+    as regions with exact arithmetic that doesn't use the clipping library. They run at
+    a fixed seed in the regular suite and with fresh seeds in a weekly GeomLaws workflow,
+    and known failures are kept as minimal reproducers. `test/laws/README.md` describes
+    what the laws cover and what they don't.
+
+### Changed
+
+  - `SolidModels.connected_components` (and therefore `check_port_connectivity`) now always
+    connects faces through curves embedded in another face's interior, such as contacts made
+    via bridges with 2D feet. This uses gmsh's embedded-entity topology. Callers that relied
+    on the default not merging air bridges now get fewer, larger components. This costs a few
+    milliseconds even on large models, where the former geometric search took about a minute
+    on DemoQPU17.
+  - `Polygons.orientation(::CurvilinearPolygon)` returns the winding of a curved contour from
+    its signed area. Arcs, `BSpline`s, and constant offsets of either (as in path regions)
+    contribute their exact area against their chords, so the contour is not discretized; other
+    curves are discretized.
+  - `CurvilinearRegion` reads the winding of its exterior and holes from their exact signed
+    area instead of discretizing them, so constructing a region with a circular exterior and
+    a circular hole takes about 6 µs instead of 120 µs.
+  - Finding path intersections (`Intersect.intersect!`, `prepared_intersections`, and
+    `SchematicDrivenLayout.crossovers!`) uses a sort-and-sweep over line segments instead of
+    enumerating every pair of segments that overlap in x. Results are unchanged, but
+    `crossovers!` in the DemoQPU17 example takes about 0.05 s instead of 0.85 s.
+    `Intersect.intersections` now reports each intersection once rather than once per
+    ordering of the segment pair.
+  - `ScaledIsometry` stores its linear map when constructed instead of recomputing it each time
+    it is applied, so transforming an entity computes `cos`/`sin` once rather than once per
+    point. Results are unchanged; `flatten` of the DemoQPU17 example's artwork takes about
+    40 ms instead of 66 ms. Constructing a `ScaledIsometry` costs about 55 ns more.
+  - Messages logged to the console while planning, building, or rendering a `Schematic` no
+    longer carry a `stage` keyword, so the console no longer prints `└ stage = ...` beneath
+    each one. The stage still prefixes each line of the schematic's log file.
 
 ### Deprecated
 
+  - The `detect_non_boundary_contacts` and `non_boundary_contact_tol` keywords of
+    `SolidModels.connected_components` and `SolidModels.check_port_connectivity` are
+    deprecated and have no effect.
   - DXF export (`save("file.dxf", c, python)`); save to GDS and convert with an external tool
     such as KLayout.
   - `Paths.GeneralStrands`, including `Paths.Strands` with a callable `offset`, `width`, or
@@ -73,6 +198,48 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - `isapprox` on arrays of `Point`s, and so on `Polygon`s, returns `false` when the
+    arrays differ in size. Previously it compared only the elements both arrays have, so
+    an empty array was approximately equal to any other.
+  - `==` and `isapprox` on `ClippedPolygon`s return `false` when the polygon trees have
+    different numbers of children at any level, such as an extra disjoint shape or an extra
+    hole. Previously, extra children on either side were ignored.
+  - Schematic `render!` to a `Cell` or a `SolidModel` with `strict=:no` logs a component
+    whose geometry fails to build and renders it as empty geometry, instead of throwing.
+    (#287)
+  - Rendering to a `SolidModel` applies entity styles instead of silently dropping them.
+    Styles without a kernel-native implementation are discretized through `to_polygons`,
+    with a warning on OpenCascade.
+  - `Rounded` circles and ellipses render to an OpenCascade `SolidModel` as exact ellipses
+    instead of recursing until the stack overflows.
+  - `StyleDict` on an entity other than a `ClippedPolygon` or `CurvilinearRegion`, such as a
+    `Rectangle`, applies its style at `[1]` instead of recursing until the stack overflows,
+    and throws an `ArgumentError` if it has styles at other indices.
+  - `LineSegment`s can be placed in coordinate systems of a different coordinate type and
+    transformed through references, which previously threw a `MethodError`, and their
+    `bounds` (and `lowerleft`/`upperright`) now give their extent instead of a zero
+    rectangle at the origin.
+  - `flatten` and `flatten!` with finite `max_copy` no longer duplicate geometry when a
+    reference kept for exceeding `max_copy` has references of its own. The contents of a
+    kept reference stay inside it instead of also being flattened or kept at the top level.
+  - `flatten` and `flatten!` with finite `max_copy` count each element of an
+    `ArrayReference` toward `max_copy`. Previously, an array counted as a single reference to
+    its structure regardless of its size, so the structure's contents could be copied to the
+    top level many more than `max_copy` times.
+  - `flatten` and `flatten!` place the contents of a structure referenced by an
+    `ArrayReference` at every array element. Previously, references inside that structure
+    were placed only at the first element.
+  - `render_conformal!` built faces with holes that OpenCASCADE treated as including the
+    holes: their area and extruded volume added the holes instead of subtracting them, and
+    points inside a hole counted as inside the face. `add_plane_surface` subtracts a hole
+    only if its loop winds like the exterior, but a `CurvilinearRegion` stores its holes
+    clockwise, opposite its counterclockwise exterior. The holes are now reversed, and
+    `add_conformal_loop!` takes `reverse=true` for building such hole loops by hand. Its
+    docstring example now does that, and passes a `SolidModels.PointsCache` instead of an
+    `RTree`, which threw a `MethodError`.
+  - `CurvilinearRegion` now normalizes its exterior to counterclockwise on construction, as
+    it does its holes to clockwise. A region built with a clockwise exterior and holes lost
+    its area: `to_polygons` returned no polygon for it.
   - When OpenCASCADE's fragment history reports an entity as deleted with no successor while
     the result holds a geometrically identical entity under a new tag, `SolidModel`
     fragmentation now matches the two by bounding box, so the entity keeps its physical groups
@@ -81,6 +248,22 @@ The format of this changelog is based on
     tolerance of 1 nm for floating-point coordinates instead of a quarter femtometer, which
     gave on the order of 10⁵ vertices per rounded corner. The new `atol` keyword sets the
     tolerance; integer coordinates keep Clipper's default of a quarter grid unit.
+  - `to_polygons(::ClippedPolygon)` throws an error when Clipper has rounded a hole's lowest
+    vertex to just outside the polygon (beyond its enclosing contour, or inside another
+    hole), instead of silently dropping the hole (#317) or attaching it with a cut through
+    the exterior. This can only happen when a vertex of one shape lies on or very near a
+    non-axis-aligned edge of another.
+  - `to_polygons(::ClippedPolygon)` warns when rounding a keyhole cut's attachment point to
+    the grid may make the cut polygon self-intersect: when the hole or a neighboring vertex
+    comes within a grid unit of the edge the cut attaches to, or a neighboring edge folds
+    back across it at an acute vertex.
+  - `to_polygons(::ClippedPolygon)` removes consecutive repeated points, left by a keyhole
+    cut landing on a vertex or a hole touching its enclosing contour. Some rendered polygons
+    have fewer vertices as a result, with the same shape.
+  - The intersection of a ray with a segment that it meets exactly at an endpoint is found
+    for integer coordinates. Floating-point rounding could put the computed point just
+    outside the segment, so `to_polygons(::ClippedPolygon)` dropped a hole whose lowest
+    vertex was directly above a vertex of its enclosing contour.
   - `Intersect.AirBridge` crossings give the CPW open termination after the bridge
     `initial=true`, so its trace-corner vertices sit on the side facing the following segment
     and are shared with that segment's gap polygons instead of leaving T-junctions.
@@ -88,6 +271,27 @@ The format of this changelog is based on
     name in gmsh's name registry first. Booleans and synchronization drop group-table entries
     but keep names registered, and a stale name silently left the re-created group unnamed, so
     it was written to `.xao` as `G_<dim>_<tag>`.
+  - `StraightAnd90` and `StraightAnd45` routes no longer add a straight segment whose length
+    is within rounding error of zero, as when waypoints are exactly one bend radius apart.
+    Such a segment rendered as zero-area polygons, and whether it appeared depended on
+    floating-point details such as whether the CPU fused multiply-adds, so the same layout
+    could render with different fingerprints on different machines.
+  - `SolidModels.meshsize` and `meshgrading` of a styled entity use the entity's own size when
+    the style doesn't set one. Previously a style other than `MeshSized` applied directly to
+    an entity reported no sizing, so a CPW under `only_simulated`, `Plain` or `WithDirection`
+    lost its trace and gap refinement in `render!`. The outermost `MeshSized` still wins, now
+    including one selected by an `OptionalStyle` wrapping an already sized entity. A custom
+    style sets a size by implementing `meshsize(::GeometryEntity, ::MyStyle)`; a style-only
+    `meshsize(::MyStyle)` is no longer used.
+  - `create_component(T, ps, address)` and `set_parameters(c, ps, address)` read `NamedTuple`
+    and `Dict` parameters from nested namespaces, as written by `extract_parameter_set`, and
+    reject namespace keys that are not fields of a non-empty `NamedTuple` parameter. Required
+    parameters declared as a `NamedTuple` or `Dict` are read from namespaces too. (#335)
+  - `@variant` and `@composite_variant` constructors reject unknown keyword arguments. (#336)
+  - A `@composite_variant` created from a `ParameterSet` passes it on to
+    `_build_subcomponents`. (#337)
+  - `create_component` and `set_parameters` give clearer errors for invalid `ParameterSet`
+    addresses and namespaces, and `set_parameters` on a composite keeps its `ParameterSet`.
 
 ## 1.20.0 (2026-10-06)
 
@@ -228,7 +432,7 @@ The format of this changelog is based on
     capping width-only output at 288 pixels high. If neither is supplied, the maximum dimension is capped at 4 inches. Reference bounding boxes render again, and GDS layers
     above 255 receive palette colors instead of all falling back to black.
   - Path termination and `SimpleNoRender` halos now use constant-offset edges instead of the generic
-    functional-offset fallback. The rendered discretization of these halos on curves may change but 
+    functional-offset fallback. The rendered discretization of these halos on curves may change but
     will be geometrically equivalent within tolerance.
   - `SolidModels.revolve!` now accepts unitful axis points and directions, converting point
     coordinates to the solid-model unit and direction components to a common unit. Unitless

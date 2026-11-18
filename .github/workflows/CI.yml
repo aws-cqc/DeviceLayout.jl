@@ -42,6 +42,7 @@ jobs:
           - '1.11'
           - '1.12'
           - '1.13'
+          - 'pre'
         os:
           - ubuntu-latest
         arch:

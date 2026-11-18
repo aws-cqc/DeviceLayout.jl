@@ -3,7 +3,7 @@
     # Everything but stdlib should have compat versions
     Aqua.test_deps_compat(
         DeviceLayout,
-        ignore=[:Dates, :LinearAlgebra, :Logging, :Random, :UUIDs],
+        ignore=[:Dates, :LinearAlgebra, :Logging, :Random, :UUIDs, :SparseArrays],
         check_extras=(; ignore=[:Test])
     )
     # We define ForwardDiff.extract_derivative with Unitful.Quantity; ignore that one

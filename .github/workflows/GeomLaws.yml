@@ -1,0 +1,48 @@
+name: GeomLaws exploration
+
+# The :geomlaws test items run in CI at a fixed seed and 50 examples per check, which
+# makes them deterministic regression tests. This workflow is where they search: a
+# fresh seed and a large budget each week, one job per law file. A failure prints the
+# seed and the unshrunk counterexample; see test/laws/README.md for reproducing it.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      examples:
+        description: 'Valid examples per check'
+        default: '2000'
+      seed:
+        description: 'UInt32 seed, or random'
+        default: 'random'
+
+jobs:
+  explore:
+    name: GeomLaws ${{ matrix.file }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
+      actions: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        file:
+          - test_boolean
+          - test_offset
+          - test_transform
+    steps:
+      - uses: actions/checkout@v6
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - uses: julia-actions/cache@v3
+      - uses: julia-actions/julia-buildpkg@v1
+      - name: Install TestEnv
+        run: julia -e 'using Pkg; Pkg.add("TestEnv")'
+      - name: Explore
+        env:
+          GEOMLAWS_EXAMPLES: ${{ inputs.examples || '2000' }}
+          GEOMLAWS_SEED: ${{ inputs.seed || 'random' }}
+        run: julia --project=. test/laws/explore.jl ${{ matrix.file }}

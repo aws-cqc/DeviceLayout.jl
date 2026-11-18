@@ -9,6 +9,10 @@ mutable struct Turn{T} <: ContinuousSegment{T}
     r::T
     p0::Point{T}
     α0::typeof(1.0°)
+    # Store r ≥ 0: a negative radius is the same arc turning the other way. Heading,
+    # pathlength and offset code assume r ≥ 0.
+    Turn{T}(α, r, p0, α0) where {T} =
+        r < zero(r) ? new{T}(-α, -r, p0, α0) : new{T}(α, r, p0, α0)
 end
 function (s::Turn)(t)
     # assuming s.α not zero
@@ -27,6 +31,7 @@ Outer constructor for `Turn` segments.
 """
 Turn(α, r::T; p0::Point=Point(zero(T), zero(T)), α0=0.0°) where {T <: Coordinate} =
     Turn{T}(α, r, p0, α0)
+Turn(α, r::T, p0::Point{T}, α0) where {T} = Turn{T}(α, r, p0, α0)
 convert(::Type{Turn{T}}, x::Turn) where {T} =
     Turn{T}(x.α, T(x.r), convert(Point{T}, x.p0), x.α0)
 convert(::Type{Segment{T}}, x::Turn) where {T} = convert(Turn{T}, x)

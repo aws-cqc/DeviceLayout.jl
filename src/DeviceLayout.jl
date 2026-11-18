@@ -563,7 +563,7 @@ export Curvilinear,
 
 # After curvilinear.jl (rounding produces CurvilinearRegion) and cells.jl/render
 include("postrender.jl")
-export round_layer, round_layer!, split_t_junctions!
+export round_layer, round_layer!, split_t_junctions!, split_pinches
 
 include("simple_shapes.jl")
 import .SimpleShapes:
@@ -631,6 +631,15 @@ export PolyText,
 
 include("schematics/SchematicDrivenLayout.jl")
 export SchematicDrivenLayout
+
+# Load the opt-in simulation-agnostic solid-model pipeline after both of its dependencies.
+include("solidmodels/solidmodels_experimental.jl")
+export SolidModelsExperimental
+# ExamplePDKExperimental needs SolidModelsExperimental, so it joins SchematicDrivenLayout here.
+Base.include(
+    SchematicDrivenLayout,
+    "schematics/ExamplePDKExperimental/ExamplePDKExperimental.jl"
+)
 
 include("precompile.jl")
 

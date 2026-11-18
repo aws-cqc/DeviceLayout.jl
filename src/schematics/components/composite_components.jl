@@ -413,25 +413,12 @@ function _filter_parameters(subcomp, comp, prefix, except)
     return filter(kv -> first(kv) in parameter_names(subcomp), Dict(unprefixed_params))
 end
 
-"""
-    create_component(::Type{T}, ps::ParameterSet, address::String) where {T <: AbstractCompositeComponent}
-
-Composite-component specialization that threads the root `ParameterSet` into the
-composite's private `_graph`, so that `parameter_set(cc._graph)` inside
-`_build_subcomponents` returns the same `ps` the caller holds.
-
-Without this specialization, `@compdef`'s default `_graph = SchematicGraph(uniquename(name))`
-has no PS attached and composite subcomponents can't find the parameter set during
-lazy graph construction.
-"""
 function create_component(
     ::Type{T},
     ps::ParameterSet,
     address::String
 ) where {T <: AbstractCompositeComponent}
-    sub = resolve(ps, address)
-    sub isa ParameterSet ||
-        throw(ParameterKeyError(getfield(sub, :key), _namespace_path(sub)))
+    sub = _resolve_namespace(ps, address)
     # Build the private `_graph` with the ROOT `ps` attached so that, inside
     # `_build_subcomponents`, `parameter_set(cc._graph) === ps`. The non-
     # composite scoped form handles leaf extraction + access tracking; we
@@ -444,6 +431,56 @@ function create_component(
         T,
         sub;
         _graph=_graph
+    )
+end
+
+# A composite rebuilt with new parameters keeps the `ParameterSet` attached to its graph
+# (by `create_component(T, ps, address)`), so that its `_build_subcomponents` still sees it.
+# Without one, the constructor's own fresh graph is used as before.
+function set_parameters(
+    c::AbstractCompositeComponent,
+    name::String=name(c),
+    params::NamedTuple=parameters(c);
+    kwargs...
+)
+    # Not every composite has a private `_graph` (`BasicCompositeComponent` has `graph`)
+    ps = hasfield(typeof(c), :_graph) ? parameter_set(c._graph) : nothing
+    isnothing(ps) && return create_component(typeof(c), name, params; kwargs...)
+    nm = get(kwargs, :name, name) # `kwargs` win over `name`, as in `create_component`
+    return create_component(
+        typeof(c),
+        name,
+        params;
+        _graph=SchematicGraph(uniquename(nm), ps),
+        kwargs...
+    )
+end
+
+# Attach `ps` itself (replacing any `ParameterSet` `c` carries) before applying it, so that
+# `_build_subcomponents` of the result reads the set its parameters came from. The rebuilds
+# in the generic method keep it attached.
+function set_parameters(
+    c::AbstractCompositeComponent,
+    ps::ParameterSet,
+    address::String;
+    kwargs...
+)
+    # Composites without a private `_graph` have nowhere to attach `ps`
+    if hasfield(typeof(c), :_graph)
+        c = create_component(
+            typeof(c),
+            name(c),
+            parameters(c);
+            _graph=SchematicGraph(uniquename(name(c)), ps)
+        )
+    end
+    return invoke(
+        set_parameters,
+        Tuple{AbstractComponent, ParameterSet, String},
+        c,
+        ps,
+        address;
+        kwargs...
     )
 end
 

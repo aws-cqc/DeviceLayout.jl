@@ -40,38 +40,57 @@
         @test sizes == [1, 1]
     end
 
-    @testset "stray edge embedded in face interior connects two faces" begin
-        # Two coplanar surfaces that share no topological boundary in gmsh's adjacency
-        # graph, but are bridged geometrically by 1D edges lying in the interior of
-        # one and on the boundary of the other. Mirrors the staple-airbridge foot
-        # edges landing on a ground plane: OCC's global fragment leaves these curves
-        # geometrically embedded but topologically detached, so getAdjacencies returns
-        # only the ground plane's outer rectangle. Geometry matches the minimal
-        # reproduction observed empirically — the second loose-rectangle is irrelevant
-        # but kept to match the exact tag layout the reproduction relies on.
-        fresh_model("stray_edge")
-        gmsh.model.occ.addRectangle(-10, -10, 0, 20, 20)
-        gmsh.model.occ.addRectangle(0, 0, 1, 1, 1)
-        gmsh.model.occ.addPoint(0, 0, 0)
-        gmsh.model.occ.addPoint(0, 1, 0)
-        gmsh.model.occ.addPoint(1, 1, 0)
-        gmsh.model.occ.addPoint(1, 0, 0)
-        l1 = gmsh.model.occ.addLine(9, 10)
-        l2 = gmsh.model.occ.addLine(11, 12)
-        ext = gmsh.model.occ.extrude([(1, 9), (1, 10)], 0.0, 0.0, 1.0)
+    # Ground plane 20x20 and a bridge deck at z = 1 on two open vertical legs whose foot
+    # curves land in the ground plane's interior.
+    function stray_edge_model(name)
+        fresh_model(name)
+        ground = gmsh.model.occ.addRectangle(-10, -10, 0, 20, 20)
+        deck = gmsh.model.occ.addRectangle(0, 0, 1, 1, 1)
+        p1 = gmsh.model.occ.addPoint(0, 0, 0)
+        p2 = gmsh.model.occ.addPoint(0, 1, 0)
+        p3 = gmsh.model.occ.addPoint(1, 1, 0)
+        p4 = gmsh.model.occ.addPoint(1, 0, 0)
+        l1 = gmsh.model.occ.addLine(p1, p2)
+        l2 = gmsh.model.occ.addLine(p3, p4)
+        ext = gmsh.model.occ.extrude([(1, l1), (1, l2)], 0.0, 0.0, 1.0)
+        legs = [dt for dt in ext if dt[1] == 2]
         frag, _ =
-            gmsh.model.occ.fragment([(1, l1), (1, l2)], [(2, 1), (2, 2), (2, 3), (2, 4)])
+            gmsh.model.occ.fragment([(1, l1), (1, l2)], [(2, ground), (2, deck), legs...])
+        gmsh.model.occ.synchronize()
+        return Int32[dt[2] for dt in frag if dt[1] == 2]
+    end
+
+    face_width(tag) = (bb = gmsh.model.getBoundingBox(2, tag); bb[4] - bb[1])
+
+    @testset "stray edge embedded in face interior connects two faces" begin
+        # The foot edges are embedded in the ground plane rather than bounding it, so only
+        # the embedded-curve step connects the ground plane to the legs.
+        tags = stray_edge_model("stray_edge")
+        ground_tag = only(t for t in tags if face_width(t) > 10)
+        @test length(gmsh.model.mesh.getEmbedded(2, ground_tag)) == 2
+        @test length(connected_components(2, tags)) == 1
+    end
+
+    @testset "embedded contact connects without the face joining the legs" begin
+        # Leave out the top rectangle that joins the legs through shared boundary edges.
+        tags = stray_edge_model("stray_edge_no_top")
+        faces = [t for t in tags if gmsh.model.getBoundingBox(2, t)[3] < 0.5]
+        @test length(faces) == 3
+        @test length(connected_components(2, faces)) == 1
+    end
+
+    @testset "closed contour on a face splits it without embedding" begin
+        fresh_model("closed_contour")
+        gmsh.model.occ.addRectangle(-10, -10, 0, 20, 20)
+        circle = gmsh.model.occ.addCircle(0, 0, 0, 1)
+        wall = gmsh.model.occ.extrude([(1, circle)], 0.0, 0.0, 1.0)
+        frag, _ = gmsh.model.occ.fragment([(1, circle)], [(2, 1), wall[2]])
         gmsh.model.occ.synchronize()
         tags = Int32[dt[2] for dt in frag if dt[1] == 2]
-
-        # Topology only: ground plane (tag 1) is disconnected from each leg face.
-        result_topo = connected_components(2, tags) # default: no augmentation
-        @test length(result_topo) == 2
-
-        # Geometric augmentation: the foot edges lie in the ground plane's interior
-        # and are boundary edges of the leg faces → all united into 1 component.
-        result_geom = connected_components(2, tags; detect_non_boundary_contacts=true)
-        @test length(result_geom) == 1
+        ground_pieces = [t for t in tags if gmsh.model.getBoundingBox(2, t)[6] < 0.5]
+        @test length(ground_pieces) == 2
+        @test all(isempty(gmsh.model.mesh.getEmbedded(2, t)) for t in ground_pieces)
+        @test length(connected_components(2, tags)) == 1
     end
 
     @testset "staple bridge connects" begin
@@ -92,15 +111,7 @@
             ],
             solidmodel=true
         )
-        @test length(
-            connected_components(
-                sm,
-                ["bridge_metal", "gnd"],
-                detect_non_boundary_contacts=true
-            )
-        ) == 1
-        # Does not work without stapling
-        @test length(connected_components(sm, ["bridge_metal", "gnd"])) == 2
+        @test length(connected_components(sm, ["bridge_metal", "gnd"])) == 1
     end
 
     @testset "shared-boundary volumes via fragment" begin

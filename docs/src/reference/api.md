@@ -194,6 +194,7 @@
     round_layer
     round_layer!
     split_t_junctions!
+    split_pinches
 ```
 
 #### [Curvilinear geometry](@id api-curvilinear)
@@ -298,6 +299,7 @@ See [Shapes](./shapes.md).
     SolidModels.attributes
     SolidModels.to_primitives
     render!(::SolidModel, ::CoordinateSystem; kwargs...)
+    SolidModels.import_solid!
     SolidModels.save(::File, ::SolidModel)
 ```
 
@@ -308,6 +310,8 @@ See [Shapes](./shapes.md).
     SolidModels.render_conformal!
     SolidModels.ConformalRenderContext
     SolidModels.add_conformal_loop!
+    SchematicDrivenLayout.union_geom2d!
+    SchematicDrivenLayout.difference_geom2d!
 ```
 
 ### Physical Groups
@@ -330,6 +334,7 @@ See [Shapes](./shapes.md).
     SolidModels.exclude_groups
     SolidModels.extrude_z!
     SolidModels.fragment_geom!
+    SolidModels.fragment_near!
     SolidModels.get_boundary
     SolidModels.intersect_geom!
     SolidModels.remove_group!

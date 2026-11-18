@@ -131,6 +131,7 @@ function isapprox(
     y::AbstractArray{T};
     kwargs...
 ) where {S <: Point, T <: Point}
+    size(x) == size(y) || return false
     return all(ab -> isapprox(ab[1], ab[2]; kwargs...), zip(x, y))
 end
 

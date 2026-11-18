@@ -83,3 +83,4 @@ Explore what you can build with DeviceLayout.jl:
 - [GitHub Repository](https://github.com/aws-cqc/DeviceLayout.jl)
 - [Issue Tracker](https://github.com/aws-cqc/DeviceLayout.jl/issues)
 - [Contributing Guide](https://github.com/aws-cqc/DeviceLayout.jl/blob/main/CONTRIBUTING.md)
+- [Developer Guide](@ref dev-index)

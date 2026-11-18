@@ -140,27 +140,22 @@ end
 """
     extract_parameter_set(g::SchematicGraph) -> ParameterSet
 
-Create a detached `ParameterSet` containing the supported final parameters of
-the components in `g`.
+Return a new `ParameterSet` with the parameters of every component in `g`.
 
-Each component is stored below `components` at its unique node ID. Dots in node
-IDs become nested namespace segments, and composite-component graphs are
-recursively nested below their parent component. Parameter values are taken
-from the constructed component instances, so defaults and applied overrides
-are both included. Scalar values are retained, as are one-dimensional
-`AbstractArray`s of supported values; ranges and views are materialized as plain
-`Vector`s. Named tuples and dictionaries form parameter namespaces. Other
-values are omitted, including component-valued parameters and `Point`s, which
-are `StaticVector`s standing for single geometric values rather than arrays.
+Each component's parameters, including defaults, are stored at `components.<node id>`, and
+the subcomponents of a composite component are nested below it. `NamedTuple` and `Dict`
+parameters become nested namespaces. Parameters that can't be stored in a `ParameterSet`,
+such as components and `Point`s, are omitted. If `g` has a `ParameterSet` attached, its
+other top-level namespaces (such as `global`) are copied.
 
-If `g` carries a source `ParameterSet`, its top-level namespaces other than
-`components` are deep-copied into the result. The source `components` namespace
-is replaced with the graph-derived component tree. The result has an empty
-source path and access log and shares no mutable parameter data with the graph
-or source set.
+# Examples
 
-Extraction realizes lazy composite graphs. An `ArgumentError` is thrown if a
-component path collides with a parameter leaf.
+```julia
+# `g` has a node "line" whose component has `style = (; trace=10μm, gap=4μm)`
+ps = extract_parameter_set(g)
+ps.components.line.style.gap # 4μm
+save_parameter_set("parameters.yaml", ps)
+```
 """
 function extract_parameter_set(g::SchematicGraph)
     data = if isnothing(parameter_set(g))

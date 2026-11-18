@@ -32,8 +32,31 @@ function to_primitives(::SolidModel, node::Paths.Node, ::Val{true}; kwargs...)
     return to_polygons(node; kwargs...)
 end
 
+# A style without a SolidModel method of its own is applied through `to_polygons`, as when
+# rendering to a `Cell`. That is correct for any style that renders in 2D, at the cost of
+# discretizing curves, so warn when curves are lost.
 to_primitives(sm::SolidModel, ent::StyledEntity{T, U, S}; kwargs...) where {T, U, S} =
-    to_primitives(sm, ent.ent; kwargs...)
+    _apply_style(sm, ent; kwargs...)
+function _apply_style(::SolidModel, ent::StyledEntity; kwargs...)
+    DeviceLayout.Curvilinear._maybe_warn_curve_loss(ent; context=:solidmodel)
+    return to_polygons(ent; kwargs...)
+end
+# GmshNative discretizes every curve anyway, so there is nothing to warn about.
+_apply_style(::SolidModel{GmshNative}, ent::StyledEntity; kwargs...) =
+    to_polygons(ent; kwargs...)
+# Styles that leave the geometry unchanged pass through, so native curves survive.
+to_primitives(
+    sm::SolidModel,
+    ent::StyledEntity{T, U, <:Union{Plain, MeshSized, DeviceLayout.WithDirection}};
+    kwargs...
+) where {T, U} = to_primitives(sm, ent.ent; kwargs...)
+# `ToTolerance` means rendering the entity with its `atol`, which also keeps native curves.
+to_primitives(
+    sm::SolidModel,
+    ent::StyledEntity{T, U, <:DeviceLayout.ToTolerance};
+    kwargs...
+) where {T, U} = to_primitives(sm, ent.ent; kwargs..., atol=ent.sty.atol)
+
 function to_primitives(
     sm::SolidModel{OpenCascade},
     ent::StyledEntity{T, U, S};
@@ -43,7 +66,27 @@ function to_primitives(
     if inner_prim isa Vector
         return to_primitives(sm, ent.sty.(inner_prim); kwargs...)
     end
+    # An ellipse has no corners to round, so the kernel's exact ellipse is already the result.
+    inner_prim isa Ellipse && return inner_prim
+    # Any other primitive the kernel keeps as is has no rounding method and would come
+    # straight back here, so round it through `to_curvilinear` instead.
+    inner_prim === ent.ent &&
+        return to_primitives(sm, to_curvilinear(inner_prim, ent.sty; kwargs...); kwargs...)
     return to_primitives(sm, ent.sty(inner_prim); kwargs...)
+end
+
+# An entity without a contour tree is styled as a single contour, `[1]`, as in
+# `to_polygons`. Applying that style directly keeps native curves on OpenCascade.
+function to_primitives(
+    sm::SolidModel,
+    ent::StyledEntity{T, U, <:StyleDict};
+    kwargs...
+) where {T, U}
+    return to_primitives(
+        sm,
+        DeviceLayout.Polygons._single_contour_style(ent.sty)(ent.ent);
+        kwargs...
+    )
 end
 
 function to_primitives(sm::SolidModel, ent::Vector{<:GeometryEntity}; kwargs...)
@@ -80,6 +123,12 @@ to_primitives(
     ent::StyledEntity{T, ClippedPolygon{T}, <:StyleDict};
     kwargs...
 ) where {T} = to_polygons(ent.ent, ent.sty; kwargs...)
+# `to_polygons` has no `StyleDict` method for regions, so apply the styles first.
+to_primitives(
+    ::SolidModel{GmshNative},
+    ent::StyledEntity{T, CurvilinearRegion{T}, <:StyleDict};
+    kwargs...
+) where {T} = to_polygons(to_curvilinear(ent.ent, ent.sty; kwargs...); kwargs...)
 
 function to_primitives(::SolidModel, ent::Ellipse; Δθ=nothing, kwargs...)
     isnothing(Δθ) && return ent  # Keep as ellipse primitive (default code path)
@@ -262,19 +311,12 @@ end
 
 meshsize(::GeometryEntity{T}; kwargs...) where {T} = float(ustrip(STP_UNIT, zero(T)))
 meshsize(::GeometryEntity{<:Real}; kwargs...) = 0.0
-meshsize(ent::StyledEntity{T, StyledEntity{T, R, U}, S}; kwargs...) where {T, R, U, S} =
-    meshsize(ent.ent; kwargs...)
-# Always choose outermost MeshSized
-meshsize(
-    ent::StyledEntity{T, StyledEntity{T, R, U}, S};
-    kwargs...
-) where {T, R, U, S <: MeshSized} = meshsize(ent.sty; kwargs...)
-meshsize(ent::StyledEntity; kwargs...) = meshsize(ent.sty; kwargs...)
-meshsize(s::GeometryEntityStyle; kwargs...) = 0.0
-meshsize(s::MeshSized{T}; kwargs...) where {T} = ustrip(STP_UNIT, s.h)
-meshsize(s::OptionalStyle; kwargs...) =
-    get(kwargs, s.flag, s.default) ? meshsize(s.true_style; kwargs...) :
-    meshsize(s.false_style; kwargs...)
+# The outermost style that sets a size wins; other styles defer to the entity they wrap.
+meshsize(ent::StyledEntity; kwargs...) = meshsize(ent.ent, ent.sty; kwargs...)
+meshsize(ent::GeometryEntity, ::GeometryEntityStyle; kwargs...) = meshsize(ent; kwargs...)
+meshsize(::GeometryEntity, s::MeshSized; kwargs...) = ustrip(STP_UNIT, s.h)
+meshsize(ent::GeometryEntity, s::OptionalStyle; kwargs...) =
+    meshsize(ent, get(kwargs, s.flag, s.default) ? s.true_style : s.false_style; kwargs...)
 # Path node mesh depends only on style
 meshsize(node::Paths.Node{T}; kwargs...) where {T} =
     ustrip(STP_UNIT, meshsize(node.seg, node.sty; kwargs...))
@@ -310,19 +352,16 @@ function meshsize(seg::Paths.CompoundSegment, sty::Paths.CompoundStyle; kwargs..
 end
 # There should be no DecoratedStyles at SolidModel rendering
 meshgrading(::GeometryEntity{T}; kwargs...) where {T} = -1.0
-meshgrading(ent::StyledEntity{T, StyledEntity{T, R, U}, S}; kwargs...) where {T, R, U, S} =
-    meshgrading(ent.ent; kwargs...)
-# Always choose outermost MeshSized
-meshgrading(
-    ent::StyledEntity{T, StyledEntity{T, R, U}, S};
+# Grading comes from the same place as the size.
+meshgrading(ent::StyledEntity; kwargs...) = meshgrading(ent.ent, ent.sty; kwargs...)
+meshgrading(ent::GeometryEntity, ::GeometryEntityStyle; kwargs...) =
+    meshgrading(ent; kwargs...)
+meshgrading(::GeometryEntity, s::MeshSized; kwargs...) = s.α
+meshgrading(ent::GeometryEntity, s::OptionalStyle; kwargs...) = meshgrading(
+    ent,
+    get(kwargs, s.flag, s.default) ? s.true_style : s.false_style;
     kwargs...
-) where {T, R, U, S <: MeshSized} = meshgrading(ent.sty; kwargs...)
-meshgrading(ent::StyledEntity; kwargs...) = meshgrading(ent.sty; kwargs...)
-meshgrading(::GeometryEntityStyle; kwargs...) = -1.0
-meshgrading(s::OptionalStyle; kwargs...) =
-    get(kwargs, s.flag, s.default) ? meshgrading(s.true_style; kwargs...) :
-    meshgrading(s.false_style; kwargs...)
-meshgrading(s::MeshSized{T}; kwargs...) where {T} = s.α
+)
 # All paths default to background grading
 meshgrading(node::Paths.Node; kwargs...) = -1.0
 
@@ -643,6 +682,8 @@ set_mesh_size_callback!() = gmsh.model.mesh.setSizeCallback(gmsh_meshsize)
 
 _stp_float(x::Length) = Float64(ustrip(STP_UNIT, x))
 _stp_float(x::Real) = Float64(x)
+# Unitless lengths are in STP units; operations such as `extrude_z!` take lengths.
+_stp_length(x) = _stp_float(x) * STP_UNIT
 
 const _MeshControlPointRecord = NTuple{5, Float64} # (x, y, z, h, α)
 const _MeshControlPointOwners = Dict{Tuple{String, Int}, Set{_MeshControlPointRecord}}
@@ -1128,6 +1169,11 @@ Render `cs` to `sm`.
     `"base"`. The keyword pairs `:remove_object=>true` and `:remove_tool=>true` mean
     that the "object" (first argument) group `"writeable_area"` and the "tool" (second argument)
     group `"base_negative"` are both removed when `"base"` is created.
+  - `post_fragment_ops`: Vector of Tuples in the same form as `postrender_ops`, executed after
+    the global fragmentation pass. Use this for operations that need the rendered geometry to
+    be conformal already and that handle their own fragmentation, such as adding a part and
+    fragmenting around it with [`fragment_near!`](@ref). Entities these operations add are
+    not fragmented against the rest of the model unless an operation does so itself.
   - `retained_physical_groups`: Vector of `(name, dimension)` tuples specifying which physical groups to keep after rendering. All other groups are removed.
   - `zmap`: Function (m::SemanticMeta) -> `z` coordinate of corresponding elements. Default:
     Map all metadata to zero.
@@ -1139,16 +1185,22 @@ Render `cs` to `sm`.
     as the first postrender step, before extrusions and user-defined `postrender_ops`. This
     consolidates overlapping entities within each group, reducing the cost of subsequent
     pairwise fragmentation. Default is `false`.
-  - `skip_unused_layers`: If `true`, skip rendering layers whose names are not referenced by
-    `postrender_ops` or `retained_physical_groups`. A layer is considered referenced if either
-    its mapped name or its base layer name (from `layer(meta)`) appears in the referenced set.
-    This keeps indexed and levelwise variants (e.g. `"port_1"`) when the base layer (`"port"`)
-    is referenced. Default is `false`.
+  - `skip_unused_layers`: If `true`, skip layers not referenced by `postrender_ops`,
+    `post_fragment_ops`, or `retained_physical_groups`. Indexed and levelwise variants are kept
+    when their base layer is referenced. Default is `false`.
+  - `preflattened`: If `true`, treat `cs` as already flat and skip flattening it. Default is
+    `false`.
   - `curvature_sizing`: If `true`, add radius-sized mesh control points at the centers of exact
     circular primitives preserved by the rendering backend. For `extrude_z!` postrender
     operations, generated perimeter and curvature controls are repeated at requested extrusion
     mesh layers, or at intervals no larger than each control's target size when no layers are
     specified. Default is `true`.
+  - `verbose`: If `true`, log a message for each `PhysicalGroup` created while rendering `cs`
+    and for each postrendering operation, reporting the operation being run and then the
+    resulting entity count, bounding box, and elapsed time. Each operation is logged before it
+    runs, so the operation responsible for a failure is the last one logged. Default is `false`.
+    Tooling can instead pass a step reporter object, an internal interface described in
+    `src/solidmodels/postrender.jl` and used by the benchmarks in `benchmark/solidmodel/`.
 
 Available postrendering operations include [`translate!`](@ref), [`extrude_z!`](@ref), [`revolve!`](@ref),
 [`union_geom!`](@ref), [`intersect_geom!`](@ref), [`difference_geom!`](@ref), [`fragment_geom!`](@ref), and [`box_selection`](@ref).
@@ -1163,6 +1215,7 @@ function render!(
     cs::AbstractCoordinateSystem{T};
     map_meta=layer,
     postrender_ops=[],
+    post_fragment_ops=[],
     retained_physical_groups=[],
     zmap=(_) -> zero(T),
     gmsh_options=Dict{String, Union{String, Int, Float64}}(),
@@ -1170,6 +1223,7 @@ function render!(
     auto_union=false,
     skip_unused_layers=false,
     curvature_sizing=true,
+    verbose=false,
     kwargs...
 ) where {T}
     return _render_orchestrator!(
@@ -1187,6 +1241,7 @@ function render!(
         (fragment!)=_fragment_three_pass!,
         map_meta=map_meta,
         postrender_ops=postrender_ops,
+        post_fragment_ops=post_fragment_ops,
         retained_physical_groups=retained_physical_groups,
         zmap=zmap,
         gmsh_options=gmsh_options,
@@ -1194,25 +1249,69 @@ function render!(
         auto_union=auto_union,
         skip_unused_layers=skip_unused_layers,
         curvature_sizing=curvature_sizing,
+        verbose=verbose,
         kwargs...
     )
 end
 
 # Adjacent-dimension pairs avoid both exterior boundary loss ([3,2,1], PR #145)
 # and stale OCC bindings when combined ([1,2,3], Gmsh #3446 / issue #172).
-function _fragment_three_pass!(sm::SolidModel)
-    _fragment_and_map!(sm, [0, 1])
-    _fragment_and_map!(sm, [1, 2])
-    _fragment_and_map!(sm, [2, 3])
+# With `region` (a collection of boxes), each pass uses only entities whose bbox intersects
+# one of them, rescanned per pass: OCC binds split pieces as new entities while the parent
+# may still reference the original, so walking down from seed volumes would miss them and
+# leave orphans.
+function _fragment_three_pass!(sm::SolidModel; region=nothing, reporter=nothing)
+    for dims in ([0, 1], [1, 2], [2, 3])
+        t_fragment = time_ns()
+        _fragment_and_map!(
+            sm,
+            dims;
+            included_entities=_entities_in_region(sm, dims, region)
+        )
+        _step(
+            reporter,
+            :fragment,
+            "fragmented dimensions $dims",
+            _seconds_since(t_fragment),
+            nothing
+        )
+    end
     return sm
 end
+
+_entities_in_region(::SolidModel, dims, ::Nothing) = nothing   # all entities of `dims`
+function _entities_in_region(sm::SolidModel, dims, region)
+    gmsh.model.set_current(name(sm))
+    ents = vcat([gmsh.model.get_entities(dim) for dim in dims]...)
+    selected = filter(dt -> _in_region(region, bounds3d([dt])), ents)
+    # A boolean that rebuilds an entity can retag its sub-entities, including those outside
+    # the region. `_fragment_and_map!` can only follow operands, so the full boundary of
+    # every selected top-dimension entity is submitted too, as the global pass does
+    # implicitly.
+    top = maximum(dims)
+    parents = filter(dt -> dt[1] == top, selected)
+    isempty(parents) && return selected
+    closure = filter(
+        dt -> dt[1] in dims,
+        [(d, abs(t)) for (d, t) in gmsh.model.get_boundary(parents, false, false, false)]
+    )
+    # In the global pass's order (dimension, then tag): tag preservation depends on operand
+    # order, and a volume listed before its faces retags its boundary curves.
+    return sort!(unique(vcat(selected, closure)))
+end
+
+# OCC pads bounding boxes by about 1e-7 (see `bounds3d`), so the boxes of solids that touch
+# always overlap and the test needs no tolerance.
+_rect(b) = SpatialIndexing.Rect((b[1], b[2], b[3]), (b[4], b[5], b[6]))
+_boxes_touch(a, b) = SpatialIndexing.intersects(_rect(a), _rect(b))
+_in_region(region, b) = any(r -> _boxes_touch(r, b), region)
 
 # Shared orchestrator body called by both `render!` and `render_conformal!`.
 # The two entry points differ only in:
 #   - `emit!(els, meta, k; zmap, points_cache, kwargs...)`: how OCC entities are
 #     added for a metadata group. Stock uses `_add_to_current_solidmodel!`;
 #     conformal wraps `_add_conformal!` closing over the caller's context.
-#   - `fragment!(sm)`: post-postrender fragment pass. Stock always runs the
+#   - `fragment!(sm; reporter)`: post-postrender fragment pass. Stock always runs the
 #     three-pass `_fragment_and_map!`; conformal only runs it when
 #     `fragment_backstop=true`.
 # Every other step (gmsh setup, metadata loop, control-point collection,
@@ -1224,20 +1323,25 @@ function _render_orchestrator!(
     fragment!,
     map_meta=layer,
     postrender_ops=[],
+    post_fragment_ops=[],
     retained_physical_groups=[],
     zmap=(_) -> zero(T),
     gmsh_options=Dict{String, Union{String, Int, Float64}}(),
     skip_postrender=false,
     auto_union=false,
     skip_unused_layers=false,
+    preflattened=false,
     curvature_sizing=true,
+    verbose=false,
     kwargs...
 ) where {T}
+    t_render = time_ns()
+    reporter = _step_reporter(verbose)
     gmsh.model.set_current(name(sm))
 
     set_gmsh_option(gmsh_options)
 
-    flat = flatten(cs)
+    flat = preflattened ? cs : flatten(cs)
 
     clear_mesh_control_points!()
     mesh_seen = Set{_MeshControlPointRecord}()
@@ -1249,12 +1353,13 @@ function _render_orchestrator!(
 
     # Build set of used layer names for skip_unused_layers optimization
     used_names = if skip_unused_layers
-        _used_group_names(postrender_ops, retained_physical_groups)
+        _used_group_names(vcat(postrender_ops, post_fragment_ops), retained_physical_groups)
     else
         nothing
     end
 
     # Create physical groups
+    _note(reporter, "render!: rendering entities to physical groups of model $(name(sm))")
     for meta in unique(element_metadata(flat)) # For each unique (layer, level, index) triple
         mapped_name = map_meta(meta)
         isnothing(mapped_name) && continue
@@ -1263,6 +1368,7 @@ function _render_orchestrator!(
            string(layer(meta)) ∉ used_names
             continue
         end
+        t_group = time_ns()
         idx = (element_metadata(flat) .== meta) # Get the corresponding elements
         els = to_primitives.(sm, elements(flat)[idx]; kwargs...)
         meshsizes = sizeandgrading.(elements(flat)[idx]; kwargs...)
@@ -1281,6 +1387,7 @@ function _render_orchestrator!(
 
         # Make physical group for each dimension
         sm[mapped_name] = group_dimtags
+        _step(reporter, :groups, mapped_name, _seconds_since(t_group), group_dimtags)
 
         # Sample mesh size control points from the same primitive form added to the model.
         z_of_meta = _stp_float(zmap(meta))
@@ -1316,7 +1423,16 @@ function _render_orchestrator!(
     finalize_size_fields!()
     # Extrusions, Booleans, etc
     _synchronize!(sm)
-    skip_postrender && return nothing
+    if skip_postrender
+        _step(
+            reporter,
+            :render,
+            "render!: skipping postrendering",
+            _seconds_since(t_render),
+            nothing
+        )
+        return nothing
+    end
     # Union each physical group to consolidate overlapping entities before postrender.
     # Doing this before extrusions/booleans reduces the cost of pairwise fragmentation.
     if auto_union
@@ -1324,13 +1440,27 @@ function _render_orchestrator!(
         for groupname in collect(keys(dimgroupdict(sm, 2))) # Only dim 2 will be present
             push!(auto_union_ops, (groupname, union_geom!, (groupname, 2)))
         end
-        _postrender!(sm, auto_union_ops)
+        _note(reporter, "render!: unioning $(length(auto_union_ops)) 2D physical groups")
+        _postrender!(sm, auto_union_ops; reporter, phase=:auto_union)
         _synchronize!(sm)
     end
-    meshsize_composed = _postrender!(sm, postrender_ops; mesh_points_by_group, mesh_seen)
+    _note(reporter, "render!: running $(length(postrender_ops)) postrendering operations")
+    meshsize_composed =
+        _postrender!(sm, postrender_ops; mesh_points_by_group, mesh_seen, reporter)
     _synchronize!(sm)
     # Get rid of redundant entities and update groups accordingly.
-    fragment!(sm)
+    fragment!(sm; reporter)
+
+    # Operations that need conformal geometry and do their own fragmentation, such as
+    # importing a part and calling `fragment_near!`.
+    if !isempty(post_fragment_ops)
+        _note(
+            reporter,
+            "render!: running $(length(post_fragment_ops)) post-fragment operations"
+        )
+        _postrender!(sm, post_fragment_ops; reporter, phase=:post_fragment)
+        _synchronize!(sm)
+    end
 
     # Rebuild KDTrees to include mesh-size controls composed with extrusions.
     meshsize_composed && finalize_size_fields!()
@@ -1353,6 +1483,7 @@ function _render_orchestrator!(
         reindex_physical_groups!(sm)
     end
 
+    _step(reporter, :render, "render!: done", _seconds_since(t_render), nothing)
     return _synchronize!(sm)
 end
 
@@ -1409,7 +1540,8 @@ end
 function _fragment_and_map!(
     sm::SolidModel,
     frag_dims;
-    excluded_physical_groups=PhysicalGroup[]
+    excluded_physical_groups=PhysicalGroup[],
+    included_entities=nothing
 )
     gmsh.model.set_current(name(sm))
     # Get the tags of entities in existing groups
@@ -1417,7 +1549,10 @@ function _fragment_and_map!(
         (name, dimtags(pg)) for dim in frag_dims for
         (name, pg) in pairs(dimgroupdict(sm, dim))
     ]
-    allents = vcat([gmsh.model.get_entities(dim) for dim in frag_dims]...)
+    allents =
+        isnothing(included_entities) ?
+        vcat([gmsh.model.get_entities(dim) for dim in frag_dims]...) :
+        collect(included_entities)
 
     # Remove any excluded groups from the fragment.
     if !isempty(excluded_physical_groups)
@@ -1478,11 +1613,17 @@ function _fragment_and_map!(
         kernel(sm).remove(setdiff(allents, frags))
     end
     isempty(entmap) && return _synchronize!(sm)
-    # For each original group,
-    # reassign the group to the fragments its elements were mapped to
+    # Members outside the fragment keep their tags. Groups with members inside are re-added even
+    # when tags were preserved: gmsh drops physical membership on rebuilt entities.
     for (name, dim_tags) in groups
         isempty(dim_tags) && continue
-        sm[name] = vcat((entmap[indexin(dim_tags, allents)])...)
+        idx = indexin(dim_tags, allents)
+        all(isnothing, idx) && continue
+        newtags = Tuple{Int32, Int32}[]
+        for (dt, i) in zip(dim_tags, idx)
+            isnothing(i) ? push!(newtags, dt) : append!(newtags, entmap[i])
+        end
+        sm[name] = newtags
     end
     return _synchronize!(sm)
 end
@@ -1533,7 +1674,8 @@ end
 function _fragment_and_map!(
     ::SolidModel{GmshNative},
     frag_dims;
-    excluded_physical_groups=PhysicalGroup[]
+    excluded_physical_groups=PhysicalGroup[],
+    included_entities=nothing
 ) end
 
 # Assumes `gmsh` has been initialized and the current model has been set beforehand, and that

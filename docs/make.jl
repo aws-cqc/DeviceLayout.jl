@@ -24,7 +24,12 @@ DocMeta.setdocmeta!(
 
 makedocs(
     repo=Documenter.Remotes.GitHub("aws-cqc", "DeviceLayout.jl"),
-    modules=[DeviceLayout, CoordinateTransformations, DeviceLayout.SchematicDrivenLayout],
+    modules=[
+        DeviceLayout,
+        CoordinateTransformations,
+        DeviceLayout.SchematicDrivenLayout,
+        DeviceLayout.SolidModelsExperimental
+    ],
     warnonly=true,
     checkdocs=:none,
     format=Documenter.HTML(
@@ -61,8 +66,10 @@ makedocs(
             "Texts" => "concepts/texts.md",
             "Paths" => "concepts/paths.md",
             "Routes" => "concepts/routes.md",
+            "Channel Autorouter" => "concepts/channel_autorouter.md",
             "Rendering and Export" => "concepts/render.md",
             "Solid Models (3D Geometry)" => "concepts/solidmodels.md",
+            "Solid Models (Experimental)" => "concepts/solidmodels_experimental.md",
             "Schematic-Driven Design" => "concepts/schematic_driven_design.md",
             "Components" => "concepts/components.md",
             "Autofill" => "concepts/autofill.md",
@@ -72,17 +79,27 @@ makedocs(
         "Examples" => [
             "ExamplePDK" => "examples/examplepdk.md",
             "Quantum Processor" => "examples/qpu17.md",
-            "Single-Transmon Simulation" => "examples/singletransmon.md"
+            "Single-Transmon Simulation" => "examples/singletransmon.md",
+            "Channel Autorouter" => "examples/autorouter.md"
         ],
         "Reference" => [
             "Overview" => "reference/index.md",
             "Geometry API Reference" => "reference/api.md",
             "Path API Reference" => "reference/path_api.md",
             "Schematic API Reference" => "reference/schematic_api.md",
+            "Experimental Solid Model API Reference" => "reference/solidmodels_experimental_api.md",
             "ParameterSet API Reference" => "reference/parameter_set_api.md",
             "Shape Reference" => "reference/shapes.md"
         ],
-        "FAQ/Troubleshooting" => "how_to/faq.md"
+        "FAQ/Troubleshooting" => "how_to/faq.md",
+        "Developer Guide" => [
+            "Overview" => "developers/index.md",
+            "Design Principles" => "developers/principles.md",
+            "Conventions" => "developers/conventions.md",
+            "Contributing" => "developers/contributing.md",
+            "Versioning Policy" => "developers/versioning.md",
+            "Maintainer Runbook" => "developers/maintenance.md"
+        ]
     ]
 )
 

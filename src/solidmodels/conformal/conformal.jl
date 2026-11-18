@@ -409,7 +409,10 @@ _add_conformal!(
 # CurvilinearRegion: single add_plane_surface call with hole loops. Stock
 # render! creates the outer surface, then a surface per hole, then k.cut()s
 # each hole. The multi-loop form is one OCC call and preserves shared points
-# naturally, which is what we need for conformal rendering.
+# naturally, which is what we need for conformal rendering. `add_plane_surface`
+# subtracts a hole only if its loop winds like the exterior, and a
+# `CurvilinearRegion` stores its holes clockwise, opposite its counterclockwise
+# exterior, so they are reversed.
 function _add_conformal!(
     ctx::ConformalRenderContext,
     surf::CurvilinearRegion{T},
@@ -422,7 +425,8 @@ function _add_conformal!(
 ) where {T}
     z = zmap(m)
     outer_loop = _add_conformal_loop!(ctx, surf.exterior, k, z; points_cache, atol)
-    hole_loops = _add_conformal_loop!.(Ref(ctx), surf.holes, k, z; points_cache, atol)
+    hole_loops =
+        _add_conformal_loop!.(Ref(ctx), surf.holes, k, z; points_cache, atol, reverse=true)
     surftag = k.add_plane_surface([outer_loop; hole_loops...])
     return (Int32(2), surftag)
 end
@@ -541,19 +545,24 @@ _add_conformal!(ctx::ConformalRenderContext, els::AbstractVector, m::Meta, k; kw
 
 """
     add_conformal_loop!(ctx::ConformalRenderContext, cl::CurvilinearPolygon,
-        k::OpenCascade, z; points_cache=nothing, atol=onenanometer(...))
+        k::OpenCascade, z; points_cache=nothing, atol=onenanometer(...), reverse=false)
 
-Build an OCC curve loop for `cl` using the conformal edge/curve cache.
+Build an OCC curve loop for `cl` using the conformal edge/curve cache, traversing
+`cl` backwards if `reverse` is `true`.
 
 This is the public seam for callers that build OCC geometry themselves (rather
 than using [`render_conformal!`](@ref)'s orchestrator). Typical usage:
 
 ```julia
 ctx = ConformalRenderContext()
-points_cache = SpatialIndexing.RTree{Float64, 3}(Int32)
-for region in regions
+points_cache = SolidModels.PointsCache()
+for region in regions # counterclockwise exteriors, as Clipper returns them
     outer = add_conformal_loop!(ctx, region.exterior, k, z; points_cache)
-    holes = [add_conformal_loop!(ctx, h, k, z; points_cache) for h in region.holes]
+    # `add_plane_surface` subtracts a hole only if its loop winds like the exterior,
+    # and a `CurvilinearRegion` stores its holes clockwise
+    holes = [
+        add_conformal_loop!(ctx, h, k, z; points_cache, reverse=true) for h in region.holes
+    ]
     k.add_plane_surface([outer; holes...])
 end
 ```
@@ -567,9 +576,10 @@ function add_conformal_loop!(
     k::OpenCascade,
     z;
     points_cache=nothing,
-    atol=onenanometer(coordinatetype(cl))
+    atol=onenanometer(coordinatetype(cl)),
+    reverse=false
 )
-    return _add_conformal_loop!(ctx, cl, k, z; points_cache, atol)
+    return _add_conformal_loop!(ctx, cl, k, z; points_cache, atol, reverse)
 end
 
 function _add_conformal_loop!(
@@ -578,8 +588,10 @@ function _add_conformal_loop!(
     k::OpenCascade,
     z;
     points_cache=nothing,
-    atol=onenanometer(coordinatetype(cl))
+    atol=onenanometer(coordinatetype(cl)),
+    reverse=false
 )
+    reverse && (cl = DeviceLayout.Curvilinear._reverse(cl))
     poly_pts = points(cl)
     pts = [
         _cached_point_relaxed!(
@@ -822,7 +834,7 @@ same shared orchestrator as
     the cache already guarantees conformality on rendered geometry if preconditions are met (see below).
 
 Accepts all of `render!`'s keyword arguments (`map_meta`, `postrender_ops`,
-`retained_physical_groups`, `zmap`, `gmsh_options`, `skip_postrender`,
+`post_fragment_ops`, `retained_physical_groups`, `zmap`, `gmsh_options`, `skip_postrender`,
 `auto_union`, `skip_unused_layers`, `curvature_sizing`) in addition to:
 
   - `context::ConformalRenderContext`: the edge/curve cache and merge tolerances.
@@ -884,7 +896,7 @@ function render_conformal!(
             points_cache=points_cache,
             kwargs...
         ),
-        (fragment!)=fragment_backstop ? _fragment_three_pass! : (_) -> nothing,
+        (fragment!)=fragment_backstop ? _fragment_three_pass! : (_sm; kwargs...) -> nothing, # _sm unused but _ breaks <1.12
         kwargs...
     )
 end

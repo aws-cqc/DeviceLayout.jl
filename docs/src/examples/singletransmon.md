@@ -9,7 +9,7 @@ constructs the geometry used in [the *Palace* release documentation](https://aws
 demonstrating the power of the [`SolidModels`](../concepts/solidmodels.md)
 capability for electronic design automation in an open-source toolchain.
 
-The full code for this example can be found [in `examples/SingleTransmon/SingleTransmon.jl` in the `DeviceLayout.jl` repository](https://github.com/aws-cqc/DeviceLayout.jl/blob/main/examples/SingleTransmon/SingleTransmon.jl). Components and process technology are drawn from the
+The full code for this example can be found [in `examples/SingleTransmon` in the `DeviceLayout.jl` repository](https://github.com/aws-cqc/DeviceLayout.jl/blob/main/examples/SingleTransmon/): `schematic.jl` builds the schematic and `SolidModelTarget`, and `SingleTransmon.jl` renders, meshes, and simulates it. Components and process technology are drawn from the
 [ExamplePDK](examplepdk.md).
 
 ## Overview

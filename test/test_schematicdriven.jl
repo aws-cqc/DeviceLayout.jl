@@ -546,6 +546,44 @@
         end
     end
 
+    @testset "Cell render geometry recovery" begin
+        @compdef struct FallibleComponent <: Component
+            name = "fallible"
+            fail::Bool = false
+        end
+        function SchematicDrivenLayout._geometry!(
+            cs::CoordinateSystem,
+            c::FallibleComponent
+        )
+            c.fail && error("geometry failure")
+            return place!(cs, centered(Rectangle(10μm, 10μm)), BASE_NEGATIVE)
+        end
+        SchematicDrivenLayout.hooks(::FallibleComponent) =
+            (; origin=PointHook(0μm, 0μm, 0°))
+        target = ArtworkTarget(ProcessTechnology((; base_negative=GDSMeta()), (;)))
+
+        # Plan under a TestLogger so the schematic logger tees render logs into it.
+        function recovery_schematic(logger)
+            g = SchematicGraph("recovery")
+            add_node!(g, FallibleComponent(name="good"))
+            add_node!(g, FallibleComponent(name="bad", fail=true))
+            sch = with_logger(() -> plan(g; log_dir=nothing), logger)
+            check!(sch)
+            return sch
+        end
+
+        logger = TestLogger()
+        sch = recovery_schematic(logger)
+        cell = Cell("recovered", nm)
+        @test render!(cell, sch, target; strict=:no) === cell
+        @test length(elements(flatten(cell))) == 1
+        @test SchematicDrivenLayout.max_level_logged(sch, :render) == Logging.Error
+        @test count(log -> log.level == Logging.Error, logger.logs) == 1
+
+        sch = recovery_schematic(TestLogger())
+        @test_throws ErrorException render!(Cell("strict", nm), sch, target)
+    end
+
     @testset "Targets" begin
         tech = ProcessTechnology((; base_negative=GDSMeta()), (;))
         meta = SemanticMeta(:base_negative)
@@ -1074,6 +1112,25 @@
         @composite_variant TestWrapperVariant TestWrapper new_defaults = (; jj_width=200nm)
         @test component(graph(TestWrapperVariant())[1]).jj_width == 200nm
         @test hooks(TestWrapperVariant()).xy1.p == hooks(c).xy1.p # Uses base variant map_hooks
+
+        # Variants reject unknown keyword arguments, as the base `@compdef` constructor does
+        @test_throws MethodError TestComponent(; widht=1μm)
+        @test_throws ArgumentError TestCompVariant(; widht=1μm)
+        @test_throws ArgumentError create_component(TestCompVariant; widht=1μm)
+        @test_throws MethodError TestWrapper(; jj_widht=200nm)
+        @test_throws ArgumentError TestWrapperVariant(; jj_widht=200nm)
+        @test_throws ArgumentError create_component(TestWrapperVariant; jj_widht=200nm)
+        typo_ps = SchematicDrivenLayout.ParameterSet()
+        typo_ps.components.variant.widht = 1μm
+        @test_throws ArgumentError create_component(
+            TestCompVariant,
+            typo_ps,
+            "components.variant"
+        )
+        # Variant-only parameters are still accepted
+        @test parameters(TestCompVariant(; width=1μm)).width == 1μm
+        @test parameters(create_component(TestWrapperVariant; jj_width=300nm)).jj_width ==
+              300nm
 
         ### No reordering of nodes or changing root of rendering tree
         g = SchematicGraph("spacers")

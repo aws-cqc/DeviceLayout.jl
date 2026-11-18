@@ -112,6 +112,15 @@
     Paths.StraightAnd45
     Paths.SingleChannelRouting
     Paths.RouteChannel
+    Paths.ChannelRouter
+    Paths.AutoChannelRouting
+```
+
+### Channel autorouting
+
+```@docs
+    Paths.autoroute!
+    Paths.assign_tracks!
 ```
 
 ### Route drawing

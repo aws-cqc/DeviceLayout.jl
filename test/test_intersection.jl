@@ -95,6 +95,42 @@
     @test pathlength_nearest(turn, Point(0.9, -2)) ≈ 0
     @test pathlength_nearest(turn, Point(-1, 1)) ≈ 3π / 4
 
+    @testset "sweep for intersections" begin
+        # Crossing straights, a meander with curved segments, and a self-crossing loop
+        pas = [Path(i * 0.1mm, -1mm, α0=π / 2 + 0.1i) for i = -5:5]
+        straight!.(pas, 2mm, Ref(sty))
+        meander = Path(-1mm, 0.5mm)
+        for i = 1:5
+            straight!(meander, 2mm, sty)
+            turn!(meander, (-1)^i * π, 0.05mm)
+        end
+        loop = Path(-0.3mm, -0.3mm)
+        straight!(loop, 0.5mm, sty)
+        turn!(loop, 3π / 2, 0.1mm)
+        straight!(loop, 0.5mm)
+        all_paths = (pas..., meander, loop)
+        from_sweep = Intersect.intersections(all_paths...)
+        @test all(i1 < i2 for (i1, i2, _) in from_sweep)
+        # Reference: test every pair of segments with the same endpoint-intersection predicate
+        all_segs = Tuple{Int, Int, Polygons.LineSegment}[]
+        for (pa_idx, pa) in enumerate(all_paths)
+            inds, segs = Paths.line_segments(pa)
+            append!(all_segs, ((pa_idx, n, s) for (n, s) in zip(inds, segs)))
+        end
+        reference = Set{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}}()
+        for (a, (i1, n1, s1)) in enumerate(all_segs)
+            for (i2, n2, s2) in all_segs[(a + 1):end]
+                intersects, atapoint, atendpoints = Polygons.intersects_at_endpoint(s1, s2)
+                if intersects && atapoint && !atendpoints
+                    push!(reference, minmax((i1, n1), (i2, n2)))
+                end
+            end
+        end
+        @test length(from_sweep) == length(reference)
+        @test Set(minmax(i1, i2) for (i1, i2, _) in from_sweep) == reference
+        @test any(i1[1] == i2[1] for (i1, i2, _) in from_sweep) # loop self-intersection
+    end
+
     @testset "mixed coordinate contexts (issue #212)" begin
         pa1 = Path(μm)  # μm-context
         Paths.turn!(pa1, -360°, 100μm, Paths.CPW(10μm, 6μm))

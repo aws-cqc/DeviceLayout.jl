@@ -196,6 +196,7 @@ If you don't have any other leads, you can fall back on this generic debugging c
 
   - Update to the latest DeviceLayout version
   - Search [open and closed DeviceLayout issues](https://github.com/aws-cqc/DeviceLayout.jl/issues?q=is%3Aissue%20SolidModel) for similar errors
+  - Render with `verbose=true` as a keyword argument to `render!(::SolidModel, ...)` or your `SolidModelTarget` constructor to log every physical group and postrendering operation along with the resulting entity count, bounding box, and elapsed time. Each operation is logged before it runs, so the operation responsible for an error is the last one logged.
   - At any point, inspect rendering or meshing results in the Gmsh GUI by running `SolidModels.gmsh.fltk.run()`, using GUI controls for fine-grained entity and physical group labeling and visibility
   - At any point, inspect the contents of the model by listing physical groups, their entity counts, and their bounds: 
 

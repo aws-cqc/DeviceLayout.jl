@@ -435,6 +435,7 @@ ClippedPolygon{T}(x::Clipper.PolyNode{Point}) where {T} =
 function ==(p1::ClippedPolygon, p2::ClippedPolygon)
     function children_equal(l, r)
         # recursively check contours of all children in the tree
+        length(Clipper.children(l)) == length(Clipper.children(r)) || return false
         for (x, y) in zip(Clipper.children(l), Clipper.children(r))
             (!circularequality(x.contour, y.contour) || !children_equal(x, y)) &&
                 return false
@@ -447,6 +448,7 @@ end
 function isapprox(p1::ClippedPolygon, p2::ClippedPolygon; kwargs...)
     function children_approx(l, r)
         # recursively check contours of all children in the tree
+        length(Clipper.children(l)) == length(Clipper.children(r)) || return false
         for (x, y) in zip(Clipper.children(l), Clipper.children(r))
             (!circularapprox(x.contour, y.contour; kwargs...) || !children_approx(x, y)) &&
                 return false
@@ -484,7 +486,8 @@ function to_polygons(p::ClippedPolygon{T}; kwargs...) where {T}
     pc = clipperize(p)
     S = typeof(pc).parameters[1]
     pci = recast(Clipper.PolyNode{Point{Int64}}, pc.tree)
-    o = interiorcuts(pci, Polygon{S}[])
+    userpoint(p) = unscale(only(reinterpret(Point{S}, [p])), T)
+    o = interiorcuts(pci, Polygon{S}[], userpoint)
     return declipperize.(o, T)
 end
 # Broadcast equivalent
@@ -651,11 +654,18 @@ function perimeter(e::Ellipse)
     return π * ((a + b) + 3 * (a - b)^2 / (10 * (a + b) + sqrt(a^2 + 14 * a * b + b^2)))
 end
 
-function signed_area(p::Polygon) # Can be negative
-    return sum(
-        (gety.(p.p) + gety.(circshift(p.p, -1))) .*
-        (getx.(p.p) - getx.(circshift(p.p, -1)))
-    ) / 2
+# Can be negative. Cross products are taken relative to the first vertex for precision far
+# from the origin.
+function signed_area(p::Polygon{T}) where {T}
+    a2 = zero(float(T))^2
+    isempty(p.p) && return a2
+    o = first(p.p)
+    n = length(p.p)
+    for i = 1:n
+        u, v = p.p[i] - o, p.p[mod1(i + 1, n)] - o
+        a2 += getx(u) * gety(v) - gety(u) * getx(v)
+    end
+    return a2 / 2
 end
 
 """
@@ -1141,9 +1151,7 @@ abstract type D1{T} <: GeometryEntity{T} end
 
 ab(p0, p1) = Point(gety(p1) - gety(p0), getx(p0) - getx(p1))
 
-to_polygons(::D1{T}) where {T} = Polygon{T}[]
-
-transform(d1::T, f::Transformation) where {T <: D1} = T(f(d1.p0), f(d1.p1))
+to_polygons(::D1{T}; kwargs...) where {T} = Polygon{T}[]
 
 """
     LineSegment{T} <: D1{T}
@@ -1162,6 +1170,12 @@ struct LineSegment{T} <: D1{T}
     end
 end
 LineSegment(p0::Point{S}, p1::Point{T}) where {S, T} = LineSegment(promote(p0, p1)...)
+transform(l::LineSegment, f::Transformation) = LineSegment(f(l.p0), f(l.p1))
+convert(::Type{GeometryEntity{T}}, l::LineSegment) where {T} =
+    LineSegment(convert(Point{T}, l.p0), convert(Point{T}, l.p1))
+
+lowerleft(l::LineSegment) = Point(l.p0.x, min(l.p0.y, l.p1.y))
+upperright(l::LineSegment) = Point(l.p1.x, max(l.p0.y, l.p1.y))
 
 struct LineSegmentView{T} <: AbstractVector{T}
     v::Vector{Point{T}}
@@ -1185,6 +1199,9 @@ struct Ray{T} <: D1{T}
     p1::Point{T}
 end
 Ray(p0::Point{S}, p1::Point{T}) where {S, T} = Ray(promote(p0, p1)...)
+transform(r::Ray, f::Transformation) = Ray(f(r.p0), f(r.p1))
+convert(::Type{GeometryEntity{T}}, r::Ray) where {T} =
+    Ray(convert(Point{T}, r.p0), convert(Point{T}, r.p1))
 
 struct Line{T} <: D1{T}
     p0::Point{T}
@@ -1192,6 +1209,8 @@ struct Line{T} <: D1{T}
 end
 Line(p0::Point{S}, p1::Point{T}) where {S, T} = Line(promote(p0, p1)...)
 Line(seg::LineSegment) = Line(seg.p0, seg.p1)
+transform(l::Line, f::Transformation) = Line(f(l.p0), f(l.p1))
+convert(::Type{GeometryEntity{T}}, l::Line) where {T} = convert(Line{T}, l)
 
 Base.promote_rule(::Type{Line{S}}, ::Type{Line{T}}) where {S, T} = Line{promote_type(S, T)}
 Base.convert(::Type{Line{S}}, L::Line) where {S} = Line{S}(L.p0, L.p1)
@@ -1219,6 +1238,12 @@ Return 1 if the path `p1`--`p2`--`p3` is going counter-clockwise (increasing ang
 """
 function orientation(p1::Point, p2::Point, p3::Point)
     return sign((p3.y - p2.y) * (p2.x - p1.x) - (p2.y - p1.y) * (p3.x - p2.x))
+end
+# Exact for integer coordinates: in their own type, the products overflow `Int64` for the
+# femtometer-grid coordinates from `clipperize` once points are a few microns apart.
+function orientation(p1::Point{T}, p2::Point{T}, p3::Point{T}) where {T <: Integer}
+    x1, y1, x2, y2, x3, y3 = widen.((p1.x, p1.y, p2.x, p2.y, p3.x, p3.y))
+    return T(sign((y3 - y2) * (x2 - x1) - (y2 - y1) * (x3 - x2)))
 end
 
 isparallel(A::D1, B::D1) = Δy(A) * Δx(B) == Δy(B) * Δx(A)
@@ -1387,6 +1412,21 @@ function intersection(A::Line{T}, B::Line{T}, checkparallel=true) where {T}
         u = A.p1 - A.p0
         v = B.p1 - B.p0
         w = A.p0 - B.p0
+        if T <: Integer
+            # Exact integer dot products, then one division. Normalizing `vp` in floating
+            # point (as below) rounds the parameter, so a hit exactly at a segment endpoint
+            # can fail the exact `in_bounds` check in `intersection(::Ray, ::LineSegment)`.
+            # An integer quotient is computed exactly, at any coordinate scale.
+            vx, vy = -Int128(v.y), Int128(v.x)
+            num = -(vx * w.x + vy * w.y)
+            den = vx * u.x + vy * u.y
+            i = if iszero(den) || !iszero(rem(num, den))
+                float(num) / float(den)
+            else
+                float(div(num, den))
+            end
+            return true, A.p0 + i * u
+        end
         vp = Point{float(T)}(-v.y, v.x)     # need float or hit overflow
 
         vp = vp / max(abs(vp.x), abs(vp.y))   # scale this, since its magnitude cancels out
@@ -1618,6 +1658,9 @@ Style used for applying differing styles to different Polygons at different leve
 `ClippedPolygon` or `CurvilinearRegion`. Styles are stored by the sequence of child indices
 required to find the corresponding `Clipper.PolyNode` within the `ClippedPolygon`. For a
 `CurvilinearRegion` only dictionaries of depth 2 (a single parent and one set of holes) are valid.
+
+Any other entity, such as a `Rectangle` or a path node, is styled as a single contour with the
+style at `[1]` (the default unless set), and styles at other indices throw an `ArgumentError`.
 """
 struct StyleDict{S} <: GeometryEntityStyle where {S}
     styles::Dict{Vector{Int}, GeometryEntityStyle}
@@ -1690,6 +1733,23 @@ Base.setindex!(d::StyleDict, s::GeometryEntityStyle, indices::Int...) =
     addstyle!(d, s, indices...)
 Base.setindex!(d::StyleDict, s::GeometryEntityStyle, n::Clipper.PolyNode) =
     addstyle!(d, s, getkey(n))
+
+function _single_contour_style(s::StyleDict)
+    others = sort!([k for k in keys(s.styles) if k != [1]])
+    isempty(others) || throw(
+        ArgumentError(
+            "this `StyleDict` has styles at $(join(others, ", ")), but only a " *
+            "`ClippedPolygon` or `CurvilinearRegion` has contours to index. Other entities " *
+            "are styled as a single contour, `[1]`. To style contours separately, convert " *
+            "the entity to a `ClippedPolygon` first, for example with `union2d`."
+        )
+    )
+    return s[1]
+end
+
+# Without this, the generic fallback hands the polygon straight back to itself.
+to_polygons(p::Polygon, s::StyleDict; kwargs...) =
+    to_polygons(p, _single_contour_style(s); kwargs...)
 
 function to_polygons(p::ClippedPolygon, s::StyleDict; kwargs...)
     p = deepcopy(p) # deepcopy so as not to modify

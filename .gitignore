@@ -16,3 +16,4 @@ coverage/
 CLAUDE*
 test/build/
 .claude/
+.pi-subagents/

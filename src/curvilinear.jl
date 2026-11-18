@@ -36,7 +36,7 @@ import DeviceLayout: MeshSized, WithDirection, OptionalStyle, Plain, NoRender
 using DeviceLayout.Paths
 import DeviceLayout.Polygons: cornerindices, iscircle, StyleDict, Rounded
 import DeviceLayout.Polygons.Clipper: PolyNode, contour
-import Unitful: uconvert, °, Length, numtype, unit
+import Unitful: uconvert, °, Length, NoUnits, numtype, unit
 
 using ..Points
 using ..Polygons
@@ -242,6 +242,110 @@ function _reverse(e::CurvilinearPolygon)
     )
 end
 
+"""
+    orientation(e::CurvilinearPolygon)
+
+Return 1 if the contour of `e` goes counterclockwise, -1 if clockwise, judged by the sign of
+its signed area including the area each curve encloses with its chord. As for `Polygon`, a
+zero-area contour counts as counterclockwise.
+
+`Turn` and `BSpline` curves, and constant offsets of either, contribute their exact area
+without discretization; other curves are discretized as in `to_polygons`.
+"""
+function Polygons.orientation(e::CurvilinearPolygon)
+    a = Polygons.signed_area(e)
+    return a >= zero(a) ? 1 : -1
+end
+
+_cross(u::Point, v::Point) = getx(u) * gety(v) - gety(u) * getx(v)
+
+# Shoelace over the vertices, plus each curve's signed area against its chord.
+function Polygons.signed_area(e::CurvilinearPolygon)
+    a2 = 2 * Polygons.signed_area(Polygon(e.p))
+    for c in e.curves
+        a2 += _chord_area2(c)
+    end
+    return a2 / 2
+end
+
+# Twice the signed area enclosed by curve `c` followed by its chord back to its start.
+# Circular segment: r²(α - sin α) / 2 has the sign of α, which is positive for a left turn.
+# A negative radius sweeps the other way (as in `discretize_curve`), so it flips the sign.
+_chord_area2(c::Paths.Turn) = c.r * abs(c.r) * (uconvert(NoUnits, c.α) - sin(c.α))
+# Regions of paths along arcs are bounded by constant offsets of the arcs, which are arcs
+_chord_area2(c::Paths.ConstantOffset{T, Paths.Turn{T}}) where {T} =
+    _chord_area2(Paths.Turn(c))
+
+# The knot spans of `b` within its domain t ∈ [0, 1]. The knots need not span [0, 1] exactly
+# (a split spline keeps its parent's knots).
+_knot_spans(b::Paths.BSpline) = [0.0; filter(t -> 0 < t < 1, b.r.ranges[1]); 1.0]
+
+# Green's theorem, ∫ (r(t) - r(0)) × r'(t) dt over t ∈ [0, 1]. The interpolant is cubic in
+# `t` on each knot span, so the integrand has degree 5 there and 3-point Gauss–Legendre is
+# exact.
+function _chord_area2(b::Paths.BSpline{T}) where {T}
+    ts = _knot_spans(b)
+    r0 = b.r(0.0)
+    a2 = zero(float(T))^2
+    for k = 1:(length(ts) - 1)
+        m = (ts[k] + ts[k + 1]) / 2
+        h = (ts[k + 1] - ts[k]) / 2
+        for (x, w) in ((-sqrt(3 / 5), 5 / 9), (0.0, 8 / 9), (sqrt(3 / 5), 5 / 9))
+            t = m + h * x
+            dr = Paths.Interpolations.gradient(b.r, t)[1]
+            a2 += w * h * _cross(b.r(t) - r0, dr)
+        end
+    end
+    return a2
+end
+
+# Regions of paths along splines are bounded by constant offsets q = r + d n̂ of a spline r,
+# with n̂ its left unit normal. Since n̂ × dn̂ = dθ and n̂ × dr = -ds, Green's theorem gives
+#   ∫ (q - q(0)) × dq = ∫ (r - r(0)) × dr + d (r(1) - r(0)) × (n̂(0) + n̂(1))
+#                       - d² n̂(0) × n̂(1) - 2dL + d²Δθ,
+# with L the length of r and Δθ the angle its tangent turns. Quadrature of the left side
+# converges slowly where d approaches the radius of curvature, and the identity also holds
+# past it, where q has cusps.
+function _chord_area2(c::Paths.ConstantOffset{T, Paths.BSpline{T}}) where {T}
+    b, d = c.seg, c.offset
+    normal(t) =
+        (g = Paths.Interpolations.gradient(b.r, t)[1]; Point(-gety(g), getx(g)) / norm(g))
+    n0, n1 = normal(0.0), normal(1.0)
+    return _chord_area2(b) + d * _cross(b.r(1.0) - b.r(0.0), n0 + n1) -
+           d^2 * _cross(n0, n1) - 2 * d * pathlength(b) + d^2 * _turning_angle(b)
+end
+
+# The angle the tangent of `b` turns over t ∈ [0, 1]. Each knot span is followed in 8 steps,
+# halved until the tangent turns by less than 90° in each so that the angles unwrap. A step
+# could hide an extra full turn only if the tangent turned by over 270° within it, which
+# takes a near-cusp in the spline.
+function _turning_angle(b::Paths.BSpline)
+    g(t) = Paths.Interpolations.gradient(b.r, t)[1]
+    ts = _knot_spans(b)
+    θ = 0.0
+    for k = 1:(length(ts) - 1), j = 1:8
+        t0 = ts[k] + (j - 1) * (ts[k + 1] - ts[k]) / 8
+        t1 = ts[k] + j * (ts[k + 1] - ts[k]) / 8
+        θ += _unwrapped_angle(g, t0, t1, g(t0), g(t1), 0)
+    end
+    return θ
+end
+
+function _unwrapped_angle(g, t0, t1, g0, g1, depth)
+    c = getx(g0) * getx(g1) + gety(g0) * gety(g1)
+    (c > zero(c) || depth == 16) && return atan(_cross(g0, g1), c)
+    tm = (t0 + t1) / 2
+    gm = g(tm)
+    return _unwrapped_angle(g, t0, tm, g0, gm, depth + 1) +
+           _unwrapped_angle(g, tm, t1, gm, g1, depth + 1)
+end
+
+# Closing the discretized curve into a polygon adds exactly its chord.
+function _chord_area2(c::Paths.Segment{T}) where {T}
+    pts = DeviceLayout.discretize_curve(c, DeviceLayout.onenanometer(T); rtol=nothing)
+    return 2 * Polygons.signed_area(Polygon(pts))
+end
+
 function transform(e::CurvilinearPolygon, f::Transformation)
     # If the transformation is a reflection, have to fix the winding.
     # curve_start_idx are shifted forward 1, reversed, then negated.
@@ -281,26 +385,32 @@ A curvilinear region made up of an exterior::CurvilinearPolygon{T} and optional 
 holes made up of CurvilinearPolygon{T}. These holes cannot intersect each other or the
 exterior.
 
-Holes are normalized to clockwise (negative) winding on construction, opposite the
-counterclockwise exterior. This matches `ClippedPolygon` hole contours, so that `to_polygons`
+On construction, the exterior is normalized to counterclockwise (positive) winding and the
+holes to clockwise (negative). This matches `ClippedPolygon` contours, so that `to_polygons`
 can reconstitute the region with `union2d` under Clipper's positive fill rule. See issue #241.
 """
 struct CurvilinearRegion{T} <: GeometryEntity{T}
     exterior::CurvilinearPolygon{T}
     holes::Vector{CurvilinearPolygon{T}}
     CurvilinearRegion{T}(ext::CurvilinearPolygon, holes=CurvilinearPolygon{T}[]) where {T} =
-        new(ext, _to_hole_winding.(holes))
+        new(_to_exterior_winding(ext), _to_hole_winding.(holes))
 end
 
 # Normalize a hole to clockwise (negative) winding, matching `ClippedPolygon` hole contours,
-# so `to_polygons` subtracts it via positive-fill `union2d`. For curve-bearing holes, winding
-# is read from the discretized loop because vertices alone can't determine it (a two-vertex
-# loop closed by two arcs has no vertex winding at all). Clipper-derived holes already arrive
-# clockwise, making this a no-op. Degenerate loops (< 3 discretized points) pass through.
+# so `to_polygons` subtracts it via positive-fill `union2d`. Winding is read from the signed
+# area including curves, because vertices alone can't determine it (a two-vertex loop closed
+# by two arcs has no vertex winding at all). Clipper-derived holes already arrive clockwise,
+# making this a no-op. Zero-area loops have no winding and pass through.
 function _to_hole_winding(h::CurvilinearPolygon)
-    pg = isempty(h.curves) ? Polygon(h.p) : to_polygons(h)
-    length(points(pg)) < 3 && return h
-    return Polygons.orientation(pg) > 0 ? _reverse(h) : h
+    a = Polygons.signed_area(h)
+    return a > zero(a) ? _reverse(h) : h
+end
+
+# Normalize the exterior to counterclockwise (positive) winding, opposite the holes. Winding
+# is read as for holes; Clipper-derived exteriors already arrive counterclockwise.
+function _to_exterior_winding(e::CurvilinearPolygon)
+    a = Polygons.signed_area(e)
+    return a < zero(a) ? _reverse(e) : e
 end
 CurvilinearRegion(x) = CurvilinearRegion(CurvilinearPolygon(x))
 
@@ -1862,6 +1972,9 @@ styled_loop(n::PolyNode, sty; kwargs...) = styled_loop(Polygon(contour(n)), sty;
 styled_loop(l::CurvilinearPolygon, sty::Plain; kwargs...) = l
 styled_loop(::CurvilinearPolygon{T}, ::NoRender; kwargs...) where {T} =
     CurvilinearPolygon(Point{T}[])
+# A lone loop is styled as a single contour, `[1]`, as in `to_polygons`.
+styled_loop(l::Union{Polygon, CurvilinearPolygon}, sty::StyleDict; kwargs...) =
+    styled_loop(l, Polygons._single_contour_style(sty); kwargs...)
 
 # Expand a styled entity into curve-bearing geometry. Entry points accept a bare style
 # (single style applied to the whole entity) and dispatch by entity type below.
@@ -2013,13 +2126,20 @@ end
 _carries_curves(e::StyledEntity{T, U}) where {T, U} = _carries_curves(e.ent)
 
 # Entities without a curve-preserving method are discretized.
-# Warn once per entity type so the loss is observable.
+# Warn once per entity type per context so the loss is observable.
 const _curve_loss_warned = Set{Symbol}()
-function _maybe_warn_curve_loss(e)
+function _maybe_warn_curve_loss(e; context=:recover_curves)
     _carries_curves(e) || return nothing
-    key = Symbol("$(typeof(e))")
+    key = Symbol(context, " ", typeof(e))
     key in _curve_loss_warned && return nothing
     push!(_curve_loss_warned, key)
+    if context === :solidmodel
+        @warn "Rendering entities of type $(typeof(e)) to an OpenCascade SolidModel " *
+              "discretizes their curves, because they have no OpenCascade " *
+              "`SolidModels.to_primitives` method and are rendered via to_polygons. (This " *
+              "warning is shown once per entity type.)"
+        return nothing
+    end
     @warn "recover_curves: entities of type $(typeof(e)) have no curve-recovery method " *
           "and are discretized via to_polygons — any curves they carry will not be " *
           "recovered. (This warning is shown once per entity type.)"

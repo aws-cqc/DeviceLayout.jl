@@ -1,0 +1,2 @@
+# Only look for test items under `test/`
+include = ["test/**"]

@@ -1,6 +1,7 @@
 module SolidModels
 
 import Gmsh: gmsh, gmsh.model.occ
+import Printf: @sprintf
 export gmsh, populate_size_fields!
 
 # Explicit callback dictionary, to overcome closure limitation on apple silicon.
@@ -515,6 +516,7 @@ end
 
 include("render.jl")
 include("postrender.jl")
+include("import.jl")
 include("conformal/conformal.jl")
 
 using .ConformalRender: render_conformal!, ConformalRenderContext, add_conformal_loop!

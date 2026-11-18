@@ -7,6 +7,12 @@ on:
 jobs:
   cleanup-preview-docs:
     runs-on: ubuntu-latest
+    # Every job that pushes to gh-pages shares this group, so they push one at a time;
+    # queue: max keeps every waiting job instead of replacing it with the newest.
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: write
     steps:

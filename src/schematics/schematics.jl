@@ -685,7 +685,7 @@ function Base.deepcopy_internal(x::SchematicLogger, stackdict::IdDict)
 end
 
 # Overrides required for custom logger
-# Update max level and add stage to kwargs
+# Update max level and add stage to kwargs for the log file
 function Logging.handle_message(
     logger::SchematicLogger,
     level,
@@ -699,8 +699,13 @@ function Logging.handle_message(
 )
     logger.max_level_logged[logger.stage] =
         max(level, get(logger.max_level_logged, logger.stage, Logging.Debug))
-    return handle_message(
-        logger.logger,
+    # Only the log file uses the stage (as a line prefix). Passing it to the console logger
+    # too would print `stage = ...` beneath every message.
+    console, logfile = logger.logger.loggers
+    _sink_takes(console, level, _module, group, id) &&
+        handle_message(console, level, message, _module, group, id, file, line; kwargs...)
+    _sink_takes(logfile, level, _module, group, id) && handle_message(
+        logfile,
         level,
         message,
         _module,
@@ -711,7 +716,15 @@ function Logging.handle_message(
         stage=logger.stage,
         kwargs...
     )
+    return nothing
 end
+# The per-sink check `TeeLogger` applies: the sink's own `shouldlog` does not check its
+# minimum level (e.g. `ConsoleLogger` only checks `maxlog`), so a sink with a higher minimum
+# than the other would otherwise receive messages below it. `env_override_minlevel` is what
+# lets `JULIA_DEBUG` surface messages below a sink's minimum level.
+_sink_takes(sink, level, _module, group, id) =
+    (min_enabled_level(sink) <= level && shouldlog(sink, level, _module, group, id)) ||
+    Base.CoreLogging.env_override_minlevel(group, _module)
 # Otherwise just pass to internal TeeLogger
 Logging.shouldlog(logger::SchematicLogger, level, _module, group, id) =
     shouldlog(logger.logger, level, _module, group, id)
@@ -792,7 +805,14 @@ end
 function close_logfile(sch::Schematic)
     tee = sch.logger.logger
     l = tee.loggers[2]
-    return !(l isa Base.NullLogger) && close(l.logger.stream) # MinLevelLogger->FormatLogger
+    # Cleanup may run after another stage has already closed the stream. Treat that case
+    # as success so an InvalidStateException does not mask an earlier workflow failure.
+    try
+        return !(l isa Base.NullLogger) && close(l.logger.stream) # MinLevelLogger->FormatLogger
+    catch e
+        e isa InvalidStateException || rethrow()
+        return nothing
+    end
 end
 
 function reopen_logfile(sch::Schematic, stage)
@@ -1412,7 +1432,7 @@ function index_layer!(sch::Schematic, ly, nextindex=1)
     index_components = ComponentNode[]
     # Index top-level schematic elements
     for (idx, m) in pairs(element_metadata(sch.coordinate_system))
-        if (layer(m) == ly)
+        if layer(m) == ly && !is_experimental_meta(m)
             element_metadata(sch.coordinate_system)[idx] = SemanticMeta(m, index=nextindex)
             nextindex = nextindex + 1
         end
@@ -1439,7 +1459,7 @@ function index_layer!(
 )
     for (cs, trans) in DeviceLayout.traversal(comp_cs)
         for (idx, el, m) in zip(1:length(elements(cs)), elements(cs), element_metadata(cs))
-            if layer(m) == ly
+            if layer(m) == ly && !is_experimental_meta(m)
                 place!(parent_cs, trans(el), SemanticMeta(m, index=nextindex))
                 element_metadata(cs)[idx] = SemanticMeta(m, index=0)
                 nextindex = nextindex + 1
@@ -1687,20 +1707,33 @@ function render!(
         "Cannot render an unchecked Schematic. Run check!(sch::Schematic), or override by setting sch.checked[] = true (not recommended!)"
     )
     reopen_logfile(sch, :render)
-    with_logger(sch.logger) do
-        return render!(cs, sch.coordinate_system; _maps(target)..., kwargs...)
+    try
+        with_logger(sch.logger) do
+            with_geometry_resolution_context() do
+                return render!(cs, sch.coordinate_system; _maps(target)..., kwargs...)
+            end
+        end
+    finally
+        close_logfile(sch)
     end
-    close_logfile(sch)
+    check_render_strict(sch, strict, :render)
+    return cs
+end
+
+function check_render_strict(sch::Schematic, strict, stage::Symbol)
     if strict == :error
-        max_level_logged(sch, :render) >= Logging.Error && error(
-            "Encountered errors while rendering. See $(sch.logger.logname) for details. Render with `strict=:no` to continue anyway (not recommended except for debugging)."
+        max_level_logged(sch, stage) >= Logging.Error && error(
+            "encountered errors while rendering. See $(sch.logger.logname) for details. " *
+            "Render with `strict=:no` to continue anyway (not recommended except for debugging)."
         )
     elseif strict == :warn
-        max_level_logged(sch, :render) >= Logging.Warn && error(
-            "Encountered warnings while rendering. See $(sch.logger.logname) for details. Render with `strict=:error` to continue anyway."
+        max_level_logged(sch, stage) >= Logging.Warn && error(
+            "encountered warnings while rendering. See $(sch.logger.logname) for details. " *
+            "Render with `strict=:error` to allow warnings while still failing on errors."
         )
     elseif strict != :no
-        @warn "Keyword `strict` in `render!` should be `:error`, `:warn`, or `:no` (got `:$strict`). Proceeding as though `strict=:no` were used."
+        @warn "keyword `strict` in `render!` should be `:error`, `:warn`, or `:no` " *
+              "(got `:$strict`). Proceeding as though `strict=:no` were used."
     end
-    return cs
+    return nothing
 end

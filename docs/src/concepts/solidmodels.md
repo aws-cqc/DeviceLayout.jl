@@ -44,6 +44,8 @@ flatten --> to_primitives --> physical groups --> postrender ops --> fragment & 
 
 Each element is converted to kernel-native geometry via `to_primitives(sm, entity)`. OpenCascade represents curves and ellipses as exact geometry. Exact arcs produce smoother meshes with fewer elements—see the example [here](./geometry.md#Solid-Models).
 
+Styles are applied to styled entities. Styles that don't change the geometry, such as [`MeshSized`](@ref), keep native curves, and `Rounded` keeps exact arcs on OpenCascade. Any other style, including a user-defined one, is applied through `to_polygons` as in 2D rendering, which discretizes curves; OpenCascade warns when that happens.
+
 ### 3. Physical group creation
 
 Rendered entities are grouped by their mapped layer name. The `map_meta` function controls this mapping; when rendering through a `SolidModelTarget`, it applies rules for levelwise layers (appending `_L1`, `_L2`, etc.) and indexed layers (appending `_1`, `_2`, etc.). At this stage, entities also receive mesh sizing information from [`MeshSized`](@ref) metadata.
@@ -98,6 +100,39 @@ level attribute will default to level 1.
 ```
 
 The "substrate surface" z-height for a given `SemanticMeta` is calculated based on its level together with technology `chip_thicknesses` and `flipchip_gaps`. For non-levelwise layers, height and thickness are always measured along the global positive z axis, as explained above. For layers in `levelwise_layers`, positive height or extrusion thickness is always away from the substrate.
+
+## Conformal rendering
+
+[`render_conformal!`](@ref SolidModels.render_conformal!) is an alternative render strategy. Instead of reconciling coincident edges with the global fragment pass ([step 5](#5.-Fragment-and-cleanup)), it deduplicates shared edges through a per-render cache, so adjacent faces resolve a shared boundary to a single kernel curve. It has a geometry-level method, `render_conformal!(sm, cs::AbstractCoordinateSystem; ...)`, and a schematic-level method, the counterpart of `render!(sm, sch, target)`:
+
+```julia
+render_conformal!(sm, schematic, target)
+```
+
+!!! warning "Experimental API"
+    The schematic-level method, the target's `prerender_ops` and their operations are experimental and may change in minor versions, for example as 3D construction is added and as they are harmonized with the [experimental solid-model pipeline](solidmodels_experimental.md). Current limitations:
+
+      - Only 2D geometry is rendered: the target's `retained_physical_groups` of dimension 2, such as the metal, ports and lumped elements, each in the plane at its layer's height.
+      - `postrender_ops`, `post_fragment_ops` and the target's 3D operations (extrusions, `bounding_layers` intersections, bridges) are not run.
+      - 1D elements such as wave ports are skipped.
+      - `SolidModelComponent` parts are not imported.
+      - A curve that a prerender operation cuts, or that an overlapping element of its group crosses, comes out as a polyline, where `render!` keeps it a curve.
+      - The emitted groups must not overlap, as the geometry-level method requires.
+
+The schematic-level method uses the [`SolidModelTarget`](@ref SchematicDrivenLayout.SolidModelTarget)'s layers, levels, indices, rendering options and physical-group names as `render!` does, and converts elements with `to_primitives` as `render!` does. Because each group is emitted once, through the edge cache, the 2D groups are formed before emission, by the target's **`prerender_ops`** rather than its `postrender_ops`:
+
+```julia
+prerender_ops = [
+    ("metal_negative", union_geom2d!, ("metal_negative",)),
+    ("metal", difference_geom2d!, ("writeable_area", "metal_negative")),
+    ("metal", union_geom2d!, ("metal", "metal_positive")),
+    ("metal", difference_geom2d!, ("metal", "port"))
+]
+```
+
+These operations, [`union_geom2d!`](@ref SchematicDrivenLayout.union_geom2d!) and [`difference_geom2d!`](@ref SchematicDrivenLayout.difference_geom2d!), are authored like the `union_geom!` and `difference_geom!` postrender operations, with the same dimension arguments, vectors of group names, and `remove_object` / `remove_tool` options, but act on 2D region groups, with Clipper booleans that recover the curves they don't cut ([`recover_curves`](@ref)). After them, shared boundaries are noded with [`split_t_junctions!`](@ref), self-touching contours are split with [`split_pinches`](@ref), both at the edge cache's vertex merge tolerance, and the groups are emitted through the geometry-level `render_conformal!`. Mesh sizes are sampled from all the original elements, as `render!` does without `skip_unused_layers`, and the mesh-size callback is installed.
+
+See the [conformal rendering API](@ref api-solidmodels) for the full set of functions and preconditions.
 
 ## Meshing
 

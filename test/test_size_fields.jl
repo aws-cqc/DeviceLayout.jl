@@ -91,3 +91,44 @@
     @test primitive_calls[] == 0
     @test isempty(SolidModels.mesh_control_points())
 end
+
+@testitem "Mesh size under styles that don't set one" setup = [CommonTestSetup] begin
+    import DeviceLayout: Plain
+    import DeviceLayout.SolidModels: meshsize, meshgrading
+    import DeviceLayout.SchematicDrivenLayout: only_simulated
+
+    pa = Path(μm)
+    straight!(pa, 100μm, Paths.CPW(10μm, 6μm))
+    node = pa[1]
+    @test meshsize(node) == 12
+    @test meshsize(only_simulated(node); simulation=true) == 12
+    @test meshsize(Plain()(node)) == 12
+    @test meshsize(WithDirection(0°)(node)) == 12
+    @test meshsize(only_simulated(pa); simulation=true) == 12
+    pu = Path(Point(0.0, 0.0))
+    straight!(pu, 100.0, Paths.CPW(10.0, 6.0))
+    @test meshsize(Plain()(pu[1])) == 12
+    @test meshsize(only_simulated(pu[1]); simulation=true) == 12
+
+    # The outermost style that sets a size wins, including one selected by an OptionalStyle,
+    # and the grading comes with it
+    r = Rectangle(2μm, 3μm)
+    inner = MeshSized(2μm, 0.5)(r)
+    @test (meshsize(Plain()(inner)), meshgrading(Plain()(inner))) == (2, 0.5)
+    outer = MeshSized(1μm, 0.8)(Plain()(inner))
+    @test (meshsize(outer), meshgrading(outer)) == (1, 0.8)
+    opt = OptionalStyle(MeshSized(1μm, 0.8), :refine)(inner)
+    @test (meshsize(opt; refine=true), meshgrading(opt; refine=true)) == (1, 0.8)
+    @test (meshsize(opt; refine=false), meshgrading(opt; refine=false)) == (2, 0.5)
+    # An explicit MeshSized(0) still turns sizing off
+    @test meshsize(MeshSized(0μm)(node)) == 0
+
+    # Simulated-only CPWs get their trace and gap refinement in the size field
+    cs = CoordinateSystem("simulated_cpw", nm)
+    place!(cs, only_simulated(pa), SemanticMeta(:path))
+    cp = SolidModels.populate_size_fields!(cs; simulation=true)
+    @test (12.0, -1.0) in keys(cp)
+    SolidModels.clear_mesh_control_points!()
+    @test isempty(SolidModels.populate_size_fields!(cs; simulation=false))
+    SolidModels.clear_mesh_control_points!()
+end

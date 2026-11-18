@@ -11,12 +11,31 @@ any entity type it can be applied to. As a fallback, it can implement
 `to_polygons(::Polygon, ::MyStyle; kwargs...)`, in which case entities will be converted to
 polygons before applying the style.
 
+A style should implement `styled_loop` and `to_curvilinear` methods to allow rounding and curve
+recovery with nested styles.
+
+When rendering to an OpenCascade `SolidModel`, a style is applied through `to_polygons`, which
+discretizes curves, unless it implements
+`SolidModels.to_primitives(::SolidModel{SolidModels.OpenCascade}, ::StyledEntity{T, U, MyStyle}; kwargs...)`
+returning curve-bearing geometry such as a `CurvilinearPolygon`. A styled `CurvilinearRegion` is
+the exception: it is rendered by applying `styled_loop` to each of its loops.
+
+A style should implement `transform(::MyStyle, f)` if it holds information in a local coordinate
+frame (like `WithDirection` does).
+
 Unless implemented by the style, `lowerleft` and `upperright` (and hence `bounds`)
 of a styled entity will use the underlying entity's bounds. Similarly, `footprint` and
 `halo` will fall back to using the underlying entity. Exceptions include the `NoRender`
 style, in which case the entity is treated as a zero-area `Rectangle`
 (ignored in collective `bounds` calculations), as well as `OptionalStyle`, in which
 case the default style is used (in case it has special behavior).
+
+Mesh sizing for `SolidModel` rendering falls back to the underlying entity unless the style
+sets a size. The outermost style that sets one wins, and an `OptionalStyle` uses the branch
+selected by the rendering options. A style that sets a mesh size implements
+`SolidModels.meshsize(::GeometryEntity, ::MyStyle; kwargs...)`, returning a unitless size in
+microns, and `SolidModels.meshgrading(::GeometryEntity, ::MyStyle; kwargs...)`, returning the
+grading exponent `α` (negative for the global default), as `MeshSized` does.
 """
 abstract type GeometryEntityStyle end
 

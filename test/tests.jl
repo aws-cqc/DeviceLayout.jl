@@ -41,6 +41,9 @@
             Point(1.0, 1.0),
             Point(2.0, 2.0)
         ) == 1.0
+        # Exact for integers whose products overflow, like femtometer-grid coordinates 1 cm apart
+        @test DeviceLayout.orientation(Point(0, 0), Point(10^13, 0), Point(0, 10^13)) == 1
+        @test DeviceLayout.orientation(Point(0, 0), Point(0, 10^13), Point(10^13, 0)) == -1
     end
 
     @testset "> Point array arithmetic" begin
@@ -79,6 +82,26 @@
               [Point(99000000000nm2nm // 100, 198000000000nm2nm // 100)]
         @test [Point(1m2nm, 2m2nm)] .- Point(1cm2nm, 2cm2nm) ==
               [Point(99000000000nm2nm // 100, 198000000000nm2nm // 100)]
+    end
+
+    @testset "> Point array isapprox" begin
+        p, q = Point(1.0, 2.0), Point(3.0, 4.0)
+        @test !isapprox(Point{Float64}[], [p])
+        @test !isapprox([p], Point{Float64}[])
+        @test !isapprox([p], [p, q, q])
+        @test !isapprox(reshape([p, q], 1, 2), [p, q])
+        @test isapprox(Point{Float64}[], Point{Float64}[])
+        @test isapprox([p, q], [p, q + Point(1e-12, 0)])
+        @test !isapprox([p, q], [p, q + Point(1e-3, 0)])
+        @test isapprox([p, q], [p, q + Point(1e-3, 0)]; atol=1e-2)
+        @test !isapprox([Point(1.0μm, 2.0μm)], Point{typeof(1.0μm)}[])
+        @test isapprox([Point(1.0μm, 2.0μm)], [Point(1000.0nm, 2000.0nm)])
+        @test !isapprox([Point(1.0μm, 2.0μm)], [Point(1000.0nm, 2000.0nm), p * μm])
+        @test isapprox([Point(1, 2)], [Point(1.0, 2.0)])
+        @test !isapprox([Point(1, 2)], [Point(1.0, 2.0), q])
+        tri = [Point(0.0, 0.0), Point(1.0, 0.0), Point(1.0, 1.0)]
+        @test !isapprox(Polygon(tri), Polygon([tri..., Point(0.0, 1.0)]))
+        @test isapprox(Polygon(tri), Polygon([tri[1], tri[2], tri[3] + Point(1e-12, 0)]))
     end
 
     @testset "> Point accessors" begin
@@ -298,6 +321,15 @@ end
     @test convert(ScaledIsometry{Point{Int}}, tr).origin isa Point{Int}
     @test hash(ScaledIsometry()) == hash(ScaledIsometry(Point(0, 0)))
 
+    # Stored linear map agrees with the normalized fields
+    tr = ScaledIsometry(Point(1.0m, 2.0m), 30°, true, -2.0)
+    @test tr(Point(1.0m, 0.0m)) ≈ Point(1.0m, 2.0m) + Point(-2cosd(30)m, -2sind(30)m)
+    @test tr(Point(0.0m, 1.0m)) ≈ Point(1.0m, 2.0m) + Point(-2sind(30)m, 2cosd(30)m)
+    expected =
+        Translation(Point(1.0m, 2.0m)) ∘ Rotation(210°) ∘
+        Transformations.LinearMap([2 0; 0 2]) ∘ XReflection()
+    @test tr.(points(pfloat)) ≈ expected.(points(pfloat))
+
     # Point vector unfolding
     ux = Point(1, 0)
     uy = Point(0, 1)
@@ -359,6 +391,26 @@ end
     @test !(Polygons.intersects(Point(2, 2), ls))
     @test !(Polygons.intersects(Point(2, 0), ls))
     @test Polygons.intersects(Point(1, 1), ls)
+
+    # A ray through a segment endpoint hits it exactly, so the hit is within the segment's
+    # bounds. Normalizing the direction in floating point put this one at y = -43 - 1 ulp.
+    r = Polygons.Ray(Point(-20, 10), Point(-20, 9))
+    seg = Polygons.LineSegment(Point(-20, -43), Point(-1, -22))
+    @test Polygons.intersection(r, seg) == (true, Point(-20, -43))
+    # Rays through an endpoint of integer segments, in several directions, at coordinate
+    # scales up to that of femtometer-grid coordinates from `clipperize`.
+    dirs = Point.([(0, -1), (1, -2), (3, -1)])
+    as = [Point(x, y) for x = -3:2:3 for y = -2:3:4]
+    bs = [Point(x, y) for x = -11:3:11 for y = -10:4:10]
+    misses = []
+    for sc in (1, 10^6, 10^12), d in dirs, k in (1, 7), a0 in as, b0 in bs
+        u, a, b = sc * d, sc * a0, sc * b0
+        (b - a).x * u.y == (b - a).y * u.x && continue # parallel
+        p0 = a - k * u
+        hit = Polygons.intersection(Polygons.Ray(p0, p0 + u), Polygons.LineSegment(a, b))
+        hit == (true, a) || push!(misses, (p0, u, b))
+    end
+    @test isempty(misses)
 end
 
 @testitem "Cell methods" setup = [CommonTestSetup] begin
@@ -505,6 +557,41 @@ end
     c2 = Cell("test", Polygon{typeof(1.0nm)}[], GDSMeta[])
     c3 = Cell("test", Polygon{typeof(1.0nm)}[], GDSMeta[], [])
     @test Cells.dbscale(c1, c2, c3) == 1.0pm
+end
+
+@testitem "Negative-radius Turn stores a positive radius" setup = [CommonTestSetup] begin
+    # Turn(α, -r) traces the same arc as Turn(-α, r). Heading (α1, direction) and offsets
+    # read α and r directly and assume r ≥ 0, so the stored form must be the positive-radius one.
+    t = Paths.Turn(90.0°, -10.0μm; p0=Point(0.0μm, 0.0μm), α0=0.0°)
+
+    @testset "Stored form" begin
+        @test t.α == -90.0°
+        @test t.r == 10.0μm
+        @test t == Paths.Turn(-90.0°, 10.0μm; p0=Point(0.0μm, 0.0μm), α0=0.0°)
+    end
+
+    @testset "Endpoint and heading" begin
+        @test Paths.p1(t) ≈ Point(10.0μm, -10.0μm) atol = 1nm
+        @test Paths.α1(t) ≈ -90.0°
+        @test t(Paths.pathlength(t)) ≈ Paths.p1(t) atol = 1nm
+    end
+
+    @testset "Offset turn" begin
+        off = Paths.Turn(Paths.ConstantOffset(t, 2.0μm))
+        @test Paths.p0(off) ≈ Point(0.0μm, 2.0μm) atol = 1nm
+        @test Paths.p1(off) ≈ Point(12.0μm, -10.0μm) atol = 1nm
+        @test Paths.α1(off) ≈ -90.0°
+        @test off.r ≈ 12.0μm
+    end
+
+    @testset "Path continues from the turn's heading" begin
+        p = Path(Point(0.0μm, 0.0μm); α0=0.0°)
+        turn!(p, 90.0°, -10.0μm, Paths.Trace(2.0μm))
+        @test α1(p) ≈ -90.0°
+        @test p1(p) ≈ Point(10.0μm, -10.0μm) atol = 1nm
+        straight!(p, 10.0μm, Paths.Trace(2.0μm))
+        @test p1(p) ≈ Point(10.0μm, -20.0μm) atol = 1nm
+    end
 end
 
 @testitem "Path basics" setup = [CommonTestSetup] begin
