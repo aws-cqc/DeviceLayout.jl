@@ -2,6 +2,7 @@ using Test, BenchmarkTools
 using DeviceLayout, Pkg, FileIO, Unitful, DeviceLayout.PreferredUnits
 using DeviceLayout.SchematicDrivenLayout
 import Random: default_rng, rand, seed!
+import Logging: NullLogger, with_logger
 
 const um = μm
 const SUITE = BenchmarkGroup()

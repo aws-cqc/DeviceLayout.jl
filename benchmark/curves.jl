@@ -11,7 +11,8 @@ function turns()
     return render!(c, turn_path, GDSMeta())
 end
 
-# Build and render B-splines
+# Build and render B-splines. Several of the splines bend more tightly than the CPW's outer
+# edges, so rendering warns; the logger is silenced so that logging is not timed.
 function bsplines()
     c = Cell{Float64}("test")
     bspline_path = Path{Float64}()
@@ -24,7 +25,9 @@ function bsplines()
             endpoints_speed=20.0 * i
         )
     end
-    return render!(c, bspline_path, GDSMeta())
+    return with_logger(NullLogger()) do
+        return render!(c, bspline_path, GDSMeta())
+    end
 end
 
 # Approximate offset curves with B-splines

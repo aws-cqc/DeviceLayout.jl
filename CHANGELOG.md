@@ -29,13 +29,15 @@ The format of this changelog is based on
     or `Schematic` and a `LayoutTarget` record per-call semantic-to-GDS mappings without
     serializing the target's mutable mapping cache, and return the rendered `Cell` so it can
     be saved as GDS without rendering again.
-  - Rendering warns when an offset of a B-spline segment has a cusp, which happens when the
-    offset exceeds the B-spline's radius of curvature somewhere along the segment (for
-    example, when half the width of a `Paths.Trace` or the outer edge of a `Paths.CPW` is
-    larger than the tightest bend radius of a `bspline!` segment). Such an edge
-    self-intersects, and later operations like `union2d_curved` may not handle it as
-    expected. One warning is logged for each affected edge each time it is discretized,
-    naming the offset and a nearby point on the B-spline. Rendered geometry is unchanged.
+  - Converting a B-spline path segment to polygons (for example, rendering it to a `Cell`)
+    warns when an edge of its style is farther from the centerline than the centerline's
+    radius of curvature somewhere along the segment (for example, when half the width of a
+    `Paths.Trace` or the outer edge of a `Paths.CPW` is larger than the tightest bend radius
+    of a `bspline!` segment). Such an edge folds back on itself, and later operations like
+    `union2d_curved` may not handle it as expected. The warning names the edge's distance
+    from the centerline, the radius and a nearby point on the centerline. It is logged each
+    time the edge is converted, so calls such as `bounds` and `render!` on the same path
+    each warn. Rendered geometry is unchanged.
 
 ### Fixed
 

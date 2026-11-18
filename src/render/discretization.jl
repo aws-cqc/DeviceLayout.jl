@@ -143,11 +143,7 @@ function discretization_grid(
         t_scale=l * max_speed,
         rtol=rtol
     )
-    # A sign change of 1 − offset·κ means the offset point's velocity reverses
-    # along the base tangent: a cusp, regardless of where samples landed.
-    if tracker.tangential_min < 0 < tracker.tangential_max
-        _warn_cusp(s.offset, s.seg.r(tracker.t_nearest))
-    end
+    tracker.tangential_min < 0 && _warn_cusp(s.offset, s.seg.r, tracker.t_min)
     return grid
 end
 
@@ -171,15 +167,9 @@ function discretization_grid(
         t_scale=l * max(speed0, speed1),
         rtol=rtol
     )
-    # A tangential-speed reversal is only a cusp if the full speed
-    # √((1 − offset·κ)² + offset′²) also vanishes there; at the reversal it is
-    # |offset′|, so a fast-varying offset turns the would-be cusp into smooth
-    # sideways motion and should not warn. The 0.1 cutoff is a heuristic for
-    # a turnaround sharp enough to count as a cusp.
-    if tracker.tangential_min < 0 < tracker.tangential_max &&
-       abs(tracker.offset_deriv_nearest) < 0.1
-        l_nearest = Paths.t_to_arclength(s.seg, tracker.t_nearest)
-        _warn_cusp(Paths.getoffset(s, l_nearest), s.seg.r(tracker.t_nearest))
+    if tracker.tangential_min < 0
+        offset = Paths.getoffset(s, Paths.t_to_arclength(s.seg, tracker.t_min))
+        _warn_cusp(offset, s.seg.r, tracker.t_min)
     end
     return grid
 end
@@ -203,25 +193,21 @@ function _offset_bspline_point(s::Paths.GeneralOffset, t)
     return s.seg.r(t) + Paths.getoffset(s, l) * Point(-tangent.y, tangent.x)
 end
 
-# Records the tangential speed component 1 − offset·κ at every curvature evaluation
-# the marching kernel makes, so that a cusp (a sign change of that component) can be
-# detected after marching without re-evaluating curvature along the grid.
+# Records the smallest tangential speed component 1 − offset·κ over the curvature
+# evaluations the marching kernel makes, and where it occurred. Where it is negative the
+# offset exceeds the radius of curvature on its side, so the edge runs backward: it has a
+# cusp or, if that holds along the whole segment, is reversed. Points between the kernel's
+# evaluations are not checked.
 mutable struct _CuspTracker
     tangential_min::Float64
-    tangential_max::Float64
-    abs_tangential_nearest::Float64 # |tangential| at the evaluation nearest a reversal
-    t_nearest::Float64
-    offset_deriv_nearest::Float64 # d(offset)/d(arclength) there; 0 for constant offsets
+    t_min::Float64
 end
-_CuspTracker() = _CuspTracker(Inf, -Inf, Inf, NaN, 0.0)
+_CuspTracker() = _CuspTracker(Inf, NaN)
 
-function _track_cusp!(tracker::_CuspTracker, tangential, t, offset_deriv=0.0)
-    tracker.tangential_min = min(tracker.tangential_min, tangential)
-    tracker.tangential_max = max(tracker.tangential_max, tangential)
-    if abs(tangential) < tracker.abs_tangential_nearest
-        tracker.abs_tangential_nearest = abs(tangential)
-        tracker.t_nearest = t
-        tracker.offset_deriv_nearest = offset_deriv
+function _track_cusp!(tracker::_CuspTracker, tangential, t)
+    if tangential < tracker.tangential_min
+        tracker.tangential_min = tangential
+        tracker.t_min = t
     end
     return nothing
 end
@@ -243,9 +229,10 @@ function _offset_bspline_curvature(s::Paths.GeneralOffset, t, tracker::_CuspTrac
     doffset = Paths.offset_derivative(s, l)
     d2offset = Paths.ForwardDiff.derivative(l_ -> Paths.offset_derivative(s, l_), l)
 
-    _track_cusp!(tracker, 1 - offset / r, t, doffset)
-    ds_dl = 1 / sqrt((1 - offset / r)^2 + doffset^2)
-    d2s_dl2 = -ds_dl^3 * doffset * (d2offset - (1 - offset / r) / r)
+    tangential = 1 - offset / r
+    _track_cusp!(tracker, tangential, t)
+    ds_dl = 1 / sqrt(tangential^2 + doffset^2)
+    d2s_dl2 = -ds_dl^3 * doffset * (d2offset - tangential / r)
 
     g = Paths.Interpolations.gradient(s.seg.r, t)[1]
     base_tangent = g / norm(g)
@@ -261,12 +248,16 @@ function _offset_bspline_curvature(s::Paths.GeneralOffset, t, tracker::_CuspTrac
     return norm(d2_seg)
 end
 
-function _warn_cusp(offset, base_pt)
+function _warn_cusp(offset, r, t)
+    radius = 1 / abs(_bspline_signed_curvature(r, t))
+    pt = r(t)
+    round6(x) = round(x / oneunit(x); sigdigits=6) * oneunit(x)
     @warn """
-       Offset curve has a cusp where the offset $(offset) approaches the curvature radius
-       of the base curve, near the base curve point $(base_pt).
-       Check that your geometry is correct—cusps and related self-intersections are usually unwanted.
-       Some operations may not handle cusps or self-intersecting curves as expected.
+       An edge of a B-spline path segment is $(round6(abs(offset))) from the centerline, \
+       more than the centerline's radius of curvature $(round6(radius)) near \
+       $(Point(round6(pt.x), round6(pt.y))), so the edge folds back on itself. \
+       Reduce the width of the path's style there or loosen the bend. \
+       Operations such as `union2d_curved` may not handle the folded edge as expected.
        """
 end
 
