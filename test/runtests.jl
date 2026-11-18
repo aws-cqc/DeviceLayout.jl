@@ -222,5 +222,8 @@ end
     DeviceLayout.SolidModels.set_gmsh_option("General.Verbosity", 0)
 end
 
+include("shards.jl")
+const in_shard = shard_filter()
+
 @run_package_tests filter =
-    ti -> (isempty(ARGS) || any(arg -> occursin(arg, ti.name), ARGS))
+    ti -> in_shard(ti) && (isempty(ARGS) || any(arg -> occursin(arg, ti.name), ARGS))
