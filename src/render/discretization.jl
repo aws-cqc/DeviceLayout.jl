@@ -248,16 +248,18 @@ function _offset_bspline_curvature(s::Paths.GeneralOffset, t, tracker::_CuspTrac
     return norm(d2_seg)
 end
 
-function _warn_cusp(offset, r, t)
-    radius = 1 / abs(_bspline_signed_curvature(r, t))
-    pt = r(t)
+function _warn_cusp(offset, spline, t)
+    radius = 1 / abs(_bspline_signed_curvature(spline, t))
+    pt = spline(t)
     round6(x) = round(x / oneunit(x); sigdigits=6) * oneunit(x)
     @warn """
-       An edge of a B-spline path segment is $(round6(abs(offset))) from the centerline, \
-       more than the centerline's radius of curvature $(round6(radius)) near \
-       $(Point(round6(pt.x), round6(pt.y))), so the edge folds back on itself. \
-       Reduce the width of the path's style there or loosen the bend. \
-       Operations such as `union2d_curved` may not handle the folded edge as expected.
+       An edge of a B-spline path segment is $(round6(abs(offset))) from the centerline \
+       on the inside of a bend, more than the centerline's radius of curvature \
+       $(round6(radius)) near $(Point(round6(pt.x), round6(pt.y))), so the edge runs \
+       backward along the path there and the polygon may fold or cross itself. \
+       Reduce the edge's distance from the centerline (the style's width, or its halo) \
+       or loosen the bend. Operations such as `union2d_curved` may not handle this \
+       as expected.
        """
 end
 

@@ -30,14 +30,15 @@ The format of this changelog is based on
     serializing the target's mutable mapping cache, and return the rendered `Cell` so it can
     be saved as GDS without rendering again.
   - Converting a B-spline path segment to polygons (for example, rendering it to a `Cell`)
-    warns when an edge of its style is farther from the centerline than the centerline's
-    radius of curvature somewhere along the segment (for example, when half the width of a
-    `Paths.Trace` or the outer edge of a `Paths.CPW` is larger than the tightest bend radius
-    of a `bspline!` segment). Such an edge folds back on itself, and later operations like
-    `union2d_curved` may not handle it as expected. The warning names the edge's distance
-    from the centerline, the radius and a nearby point on the centerline. It is logged each
-    time the edge is converted, so calls such as `bounds` and `render!` on the same path
-    each warn. Rendered geometry is unchanged.
+    warns when an edge on the inside of a bend is farther from the centerline than the
+    centerline's radius of curvature, at the points where discretization samples the curve
+    (for example, when half the width of a `Paths.Trace`, or half the trace plus the gap of a
+    `Paths.CPW`, is larger than the tightest bend radius of a `bspline!` segment). Such an
+    edge runs backward along the path there, so the polygon may fold or cross itself, and
+    later operations like `union2d_curved` may not handle it as expected. The warning names
+    the edge's distance from the centerline, the radius and a nearby point on the
+    centerline. It is logged each time the edge is converted, so calls such as `bounds` and
+    `render!` on the same path each warn. Rendered geometry is unchanged. (#247)
 
 ### Fixed
 

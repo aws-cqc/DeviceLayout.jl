@@ -248,7 +248,11 @@ end
             kwargs...
         )
     warns(c; kwargs...) =
-        @test_logs (:warn, r"folds back") DeviceLayout.discretize_curve(c, 1.0nm; kwargs...)
+        @test_logs (:warn, r"runs backward") DeviceLayout.discretize_curve(
+            c,
+            1.0nm;
+            kwargs...
+        )
 
     # Half the trace width stays below the minimum radius: no warning
     c = edges(Paths.Trace(600.0μm); bend...)[2]
@@ -260,7 +264,7 @@ end
     c = edges(Paths.Trace(680.0μm); bend...)[2]
     warns(c)
     warns(c; rtol=1e-3)
-    msg = r"is 340000\.0 nm from the centerline, .* radius of curvature 3374\d\d\.0 nm"
+    msg = r"is 340000\.0 nm from the centerline on the inside .* curvature 337\d\d\d\.0 nm"
     @test_logs (:warn, msg) DeviceLayout.discretize_curve(c, 1.0nm)
 
     # Same for general offsets, whether constant or varying
@@ -271,7 +275,8 @@ end
     nowarn(edges(Paths.TaperTrace(600.0μm, 660.0μm); bend...)[2])
     warns(edges(Paths.TaperTrace(660.0μm, 720.0μm); bend...)[2])
 
-    # Both inner edges of the CPW pass the radius; their offsets have opposite signs
+    # Both edges of the gap on the inside of the bend pass the radius; the outer one is
+    # stored reversed, so their offsets have opposite signs
     cpw = edges(Paths.CPW(680.0μm, 60.0μm); bend...)
     @test sign(cpw[3].offset) != sign(cpw[4].offset)
     nowarn.(cpw[1:2])
@@ -300,13 +305,13 @@ end
             auto_curvature=true
         )
         local c = Curvilinear.pathtopolys(pa[1]).curves[2]
-        @test_logs (:warn, r"folds back") DeviceLayout.discretize_curve(c, 1e-3)
+        @test_logs (:warn, r"runs backward") DeviceLayout.discretize_curve(c, 1e-3)
     end
 
     # The warning reaches the user once per affected edge when rendering
     pa = Path()
     bspline!(pa, [Point(500.0μm, 500.0μm)], 90°, Paths.Trace(680.0μm); bend...)
-    @test_logs (:warn, r"folds back") render!(Cell("cusp", nm), pa, GDSMeta())
+    @test_logs (:warn, r"runs backward") render!(Cell("cusp", nm), pa, GDSMeta())
 end
 
 @testitem "BSpline approximation" setup = [CommonTestSetup] begin

@@ -11,8 +11,9 @@ function turns()
     return render!(c, turn_path, GDSMeta())
 end
 
-# Build and render B-splines. Several of the splines bend more tightly than the CPW's outer
-# edges, so rendering warns; the logger is silenced so that logging is not timed.
+# Build and render B-splines. Every spline's minimum radius of curvature is smaller than the
+# CPW's outer-edge offset, so rendering warns; the logger is silenced so that logging is not
+# timed.
 function bsplines()
     c = Cell{Float64}("test")
     bspline_path = Path{Float64}()
