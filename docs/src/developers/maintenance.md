@@ -68,7 +68,7 @@ Workflows live in `.github/workflows/`.
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `CI.yml` | push to `main`, tags, PRs, manual | `julia-format` job runs `scripts/format.jl check`; then a `test` matrix over Julia versions runs `Pkg.test()` with coverage uploaded to Codecov. Installs Python + `requirements.txt` for the DXF test. `pre` entries in the matrix are `continue-on-error`. |
+| `CI.yml` | push to `main`, tags, PRs, manual | `julia-format` job runs `scripts/format.jl check`; then a `test` matrix over Julia versions and test shards (see `test/shards.jl`) runs `Pkg.test()` with `DL_TEST_SHARD` set to the shard, and uploads each shard's coverage to Codecov. Pull requests run only the oldest supported version and the latest release. Installs Python + `requirements.txt` for the DXF test. `pre` entries in the matrix are `continue-on-error`. |
 | `Documentation.yml` | push to `main`, tags, PRs | Builds docs with Julia 1.10 and deploys via `deploydocs` (`push_preview=true` for PR previews). Uploads `docs/build/` as an artifact for 7 days. |
 | `Docs-Cleanup.yml` | PR closed | Removes `previews/PR<n>` from the `gh-pages` branch and squashes its history. |
 | `TagBot.yml` | comment by `JuliaTagBot`, manual | Creates the GitHub release after a version is registered in General. |
@@ -100,19 +100,24 @@ For anyone setting up a similar repository, or debugging why a step didn't fire:
   registered as a deploy key on the repository.
 - **CompatHelper** (`.github/workflows/CompatHelper.yaml`) reuses `DOCUMENTER_KEY` as
   `COMPATHELPER_PRIV` for the same reason: PRs opened with an SSH key trigger CI.
-- **Branch protection** on `main` requires the format check, the docs build, and the test job
-  for each released Julia version.
+- **Branch protection** on `main` requires the format check, the docs build, and the test
+  shard jobs (`Julia <version> - shard <k>/<n> - ubuntu-latest - x64 - pull_request`) for each
+  Julia version that pull requests run.
 
 ## Maintenance chores
 
 ### Julia version matrix
 
 The `test` matrix in `.github/workflows/CI.yml` lists every supported Julia minor version
-explicitly, plus `'pre'` whenever a new minor is in pre-release.
+explicitly, plus `'pre'` whenever a new minor is in pre-release. Pull requests run only the
+oldest supported version and the latest release, which is a second list in the same `version:`
+expression.
 
-- When a new minor Julia is released, replace `'pre'` with that version. Then add that job to
-  the branch protection rule as a required check; the job may need to run once on `main`
-  before GitHub offers it in the rule's list.
+- When a new minor Julia is released, replace `'pre'` with that version, and replace the
+  previous latest release with it in the pull-request list. Then update the branch
+  protection rule: add the new version's shard jobs as required checks and remove the
+  previous release's, which no longer run on pull requests. The jobs may need to run once in
+  a pull request before GitHub offers them in the rule's list.
 - When the next minor enters pre-release (usually some weeks after a release), add `'pre'`
   back. It runs with `continue-on-error`, so it can't block merges, but failures should be
   looked at: they are early warning of upstream changes.

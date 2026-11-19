@@ -10,7 +10,8 @@ on:
 
 concurrency: 
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Pushes to main are the only runs of 1.11, 1.12 and pre, so a newer push must not cancel them
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   julia-format:
@@ -27,7 +28,7 @@ jobs:
         run: julia scripts/format.jl "check"
 
   test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    name: Julia ${{ matrix.version }} - shard ${{ matrix.shard }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.version == 'pre' }}
     timeout-minutes: 60
@@ -37,12 +38,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version:
-          - '1.10'
-          - '1.11'
-          - '1.12'
-          - '1.13'
-          - 'pre'
+        # Pull requests test the oldest supported version and the latest release;
+        # pushes, tags and manual runs test every version
+        version: ${{ github.event_name == 'pull_request' && fromJSON('["1.10", "1.13"]') || fromJSON('["1.10", "1.11", "1.12", "1.13", "pre"]') }}
+        # Each version's suite is split across jobs by test file (see test/shards.jl).
+        # The denominator is the shard count, so change all entries together.
+        shard: ['1/3', '2/3', '3/3']
         os:
           - ubuntu-latest
         arch:
@@ -65,8 +66,15 @@ jobs:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v3
+        with:
+          # The shards of one version share a single cache entry, rather than
+          # multiplying the repository's cache use (10 GB limit) by the shard count
+          cache-name: julia-cache;workflow=${{ github.workflow }};job=${{ github.job }};version=${{ matrix.version }};os=${{ matrix.os }};arch=${{ matrix.arch }}
+          include-matrix: false
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
+        env:
+          DL_TEST_SHARD: ${{ matrix.shard }}
       - uses: julia-actions/julia-processcoverage@v1
         with:
           directories: src
