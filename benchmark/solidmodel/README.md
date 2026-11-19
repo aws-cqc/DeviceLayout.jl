@@ -16,10 +16,11 @@ enough to define them: at or after the commit that added this directory.
 
 ## Running
 
-From the repository root:
+From the repository root, with Julia 1.11 or later (earlier versions ignore the `[sources]`
+entry in `benchmark/Project.toml` that points DeviceLayout at this checkout):
 
 ```sh
-julia --project=benchmark -e 'using Pkg; Pkg.develop(PackageSpec(path=".")); Pkg.instantiate()'
+julia --project=benchmark -e 'using Pkg; Pkg.instantiate()'
 julia --project=benchmark benchmark/solidmodel/run_single_transmon.jl
 julia --project=benchmark benchmark/solidmodel/run_qpu17.jl --order=1 --scales=1.0
 ```

@@ -1,7 +1,15 @@
 name: Benchmark
 
+# Manual only. Runs the suite in benchmark/benchmarks.jl against the head ref and, unless
+# base_ref is empty, against base_ref in the same job, so both run on the same runner. Uploads
+# the JSON results, the markdown reports, and the comparison as artifacts.
 on:
   workflow_dispatch:
+    inputs:
+      base_ref:
+        description: "Base git ref to compare against (empty = single run, no comparison). Must support every benchmark in the head suite."
+        required: false
+        default: "main"
 
 jobs:
 
@@ -9,17 +17,37 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      BASE_REF: ${{ inputs.base_ref }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: julia-actions/setup-julia@v3
         with:
-          version: '1.10'
+          version: '1.13'
       - uses: julia-actions/cache@v3
-      - name: "Run benchmarks"
+      - name: Instantiate benchmark environment
+        run: julia --project=benchmark -e 'using Pkg; Pkg.instantiate()'
+      - name: Run head
+        run: julia --project=benchmark benchmark/run_benchmarks.jl --out=results/head.json
+      - name: Run base
+        if: ${{ env.BASE_REF != '' }}
         run: |
-          julia --project=benchmark -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
-          julia --project=benchmark -e 'include("benchmark/run_benchmarks.jl")'
-      - uses: actions/upload-artifact@v4  
+          # The suite (benchmark/) stays at head; only the package under test moves to the base ref.
+          # actions/checkout creates a local branch only for the ref being run, so other branches
+          # exist only as origin/<name>.
+          base=$(git rev-parse --verify --quiet "$BASE_REF^{commit}" || git rev-parse --verify "origin/$BASE_REF^{commit}")
+          git worktree add --detach ../base "$base"
+          julia --project=benchmark -e 'using Pkg; Pkg.develop(PackageSpec(path="../base")); Pkg.instantiate()'
+          julia --project=benchmark benchmark/run_benchmarks.jl --out=results/base.json
+      - name: Compare
+        if: ${{ env.BASE_REF != '' }}
+        run: |
+          julia --project=benchmark benchmark/compare.jl results/base.json results/head.json > results/comparison.md
+          cat results/comparison.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: benchmark
-          path: benchmark.md
+          path: results/

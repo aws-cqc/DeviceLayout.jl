@@ -31,6 +31,8 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
+        # Julia 1.10 ignores the [sources] entry in docs/Project.toml that points DeviceLayout at
+        # this checkout, so develop it explicitly.
         julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
         julia --project=docs --color=yes docs/make.jl
 
