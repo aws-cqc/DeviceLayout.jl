@@ -10,7 +10,10 @@
 # table gets the median weight. Rebalance when one shard's job becomes clearly slower than
 # the others.
 
-# Seconds per file: the mean of full-suite `Pkg.test` runs on Julia 1.10, 1.11 and 1.12
+# Seconds per file: the mean of full-suite `Pkg.test` runs on Julia 1.10, 1.11 and 1.12,
+# measured on an aarch64 workstation, so CI runners may not split exactly as evenly.
+# To regenerate, add `verbose=true` to `@run_package_tests` in runtests.jl and run the full
+# suite with `Pkg.test()`: the summary lists the time of each file.
 const TEST_FILE_SECONDS = Dict(
     "laws/test_boolean.jl" => 86,
     "laws/test_fixtures.jl" => 6,

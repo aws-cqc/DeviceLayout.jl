@@ -86,8 +86,12 @@ the TestEnv routes for iteration on those versions.
 `Base.depwarn` is silent and `@test_deprecated` checks nothing, so the "Deprecations" test
 item only fully tests those deprecations under `Pkg.test()`.
 
-CI runs the full suite on every released Julia minor from 1.10 upward. Pre-release Julia is
-allowed to fail but failures should be investigated.
+CI splits the suite by test file across shard jobs for each Julia version (see
+`test/shards.jl`; setting `DL_TEST_SHARD="k/n"` runs shard k of n locally too). Pull requests
+test the oldest supported version and the latest release. Pushes to `main`, tags and manual
+runs test every released Julia minor from 1.10 upward, so a failure specific to another
+version shows up only after merging. Pre-release Julia is allowed to fail but failures should
+be investigated.
 
 ### Geometry laws
 
@@ -225,10 +229,10 @@ Authors check this list before asking for review, and reviewers check the same l
 
 ### CI and merging
 
-Required checks on `main` are: formatting, documentation build, and tests on each released
-Julia minor version in the CI matrix. Tests only start once the formatting check passes, so run
-`julia scripts/format.jl format` and the tests locally before pushing. A PR can merge once the
-checks pass and a maintainer has approved.
+Required checks on `main` are: formatting, documentation build, and the test shard jobs
+for each Julia version that pull requests run. Tests only start once the formatting check
+passes, so run `julia scripts/format.jl format` and the tests locally before pushing. A PR can
+merge once the checks pass and a maintainer has approved.
 
 ### [Reviewing](@id dev-review)
 

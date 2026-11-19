@@ -10,7 +10,8 @@ on:
 
 concurrency: 
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Pushes to main are the only runs of 1.11, 1.12 and pre, so a newer push must not cancel them
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   julia-format:
