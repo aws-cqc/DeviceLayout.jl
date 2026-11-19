@@ -195,28 +195,8 @@ julia --project=benchmark -e 'include("benchmark/run_benchmarks.jl")'
 ```
 
 `run_benchmarks.jl` writes the results to `benchmark.json` and a report to `benchmark.md`
-(`--out=path.json` sets both paths), and prints the report. The suite always comes from the
-directory the script is in, so to compare two commits, develop the other checkout into the
-environment, run the same suite against it, and compare the result files:
-
-```sh
-julia --project=benchmark benchmark/run_benchmarks.jl --out=head.json
-git worktree add --detach ../base main
-julia --project=benchmark -e 'using Pkg; Pkg.develop(PackageSpec(path="../base"))'
-julia --project=benchmark benchmark/run_benchmarks.jl --out=base.json
-julia --project=benchmark benchmark/compare.jl base.json head.json
-# Point the environment back at this checkout
-git restore benchmark/Project.toml
-julia --project=benchmark -e 'using Pkg; Pkg.resolve()'
-```
-
-`compare.jl` prints the time and memory ratios of head to base for every benchmark, using the
-minimum time over samples, and marks ratios outside each benchmark's tolerance (5% for time, 1%
-for memory). Timings from different machines are not comparable, so the `Benchmark` GitHub
-workflow (`workflow_dispatch`) runs head and a base ref (default `main`) back-to-back in one
-job, writes the comparison to the job summary, and uploads the results and reports as
-artifacts. Even on one machine, some time ratios land outside the tolerance by chance; running
-the workflow with the base ref set to the head branch shows how many.
+(`--out=path.json` sets both paths), and prints the report.
+`compare.jl` compares two result `.json` files of the same suite run against (potentially) different checkouts.
 
 Benchmarks are not run on every PR. If a change is performance-motivated, include before/after
 numbers in the PR description.
