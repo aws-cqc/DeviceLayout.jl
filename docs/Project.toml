@@ -7,3 +7,6 @@ FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 GraphMakie = "1ecd5474-83a3-4783-bb4f-06765db800d2"
 DeviceLayout = "ebf59a4a-04ec-49d7-8cd4-c9382ceb8e85"
 Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+
+[sources]
+DeviceLayout = {path = ".."}

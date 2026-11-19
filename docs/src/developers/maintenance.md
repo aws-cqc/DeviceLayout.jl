@@ -73,7 +73,7 @@ Workflows live in `.github/workflows/`.
 | `Docs-Cleanup.yml` | PR closed | Removes `previews/PR<n>` from the `gh-pages` branch and squashes its history. |
 | `TagBot.yml` | comment by `JuliaTagBot`, manual | Creates the GitHub release after a version is registered in General. |
 | `CompatHelper.yaml` | daily, manual | Checks for new dependency versions outside `[compat]` (see [Dependency compatibility](@ref dev-compathelper)). |
-| `Benchmark.yml` | manual | Runs the benchmark suite and uploads `benchmark.md`. |
+| `Benchmark.yml` | manual | Runs the benchmark suite against the head and a base ref (default `main`) in one job, so both run on the same runner, and writes the comparison to the job summary (see [Benchmarks](@ref dev-benchmarks)). Uploads the results and reports as artifacts. |
 | `GeomLaws.yml` | weekly, manual | Runs the `:geomlaws` test items with a fresh seed and 2000 examples per check, one job per law file, with shrinking off (see [GeomLaws exploration](@ref dev-geomlaws-exploration)). Manual runs can set the seed and the number of examples. |
 
 All jobs run on `ubuntu-latest` x64 only; macOS, Windows, and ARM are not covered.

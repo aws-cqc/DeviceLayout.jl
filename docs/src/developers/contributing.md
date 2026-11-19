@@ -156,15 +156,18 @@ This is usually the fastest way to review docs changes.
 **Local build.**
 
 ```sh
-julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+julia --project=docs -e 'using Pkg; Pkg.instantiate()'
 julia --project=docs docs/make.jl
 ```
+
+The `[sources]` entry in `docs/Project.toml` points DeviceLayout at this checkout. Julia 1.10
+ignores it, so on 1.10 run `Pkg.develop(PackageSpec(path=pwd()))` before `Pkg.instantiate()`.
 
 Expect several minutes: the `@example` blocks run real code, including the QPU17 example.
 If the build dies with `MissingRemoteError` for a `CoordinateTransformations` docstring, run
 `Pkg.develop("CoordinateTransformations")` in the docs environment: the Reference pages include
 its docstrings, and Documenter needs a git checkout to generate source links. (This adds a
-local path to `docs/Project.toml` under `[sources]`; don't commit that.) Because
+local path for it to `docs/Project.toml` under `[sources]`; don't commit that entry.) Because
 `prettyurls=true`, the output in `docs/build/` needs a web server rather than `file://`; for
 example `using LiveServer; serve(dir="docs/build")`.
 
@@ -182,16 +185,38 @@ matters if you're changing the package itself.
 
 `benchmark/` is a [PkgBenchmark](https://github.com/JuliaCI/PkgBenchmark.jl) suite
 (`benchmarks.jl` defines `SUITE`; topical files add groups for autofill, bounds, clipping,
-curves, intersections, polygons, and schematics). It has its own environment:
+curves, intersections, polygons, and schematics). It has its own environment, which points
+DeviceLayout at this checkout the same way as the docs environment (on Julia 1.10, develop it
+first):
 
 ```sh
-julia --project=benchmark -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+julia --project=benchmark -e 'using Pkg; Pkg.instantiate()'
 julia --project=benchmark -e 'include("benchmark/run_benchmarks.jl")'
 ```
 
-`run_benchmarks.jl` writes `benchmark.md` and prints a summary. The `Benchmark` GitHub
-workflow runs the same thing on demand (`workflow_dispatch`) and uploads `benchmark.md` as an
-artifact. To compare two commits, use `PkgBenchmark.judge` directly.
+`run_benchmarks.jl` writes the results to `benchmark.json` and a report to `benchmark.md`
+(`--out=path.json` sets both paths), and prints the report. The suite always comes from the
+directory the script is in, so to compare two commits, develop the other checkout into the
+environment, run the same suite against it, and compare the result files:
+
+```sh
+julia --project=benchmark benchmark/run_benchmarks.jl --out=head.json
+git worktree add --detach ../base main
+julia --project=benchmark -e 'using Pkg; Pkg.develop(PackageSpec(path="../base"))'
+julia --project=benchmark benchmark/run_benchmarks.jl --out=base.json
+julia --project=benchmark benchmark/compare.jl base.json head.json
+# Point the environment back at this checkout
+git restore benchmark/Project.toml
+julia --project=benchmark -e 'using Pkg; Pkg.resolve()'
+```
+
+`compare.jl` prints the time and memory ratios of head to base for every benchmark, using the
+minimum time over samples, and marks ratios outside each benchmark's tolerance (5% for time, 1%
+for memory). Timings from different machines are not comparable, so the `Benchmark` GitHub
+workflow (`workflow_dispatch`) runs head and a base ref (default `main`) back-to-back in one
+job, writes the comparison to the job summary, and uploads the results and reports as
+artifacts. Even on one machine, some time ratios land outside the tolerance by chance; running
+the workflow with the base ref set to the head branch shows how many.
 
 Benchmarks are not run on every PR. If a change is performance-motivated, include before/after
 numbers in the PR description.
