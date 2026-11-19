@@ -1162,8 +1162,7 @@ function populate_size_fields!(
     )
 end
 
-# For `render_conformal!(sm, sch, target)`, which passes all the target's rendering options,
-# including those `render!` declares, after its own render has checked them
+# For functions that do their own check separately (`render_conformal!`)
 function populate_size_fields_unchecked!(
     cs::AbstractCoordinateSystem;
     primitives_of,

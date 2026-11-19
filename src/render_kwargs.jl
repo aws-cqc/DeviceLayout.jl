@@ -1,13 +1,6 @@
-# Keywords declared by the method that runs the check never reach it, so they need no entry.
-# The names are not specific to the destination, so a built-in flag passed to a target that
-# ignores it does not warn.
 struct _RenderKwargNames
-    # Guarded by `_RENDER_KWARGS_LOCK`, which every read and write holds. The sets are plain
-    # fields: `@atomic` reference-typed fields crashed the GC during precompilation on
-    # Julia 1.11.
     known::Set{Symbol}
-    # Not `maxlog`: the file sink of a schematic's log ignores it, and the check runs per entity
-    warned::Set{Symbol}
+    warned::Set{Symbol} # Not `maxlog`, to play better with per-entity checks and schematic logs
 end
 const _RENDER_KWARG_NAMES = _RenderKwargNames(
     Set{Symbol}([
@@ -27,7 +20,7 @@ const _RENDER_KWARG_NAMES = _RenderKwargNames(
     Set{Symbol}()
 )
 # `OptionalStyle`s register their flags, and geometry may be built on several threads
-const _RENDER_KWARGS_LOCK = ReentrantLock()
+const _RENDER_KWARGS_LOCK = ReentrantLock() # Guard _RENDER_KWARG_NAMES read/writes
 
 """
     DeviceLayout.register_render_kwarg!(s::Symbol)
@@ -55,7 +48,6 @@ function warn_unknown_render_kwargs(kwargs, caller=:render!)
         known = _RENDER_KWARG_NAMES.known
         warned = _RENDER_KWARG_NAMES.warned
         # This runs once per entity and almost always finds nothing new, so test membership
-        # before building anything
         if all(k -> k in known || k in warned, keys(kwargs))
             nothing
         else
@@ -71,8 +63,6 @@ function warn_unknown_render_kwargs(kwargs, caller=:render!)
     return nothing
 end
 
-# Called by each `Schematic` render, so that every schematic's log and `strict=:warn` see the
-# warning
 function reset_render_kwarg_warnings!()
     @lock _RENDER_KWARGS_LOCK begin
         empty!(_RENDER_KWARG_NAMES.warned)
