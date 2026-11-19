@@ -1,0 +1,71 @@
+struct _RenderKwargNames
+    known::Set{Symbol}
+    warned::Set{Symbol} # Not `maxlog`, to play better with per-entity checks and schematic logs
+end
+const _RENDER_KWARG_NAMES = _RenderKwargNames(
+    Set{Symbol}([
+        # Entity conversion (`to_polygons`, `SolidModels.to_primitives`)
+        :atol,
+        :rtol,
+        :Δθ,
+        :rounded,
+        # Forwarded to each entity when rendering to a `Cell`
+        :map_meta,
+        :memoized_cells,
+        # Flags of the built-in `OptionalStyle`s, set by targets
+        :simulation,
+        :artwork,
+        :solidmodel
+    ]),
+    Set{Symbol}()
+)
+# `OptionalStyle`s register their flags, and geometry may be built on several threads
+const _RENDER_KWARGS_LOCK = ReentrantLock() # Guard _RENDER_KWARG_NAMES read/writes
+
+"""
+    DeviceLayout.register_render_kwarg!(s::Symbol)
+
+Declare `s` a valid keyword argument for `render!`, so that passing it does not warn.
+
+`render!` warns about each keyword argument it does not recognize, once per session and once
+per render of a `Schematic`.
+Constructing an [`OptionalStyle`](@ref) registers its flag automatically. Call this for a
+custom option read some other way, for example by a `to_polygons` method for your own style.
+
+A package that constructs an `OptionalStyle` at top level should call this for the flag in
+its `__init__`, because registrations made while precompiling are not kept.
+"""
+function register_render_kwarg!(s::Symbol)
+    @lock _RENDER_KWARGS_LOCK begin
+        s in _RENDER_KWARG_NAMES.known && return nothing
+        push!(_RENDER_KWARG_NAMES.known, s)
+    end
+    return nothing
+end
+
+function warn_unknown_render_kwargs(kwargs, caller=:render!)
+    unknown = @lock _RENDER_KWARGS_LOCK begin
+        known = _RENDER_KWARG_NAMES.known
+        warned = _RENDER_KWARG_NAMES.warned
+        # This runs once per entity and almost always finds nothing new, so test membership
+        if all(k -> k in known || k in warned, keys(kwargs))
+            nothing
+        else
+            new = setdiff(keys(kwargs), known, warned)
+            union!(warned, new)
+            new
+        end
+    end
+    isnothing(unknown) && return nothing
+    for k in unknown
+        @warn "`$caller` does not recognize the keyword argument `$k`, which may have no effect. Check the spelling, or register a custom rendering option with `DeviceLayout.register_render_kwarg!(:$k)`."
+    end
+    return nothing
+end
+
+function reset_render_kwarg_warnings!()
+    @lock _RENDER_KWARGS_LOCK begin
+        empty!(_RENDER_KWARG_NAMES.warned)
+    end
+    return nothing
+end

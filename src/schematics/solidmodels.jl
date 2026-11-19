@@ -463,6 +463,7 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
     sch.checked[] || error(
         "cannot render an unchecked Schematic. Run check!(sch::Schematic), or override by setting sch.checked[] = true (not recommended!)"
     )
+    DeviceLayout.reset_render_kwarg_warnings!()
     reopen_logfile(sch, :render_solidmodel)
     try
         with_logger(sch.logger) do
@@ -704,6 +705,7 @@ function SolidModels.render_conformal!(
     sch.checked[] || error(
         "cannot render an unchecked Schematic. Run check!(sch::Schematic), or override by setting sch.checked[] = true (not recommended!)"
     )
+    DeviceLayout.reset_render_kwarg_warnings!()
     reopen_logfile(sch, :render_solidmodel)
     try
         with_logger(sch.logger) do
@@ -808,7 +810,7 @@ function _render_conformal!(sm, sch, target; context, kwargs...)
     )
     # That render samples mesh sizes from the formed regions, which carry no `MeshSized`
     # styles, so sample them again from the original elements, as `render!` does
-    SolidModels.populate_size_fields!(
+    SolidModels.populate_size_fields_unchecked!(
         mapped;
         primitives_of=(el; kw...) -> SolidModels.to_primitives(sm, el; kw...),
         zmap,

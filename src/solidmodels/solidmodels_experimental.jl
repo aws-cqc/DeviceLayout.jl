@@ -126,6 +126,7 @@ function render!(
     previous_stage_level = get(sch.logger.max_level_logged, stage, Logging.Debug)
     delete!(sch.logger.max_level_logged, stage)
     try
+        DeviceLayout.reset_render_kwarg_warnings!()
         # Route geometry preparation, construction, and postprocessing diagnostics through
         # the render stage so the final strictness check sees the complete operation.
         reopen_logfile(sch, stage)
