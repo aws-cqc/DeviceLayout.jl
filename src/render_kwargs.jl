@@ -1,9 +1,9 @@
 # Keywords declared by the method that runs the check never reach it, so they need no entry.
 # The names are not specific to the destination, so a built-in flag passed to a target that
 # ignores it does not warn.
-mutable struct _RenderKwargNames
-    # Guarded by `_RENDER_KWARGS_LOCK`. Each set is replaced rather than mutated. These are
-    # plain fields: `@atomic` reference-typed fields crashed the GC during precompilation on
+struct _RenderKwargNames
+    # Guarded by `_RENDER_KWARGS_LOCK`, which every read and write holds. The sets are plain
+    # fields: `@atomic` reference-typed fields crashed the GC during precompilation on
     # Julia 1.11.
     known::Set{Symbol}
     # Not `maxlog`: the file sink of a schematic's log ignores it, and the check runs per entity
@@ -45,7 +45,7 @@ its `__init__`, because registrations made while precompiling are not kept.
 function register_render_kwarg!(s::Symbol)
     @lock _RENDER_KWARGS_LOCK begin
         s in _RENDER_KWARG_NAMES.known && return nothing
-        _RENDER_KWARG_NAMES.known = push!(copy(_RENDER_KWARG_NAMES.known), s)
+        push!(_RENDER_KWARG_NAMES.known, s)
     end
     return nothing
 end
@@ -54,10 +54,17 @@ function warn_unknown_render_kwargs(kwargs, caller=:render!)
     unknown = @lock _RENDER_KWARGS_LOCK begin
         known = _RENDER_KWARG_NAMES.known
         warned = _RENDER_KWARG_NAMES.warned
-        new = setdiff(keys(kwargs), known, warned)
-        isempty(new) || (_RENDER_KWARG_NAMES.warned = union(warned, new))
-        new
+        # This runs once per entity and almost always finds nothing new, so test membership
+        # before building anything
+        if all(k -> k in known || k in warned, keys(kwargs))
+            nothing
+        else
+            new = setdiff(keys(kwargs), known, warned)
+            union!(warned, new)
+            new
+        end
     end
+    isnothing(unknown) && return nothing
     for k in unknown
         @warn "`$caller` does not recognize the keyword argument `$k`, which may have no effect. Check the spelling, or register a custom rendering option with `DeviceLayout.register_render_kwarg!(:$k)`."
     end
@@ -68,7 +75,7 @@ end
 # warning
 function reset_render_kwarg_warnings!()
     @lock _RENDER_KWARGS_LOCK begin
-        _RENDER_KWARG_NAMES.warned = Set{Symbol}()
+        empty!(_RENDER_KWARG_NAMES.warned)
     end
     return nothing
 end

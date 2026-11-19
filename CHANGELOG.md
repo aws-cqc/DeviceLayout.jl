@@ -8,8 +8,9 @@ The format of this changelog is based on
 
 ### Added
 
-  - `render!` warns about each keyword argument it doesn't recognize, which it would otherwise
-    ignore silently, once per session and once per `Schematic` render. `OptionalStyle` flags are recognized automatically, and
+  - `render!` and `SolidModels.populate_size_fields!` warn about each keyword argument they
+    don't recognize, which they would otherwise ignore silently, once per session and once per
+    `Schematic` render. `OptionalStyle` flags are recognized automatically, and
     `DeviceLayout.register_render_kwarg!` registers other custom rendering options.
 
 ## 1.22.0 (2026-11-16)

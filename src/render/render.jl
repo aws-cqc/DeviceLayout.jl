@@ -67,6 +67,7 @@ function render!(
     meta::GDSMeta=GDSMeta();
     kwargs...
 ) where {T, U <: Texts.Text{T}}
+    warn_unknown_render_kwargs(kwargs)
     opt = style(text)
     selected = get(kwargs, opt.flag, opt.default) ? opt.true_style : opt.false_style
     selected isa Plain && return render!(c, entity(text), meta; kwargs...)

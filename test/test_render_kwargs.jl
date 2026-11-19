@@ -50,6 +50,15 @@
     end
     @test count(is_unknown(:entity_typo), logs) == 1
     @test count(is_unknown(:path_typo), logs) == 1
+
+    # Optional text, which reads its flag from the keywords
+    text = optional_entity(Texts.Text("hi", Point(0nm, 0nm)), :kwargs_text_flag)
+    logs, _ = Test.collect_test_logs() do
+        render!(Cell("c", nm), text, GDSMeta(); kwargs_text_flag=true)
+        return render!(Cell("c", nm), text, GDSMeta(); text_typo=true)
+    end
+    @test count(is_unknown(:kwargs_text_flag), logs) == 0
+    @test count(is_unknown(:text_typo), logs) == 1
 end
 
 @testitem "render kwargs: schematic log" setup = [CommonTestSetup] begin
