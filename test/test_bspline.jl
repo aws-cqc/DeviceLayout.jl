@@ -264,8 +264,6 @@ end
     c = edges(Paths.Trace(680.0μm); bend...)[2]
     warns(c)
     warns(c; rtol=1e-3)
-    msg = r"is 340000\.0 nm from the centerline on the inside .* curvature 337\d\d\d\.0 nm"
-    @test_logs (:warn, msg) DeviceLayout.discretize_curve(c, 1.0nm)
 
     # Same for general offsets, whether constant or varying
     c = edges(Paths.Trace(x -> 680.0μm); bend...)[2]

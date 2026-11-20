@@ -195,9 +195,8 @@ end
 
 # Records the smallest tangential speed component 1 − offset·κ over the curvature
 # evaluations the marching kernel makes, and where it occurred. Where it is negative the
-# offset exceeds the radius of curvature on its side, so the edge runs backward: it has a
-# cusp or, if that holds along the whole segment, is reversed. Points between the kernel's
-# evaluations are not checked.
+# offset exceeds the radius of curvature on its side, so the offset curve runs backward
+# along the base curve there. Points between the kernel's evaluations are not checked.
 mutable struct _CuspTracker
     tangential_min::Float64
     t_min::Float64
@@ -253,13 +252,13 @@ function _warn_cusp(offset, spline, t)
     pt = spline(t)
     round6(x) = round(x / oneunit(x); sigdigits=6) * oneunit(x)
     @warn """
-       An edge of a B-spline path segment is $(round6(abs(offset))) from the centerline \
-       on the inside of a bend, more than the centerline's radius of curvature \
-       $(round6(radius)) near $(Point(round6(pt.x), round6(pt.y))), so the edge runs \
-       backward along the path there and the polygon may fold or cross itself. \
-       Reduce the edge's distance from the centerline (the style's width, or its halo) \
-       or loosen the bend. Operations such as `union2d_curved` may not handle this \
-       as expected.
+       A curve's offset $(round6(abs(offset))) from a B-spline, on the inside of a bend, \
+       exceeds the B-spline's radius of curvature $(round6(radius)) near \
+       $(Point(round6(pt.x), round6(pt.y))), so the offset curve runs backward there and \
+       a polygon with that curve as an edge may fold or cross itself. Operations such as \
+       `union2d_curved` may not handle this as expected. If the curve is an edge of a \
+       path's style, reduce the edge's distance from the centerline (the style's width, \
+       or its halo) or loosen the bend.
        """
 end
 

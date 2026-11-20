@@ -11,24 +11,21 @@ function turns()
     return render!(c, turn_path, GDSMeta())
 end
 
-# Build and render B-splines. Every spline's minimum radius of curvature is smaller than the
-# CPW's outer-edge offset, so rendering warns; the logger is silenced so that logging is not
-# timed.
+# Build and render B-splines. Every spline's minimum radius of curvature is larger than the
+# CPW's outer-edge offset, so rendering doesn't warn.
 function bsplines()
     c = Cell{Float64}("test")
     bspline_path = Path{Float64}()
     for i = 1:10
         bspline!(
             bspline_path,
-            [p0(bspline_path) + Point(20 * i, 10 * i)],
+            [p1(bspline_path) + Point(40 * i, 20 * i)],
             0°,
             Paths.CPW(10.0, 6.0),
-            endpoints_speed=20.0 * i
+            endpoints_speed=40.0 * i
         )
     end
-    return with_logger(NullLogger()) do
-        return render!(c, bspline_path, GDSMeta())
-    end
+    return render!(c, bspline_path, GDSMeta())
 end
 
 # Approximate offset curves with B-splines
