@@ -409,6 +409,72 @@ end
     @test q1.max_displacement ≈ sqrt(3) / 1000
 end
 
+@testitem "Velocity tables" setup = [CommonTestSetup, QuietGmshSetup, DesignVelocitySetup] begin
+    import .SolidModels.gmsh
+    # The table of the velocities at the nodes of a mesh file, as a solver reads it.
+    sm = SolidModel("table_test"; overwrite=true)
+    render!(
+        sm,
+        pad_in_cutout(PAD_P0);
+        zmap=m -> 0μm,
+        postrender_ops=[
+            ("above", SM.extrude_z!, ("cutout", 100μm)),
+            ("below", SM.extrude_z!, ("cutout", -100μm)),
+            ("domain", SM.union_geom!, ("above", "below", 3, 3))
+        ]
+    )
+    dv = SM.design_velocities(pad_in_cutout, PAD_P0; zlimits=(-100μm, 100μm))
+    order0 = SM.get_gmsh_number("Mesh.ElementOrder")
+    optimize0 = SM.get_gmsh_number("Mesh.HighOrderOptimize")
+    version0 = SM.get_gmsh_number("Mesh.MshFileVersion")
+    SM.mesh_order(2)
+    gmsh.model.mesh.generate(3)
+    function read_table(path)
+        lines = readlines(path)
+        rows = [parse.(Float64, split(l, ",")) for l in lines[2:end]]
+        return strip.(split(lines[1], ",")), reduce(hcat, rows)
+    end
+    for (ext, version) in (("msh2", 2.2), ("msh", 4.1))
+        SM.set_gmsh_option("Mesh.MshFileVersion", version)
+        src = joinpath(tdir, "table.$ext")
+        save(src, sm)
+        path = joinpath(tdir, "velocities_$ext.csv")
+        @test SM.write_velocities(path, src, dv) == path
+        header, T = read_table(path)
+        @test header == ["x", "y", "z", "x0.x", "x0.y", "x0.z", "w.x", "w.y", "w.z"]
+        # Each row is a node of the file, exactly, with its velocities; the nodes it does
+        # not list do not move.
+        X = SM._with_mesh(m -> m.nodes, src, version)
+        V = (dv.x0(X), dv.w(X))
+        index = Dict(Tuple(X[:, j]) => j for j in axes(X, 2))
+        listed = falses(size(X, 2))
+        for k in axes(T, 2)
+            j = index[Tuple(T[1:3, k])]
+            listed[j] = true
+            @test T[4:6, k] == V[1][:, j] && T[7:9, k] == V[2][:, j]
+        end
+        @test 0 < count(listed) < length(listed)
+        @test all(j -> iszero(V[1][:, j]) && iszero(V[2][:, j]), findall(!, listed))
+    end
+    SM.mesh_order(order0, optimize0)
+    SM.set_gmsh_option("Mesh.MshFileVersion", version0)
+
+    # In a file in mm, the velocities are in mm per μm of the parameters.
+    src = joinpath(tdir, "table.msh2")
+    _, T = read_table(
+        SM.write_velocities(
+            joinpath(tdir, "mm.csv"),
+            src,
+            (; c=X -> ones(size(X)));
+            unit=mm
+        )
+    )
+    @test all(T[4:6, :] .== 1e-3)
+    @test sortslices(T[1:3, :]; dims=2) ==
+          sortslices(SM._with_mesh(m -> m.nodes, src, 2.2); dims=2)
+    @test_throws ArgumentError SM.write_velocities(joinpath(tdir, "none.csv"), src, (;))
+end
+
 @testsnippet MshSetup begin
     # A unit hexahedron, and the text of an MSH 2.2 file with nodes (3 × N) and elements
     # (lines of type, tags and nodes).

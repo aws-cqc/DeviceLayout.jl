@@ -16,10 +16,11 @@ parameters normally means rendering, meshing and simulating again. Two tools in
 
 Together they give smooth, accurate finite differences of simulated quantities with respect
 to layout parameters, with no noise from re-meshing. They also give derivatives from a
-single simulation with solvers that compute shape sensitivities: a solver that reports the
-gradient ``gₖ`` of a quantity ``J`` with respect to the positions ``xₖ`` of its mesh nodes
-gives ``dJ/dp = Σₖ gₖ ⋅ V(xₖ)``. The design velocity carries the layout's design intent to
-the solver's mesh, and the solver needs no knowledge of the layout.
+single simulation with solvers that compute shape sensitivities, such as Palace: given the
+velocities at the nodes of its mesh, such a solver returns ``dJ/dp = Σₖ gₖ ⋅ V(xₖ)``,
+where ``gₖ`` is the gradient of a quantity ``J`` with respect to the position ``xₖ`` of
+node ``k``. The design velocity carries the layout's design intent to the solver's mesh, and
+the solver needs no knowledge of the layout.
 
 Design velocities are geometry: they know nothing about the physics of the simulation. A
 parameter is a geometry control knob, as everywhere in DeviceLayout.jl.
@@ -130,7 +131,24 @@ the design velocity vanishes there. This allows, for example, a region of a subs
 model to be redesigned without recomputing the rest. Use a `window` and `zlimits` that keep
 the velocity zero on the region's boundary.
 
+## Velocities for a solver
+
+[`SolidModels.write_velocities`](@ref) writes the velocities at the nodes of a mesh file,
+for a solver that computes shape sensitivities:
+
+```julia
+SolidModels.write_velocities("velocities.csv", "design.msh2", dv)
+```
+
+The table lists the coordinates of the nodes at which some velocity is nonzero, as in the
+file, and the velocities in the file's length unit per
+[`SolidModels.parameter_unit`](@ref). It is the input of the `"Velocities"` of Palace's
+`"Sensitivity"` configuration, which writes the derivatives of the simulated quantities
+with respect to each parameter. Palace evaluates the interpolant of the table at the nodes
+of the mesh it solves on, which move with it when the mesh file is morphed, so the
+derivatives are those of simulations on morphed meshes.
+
 ## See also
 
   - [Solid Models](@ref concept-solidmodels) for the 2D-to-3D pipeline
-  - [API Reference: Design velocities and mesh morphing](@ref api-design-velocities)
+  - [API Reference: Design velocities and meshes](@ref api-design-velocities)

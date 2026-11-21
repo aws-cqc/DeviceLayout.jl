@@ -30,6 +30,9 @@ The format of this changelog is based on
     reports the change in element quality as a `SolidModels.MorphQuality`, checked at the
     corners of every element. `SolidModels.morph_quality` compares a mesh with an earlier
     one, to decide when a sequence of morphs calls for re-meshing.
+  - `SolidModels.write_velocities` writes the design velocities at the nodes of a Gmsh mesh
+    file as a CSV table, the input of solvers that compute shape sensitivities, such as the
+    `"Velocities"` of Palace's `"Sensitivity"` configuration.
 
 ## 1.22.0 (2026-11-16)
 

@@ -116,6 +116,53 @@ function morph_quality(reference::AbstractString, mesh::AbstractString)
     return _morph_quality(a, a.nodes, _corresponding_nodes(a, b, reference, mesh))
 end
 
+"""
+    write_velocities(path, mesh, velocities; unit=STP_UNIT)
+
+Write to `path` the table of `velocities` at the nodes of the mesh in the file `mesh`, the
+input of solvers that compute shape sensitivities, such as the `"Velocities"` of Palace's
+`"Sensitivity"` configuration.
+
+`velocities` is the `NamedTuple` returned by [`SolidModels.design_velocities`](@ref), or
+any collection of fields like [`SolidModels.DesignVelocity`](@ref) keyed by parameter name.
+The table is a CSV file with the columns `x`, `y` and `z` of the coordinates of the nodes,
+in the file's length unit `unit` at full precision, then `<name>.x`, `<name>.y` and
+`<name>.z` of the velocity of each parameter, in `unit` per
+[`SolidModels.parameter_unit`](@ref) of its velocity. It lists only the nodes at which some
+velocity is nonzero. The mesh must be a Gmsh MSH 2.2 or 4.1 file, as for
+[`SolidModels.morph_mesh`](@ref).
+"""
+function write_velocities(
+    path::AbstractString,
+    mesh::AbstractString,
+    velocities;
+    unit=STP_UNIT
+)
+    isempty(velocities) && throw(ArgumentError("no velocities to write"))
+    version, _ = _msh_format(mesh)
+    scale = Float64(ustrip(STP_UNIT, 1.0 * unit))
+    X = _with_mesh(m -> m.nodes, mesh, version)
+    names = collect(keys(velocities))
+    V = [velocities[k](X .* scale) ./ scale for k in names]
+    open(path, "w") do io
+        print(io, "x, y, z")
+        for k in names
+            print(io, ", $k.x, $k.y, $k.z")
+        end
+        println(io)
+        for j in axes(X, 2)
+            any(v -> any(!iszero, view(v, :, j)), V) || continue
+            join(io, view(X, :, j), ", ")
+            for v in V
+                print(io, ", ")
+                join(io, view(v, :, j), ", ")
+            end
+            println(io)
+        end
+    end
+    return path
+end
+
 ######## Reading and writing
 
 # The elements of one type on one entity.

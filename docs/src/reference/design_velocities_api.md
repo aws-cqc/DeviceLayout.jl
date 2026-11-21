@@ -13,10 +13,11 @@ together.
     SolidModels.DesignDisplacement
 ```
 
-## Mesh morphing
+## Meshes
 
 ```@docs
     SolidModels.morph_mesh
     SolidModels.morph_quality
     SolidModels.MorphQuality
+    SolidModels.write_velocities
 ```
