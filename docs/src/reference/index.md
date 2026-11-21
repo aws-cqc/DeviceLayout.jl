@@ -29,6 +29,7 @@ Docstrings are split up over a few pages:
 - [Path API](path_api.md)
 - [Schematic-Driven Design API](schematic_api.md)
 - [Experimental Solid Model API](solidmodels_experimental_api.md)
+- [Design Velocity API](design_velocities_api.md)
 - [ParameterSet API Reference](parameter_set_api.md)
 - [Shape Library](shapes.md)
 
