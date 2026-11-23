@@ -258,16 +258,23 @@ _any_boxes_touch(boxes) = any(
 
 _object_dimtags(sm, groups) = unique(reduce(vcat, (dimtags(sm[g, 3]) for g in groups)))
 
-# `dimtags` plus every entity on their boundaries, down to points. `getBoundary` with
-# `recursive=true` returns points only, so the dimensions are walked one at a time.
+# `dimtags` plus every entity on their boundaries, down to points, each once. `getBoundary`
+# with `recursive=true` returns points only, so the boundaries are walked one level at a time.
+# `dimtags` may mix dimensions. The order is the order `getBoundary` reports, which
+# `import_solid!` relies on to pair a copy's entities with its prototype's.
 function _boundary_closure(dimtags)
-    closure = Set{Tuple{Int32, Int32}}(dimtags)
-    layer = collect(dimtags)
-    while !isempty(layer) && first(layer)[1] > 0
-        layer = unique([
-            (d, abs(t)) for (d, t) in gmsh.model.getBoundary(layer, false, false, false)
-        ])
-        union!(closure, layer)
+    closure = unique!(Tuple{Int32, Int32}[(d, t) for (d, t) in dimtags])
+    seen = Set(closure)
+    layer = closure
+    while true
+        parents = filter(dt -> dt[1] > 0, layer)
+        isempty(parents) && break
+        layer = Tuple{Int32, Int32}[]
+        for (d, t) in gmsh.model.getBoundary(parents, false, false, false)
+            b = (Int32(d), Int32(abs(t)))
+            b in seen || (push!(seen, b); push!(layer, b))
+        end
+        append!(closure, layer)
     end
     return closure
 end

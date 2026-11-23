@@ -12,6 +12,11 @@ The format of this changelog is based on
     don't recognize, which they would otherwise ignore silently, once per session and once per
     `Schematic` render. `OptionalStyle` flags are recognized automatically, and
     `DeviceLayout.register_render_kwarg!` registers other custom rendering options.
+  - `SolidModels.import_solid!(sm, filename, transforms; ...)` reads a file once and places a
+    copy at each transform, instead of re-reading the file and synchronizing the model for
+    every placement. Physical groups from a `.xao` file are assigned to each copy, under one
+    shared name or per-copy names. `SolidModelComponent` instances that share a file and
+    `scale` are imported this way automatically.
 
 ## 1.22.0 (2026-11-16)
 

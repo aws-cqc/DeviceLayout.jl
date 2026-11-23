@@ -207,6 +207,8 @@ conversion.
 The imported solid lands in a physical group named after its node `id`. Physical groups
 carried by the file (a `.xao`) are registered as `"<id>_<name>"`, so the same component
 placed in several nodes gives distinct group names that trace back to the schematic.
+Instances that share a file and `scale` are imported together: the file is read once and each
+instance is a copy.
 
 The `component_fragment` option of `render!(sm, sch, target)` selects when the parts are
 imported and made conformal with the rest of the model.
@@ -267,17 +269,39 @@ end
 
 hooks(c::SolidModelComponent) = c.hooks
 
-# The `import_solid!` operation for `c` placed in node `id` with global transformation `tr`.
-function _import_op(c::SolidModelComponent, id::String, tr, target::Target)
+# Import every instance of one file at one scale, reading the file once. Each instance
+# `ids[i]` is placed at `transforms[i]` and gets its own group `ids[i]`, and the file's groups
+# are registered as `"<id>_<name>"`. Returns no entities, which leaves the operation's
+# destination group untouched: the instance groups are already registered.
+function _import_components!(
+    sm::SolidModels.SolidModel,
+    filename,
+    transforms;
+    ids,
+    kwargs...
+)
+    SolidModels.import_solid!(
+        sm,
+        filename,
+        transforms;
+        groupname=ids,
+        group_map=[nm -> string(id, "_", nm) for id in ids],
+        kwargs...
+    )
+    return []
+end
+
+# The operation importing `instances`, which share `filename` and `scale`. The destination is
+# the first instance's group, named only for reporting.
+function _import_op(filename, scale, instances, target::Target)
+    ids = [inst.id for inst in instances]
     return (
-        id,
-        SolidModels.import_solid!,
-        (c.filename,),
-        :transform => tr,
-        :z => layer_z(target.technology, c.meta),
-        :scale => c.scale,
-        :groupname => nothing,
-        :group_map => nm -> string(id, "_", nm)
+        first(ids),
+        _import_components!,
+        (filename, [inst.transform for inst in instances]),
+        :ids => ids,
+        :z => [layer_z(target.technology, inst.meta) for inst in instances],
+        :scale => scale
     )
 end
 
@@ -296,7 +320,9 @@ const _COMPONENT_FRAGMENT_MODES = (:global, :near)
         -> (; postrender, post_fragment)
 
 Collect the import operations of the `SolidModelComponent`s in `sch` at their solved global
-transforms, split by when they run. With `fragment=:global` they all go in `postrender`.
+transforms, split by when they run. Instances that share a file and `scale` are imported by one
+operation, which reads the file once and places a copy per instance. With `fragment=:global`
+they all go in `postrender`.
 With `fragment=:near` they go in `post_fragment`, followed by one
 [`SolidModels.fragment_near!`](@ref) over all of them, so every part is in place before any
 is fragmented.
@@ -307,7 +333,7 @@ function component_solidmodel_ops(sch::Schematic, target::Target; fragment=:glob
             "component_fragment must be one of $(_COMPONENT_FRAGMENT_MODES), got $(repr(fragment))"
         )
     )
-    ops = map(find_components(SolidModelComponent, sch)) do idx
+    instances = map(find_components(SolidModelComponent, sch)) do idx
         # A component inside a composite is found by its path of node indices; its id is
         # the node ids along that path joined by "." as in `add_graph!`.
         path = idx isa Tuple ? idx : (idx,)
@@ -315,11 +341,29 @@ function component_solidmodel_ops(sch::Schematic, target::Target; fragment=:glob
         c = component(nodes[end])
         _isignored(target, c.meta) && return nothing
         id = join((n.id for n in nodes), ".")
-        return _import_op(c, id, transformation(sch, path), target)
+        return (; id, c.filename, c.scale, c.meta, transform=transformation(sch, path))
     end
-    ops = filter(!isnothing, ops)
+    filter!(!isnothing, instances)
+    # Batch by file and scale. Batches are ordered by each file's first appearance in the
+    # schematic, so instances of different files may be imported in a different order than
+    # they appear (A, B, A imports as A, A, B); only internal group tags depend on it. The path
+    # is made absolute so different spellings of one file share a read. `scale` is part of the
+    # key because STEP and BREP files are scaled while reading, so differently scaled
+    # instances need their own read. The batches hold `Any` because instances' transform and
+    # meta types can differ.
+    batches = Dict{Tuple{String, Float64}, Vector{Any}}()
+    keys_in_order = Tuple{String, Float64}[]
+    for inst in instances
+        key = (abspath(inst.filename), inst.scale)
+        haskey(batches, key) || (push!(keys_in_order, key); batches[key] = [])
+        push!(batches[key], inst)
+    end
+    ops = [
+        _import_op(filename, scale, batches[(filename, scale)], target) for
+        (filename, scale) in keys_in_order
+    ]
     (fragment == :global || isempty(ops)) && return (; postrender=ops, post_fragment=[])
-    ids = first.(ops)
+    ids = [inst.id for inst in instances]
     near = (first(ids), _fragment_components!, (ids,))
     return (; postrender=[], post_fragment=vcat(ops, [near]))
 end
