@@ -270,6 +270,14 @@ an explanation of the mechanism. Assertions that fail on the current code are wr
 `@test_broken`, so a change that fixes one shows up as an unexpected pass. The
 generative checks they affect are skipped through `KNOWN_BROKEN` in `lawslib.jl`.
 
+Clipper2_jll 2.0.1 is compiled with GCC's default `-ffp-contract=fast`, so on aarch64 it
+fuses multiply-adds into one rounding, and on x86_64, whose baseline has no FMA, it
+doesn't. The two can round an intersection to different grid points, so a reproducer
+found on one may pass on the other. Check a new entry on both, or on aarch64 against
+Clipper2 and the `cclipper2` wrapper built with `-ffp-contract=off` (loaded through the
+`Clipper2_jll` and `cclipper2_jll` library path preferences), which gives the same ledger
+results as x86_64.
+
 | Entry | Finding                                                                                                                            | Source             | Status                                                                                           |
 |:----- |:---------------------------------------------------------------------------------------------------------------------------------- |:------------------ |:------------------------------------------------------------------------------------------------ |
 | L1    | A thin integer polygon (a vertex within a unit of an edge, or a triangle with an edge under 2 units) vanishes under `union2d([A])` | Clipper1, Clipper2 | Broken; B3 and O1 skip thin integer polygons                                                     |

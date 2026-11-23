@@ -710,35 +710,35 @@
     # `to_polygons` can't attach.
     # Found by: a plane minus running-bond walls of 9–64 abutting rotated bricks, outside
     # the generated laws. Class: kernel finding, mostly Clipper2: `to_polygons` threw for
-    # 79 of 1000 walls, and 2 on Clipper1. Where the corner shared by two bricks lies on
-    # the edge of a third, the plane comes back with the bricks' hole and, beside it, a
-    # 3-vertex hole under a fm wide along the third brick's edge. Its lowest vertex lies
-    # just inside the other hole, so no keyhole cut reaches it. The region is right; the
-    # failure is loud.
+    # 79 of 1000 walls (64 on a build that, like x86_64's, doesn't fuse multiply-adds), and
+    # 2 on Clipper1. Where the corner shared by two bricks lies on the edge of a third, the
+    # plane comes back with the bricks' hole and, beside it, a 3-vertex hole under a fm wide
+    # along the third brick's edge. Its lowest vertex lies just inside the other hole, so no
+    # keyhole cut reaches it. The region is right; the failure is loud.
     @testset "> L19 sliver hole beside a hole" begin
         bricks = [
             Polygon(
                 Point{Float64}[
-                    (5.8138401276653875, 4.308274595060582),
-                    (16.324321235716287, 3.1116849304086576),
-                    (16.882920809356225, 8.0182543577952),
-                    (6.372439701305325, 9.214844022447126)
+                    (-17.096323034336404, 1.1925670686004954),
+                    (-25.644484551504608, 1.7888506029007432),
+                    (-25.80546482003053, -0.5189195387845454),
+                    (-17.257303302862326, -1.115203073084793)
                 ]
             ),
             Polygon(
                 Point{Float64}[
-                    (1.1171991472798743, 9.813138854773088),
-                    (11.627680255330775, 8.616549190121164),
-                    (12.186279828970711, 13.523118617507706),
-                    (1.6757987209198115, 14.71970828215963)
+                    (-25.644484551504608, 1.7888506029007432),
+                    (-34.19264606867281, 2.385134137200991),
+                    (-34.353626337198726, 0.07736399551570228),
+                    (-25.80546482003053, -0.5189195387845454)
                 ]
             ),
             Polygon(
                 Point{Float64}[
-                    (11.627680255330775, 8.616549190121164),
-                    (22.138161363381673, 7.419959525469239),
-                    (22.69676093702161, 12.326528952855782),
-                    (12.186279828970711, 13.523118617507706)
+                    (-21.531384061446424, -0.8170613059346695),
+                    (-30.079545578614628, -0.2207777716344218),
+                    (-30.24052584714055, -2.52854791331971),
+                    (-21.692364329972346, -3.124831447619958)
                 ]
             )
         ]
@@ -754,78 +754,52 @@
     # Found by: a plane minus the pieces of a comb `A ∖ B` and a rotated rectangle B,
     # outside the generated laws. Class: kernel defect, Clipper2 only. In that pattern it
     # happened about once in 1000 trials for two combs, and up to 4 times in 10 000 for a
-    # comb or U against a U or a rectangle, never on Clipper1. The plane's hole holds a
-    # clockwise contour of 105 μm² beside one island and inside none, so the shim leaves it
-    # in place. Read as an island it adds 78 μm² too much; dropped, the area would be 27 μm²
-    # short. No error is raised. One level up (the outline of `A ∪ B` minus the same pieces)
-    # it happened about 4 times in 1000 for two combs or two U shapes, and 13 in 5000 for a
-    # comb against a rectangle, where Clipper1 never gave too much area.
+    # comb or U against a U or a rectangle, never on Clipper1. Where the 29 μm² hole of
+    # `A ∪ B` should leave an island, the plane's hole holds a clockwise contour of 83 μm²
+    # and no island, so the shim leaves it in place. Read as an island it adds 54 μm² too
+    # much; dropped, the area would be 29 μm² short. No error is raised. One level up (the
+    # outline of `A ∪ B` minus the same pieces) it happened about 4 times in 1000 for two
+    # combs or two U shapes, and 13 in 5000 for a comb against a rectangle, where Clipper1
+    # never gave too much area.
     @testset "> L20 contour oriented like the hole around it" begin
         A = Polygon(
             Point{Float64}[
-                (1.9496794555960104, 74.8892020393039),
-                (-82.9315105646534, -9.935225932515127),
-                (-20.40848009916882, -72.50009499765964),
-                (-3.3710143663163317, -55.47402261891575),
-                (-55.29099133532354, -3.519302306302409),
-                (-51.108159563113674, 0.6607323079084524),
-                (0.8118174058935335, -51.293988004704886),
-                (17.849283138746017, -34.26791562596099),
-                (-34.07069383026118, 17.686804686652348),
-                (-29.887862058051315, 21.86683930086321),
-                (22.032114910955887, -30.08788101175013),
-                (39.069580643808365, -13.061808633006237),
-                (-12.850396325198833, 38.8929116796071),
-                (-8.667564552988964, 43.072946293817964),
-                (43.25241241601823, -8.881774018795376),
-                (64.4727099210806, 12.324332974159379)
+                (11.487715495361364, 101.25670249925746),
+                (-67.84964056689019, 11.225685993546943),
+                (-4.30911515379515, -44.76765368802283),
+                (8.824166113857412, -29.86417415116503),
+                (-43.4624822360238, 16.211996022623296),
+                (-36.761424488113484, 23.81627061219313),
+                (15.525223861767735, -22.259899561595205),
+                (28.658505129420302, -7.356420024737403),
+                (-23.628143220460913, 38.719750149050924),
+                (-16.927085472550594, 46.32402473862075),
+                (35.359562877330625, 0.2478545648324264),
+                (48.49284414498319, 15.151334101690221),
+                (-3.793804204898029, 61.22750427547855),
+                (2.907253543012292, 68.83177886504839),
+                (55.19390189289351, 22.755608691260054),
+                (75.0282409084564, 45.26336281768768)
             ]
         )
         B = Polygon(
             Point{Float64}[
-                (79.19224184824154, -65.80500886733756),
-                (92.99349547176334, -20.812351724564557),
-                (-54.22522906963919, 24.346193792759898),
-                (-68.02648269316097, -20.646463350013114)
+                (-35.67004143144544, 63.84985989359336),
+                (-43.717920404400395, -88.57348860290764),
+                (27.10612566959908, -92.31296393133226),
+                (35.154004642554035, 60.110384565168744)
             ]
         )
+        pieces = vcat(to_polygons(difference2d(A, B)), [B])
+        u = union2d(A, B)
         plane = Rectangle(2000.0, 2000.0) - Point(1000.0, 1000.0)
-        cp = difference2d(plane, vcat(to_polygons(difference2d(A, B)), [B]))
-        @test_broken first(region_within(cp, difference2d(plane, union2d(A, B)), 1))
-        # At the top level: the outline of `A2 ∪ B2` minus the pieces of `A2 ∖ B2` and
-        # B2 comes back as a clockwise 48 μm² contour at the root, where 9 μm² are
+        cp = difference2d(plane, pieces)
+        @test_broken first(region_within(cp, difference2d(plane, u), 1))
+        # At the top level: the outline of `A ∪ B` minus the same pieces has the same
+        # clockwise 83 μm² contour at the root, beside the 50 μm² island, where 79 μm² are
         # expected.
-        A2 = Polygon(
-            Point{Float64}[
-                (8.033453943697147, -70.87481577291379),
-                (47.12894478834977, 42.57800523923947),
-                (-10.044863604674674, 62.27992258816081),
-                (-17.474136703187504, 40.72060787217056),
-                (25.518069063317775, 25.9056268788308),
-                (23.17346945066745, 19.101736341782733),
-                (-19.81873631583783, 33.91671733512249),
-                (-27.24800941435066, 12.357402619132241),
-                (15.744196352154624, -2.457578374207519),
-                (13.399596739504297, -9.261468911255584),
-                (-29.592609027000982, 5.553512082084176),
-                (-37.021882125513805, -16.005802633906075),
-                (5.97032364099147, -30.820783627245834),
-                (3.6257240283411445, -37.62467416429391),
-                (-39.36648173816413, -22.80969317095414),
-                (-49.14035444932729, -51.17289842399246)
-            ]
-        )
-        B2 = Polygon(
-            Point{Float64}[
-                (-85.4130010839323, 41.97278745197363),
-                (11.655024594526118, -35.48687696590052),
-                (27.868112926783972, -15.169561026179437),
-                (-69.19991275167445, 62.290103391694714)
-            ]
-        )
-        u2 = union2d(A2, B2)
-        outline = Polygon(only(u2.tree.children).contour)
-        cp2 = difference2d(outline, vcat(to_polygons(difference2d(A2, B2)), [B2]))
-        @test_broken first(region_within(cp2, difference2d(outline, u2), 1))
+        outline = Polygon(only(u.tree.children).contour)
+        cp2 = difference2d(outline, pieces)
+        @test_broken first(region_within(cp2, difference2d(outline, u), 1))
     end
 end
