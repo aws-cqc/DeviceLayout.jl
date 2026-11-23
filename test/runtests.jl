@@ -5,7 +5,7 @@ using TestItemRunner
     using Preferences
     using DeviceLayout, LinearAlgebra, Unitful, FileIO, Logging
     import Unitful: s, °, DimensionError
-    import Clipper
+    import DeviceLayout.Clipper as Clipper
     import ForwardDiff
 
     const pm2μm = DeviceLayout.PreferMicrons.pm

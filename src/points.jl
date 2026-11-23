@@ -2,7 +2,7 @@ module Points
 
 import DeviceLayout: PointTypes, InverseLength, Coordinate
 import StaticArrays
-import Clipper: IntPoint
+import DeviceLayout.Clipper: IntPoint
 import Base: convert, *, summary, show, isapprox
 import ForwardDiff: ForwardDiff, extract_derivative
 import Unitful:

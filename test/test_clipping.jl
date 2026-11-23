@@ -158,14 +158,14 @@
         @test typeof(u) == ClippedPolygon{Int}
         up = to_polygons(u)
         @test length(up) == 1
-        @test up[1] == Polygon(Point{Int}[(0, 0), (3, 0), (3, 1), (0, 1)])
+        @test up[1] == Polygon(Point{Int}[(3, 1), (0, 1), (0, 0), (3, 0)])
 
         d = difference2d(r1, r2)
         @test typeof(d) == ClippedPolygon{Int}
         dp = to_polygons(d)
         @test length(dp) == 2
-        @test dp[1] == Polygon(Point{Int}[(3, 1), (2, 1), (2, 0), (3, 0)])
-        @test dp[2] == Polygon(Point{Int}[(0, 1), (0, 0), (1, 0), (1, 1)])
+        @test dp[1] == Polygon(Point{Int}[(1, 0), (1, 1), (0, 1), (0, 0)])
+        @test dp[2] == Polygon(Point{Int}[(3, 1), (2, 1), (2, 0), (3, 0)])
 
         i = intersect2d(r1, r2)
         @test typeof(i) == ClippedPolygon{Int}
@@ -181,14 +181,14 @@
         @test typeof(u) == ClippedPolygon{Float64}
         up = to_polygons(u)
         @test length(up) == 1
-        @test up[1] == Polygon(Point{Int}[(0.0, 0.0), (3, 0.0), (3.0, 1.0), (0.0, 1.0)])
+        @test up[1] == Polygon(Point{Int}[(3.0, 1.0), (0.0, 1.0), (0.0, 0.0), (3.0, 0.0)])
 
         d = difference2d(r1, r2)
         @test typeof(d) == ClippedPolygon{Float64}
         dp = to_polygons(d)
         @test length(dp) == 2
-        @test dp[1] == Polygon(Point{Int}[(3.0, 1.0), (2.0, 1.0), (2.0, 0.0), (3.0, 0.0)])
-        @test dp[2] == Polygon(Point{Int}[(0.0, 1.0), (0.0, 0.0), (1.0, 0.0), (1.0, 1.0)])
+        @test dp[1] == Polygon(Point{Int}[(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)])
+        @test dp[2] == Polygon(Point{Int}[(3.0, 1.0), (2.0, 1.0), (2.0, 0.0), (3.0, 0.0)])
 
         i = intersect2d(r1, r2)
         @test typeof(i) == ClippedPolygon{Float64}
@@ -278,14 +278,14 @@
         @test typeof(u) == ClippedPolygon{T}
         up = to_polygons(u)
         @test length(up) == 1
-        @test up[1] == Polygon(Point{T}[(0μm, 0μm), (3μm, 0μm), (3μm, 1μm), (0μm, 1μm)])
+        @test up[1] == Polygon(Point{T}[(3μm, 1μm), (0μm, 1μm), (0μm, 0μm), (3μm, 0μm)])
 
         d = difference2d(r1, r2)
         @test typeof(d) == ClippedPolygon{T}
         dp = to_polygons(d)
         @test length(dp) == 2
-        @test dp[1] == Polygon(Point{T}[(3μm, 1μm), (2μm, 1μm), (2μm, 0μm), (3μm, 0μm)])
-        @test dp[2] == Polygon(Point{T}[(0μm, 1μm), (0μm, 0μm), (1μm, 0μm), (1μm, 1μm)])
+        @test dp[1] == Polygon(Point{T}[(1μm, 0μm), (1μm, 1μm), (0μm, 1μm), (0μm, 0μm)])
+        @test dp[2] == Polygon(Point{T}[(3μm, 1μm), (2μm, 1μm), (2μm, 0μm), (3μm, 0μm)])
 
         i = intersect2d(r1, r2)
         @test typeof(i) == ClippedPolygon{T}
@@ -304,7 +304,7 @@
         up = to_polygons(u)
         @test length(up) == 1
         @test up[1] == Polygon(
-            Point{T}[(0.0μm, 0.0μm), (3.0μm, 0.0μm), (3.0μm, 1.0μm), (0.0μm, 1.0μm)]
+            Point{T}[(3.0μm, 1.0μm), (0.0μm, 1.0μm), (0.0μm, 0.0μm), (3.0μm, 0.0μm)]
         )
 
         d = difference2d(r1, r2)
@@ -312,10 +312,10 @@
         dp = to_polygons(d)
         @test length(dp) == 2
         @test dp[1] == Polygon(
-            Point{T}[(3.0μm, 1.0μm), (2.0μm, 1.0μm), (2.0μm, 0.0μm), (3.0μm, 0.0μm)]
+            Point{T}[(1.0μm, 0.0μm), (1.0μm, 1.0μm), (0.0μm, 1.0μm), (0.0μm, 0.0μm)]
         )
         @test dp[2] == Polygon(
-            Point{T}[(0.0μm, 1.0μm), (0.0μm, 0.0μm), (1.0μm, 0.0μm), (1.0μm, 1.0μm)]
+            Point{T}[(3.0μm, 1.0μm), (2.0μm, 1.0μm), (2.0μm, 0.0μm), (3.0μm, 0.0μm)]
         )
 
         i = intersect2d(r1, r2)
@@ -548,6 +548,127 @@
         @test iszero(perimeter(empty_poly))
         multi_poly = union2d(r1, r1 + Point(3, 0))
         @test perimeter(multi_poly) == 8
+    end
+
+    # Edge-touching integer polygons merge at every shared-edge length, down to a single
+    # integer unit. Contour counts, not vertex lists, are asserted, so collinear-vertex
+    # stripping doesn't affect them.
+    @testset "> Edge-touching integer union" begin
+        # Two squares sharing a full vertical edge, all subjects in one union.
+        touch(sz) = union2d([Rectangle(sz, sz), Rectangle(sz, sz) + Point(sz, 0)])
+        for sz in (1, 2, 5, 20, 1000)
+            @test length(to_polygons(touch(sz))) == 1
+        end
+
+        # Pixel blocks merge too, for Int and Quantity{Int} coordinates.
+        @test length(to_polygons(draw_pixels([1 1; 1 1], 20))) == 1     # solid pixel block
+        @test length(to_polygons(draw_pixels([-1 1; 1 1], 20))) == 1    # hatching pattern
+        @test length(to_polygons(draw_pixels([1 0; 0 1], 20))) == 2     # diagonal: corners only, correctly stays split
+        @test length(to_polygons(draw_pixels([1 1; 1 1], 20μm))) == 1   # Quantity{Int} coords
+        # Shield-style T-junction (a bar with two legs sharing its bottom edge).
+        bar = Rectangle(3, 1)
+        legs = [Rectangle(1, 2) + Point(0, -2), Rectangle(1, 2) + Point(2, -2)]
+        @test length(to_polygons(union2d([bar, legs...]))) == 1
+    end
+
+    @testset "> Independent subject and clip fill rules" begin
+        result_area(p) = sum(DeviceLayout.Polygons.area, to_polygons(p))
+        outer = Rectangle(10, 10)
+        inner = Rectangle(4, 4) + Point(3, 3)
+        clockwise(p) = Polygon(reverse(points(p)))
+
+        @test result_area(
+            clip(
+                Clipper.ClipTypeDifference,
+                outer,
+                clockwise(inner);
+                pfs=Clipper.PolyFillTypePositive,
+                pfc=Clipper.PolyFillTypeNegative
+            )
+        ) == 84
+        @test result_area(
+            clip(
+                Clipper.ClipTypeDifference,
+                clockwise(outer),
+                inner;
+                pfs=Clipper.PolyFillTypeNegative,
+                pfc=Clipper.PolyFillTypePositive
+            )
+        ) == 84
+        @test result_area(
+            clip(
+                Clipper.ClipTypeDifference,
+                outer,
+                [inner, inner];
+                pfs=Clipper.PolyFillTypePositive,
+                pfc=Clipper.PolyFillTypeEvenOdd
+            )
+        ) == 100
+        @test result_area(
+            clip(
+                Clipper.ClipTypeDifference,
+                outer,
+                [inner, inner];
+                pfs=Clipper.PolyFillTypeEvenOdd,
+                pfc=Clipper.PolyFillTypeNonZero
+            )
+        ) == 84
+    end
+
+    @testset "> Degenerate paths" begin
+        # As with Clipper1, paths with fewer than three vertices contribute nothing.
+        degenerate = Polygon([Point(0, 0), Point(1, 0)])
+        nopoints = Polygon(Point{Int}[])
+        r = Polygon(Point{Int}[(0, 0), (2, 0), (2, 2), (0, 2)])
+        @test isempty(to_polygons(union2d(degenerate)))
+        @test only(to_polygons(union2d([nopoints, r, degenerate]))) ==
+              only(to_polygons(union2d(r)))
+        @test only(to_polygons(difference2d(r, [degenerate, nopoints]))) ==
+              only(to_polygons(union2d(r)))
+        @test only(
+            to_polygons(
+                clip(
+                    Clipper.ClipTypeDifference,
+                    [r],
+                    [nopoints, degenerate];
+                    pfs=Clipper.PolyFillTypePositive,
+                    pfc=Clipper.PolyFillTypeEvenOdd
+                )
+            )
+        ) == only(to_polygons(union2d(r)))
+    end
+
+    # Contours that Clipper2 nests under a neighbour they touch are tested in the GeomLaws
+    # ledger (L18).
+
+    @testset "> PolyNode display" begin
+        cp = union2d(Rectangle(2, 2))
+        @test sprint(show, cp.tree) == "Top-level PolyNode with 1 immediate children."
+        @test startswith(sprint(show, cp.tree.children[1]), "Closed PolyNode with contour:")
+    end
+
+    @testset "> Clipper.jl names" begin
+        # Code that does `import Clipper` reaches the same values and tree accessors
+        C2 = Clipper.C2
+        @test Clipper.JoinTypeRound === C2.JoinTypeRound
+        cp = difference2d(Rectangle(10, 10), Rectangle(2, 2) + Point(4, 4))
+        outer = only(C2.children(cp.tree))
+        @test !C2.ishole(outer) && C2.ishole(only(C2.children(outer)))
+        @test C2.contour(outer) == outer.contour
+    end
+
+    @testset "> Concurrent tasks" begin
+        # Each task clips with its own engine. Concurrent tasks sharing one crash Julia
+        # when they run on several threads.
+        engine() = DeviceLayout.Polygons.clipper()
+        @test engine() === engine()
+        @test fetch(Threads.@spawn engine()) !== engine()
+        rects = [Rectangle(Point(i, 0), Point(i + 10, 10)) for i = 0:3:30]
+        bars = [Rectangle(Point(2, 2), Point(8 + k, 30)) for k = 1:5]
+        serial = [to_polygons(difference2d(rects, b)) for b in bars]
+        tasks =
+            [Threads.@spawn(to_polygons(difference2d(rects, b))) for _ = 1:20 for b in bars]
+        @test fetch.(tasks) == repeat(serial, 20)
     end
 end
 
@@ -899,13 +1020,121 @@ end
         @test length(
             points(only(offset(Rectangle(10.0, 10.0), 1.0; j=Clipper.JoinTypeRound)))
         ) == length(points(o))
-        # Integer coordinates use grid units: Clipper's default of a quarter grid unit
+        # Integer coordinates use grid units, with a default of a quarter grid unit
         ri = Rectangle(10nm, 10nm)
         n_default = length(points(only(offset(ri, 1000nm; j=Clipper.JoinTypeRound))))
         n_1nm = length(points(only(offset(ri, 1000nm; j=Clipper.JoinTypeRound, atol=1nm))))
         @test n_1nm < n_default
         @test_throws DimensionError offset(r, 1μm; j=Clipper.JoinTypeRound, atol=0.001)
         @test_throws DimensionError offset(Rectangle(10, 10), 1; atol=1nm)
+
+        # The effective tolerance is capped at |δ|/4, also where |δ| < 4 atol: a round join
+        # at the 5.7° tip of a thin triangle stays within δ/4 of the arc.
+        segdist(p, a, b) =
+            norm(p - (a + clamp(((p - a) ⋅ (b - a)) / ((b - a) ⋅ (b - a)), 0, 1) * (b - a)))
+        function min_midpoint_dist(o, inp)
+            q, v = points(inp), points(o)
+            mids = [(v[i] + v[mod1(i + 1, length(v))]) / 2 for i in eachindex(v)]
+            return minimum(
+                segdist(m, q[k], q[mod1(k + 1, length(q))]) for m in mids, k in eachindex(q)
+            )
+        end
+        tip = Polygon(Point{Float64}[(0, 0), (10, -0.5), (10, 0.5)])
+        for δ in (0.001, 0.002)
+            o = only(offset(tip, δ; j=Clipper.JoinTypeRound))
+            @test min_midpoint_dist(o, tip) > 0.74δ
+        end
+        # `atol=0` means a quarter of a grid unit
+        @test length(
+            points(
+                only(offset(Rectangle(1.0, 1.0), 0.01; j=Clipper.JoinTypeRound, atol=0))
+            )
+        ) > 10000
+    end
+
+    @testset "Offsetting holes given as separate polygons" begin
+        # The lowest polygon is an outer contour, so the clockwise one is a hole: it grows
+        # when the outer contour shrinks, and shrinks when it grows.
+        outer = Polygon(Point{Int}[(0, 0), (100, 0), (100, 100), (0, 100)])
+        hole = Polygon(Point{Int}[(30, 30), (30, 70), (70, 70), (70, 30)])
+        @test Polygons.area(only(offset([outer, hole], -5))) == 90^2 - 50^2
+        @test Polygons.area(only(offset([outer, hole], 5))) == 110^2 - 30^2
+        @test Polygons.area(only(offset(hole, 5))) == 50^2
+    end
+
+    @testset "Offsetting clockwise polygons" begin
+        # Outer contours come back counterclockwise whatever the input's orientation. The
+        # square offset by 1 overlaps the 30 × 30 one in 11 × 11.
+        cw = Polygon(reverse(points(Rectangle(10.0, 10.0))))
+        @test Polygons.orientation(only(offset(cw, 1.0))) == 1
+        @test Polygons.orientation(only(offset(cw, -1.0))) == 1
+        @test Polygons.orientation(only(halo(cw, 1.0))) == 1
+        @test Polygons.area(
+            only(to_polygons(difference2d(Rectangle(30.0, 30.0), offset(cw, 1.0))))
+        ) ≈ 900 - 11^2
+        # A clockwise outer contour with a counterclockwise hole
+        outer = Polygon(reverse(points(Rectangle(100.0, 100.0))))
+        hole = Polygon(Point{Float64}[(20, 20), (80, 20), (80, 80), (20, 80)])
+        grown, shrunk = only(offset([outer, hole], 1.0)), only(offset([outer, hole], -1.0))
+        @test Polygons.orientation(grown) == Polygons.orientation(shrunk) == 1
+        @test Polygons.area(grown) ≈ 102^2 - 58^2
+        @test Polygons.area(shrunk) ≈ 98^2 - 62^2
+    end
+
+    @testset "Offsetting zero-area polygons" begin
+        r = Polygon(Point{Int}[(0, 0), (100, 0), (100, 100), (0, 100)])
+        flat = Polygon(Point{Int}[(0, 200), (50, 200), (50, 200), (0, 200)])
+        for p in (
+            flat,
+            Polygon(Point{Int}[(0, 0), (25, 0), (50, 0)]),
+            Polygon(Point{Int}[(0, 0), (50, 0)]),
+            Polygon(Point{Int}[(0, 0)])
+        )
+            @test isempty(offset(p, 5))
+            @test isempty(offset(p, -5))
+        end
+        @test Polygons.area(only(offset([r, flat], -5))) == 90^2
+        @test Polygons.area(only(offset([r, flat], 5))) == 110^2
+        rf, flatf = Polygon{Float64}(points(r)), Polygon{Float64}(points(flat))
+        @test Polygons.area(only(offset([rf, flatf], -5.0))) ≈ 90^2
+        # A 2³² fm square and a 2³³ × 2³¹ fm rectangle, whose areas on the grid overflow
+        # Int64 to zero
+        @test Polygons.area(only(offset(Rectangle(4.294967296, 4.294967296), 1.0))) ≈
+              6.294967296^2
+        @test length(offset(Rectangle(8.589934592, 2.147483648), 0.5)) == 1
+    end
+
+    @testset "Open end types" begin
+        # An L of two 100-unit legs offset by 10: butt ends add nothing to the 4000 of the
+        # legs, square ends add 2 × 10 × 20, round ends two half discs.
+        l = Polygon(Point{Int}[(0, 0), (100, 0), (100, 100)])
+        endarea(e) = Polygons.area(only(offset(l, 10; e=e)))
+        @test endarea(Clipper.EndTypeOpenButt) == 4000
+        @test endarea(Clipper.EndTypeOpenSquare) == 4400
+        @test isapprox(endarea(Clipper.EndTypeOpenRound), 4000 + π * 10^2; rtol=0.01)
+        # A path has no inside to shrink, so non-positive offsets give nothing
+        sq = Polygon(Point{Int}[(0, 0), (100, 0), (100, 100), (0, 100)])
+        for e in (
+                Clipper.EndTypeClosedLine,
+                Clipper.EndTypeOpenButt,
+                Clipper.EndTypeOpenSquare,
+                Clipper.EndTypeOpenRound
+            ),
+            d in (-10, 0)
+
+            @test isempty(offset(l, d; e=e))
+            @test isempty(offset(sq, d; e=e))
+        end
+        # Nor do offsets under half a grid unit, which Clipper2 returns as the input path
+        lf = Polygon{Float64}(points(l))
+        for e in (
+            Clipper.EndTypeClosedLine,
+            Clipper.EndTypeOpenButt,
+            Clipper.EndTypeOpenSquare,
+            Clipper.EndTypeOpenRound
+        )
+            @test isempty(offset(lf, 3e-10; e=e))
+        end
     end
 end
 
@@ -1198,8 +1427,10 @@ end
     @test count(==(Point(10, 0)), poly.p) == 2
     @test abs(Polygons.area(poly)) == tree_area(cp)
 
-    # Clipper rounds this hole's lowest vertex to 0.08 units below its enclosing contour, so
-    # nothing is below it to attach to (#317), which is an error rather than a dropped hole.
+    # Clipper1 rounded the lowest vertex of this xor's hole to 0.08 units below its
+    # enclosing contour, so nothing is below it to attach to (#317), which is an error
+    # rather than a dropped hole. Clipper2 returns four outer contours touching at vertices
+    # for the same xor, with no hole, so the tree below is Clipper1's output.
     A = Polygon(
         Point{Float64}[(-2, 5), (-16, 11), (-12, -4), (-11, -9), (19, -4), (17, -3)] .*
         0.37
@@ -1218,10 +1449,45 @@ end
             (13, -5)
         ] .* 0.37
     )
-    @test_throws r"\(4\.81, ?-1\.85\).*could not be\s+attached" to_polygons(xor2d([A], [B]))
+    cp = xor2d([A], [B])
+    @test sum(p -> abs(Polygons.area(p)), to_polygons(cp)) ≈ tree_area(cp)
+    outer = Point{Float64}[
+        (2.502368421, -2.234605263),
+        (7.03, -1.48),
+        (6.29, -1.11),
+        (4.898395904, -0.524061433),
+        (5.18, 3.7),
+        (7.77, 5.18),
+        (4.07, 4.44),
+        (6.66, 7.4),
+        (-0.37, 4.44),
+        (-0.6960625, 1.8315),
+        (2.895285171, 0.319353612),
+        (2.502368421, -2.234605263),
+        (1.93, -2.33),
+        (2.22, -4.07)
+    ]
+    hole = Point{Float64}[
+        (3.417526882, 0.099462366),
+        (2.895285171, 0.319353612),
+        (2.96, 0.74),
+        (3.417526882, 0.099462366),
+        (4.898395904, -0.524061433),
+        (4.81, -1.85)
+    ]
+    function holed(o, h)
+        PN = Clipper.PolyNode{eltype(o)}
+        root = PN(eltype(o)[], false, false, PN[])
+        enclosing = PN(o, false, false, PN[], root)
+        push!(root.children, enclosing)
+        push!(enclosing.children, PN(h, true, false, PN[], enclosing))
+        return ClippedPolygon(root)
+    end
+    @test_throws r"\(4\.81, ?-1\.85\).*could not be\s+attached" to_polygons(
+        holed(outer, hole)
+    )
     # The vertex is reported in the polygon's own units.
-    Aμ, Bμ = Polygon(points(A) .* μm), Polygon(points(B) .* μm)
-    @test_throws r"\(4\.81 μm, ?-1\.85 μm\)" to_polygons(xor2d([Aμ], [Bμ]))
+    @test_throws r"\(4\.81 μm, ?-1\.85 μm\)" to_polygons(holed(outer .* μm, hole .* μm))
 
     # Clipper rounds both intersections of this hole with the edge from (-22, -98) to
     # (100, -2) to the hole's lowest vertex (0, -81), 0.31 units below the edge. More of the

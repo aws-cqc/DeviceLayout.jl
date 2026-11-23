@@ -37,9 +37,8 @@ otherwise. Throw an error rather than guess at what the user intended
 
 **Global state.** Avoid adding global state, but be aware that it is used in a few places:
 
-- `__init__` creates the global Clipper handle (`_clip`) and registers FileIO formats.
-  `precompile.jl` duplicates both because `__init__` has not run during precompilation.
-  Clipping through `_clip` is not thread-safe.
+- `__init__` registers FileIO formats. `precompile.jl` does too, because `__init__` has not
+  run during precompilation.
 - `SolidModels` wraps a single global Gmsh session, and the mesh-size callback installed by
   `render!` or `set_mesh_size_callback!` is global to it. Tests that touch it use the
   `QuietGmshSetup` snippet to initialize it and silence output.
