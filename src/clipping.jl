@@ -637,8 +637,22 @@ function _offset(
     if all(==(first(orientations)), orientations)
         return polys  # All same orientation — no holes
     end
-    # Mixed orientations mean holes are present — recombine via union2d so that the
-    # PolyTree keeps hole topology, then flatten back to Polygons with interior cuts.
+    # Mixed orientations mean holes are present. The offset's output is already a union, so
+    # with one outer contour every other contour is one of its holes, and the tree is built
+    # directly. `union2d` would build it with a second union, whose check of each hole
+    # against its outer contour costs holes × outer vertices.
+    if count(==(1), orientations) == 1
+        N = Clipper.PolyNode{Point{T}}
+        root = N(Point{T}[], false, false, N[])
+        outer_node = N(polys[findfirst(==(1), orientations)].p, false, false, N[], root)
+        push!(root.children, outer_node)
+        for (p, o) in zip(polys, orientations)
+            o == -1 && push!(outer_node.children, N(p.p, true, false, N[], outer_node))
+        end
+        return to_polygons(ClippedPolygon(root))
+    end
+    # With several outer contours, recombine via union2d so that the PolyTree keeps hole
+    # topology, then flatten back to Polygons with interior cuts.
     return to_polygons(union2d(polys))
 end
 
@@ -799,9 +813,11 @@ function interiorcuts(
         interior_side = orientation(Polygon(enclosing_contour))
         # Holes are cut bottom to top, and right to left at equal height. The order doesn't
         # depend on the order Clipper returns holes in, and for rows of holes right to left
-        # is about 30% faster than left to right.
-        cutorder(h) = (p = uniqueray(contour(h))[1].p0; (p.y, -p.x))
-        for hole in sort(children(enclosing), by=cutorder)
+        # is about 30% faster than left to right. The keys are computed once, since
+        # `sort(...; by)` would find each hole's lowest vertex again in every comparison.
+        holes = children(enclosing)
+        cutorder = map(h -> (p = uniqueray(contour(h))[1].p0; (p.y, -p.x)), holes)
+        for hole in holes[sortperm(cutorder)]
             # process all the holes.
             interiorcuts(hole, outpolys, userpoint)
 

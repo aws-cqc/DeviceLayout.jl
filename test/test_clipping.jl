@@ -982,7 +982,7 @@ end
         # Without the fix, Clipper returns 2 separate Polygons (one for the
         # expanded outer contour, one for the shrunk inner hole contour) because
         # _offset loses hole topology.  With the fix, mixed-orientation contours
-        # are recombined via union2d and flattened with interior cuts.
+        # are nested as holes of their outer contour and flattened with interior cuts.
         result = offset(ring, 5nm)
         @test length(result) == 1  # single ring polygon with interior cut
 
@@ -1060,6 +1060,22 @@ end
         @test Polygons.area(only(offset([outer, hole], -5))) == 90^2 - 50^2
         @test Polygons.area(only(offset([outer, hole], 5))) == 110^2 - 30^2
         @test Polygons.area(only(offset(hole, 5))) == 50^2
+    end
+
+    @testset "Offsetting several outer contours with holes" begin
+        # With more than one outer contour, the holes are nested by `union2d`: two rings,
+        # and a ring with an island in its hole.
+        ring(x) = [
+            Polygon(Point{Int}[(x, 0), (x + 100, 0), (x + 100, 100), (x, 100)]),
+            Polygon(Point{Int}[(x + 30, 30), (x + 30, 70), (x + 70, 70), (x + 70, 30)])
+        ]
+        two = offset([ring(0); ring(200)], 5)
+        @test length(two) == 2
+        @test sum(Polygons.area, two) == 2 * (110^2 - 30^2)
+        island = Polygon(Point{Int}[(45, 45), (55, 45), (55, 55), (45, 55)])
+        nested = offset([ring(0); island], 2)
+        @test length(nested) == 2
+        @test sum(Polygons.area, nested) == 104^2 - 36^2 + 14^2
     end
 
     @testset "Offsetting clockwise polygons" begin
