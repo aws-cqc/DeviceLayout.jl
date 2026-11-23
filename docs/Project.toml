@@ -1,6 +1,5 @@
 [deps]
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
-Clipper = "c8f6d549-b3ab-5508-a0d1-48fe138e8cc1"
 CoordinateTransformations = "150eb455-5306-5404-9cee-2592286d6298"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"

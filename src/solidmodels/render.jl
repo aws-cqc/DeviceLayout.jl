@@ -1,5 +1,5 @@
 ######## Rendering
-import Clipper: children, contour, ishole, PolyNode
+import DeviceLayout.Clipper: children, contour, ishole, PolyNode
 import Unitful: Length
 import StaticArrays: SVector
 import NearestNeighbors: nn

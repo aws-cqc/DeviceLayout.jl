@@ -78,9 +78,10 @@ end
         end
         return true
     end
-    # Holds wherever |δ|·sin(turn) ≥ 1 at every vertex; below that Clipper can leave
-    # the original vertex of a sharp corner in the output (ledger L7), a genuine
-    # deviation of up to δ from the offset curve rather than a discretization artifact.
+    # Stated wherever |δ|·sin(turn) ≥ 1 at every vertex; below that Clipper1 left the
+    # original vertex of a sharp corner in the output (ledger L7), a genuine deviation
+    # of up to δ from the offset curve rather than a discretization artifact.
+    # `round_oracle_sharp` covers the rest.
     @lawcheck function round_oracle(
         A=int_thick_polygon,
         δ=Data.Integers(1, 8),
@@ -126,10 +127,7 @@ end
         out = offset([A], δ; j=Clipper.JoinTypeRound, atol)
         return offset_oracle(A, out, _gridcoord(δ), 2 + arc_lattice_tol(atol))
     end
-    @law :O3_int_sharp @lawcheck function round_oracle_sharp(
-        A=int_thick_polygon,
-        δ=Data.Integers(1, 8)
-    )
+    @lawcheck function round_oracle_sharp(A=int_thick_polygon, δ=Data.Integers(1, 8))
         well_conditioned_offset(A, δ) && reject!()
         return offset_oracle(A, offset([A], δ; j=Clipper.JoinTypeRound), δ, 2)
     end
@@ -167,7 +165,7 @@ end
     # At convex corners round ⊆ square ⊆ miter for δ > 0. (A miter reaching more than
     # 2δ from its vertex, at corners sharper than 60°, is replaced by the square join;
     # containment still holds.) Stated away from the L7/L10 regime — a turn with
-    # sin·δ < 1 followed by a sharp tip — where the kernel's square and miter joins are
+    # sin·δ < 1 followed by a sharp tip — where Clipper1's square and miter joins were
     # wrong (see `well_conditioned_offset`).
     @lawcheck function join_order_int(A=int_thick_polygon, δ=Data.Integers(1, 6))
         well_conditioned_offset(A, δ) || reject!()
@@ -286,8 +284,10 @@ end
     # bounded by the three inset edges. Comparing Clipper1 with Clipper2 found Clipper2
     # misclassifying tips sharper than acos(0.999) ≈ 2.6° in its concavity test: the
     # inset's tip vertex lands 0.5 δ short of the exact one (a sub-unit-thick sliver,
-    # inside the region tolerance) or, on the second triangle, the inset vanishes for
-    # every join type. Clipper1 is exact on both.
+    # inside the region tolerance). On the second triangle, the inset vanished for every
+    # join type in a Clipper2 build that truncates intersection points to the lattice
+    # instead of rounding them (without `CLIPPER2_HI_PRECISION`). Clipper1 is exact on
+    # both.
     for (A, δ, expected) in (
         (
             Polygon(Point{Int}[(0, 0), (1000, 0), (0, 40)]),

@@ -7,9 +7,12 @@ using UUIDs
 include("units.jl")
 export PreferredUnits
 
+# DeviceLayout's own `Clipper` module (Clipper1 names over Clipper.jl 0.7, #199). The rest
+# of `src/` refers to `Clipper.X` and means this module.
+include("clipper_compat.jl")
+import .Clipper
+
 import StaticArrays
-import Clipper
-import Clipper: libcclipper
 import ThreadSafeDicts: ThreadSafeDict
 
 import Base: length, show, eltype
@@ -54,8 +57,6 @@ const ccwerrboundB   = (2.0 + 12.0 * epsilon) * epsilon
 const ccwerrboundC   = (9.0 + 64.0 * epsilon) * epsilon * epsilon
 
 function __init__()
-    # To ensure no crashes
-    global _clip = Ref(Clipper.Clip())
     # The magic bytes are the GDS HEADER tag (0x0002), preceded by the number of
     # bytes in total (6 == 0x0006) for the HEADER record.
     add_format(

@@ -1,4 +1,4 @@
-import Clipper
+import DeviceLayout.Clipper
 
 struct DotMatrix{S <: Coordinate, T <: AbstractCoordinateSystem{S}, M} <: Style{S}
     pixelmap::Dict{Char, T}

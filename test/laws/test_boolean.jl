@@ -1,16 +1,20 @@
 # Boolean-algebra laws over `union2d`, `intersect2d`, `difference2d`, `xor2d`, `clip`,
 # `clip_tiled`, and the keyhole cuts of `to_polygons`. README.md lists every law.
 #
-# Verdict conventions, from calibration at ≥ 1000 examples per family on Clipper1:
+# Verdict conventions, from calibration at ≥ 1000 examples per family on Clipper1, and
+# at 3 × 5000 on Clipper2:
 #   * rectilinear integer inputs: every intersection is a lattice point, so the laws
 #     hold with no tolerance (`≐`, or `region_same` where the kernel may split or merge
 #     contours that touch at a vertex);
 #   * identities, self-union, and single-rule fill laws hold with no tolerance on
-#     every family — one operation, one rounding, same inputs. Commutativity is also one
-#     operation per side, but it needs a tolerance on stars (B1 explains why);
+#     every family — one operation, one rounding, same inputs — except where an
+#     integer overlap thinner than a unit is missed (B9, ledger L17). Commutativity is
+#     also one operation per side, but it needs a tolerance on stars (B1 explains why);
 #   * laws that compose operations (associativity, duality, absorption, mixed fill
-#     rules, tiling) hold within one lattice unit on integer and float stars, because
-#     each side rounds intersection vertices independently.
+#     rules, tiling) hold within one lattice unit on float stars, because each side
+#     rounds intersection vertices independently. On integer stars they hold within
+#     two: Clipper2's rounded intersection points depend on how the operands are
+#     grouped, so the two sides can round the same vertex in opposite directions.
 
 @testitem "GeomLaws B1: commutativity" setup = [CommonTestSetup, LawsSetup] tags =
     [:geomlaws] begin
@@ -62,28 +66,29 @@ end
                ) &&
                region_same(union2d([A, B, C]), union2d(union2d([A], [B]), [C]))
     end
-    for gen in (int_triple, float_triple)
+    # Within one unit on floats, two on integers (see the verdict conventions above).
+    for (gen, tol) in ((int_triple, 2), (float_triple, 1))
         @lawcheck function associates(triple=gen)
             A, B, C = triple
             return first(
                        region_within(
                            union2d(union2d([A], [B]), [C]),
                            union2d([A], union2d([B], [C])),
-                           1
+                           tol
                        )
                    ) &&
                    first(
                        region_within(
                            intersect2d(intersect2d([A], [B]), [C]),
                            intersect2d([A], intersect2d([B], [C])),
-                           1
+                           tol
                        )
                    ) &&
                    first(
                        region_within(
                            union2d([A, B, C]),
                            union2d(union2d([A], [B]), [C]),
-                           1
+                           tol
                        )
                    )
         end
@@ -183,47 +188,26 @@ end
             difference2d(difference2d([A], [B]), [C])
         ) && region_same(union2d(difference2d([A], [B]), [B]), union2d([A], [B]))
     end
-    for gen in (int_triple, float_triple)
-        @lawcheck function duality(triple=gen)
-            A, B, C = triple
-            return first(
-                region_within(
-                    difference2d([A], union2d([B], [C])),
-                    difference2d(difference2d([A], [B]), [C]),
-                    1
-                )
-            ) && first(
-                region_within(union2d(difference2d([A], [B]), [B]), union2d([A], [B]), 1)
-            )
-        end
-    end
-end
-
-@testitem "GeomLaws B6 reproducer: hole beside a coincident edge" setup =
-    [CommonTestSetup, LawsSetup] tags = [:geomlaws] begin
-    # The subject's edges v₁v₂ and v₄v₅ run along the clip edge c₂c₃ less than one unit
-    # inside it, and the concavity v₂v₃v₄ between them encloses, with that edge, a
-    # triangle that is in neither operand. Found by the B6 absorption law as
-    # `(A ∖ B) ∪ B` at 5000 examples on Clipper2 2.0.1 (and its `main` of 2026-04):
-    # `FixSelfIntersects` sees the touching point as a two-edge self-intersection and
-    # `DoSplitOp` deletes the split-off loop whenever its orientation is opposite to
-    # the parent's, however large — the hole is filled and v₃, v₄ vanish. Clipper1
-    # returns the region correctly. The two operands overlap only in the sub-unit
-    # sliver along the shared edge, so their even-odd region is the union within 1.
-    S = Polygon(
-        Point{Int}[
-            (9035040, -1518829),
-            (8467159, -916142),
-            (3130000, 0),
-            (3351655, 4512897),
-            (2983653, 4903454),
-            (-4290000, 1480000),
-            (2860000, -7470000)
-        ]
+    dual(A, B, C, tol) = first(
+        region_within(
+            difference2d([A], union2d([B], [C])),
+            difference2d(difference2d([A], [B]), [C]),
+            tol
+        )
     )
-    C = Polygon(Point{Int}[(6864912, 5923282), (-155381, 8234882), (9645694, -2166911)])
-    for out in (union2d([S], [C]), union2d([C], [S]), union2d([S, C]))
-        @test first(region_within(out, [S, C], 1))
+    absorb(A, B, tol) =
+        first(region_within(union2d(difference2d([A], [B]), [B]), union2d([A], [B]), tol))
+    # Within two units on integers (see the verdict conventions above).
+    @lawcheck function duality(triple=int_triple)
+        return dual(triple..., 2) && absorb(triple[1], triple[2], 2)
+    end
+    @lawcheck function duality_float(triple=float_triple)
+        return dual(triple..., 1)
+    end
+    # Absorption on floats fails about once in 1000 draws, where Clipper2 fills a hole
+    # (ledger L16).
+    @law :B6_float @lawcheck function absorption_float(triple=float_triple)
+        return absorb(triple[1], triple[2], 1)
     end
 end
 
@@ -248,8 +232,9 @@ end
     [:geomlaws] begin
     # Every output contour is weakly simple (no proper self-crossing), the tree
     # alternates outer/hole, and (`nested`) every hole vertex lies inside or on its
-    # parent. Clipper1 guarantees neither when intersection rounding is coarse relative
-    # to the geometry: integer inputs (ledger L3, L4) and, rarely, fm-lattice floats.
+    # parent. Neither is guaranteed when intersection rounding is coarse relative to the
+    # geometry: integer inputs (ledger L3, L4) and, rarely, fm-lattice floats (L8; on
+    # Clipper1 also L4).
     results(A, B) =
         (union2d([A], [B]), intersect2d([A], [B]), difference2d([A], [B]), xor2d([A], [B]))
     @lawcheck function valid_rectilinear(pair=int_rectilinear_pair)
@@ -260,7 +245,7 @@ end
             return all(c -> valid_output(c; weak=true), results(pair...))
         end
     end
-    # Features one or two fm wide reproduce L3 on the fm lattice (ledger L8).
+    # Features a few fm wide reproduce L3 on the fm lattice (ledger L8).
     @law :B8_float_perturbed @lawcheck function valid_float_perturbed(
         triple=float_perturbed_pair
     )
@@ -273,7 +258,7 @@ end
     @law :B8_nested @lawcheck function nested_int(pair=int_pair)
         return all(c -> valid_output(c; weak=true, nested=true), results(pair...))
     end
-    @law :B8_nested @lawcheck function nested_float(pair=float_star_pair)
+    @lawcheck function nested_float(pair=float_star_pair)
         return all(c -> valid_output(c; weak=true, nested=true), results(pair...))
     end
 end
@@ -285,8 +270,11 @@ end
     # rules (`pfs ≠ pfc`) must equal normalizing each operand under its own rule first,
     # which is how a kernel with a single fill rule per operation, such as Clipper2
     # (#199), has to implement them.
+    # Reversed contours are swept in the opposite direction, so on integer stars an
+    # overlap thinner than a unit can be missed in one direction and not the other
+    # (ledger L17): within 1 there.
     rev(p) = Polygon(reverse(p.p))
-    for gen in (int_pair, int_rectilinear_pair, float_star_pair)
+    for (gen, tol) in ((int_pair, 1), (int_rectilinear_pair, 0), (float_star_pair, 0))
         @lawcheck function single_rule(pair=gen)
             A, B = pair
             T = eltype(A.p).parameters[1]
@@ -297,13 +285,19 @@ end
                    region_same(clip(U, [A, B], ∅; pfs=Clipper.PolyFillTypeNonZero), u) &&
                    region_same(clip(U, [A, B], ∅; pfs=Clipper.PolyFillTypeEvenOdd), x) &&
                    isempty(togrid(clip(U, [A, B], ∅; pfs=Clipper.PolyFillTypeNegative))) &&
-                   region_same(
-                       clip(U, [rev(A), rev(B)], ∅; pfs=Clipper.PolyFillTypeNegative),
-                       u
+                   first(
+                       region_within(
+                           clip(U, [rev(A), rev(B)], ∅; pfs=Clipper.PolyFillTypeNegative),
+                           u,
+                           tol
+                       )
                    ) &&
-                   region_same(
-                       clip(U, [rev(A), rev(B)], ∅; pfs=Clipper.PolyFillTypeNonZero),
-                       u
+                   first(
+                       region_within(
+                           clip(U, [rev(A), rev(B)], ∅; pfs=Clipper.PolyFillTypeNonZero),
+                           u,
+                           tol
+                       )
                    ) &&
                    isempty(
                        togrid(
@@ -330,18 +324,25 @@ end
         )
         return region_same(mixed, union2d(xor2d([A], [B]), [C]))
     end
-    for gen in (int_triple, float_triple)
-        @lawcheck function mixed_rules(triple=gen)
-            A, B, C = triple
-            mixed = clip(
-                Clipper.ClipTypeUnion,
-                [A, B],
-                [C];
-                pfs=Clipper.PolyFillTypeEvenOdd,
-                pfc=Clipper.PolyFillTypePositive
-            )
-            return first(region_within(mixed, union2d(xor2d([A], [B]), [C]), 1))
-        end
+    function mixed_holds(A, B, C, tol)
+        mixed = clip(
+            Clipper.ClipTypeUnion,
+            [A, B],
+            [C];
+            pfs=Clipper.PolyFillTypeEvenOdd,
+            pfc=Clipper.PolyFillTypePositive
+        )
+        return first(region_within(mixed, union2d(xor2d([A], [B]), [C]), tol))
+    end
+    # Mixed rules take two operations on each side: within two units on integers (see
+    # the verdict conventions above). About once in 10 000 draws, the union on the right
+    # fills a hole that the xor leaves between two contours touching at vertices (ledger
+    # L16).
+    @law :B9_mixed_int @lawcheck function mixed_rules(triple=int_triple)
+        return mixed_holds(triple..., 2)
+    end
+    @lawcheck function mixed_rules(triple=float_triple)
+        return mixed_holds(triple..., 1)
     end
 end
 
@@ -432,22 +433,27 @@ end
     # A result's rounded intersection vertices lie within a lattice unit of its operands'
     # edges, so clipping it against an operand again reaches near-coincident edges that
     # independent operands almost never produce. B6's absorption law is one such
-    # combination; it found the Clipper2 hole fill in "B6 reproducer". The first result
+    # combination; it found the Clipper2 hole fill of ledger L16. The first result
     # must be a valid tree, whose contours (holes clockwise) then describe it under the
     # positive fill rule, and the second operation is checked against the membership
     # oracle.
-    for gen in (int_pair, float_star_pair)
-        @lawcheck function output_as_operand(
-            pair=gen,
-            op=Data.SampledFrom([union2d, intersect2d, difference2d, xor2d]),
-            other=Data.Booleans()
-        )
-            A, B = pair
-            X = op([A], [B])
-            valid_output(X; weak=true, nested=true) || reject!()
-            Xp = contour_polygons(X)
-            isempty(Xp) && reject!()
-            return boolean_oracle_holds(Xp, [other ? A : B])
-        end
+    function as_operand_holds(A, B, op, other)
+        X = op([A], [B])
+        valid_output(X; weak=true, nested=true) || reject!()
+        Xp = contour_polygons(X)
+        isempty(Xp) && reject!()
+        return boolean_oracle_holds(Xp, [other ? A : B])
+    end
+    ops = Data.SampledFrom([union2d, intersect2d, difference2d, xor2d])
+    @lawcheck function output_as_operand(pair=int_pair, op=ops, other=Data.Booleans())
+        return as_operand_holds(pair..., op, other)
+    end
+    # On floats, Clipper2 gets about one draw in 5000 grossly wrong (ledger L16).
+    @law :B12_float @lawcheck function output_as_operand(
+        pair=float_star_pair,
+        op=ops,
+        other=Data.Booleans()
+    )
+        return as_operand_holds(pair..., op, other)
     end
 end

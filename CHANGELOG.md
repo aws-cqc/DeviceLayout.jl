@@ -13,6 +13,51 @@ The format of this changelog is based on
     `Schematic` render. `OptionalStyle` flags are recognized automatically, and
     `DeviceLayout.register_render_kwarg!` registers other custom rendering options.
 
+### Changed
+
+  - Polygon clipping and offsetting use Clipper2 2.0.1, through Clipper.jl 0.7, instead of
+    Clipper1 ([#199](https://github.com/aws-cqc/DeviceLayout.jl/issues/199)). Most operations
+    are faster. What changes for users:
+
+      + **Code that picks vertices of a clipping result by index can now give wrong
+        geometry.** Output contours can start at a different vertex and come in a different
+        order, so `Rounded(r; p0=points(p)[[3, 4]])` on a `union2d` result, for example, can
+        round other corners. Select the corners by position instead.
+      + `to_polygons` can divide a region into polygons at different places, so a miter
+        offset of several polygons, as in `halo` of a `Cell`, can change near those
+        divisions. Round joins don't.
+      + Otherwise, results agree with Clipper1's to within the integer grid Clipper works
+        on (1 fm for floating-point coordinates, one unit for integer coordinates), apart
+        from edge cases at very sharp or nearly straight corners and the limitation below.
+      + `offset` gives nothing for closed polygons of zero signed area, whatever the sign of
+        `delta`.
+      + Some large operations are slower: up to 1.5× for a union whose result has thousands
+        of holes.
+      + Known Clipper2 limitation: nearly coincident edges can make Clipper2 fill a hole or
+        otherwise return too much area, with no error, or return a sliver hole that makes
+        `to_polygons` throw. This is most likely when the output of one operation is clipped
+        against one of its operands, as in `union2d(difference2d(a, b), b)`, or when many
+        polygons abut. In random trials on comb, U and brick shapes, it happened up to 8
+        times in 100. The ledger in `test/laws/README.md` has reproducers.
+
+  - The Clipper1 names that `clip` and `offset` take (`Clipper.ClipTypeUnion`,
+    `Clipper.JoinTypeMiter`, and so on) are defined in `DeviceLayout.Clipper`, as aliases of
+    Clipper.jl 0.7's values, and `ClippedPolygon`'s tree is a `DeviceLayout.Clipper.PolyNode`.
+    Code that does `import Clipper` can still use `Clipper.ClipType…`, `Clipper.JoinType…`,
+    `Clipper.children`, `Clipper.contour`, and `Clipper.ishole`, but must take
+    `PolyFillType…` and `EndType…` from `DeviceLayout.Clipper`.
+
+### Fixed
+
+  - `offset` with `e=Clipper.EndTypeOpenButt`, `Clipper.EndTypeOpenSquare`, or
+    `Clipper.EndTypeOpenRound` gives the ends it names. They used to give round, butt, and
+    square ends, respectively.
+  - Clipping can run in concurrent tasks. Every call used to share one Clipper engine, so
+    calls on several threads at once could crash Julia.
+  - Small `offset`s of polygons with a sharp corner no longer leave the corner's vertex in
+    place, and square and miter offsets no longer cut into a sharp tip that follows a
+    nearly straight vertex.
+
 ## 1.22.0 (2026-11-16)
 
 ### Added

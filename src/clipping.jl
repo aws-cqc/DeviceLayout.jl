@@ -10,8 +10,9 @@
 
 Return the `ClippedPolygon` resulting from a polygon clipping operation.
 
-Uses the [`Clipper1`](http://www.angusj.com/clipper2/Docs/Overview.htm) library and the
-[`Clipper.jl`](https://github.com/Voxel8/Clipper.jl) wrapper to perform polygon clipping.
+Uses the [Clipper2](https://www.angusj.com/clipper2/Docs/Overview.htm) library and the
+[`Clipper.jl`](https://github.com/JuliaGeometry/Clipper.jl) wrapper to perform polygon
+clipping.
 
 ## Positional arguments
 
@@ -22,7 +23,8 @@ The first argument must be one of the following types to specify a clipping oper
   - `Clipper.ClipTypeUnion`
   - `Clipper.ClipTypeXor`
 
-Note that these are types; you should not follow them with `()`.
+Note that these are types; you should not follow them with `()`. Here and below, `Clipper`
+is `DeviceLayout.Clipper`, not the Clipper.jl package.
 
 The second and third argument may be a `GeometryEntity` or array of `GeometryEntity`. All entities
 are first converted to polygons using [`to_polygons`](@ref).
@@ -265,22 +267,19 @@ function xor2d(p1, p2)
     )
 end
 
-function add_path!(
-    c::Clipper.Clip,
-    path::Vector{Point{T}},
-    polyType::Clipper.PolyType,
-    closed::Bool
+# Clipper2 applies one fill rule to both path roles. Resolve the clip paths under their
+# own rule before the main operation when the subject and clip rules differ. Clipper2
+# emits canonical positive-winding outer contours; reverse the normalized result when
+# the main operation uses Negative so it remains filled under that rule.
+function _normalize_clip_fill(
+    paths::AbstractVector{Polygon{T}},
+    source_fill::Clipper.PolyFillType,
+    target_fill::Clipper.PolyFillType
 ) where {T <: Union{Int64, Unitful.Quantity{Int64}}}
-    return ccall(
-        (:add_path, libcclipper),
-        Cuchar,
-        (Ptr{Cvoid}, Ptr{Clipper.IntPoint}, Csize_t, Cint, Cuchar),
-        c.clipper_ptr,
-        path,
-        length(path),
-        Int(polyType),
-        closed
-    ) == 1 ? true : false
+    normalizer =
+        Clipper.Clip(reverse_solution=(target_fill == Clipper.PolyFillTypeNegative))
+    Clipper.add_subject!(normalizer, [p.p for p in paths])
+    return Clipper.execute(normalizer, Clipper.ClipTypeUnion, source_fill)
 end
 
 # Clipping two identically-typed arrays of "Int64-based" Polygons.
@@ -294,14 +293,12 @@ function _clip(
 ) where {T <: Union{Int64, Unitful.Quantity{Int64}}}
     clip = clipper()
     Clipper.clear!(clip)
-    for s0 in s
-        add_path!(clip, s0.p, Clipper.PolyTypeSubject, true)
-    end
-    for c0 in c
-        add_path!(clip, c0.p, Clipper.PolyTypeClip, true)
-    end
-    result =
-        convert(Clipper.PolyNode{Point{Int64}}, Clipper.execute_pt(clip, op, pfs, pfc)[2])
+    Clipper.add_subject!(clip, [s0.p for s0 in s])
+    Clipper.add_clip!(
+        clip,
+        pfs == pfc ? [c0.p for c0 in c] : _normalize_clip_fill(c, pfc, pfs)
+    )
+    result = convert(Clipper.PolyNode{Point{Int64}}, Clipper.execute_pt(clip, op, pfs))
 
     return ClippedPolygon(recast(Clipper.PolyNode{Point{T}}, result))
 end
@@ -479,9 +476,9 @@ end
         e::Clipper.EndType=Clipper.EndTypeClosedPolygon,
         atol=nothing) where {T <: Coordinate}
 
-Using the [`Clipper`](http://www.angusj.com/delphi/clipper.php) library and
-the [`Clipper.jl`](https://github.com/Voxel8/Clipper.jl) wrapper, perform
-polygon offsetting.
+Using the [Clipper2](https://www.angusj.com/clipper2/Docs/Overview.htm) library and the
+[`Clipper.jl`](https://github.com/JuliaGeometry/Clipper.jl) wrapper, perform polygon
+offsetting.
 
 The orientations of polygons must be consistent, such that outer polygons share the same
 orientation, and any holes have the opposite orientation. Additionally, any holes should be
@@ -490,14 +487,14 @@ corners.
 
 The first argument should be an [`AbstractPolygon`](@ref). The second argument
 is how much to offset the polygon. Keyword arguments include a
-[join type](http://www.angusj.com/delphi/clipper/documentation/Docs/Units/ClipperLib/Types/JoinType.htm):
+[join type](https://www.angusj.com/clipper2/Docs/Units/Clipper/Types/JoinType.htm):
 
   - `Clipper.JoinTypeMiter`
   - `Clipper.JoinTypeRound`
   - `Clipper.JoinTypeSquare`
 
 and also an
-[end type](http://www.angusj.com/delphi/clipper/documentation/Docs/Units/ClipperLib/Types/EndType.htm):
+[end type](https://www.angusj.com/clipper2/Docs/Units/Clipper/Types/EndType.htm):
 
   - `Clipper.EndTypeClosedPolygon`
   - `Clipper.EndTypeClosedLine`
@@ -505,14 +502,15 @@ and also an
   - `Clipper.EndTypeOpenRound`
   - `Clipper.EndTypeOpenButt`
 
+where `Clipper` is `DeviceLayout.Clipper`, not the Clipper.jl package.
+
 Round joins and round ends are discretized so that the result deviates from the true arc by
 at most `atol`, which has the same dimensions as the coordinates. For floating-point
 coordinates, the default is 1 nm (`0.001` for unitless coordinates, which are taken to be
 in μm), matching the default tolerance for discretizing curves. Integer coordinates are
 not rescaled before offsetting, so they are treated as a grid: there the default is a
-quarter of one grid unit (Clipper's own default), and an explicit `atol` is converted to
-grid units. Clipper caps the effective tolerance at `abs(delta) / 4`. `atol` has no effect
-on miter or square joins.
+quarter of one grid unit, and an explicit `atol` is converted to grid units. The effective
+tolerance is capped at `abs(delta) / 4`. `atol` has no effect on miter or square joins.
 """
 function offset end
 
@@ -594,24 +592,6 @@ function offset(
     return offset(to_polygons(s), delta, j=j, e=e, atol=atol)
 end
 
-function add_path!(
-    c::Clipper.ClipperOffset,
-    path::Vector{Point{T}},
-    joinType::Clipper.JoinType,
-    endType::Clipper.EndType
-) where {T <: Union{Int64, Unitful.Quantity{Int64}}}
-    return ccall(
-        (:add_offset_path, libcclipper),
-        Cvoid,
-        (Ptr{Cvoid}, Ptr{Clipper.IntPoint}, Csize_t, Cint, Cint),
-        c.clipper_ptr,
-        path,
-        length(path),
-        Int(joinType),
-        Int(endType)
-    )
-end
-
 function _offset(
     s::AbstractVector{Polygon{T}},
     delta;
@@ -619,12 +599,33 @@ function _offset(
     e::Clipper.EndType=Clipper.EndTypeClosedPolygon,
     arc_tolerance::Float64
 ) where {T <: Union{Int64, Unitful.Quantity{Int64}}}
+    d = Float64(ustrip(delta))
+    # Clipper1 compat: open and joined paths give nothing for `d < 0.5`, where Clipper1 gave
+    # nothing or a sliver under a grid unit. Clipper2 offsets them by `abs(d)`, and returns
+    # them unchanged when `abs(d) < 0.5`.
+    e != Clipper.EndTypeClosedPolygon && d < 0.5 && return Polygon{T}[]
+    # Clipper1 compat: the tolerance is capped at `abs(d) / 4`, as the docstring states.
+    # Clipper2 caps it at `abs(d)`, which makes round joins coarser for small `d`, and picks
+    # its own when the tolerance is 0.
+    tol = arc_tolerance <= 0 ? 0.25 : min(arc_tolerance, abs(d) / 4)
     # Clipper.jl only sets the arc tolerance at construction, so build one per call
-    c = Clipper.ClipperOffset(2.0, arc_tolerance)
-    for s0 in s
-        add_path!(c, s0.p, j, e)
+    c = Clipper.ClipperOffset(2.0, tol)
+    # Clipper1 compat: all paths together take their orientation from the lowest one, so a
+    # hole passed as its own polygon is offset as a hole. One batch is one Clipper2 group,
+    # which does that; added one by one, each path would be its own group.
+    # Clipper1 compat: closed paths of zero area give nothing. Clipper2 grows them by
+    # `abs(d)` whatever the sign of `d`, so they are left out.
+    paths = [s0.p for s0 in s if e != Clipper.EndTypeClosedPolygon || !_zero_area(s0)]
+    Clipper.add_paths!(c, paths, j, e)
+    result = Clipper.execute(c, d)
+    # Clipper1 compat: outer contours come back counterclockwise, which the rest of this
+    # function and its callers rely on. Clipper2 2.0.1 orients its output like the group's
+    # lowest path, and later versions orient outer contours counterclockwise. The contour
+    # of largest area is an outer contour, so its orientation says which of the two this is.
+    if e == Clipper.EndTypeClosedPolygon && !isempty(result)
+        outer = argmax(p -> abs(Clipper.area(p)), result)
+        Clipper.is_positive(outer) || foreach(reverse!, result)
     end
-    result = Clipper.execute(c, Float64(ustrip(delta))) #TODO: fix in clipper
     polys = [Polygon(reinterpret(Point{T}, p)) for p in result]
     # Fast path: single or zero contours cannot contain holes
     if length(polys) <= 1
@@ -636,9 +637,38 @@ function _offset(
     if all(==(first(orientations)), orientations)
         return polys  # All same orientation — no holes
     end
-    # Mixed orientations mean holes are present — recombine via union2d so that the
-    # PolyTree keeps hole topology, then flatten back to Polygons with interior cuts.
+    # Mixed orientations mean holes are present. The offset's output is already a union, so
+    # with one outer contour every other contour is one of its holes, and the tree is built
+    # directly. `union2d` would build it with a second union, whose check of each hole
+    # against its outer contour costs holes × outer vertices.
+    if count(==(1), orientations) == 1
+        N = Clipper.PolyNode{Point{T}}
+        root = N(Point{T}[], false, false, N[])
+        outer_node = N(polys[findfirst(==(1), orientations)].p, false, false, N[], root)
+        push!(root.children, outer_node)
+        for (p, o) in zip(polys, orientations)
+            o == -1 && push!(outer_node.children, N(p.p, true, false, N[], outer_node))
+        end
+        return to_polygons(ClippedPolygon(root))
+    end
+    # With several outer contours, recombine via union2d so that the PolyTree keeps hole
+    # topology, then flatten back to Polygons with interior cuts.
     return to_polygons(union2d(polys))
+end
+
+# Whether a polygon's signed area is exactly zero. Products of grid coordinates overflow
+# `Int64` for extents above about 3 μm on the femtometer grid, so they are taken in `Int128`.
+function _zero_area(p::Polygon)
+    isempty(p.p) && return true
+    o = first(p.p)
+    a2 = zero(Int128)
+    for i in eachindex(p.p)
+        u, v = p.p[i] - o, p.p[mod1(i + 1, length(p.p))] - o
+        a2 +=
+            widemul(ustrip(getx(u)), ustrip(gety(v))) -
+            widemul(ustrip(gety(u)), ustrip(getx(v)))
+    end
+    return iszero(a2)
 end
 
 ### cutting algorithm
@@ -781,7 +811,13 @@ function interiorcuts(
         # Clipper gives holes the opposite orientation to their enclosing contour, so the
         # interior stays on the same side of every edge as holes are spliced in.
         interior_side = orientation(Polygon(enclosing_contour))
-        for hole in sort(children(enclosing), by=h -> uniqueray(contour(h))[1].p0.y)
+        # Holes are cut bottom to top, and right to left at equal height. The order doesn't
+        # depend on the order Clipper returns holes in, and for rows of holes right to left
+        # is about 30% faster than left to right. The keys are computed once, since
+        # `sort(...; by)` would find each hole's lowest vertex again in every comparison.
+        holes = children(enclosing)
+        cutorder = map(h -> (p = uniqueray(contour(h))[1].p0; (p.y, -p.x)), holes)
+        for hole in holes[sortperm(cutorder)]
             # process all the holes.
             interiorcuts(hole, outpolys, userpoint)
 

@@ -8,8 +8,8 @@ import Base: copy, promote_rule
 
 using ForwardDiff
 import CoordinateTransformations: AffineMap, LinearMap, Translation, Transformation
-import Clipper
-import Clipper: children, contour
+import DeviceLayout.Clipper
+import DeviceLayout.Clipper: children, contour
 import StaticArrays
 import SpatialIndexing
 import SpatialIndexing: mbr
@@ -58,7 +58,6 @@ import Unitful
 import Unitful: Quantity, Length, dimension, unit, ustrip, uconvert, °
 using ..Points
 using ..Rectangles
-import ..libcclipper
 
 import IntervalTrees
 import IntervalTrees: IntervalTree, IntervalValue
@@ -91,7 +90,9 @@ export difference2d_layerwise,
 const USCALE = 1.0 * Unitful.fm
 const SCALE  = 10.0^9
 
-clipper() = (DeviceLayout._clip[])::Clipper.Clip
+# One engine per task: it holds mutable C++ state, so tasks running concurrently can't share
+# one. Reusing it within a task avoids an allocation and finalizer per call.
+clipper() = get!(Clipper.Clip, task_local_storage(), :DeviceLayout_clip)::Clipper.Clip
 
 @inline unsafe_round(x::Number) = round(ustrip(x)) * unit(x)
 @inline unsafe_round(x::Point) = unsafe_round.(x)
@@ -1488,13 +1489,7 @@ Return 1 if the points in the polygon contour are going counter-clockwise, -1 if
 Clipper considers clockwise-oriented polygons to be holes for some polygon fill types.
 """
 function orientation(p::Polygon)
-    return ccall(
-        (:orientation, libcclipper),
-        Cuchar,
-        (Ptr{Clipper.IntPoint}, Csize_t),
-        reinterpret(Clipper.IntPoint, clipperize.(p.p)),
-        length(p.p)
-    ) == 1 ? 1 : -1
+    return Clipper.is_positive(clipperize.(p.p)) ? 1 : -1
 end
 
 """

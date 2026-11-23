@@ -68,12 +68,14 @@ const KNOWN_BROKEN =
     get(ENV, "GEOMLAWS_RUN_BROKEN", "0") == "1" ? Set{Symbol}() :
     Set([
         :B3_int_thin,   # L1: thin integer polygons vanish under identity ops
+        :B6_float,      # L16: Clipper2 fills a hole bounded by near-coincident edges
         :B8_int,        # L3: integer output may self-cross after rounding
         :B8_nested,     # L4: a hole vertex may land outside its parent after rounding
-        :B8_float_perturbed,  # L8: fm-scale self-crossing from a ≤ 2 fm feature
+        :B8_float_perturbed,  # L8: fm-scale invalid output from a few-fm feature
+        :B9_mixed_int,  # L16 again, in the reference side's union
         :B11_multi,     # L14: a cut next to another hole's cut can cross it unwarned
+        :B12_float,     # L16 again, clipping an xor's output against an operand
         :O1_int_thin,   # L1 again, through offset's internal union
-        :O3_int_sharp,  # L7: small offsets leave the input vertex in place at sharp corners
         :O7_taper,      # L12 (#8): taper halos are short of δ at the sides, long at the ends
         :O7_inner       # L13 (#8): halos with an inner offset are open at path ends
     ])
@@ -382,7 +384,7 @@ region_subset_within(X, Y, tol; kwargs...) =
 region_same(X, Y) = first(region_within(X, Y, 0))
 # Output validity (law B8): every contour simple; tree alternates outer/hole; every
 # hole vertex lies inside or on its parent contour (`nested=true`).
-# Strict simplicity is a known-broken law on Clipper1 (see test/laws/test_ledger.jl), so
+# Strict simplicity is a known-broken law (ledger L2 in test/laws/test_ledger.jl), so
 # the default checks weak simplicity.
 function valid_output(cp::ClippedPolygon; weak=true, nested=false)
     function walk(node, expect_hole)
@@ -534,9 +536,10 @@ end
 # Round joins discretize arcs into chords inside the true arc. Float laws pass
 # `atol = |δ| / 200`, which keeps the arc error small next to the features at every
 # scale and the chords few enough for exact comparisons.
-# `arc_lattice_tol` is the error bound in lattice units: Clipper1 rounds each corner's
-# number of chords to the nearest integer (at least one), so a chord can span up to 1.5
-# times the angle `atol` implies, and its sagitta reach 2.25 atol.
+# `arc_lattice_tol` is the error bound in lattice units: Clipper1 rounded each corner's
+# number of chords to the nearest integer (at least one), so a chord could span up to 1.5
+# times the angle `atol` implies, and its sagitta reach 2.25 atol. Clipper2 rounds the
+# number up, so its chords stay within atol of the arc and the bound is loose.
 round_atol(δ) = abs(δ) / 200
 arc_lattice_tol(atol::AbstractFloat) = ceil(Int, 2.25 * Float64(_gridcoord(atol)))
 
@@ -639,9 +642,9 @@ const THICK = 1.5
 is_thick(p::Polygon, t=THICK) = min_thickness(togrid(p)) >= t
 
 # Smallest |sin| of the turn angle over all vertices: near zero both at a spike and
-# at a nearly straight vertex. Clipper's offset misplaces a vertex when
-# |δ|·sin(turn) is below a lattice unit (ledger L7), so offset laws that compose
-# operations are stated away from that regime.
+# at a nearly straight vertex. Clipper1's offset misplaced a vertex when
+# |δ|·sin(turn) was below a lattice unit (ledger L7, L10; Clipper2 doesn't), and offset
+# laws that compose operations are stated away from that regime.
 function min_turn_sine(p::Polygon)
     g = togrid(p)
     n = length(g)

@@ -144,6 +144,12 @@ Upgrades that need more than a green test run:
 
 - **`gmsh_jll`** can change fragmentation behavior and mesh output. The "Single Transmon example schematic" test
   item and `test_solidmodel.jl` are the main guards in CI, but these primarily test physical groups. Meshing changes should be tested against Palace simulations.
+- **`Clipper2_jll`** is pinned to one version. Without the pin, users' environments would pick up
+  a Clipper2 that this package's code and tests have never run on. The GeomLaws ledger
+  (`test/laws/test_ledger.jl`) records that version's defects as `@test_broken`. To move the
+  pin, check whether the new version still needs the tree repairs in `src/clipper_compat.jl`,
+  update the ledger, and run the [GeomLaws exploration](@ref dev-geomlaws-exploration) with a
+  few seeds.
 
 `Aqua.test_deps_compat` in the test suite ensures every non-stdlib dependency has a compat
 entry, so adding a dependency without one fails CI.
