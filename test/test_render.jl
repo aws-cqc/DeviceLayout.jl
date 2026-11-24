@@ -966,18 +966,18 @@
         render!(c, hp)
         flatten!(c)
         @test length(c.elements) == 5 # 3 rectangles + 1 double halo rectangle + one overlay + 0 terminations
-        # Overlay halos currently don't get terminations, normally a final segment gets 1
-        # Not ideal but they don't track neighbors in this implementation
+        # Overlays on the path's own (simplified) node get terminations at both ends, but
+        # overlays inside its compound style don't track their neighbors and get none
         hp = halo(path, 2μm)
         c = Cell("halo", nm)
         render!(c, hp)
         flatten!(c)
-        @test length(c.elements) == 17 # 4 rectangles + 11 traces + 2 terminations
+        @test length(c.elements) == 19 # 4 rectangles + 11 traces + 4 terminations
         @test count(c.element_metadata .== GDSMeta(0)) == 5 # original path + terminations
         @test count(c.element_metadata .== GDSMeta(1)) == 4 # rectangles
         @test count(c.element_metadata .== GDSMeta(2)) == 4 # 3 overlays + halo overlay reference
         @test count(c.element_metadata .== GDSMeta(3)) == 1 # 1 overlay
-        @test count(c.element_metadata .== GDSMeta(4)) == 3 # final overlay
+        @test count(c.element_metadata .== GDSMeta(4)) == 5 # final overlay + terminations
     end
 
     @testset "OffsetSegments" begin

@@ -13,6 +13,14 @@ The format of this changelog is based on
     `Schematic` render. `OptionalStyle` flags are recognized automatically, and
     `DeviceLayout.register_render_kwarg!` registers other custom rendering options.
 
+### Fixed
+
+  - `halo` of a path extends the halos of overlays on its first and last segments past the
+    path's ends, like the halo of the path's own style, including with `only_layers` or
+    `ignore_layers` that select only the overlays. An overlay on a path's final sharp corner
+    no longer changes the halo of the path itself.
+  - `flatten` with a finite `max_copy` no longer throws a `KeyError` for paths with overlays.
+
 ## 1.22.0 (2026-11-16)
 
 ### Added

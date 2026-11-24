@@ -429,6 +429,93 @@
     end
 end
 
+@testitem "Halos of path overlays extend past the path ends" setup = [CommonTestSetup] begin
+    base_meta = SemanticMeta(:base)
+    copy_meta = SemanticMeta(:base_copy)
+    # Overlay every rendered node with a copy of its style, as a second rendering of the path.
+    function overlay_copy!(pa)
+        for i in eachindex(pa.nodes)
+            sty = Paths.undecorated(style(pa[i]))
+            sty isa Paths.SimpleNoRender && continue
+            overlay!(pa, deepcopy(sty), copy_meta; i)
+        end
+        return pa
+    end
+    function cpw_path()
+        pa = Path(μm)
+        straight!(pa, 100μm, Paths.CPW(10μm, 6μm))
+        turn!(pa, 90°, 50μm)
+        straight!(pa, 50μm)
+        terminate!(pa; initial=true)
+        terminate!(pa; rounding=2μm)
+        return pa
+    end
+    function corner_path()
+        pa = Path(μm)
+        straight!(pa, 100μm, Paths.Trace(10μm))
+        corner!(pa, 45°, Paths.SimpleTraceCorner())
+        return pa
+    end
+    function halo_by_meta(pa, args...; kwargs...)
+        cs = CoordinateSystem(uniquename("overlaid"), nm)
+        place!(cs, pa, base_meta)
+        flat = flatten(halo(cs, args...; kwargs...))
+        polys = Dict(meta => Polygon{typeof(1.0nm)}[] for meta in (base_meta, copy_meta))
+        for (ent, meta) in zip(elements(flat), element_metadata(flat))
+            append!(polys[meta], vcat(to_polygons(ent)))
+        end
+        return Dict(meta => union2d(p) for (meta, p) in polys)
+    end
+    xor_area(a, b) =
+        sum(abs.(DeviceLayout.Polygons.area.(to_polygons(xor2d(a, b)))); init=0.0μm^2)
+
+    for build in (cpw_path, corner_path), deltas in ((2μm,), (2μm, 1μm))
+        build === corner_path && length(deltas) == 2 && continue # rings unsupported
+        plain = halo_by_meta(build(), deltas...)[base_meta]
+        @test !isempty(to_polygons(plain))
+        overlaid = halo_by_meta(overlay_copy!(build()), deltas...)
+        # The overlay doesn't change the path's own halo.
+        @test xor_area(overlaid[base_meta], plain) < 1e-3μm^2
+        @test xor_area(overlaid[copy_meta], plain) < 1e-3μm^2
+        for kwargs in (
+            (; only_layers=[:base_copy]),
+            (; only_layers=[copy_meta]),
+            (; ignore_layers=[:base])
+        )
+            filtered = halo_by_meta(overlay_copy!(build()), deltas...; kwargs...)
+            @test isempty(to_polygons(filtered[base_meta]))
+            @test xor_area(filtered[copy_meta], plain) < 1e-3μm^2
+        end
+        ignored =
+            halo_by_meta(overlay_copy!(build()), deltas...; ignore_layers=[:base_copy])
+        @test xor_area(ignored[base_meta], plain) < 1e-3μm^2
+        @test isempty(to_polygons(ignored[copy_meta]))
+    end
+
+    # An overlaid sharp corner still rejects `inner_delta` before generic tapers are resolved.
+    tapered = Path(μm)
+    straight!(tapered, 50μm, Paths.Trace(10μm))
+    straight!(tapered, 20μm, Paths.Taper())
+    straight!(tapered, 20μm, Paths.Trace(4μm))
+    corner!(tapered, 90°, Paths.SimpleTraceCorner())
+    straight!(tapered, 10μm)
+    corner_index = findfirst(node -> segment(node) isa Paths.Corner, tapered.nodes)
+    overlay!(tapered, Paths.SimpleTraceCorner(), copy_meta; i=corner_index)
+    @test_throws ArgumentError halo(tapered, 4μm, 2μm)
+    @test style(tapered[2]) isa Paths.Taper
+
+    # An overlay on a path that doesn't render gets the extensions of its own style.
+    for kwargs in ((;), (; only_layers=[:base_copy]))
+        hidden = Path(μm)
+        straight!(hidden, 50μm, Paths.NoRender())
+        overlay!(hidden, Paths.Trace(10μm), copy_meta)
+        hidden_halo = halo_by_meta(hidden, 2μm; kwargs...)
+        @test isempty(to_polygons(hidden_halo[base_meta]))
+        @test bounds(hidden_halo[copy_meta]) ≈
+              Rectangle(Point(-2μm, -7μm), Point(52μm, 7μm))
+    end
+end
+
 @testitem "WithDirection" setup = [CommonTestSetup] begin
     ## Construction
     @test WithDirection().direction == 0°

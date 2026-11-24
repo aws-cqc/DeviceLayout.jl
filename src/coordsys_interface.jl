@@ -221,13 +221,17 @@ function flatten(
     end
     # append the top-level elements
     append_coordsys!(cflat, c; addrefs=false, metadata_filter)
+    # Counting and flattening must see the same structures, but `refs(::Path)` builds new
+    # overlay structures on every call
+    cached_refs = IdDict{GeometryStructure, Vector}()
+    refs_of = geom -> get!(() -> refs(geom), cached_refs, geom)
     keep = if isinf(max_copy)
         Returns(false)
     else
-        counts = structure_counts(c; depth=depth)
+        counts = structure_counts(c; depth=depth, refs_of=refs_of)
         s -> counts[s] > max_copy
     end
-    flatrefs, keptrefs, deeprefs = flatten_refs(c; depth=depth, keep=keep)
+    flatrefs, keptrefs, deeprefs = flatten_refs(c; depth=depth, keep=keep, refs_of=refs_of)
     append!(cflat.refs, deeprefs)
     append!(cflat.refs, keptrefs)
     append_coordsys!.(cflat, flatrefs; addrefs=false, metadata_filter)
@@ -253,25 +257,30 @@ ninstances(::StructureReference) = 1
 ninstances(ref::ArrayReference) = ref.row * ref.col
 
 # Number of copies of each structure that fully flattening to `depth` would produce
-function structure_counts(geom::GeometryStructure; depth=-1)
+function structure_counts(geom::GeometryStructure; depth=-1, refs_of=refs)
     counts = Dict{GeometryStructure, Int}()
-    _structure_counts!(counts, geom, depth, 1)
+    _structure_counts!(counts, geom, depth, 1, refs_of)
     return counts
 end
 
 # `n` is the number of copies of `geom` in the flattened result
-function _structure_counts!(counts, geom, depth, n)
+function _structure_counts!(counts, geom, depth, n, refs_of)
     depth == 0 && return
-    for ref in refs(geom)
+    for ref in refs_of(geom)
         s = structure(ref)
         ns = n * ninstances(ref)
         counts[s] = get(counts, s, 0) + ns
-        _structure_counts!(counts, s, depth - 1, ns)
+        _structure_counts!(counts, s, depth - 1, ns, refs_of)
     end
 end
 
 # References to structures satisfying `keep` go into `keptrefs` without descending into them
-function flatten_refs(geom::GeometryStructure{T}; depth=-1, keep=Returns(false)) where {T}
+function flatten_refs(
+    geom::GeometryStructure{T};
+    depth=-1,
+    keep=Returns(false),
+    refs_of=refs
+) where {T}
     flatrefs = GeometryReference{T}[]
     keptrefs = GeometryReference{T}[]
     deeprefs = GeometryReference{T}[]
@@ -282,23 +291,24 @@ function flatten_refs(geom::GeometryStructure{T}; depth=-1, keep=Returns(false))
         geom,
         Transformations.IdentityTransformation();
         depth=depth,
-        keep=keep
+        keep=keep,
+        refs_of=refs_of
     )
     return flatrefs, keptrefs, deeprefs
 end
 
 # Recursive helper accumulates the transformation `a` from `geom` to the top level
-function _flatten_refs(flatrefs, keptrefs, deeprefs, geom, a; depth, keep)
+function _flatten_refs(flatrefs, keptrefs, deeprefs, geom, a; depth, keep, refs_of)
     if depth == 0 # this structure's references will be brought upward but not flattened
-        append!(deeprefs, a.(refs(geom)))
+        append!(deeprefs, a.(refs_of(geom)))
         return
     end
 
-    for ref in refs(geom)
+    for ref in refs_of(geom)
         _push_ref!(flatrefs, keptrefs, ref, a, keep)
     end
-    for ref in refs(geom)
-        _flatten_contents!(flatrefs, keptrefs, deeprefs, ref, a, depth, keep)
+    for ref in refs_of(geom)
+        _flatten_contents!(flatrefs, keptrefs, deeprefs, ref, a, depth, keep, refs_of)
     end
 end
 
@@ -307,13 +317,22 @@ end
 _push_ref!(flatrefs, keptrefs, ref, a, keep) =
     push!(keep(structure(ref)) ? keptrefs : flatrefs, a(ref))
 
-function _flatten_contents!(flatrefs, keptrefs, deeprefs, ref, a, depth, keep)
+function _flatten_contents!(flatrefs, keptrefs, deeprefs, ref, a, depth, keep, refs_of)
     s = structure(ref)
     # A kept reference's contents stay inside it rather than also being flattened.
     # Without references, `s` has nothing to add here: `append_coordsys!` places its elements.
-    (keep(s) || isempty(refs(s))) && return
+    (keep(s) || isempty(refs_of(s))) && return
     for t in instance_transformations(ref)
-        _flatten_refs(flatrefs, keptrefs, deeprefs, s, a ∘ t; depth=depth - 1, keep=keep)
+        _flatten_refs(
+            flatrefs,
+            keptrefs,
+            deeprefs,
+            s,
+            a ∘ t;
+            depth=depth - 1,
+            keep=keep,
+            refs_of=refs_of
+        )
     end
 end
 
