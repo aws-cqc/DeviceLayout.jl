@@ -1477,6 +1477,12 @@
         @test isempty(SolidModels.mesh_control_points())
         @test isempty(SolidModels.mesh_control_trees())
 
+        # Integer settings are stored as floats, so later calls still work
+        @test SolidModels.mesh_scale(1) === 1.0
+        @test SolidModels.mesh_scale() === 1.0
+        @test SolidModels.mesh_grading_default(1) === 1.0
+        @test SolidModels.mesh_grading_default() === 1.0
+
         @test SolidModels.mesh_scale(0.5) == 0.5
         @test SolidModels.mesh_grading_default(0.85) == 0.85
         SolidModels.mesh_order(2)

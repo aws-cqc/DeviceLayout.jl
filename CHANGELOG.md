@@ -13,6 +13,13 @@ The format of this changelog is based on
     `Schematic` render. `OptionalStyle` flags are recognized automatically, and
     `DeviceLayout.register_render_kwarg!` registers other custom rendering options.
 
+### Fixed
+
+  - `SolidModels.mesh_scale` and `SolidModels.mesh_grading_default` store an integer
+    argument as a `Float64`. Previously, after `mesh_scale(1)` or `mesh_grading_default(1)`,
+    every later call to the same function threw a `TypeError`, including the call to
+    `mesh_scale()` in the mesh-size callback.
+
 ## 1.22.0 (2026-11-16)
 
 ### Added
