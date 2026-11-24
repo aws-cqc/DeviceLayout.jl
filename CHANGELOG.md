@@ -13,6 +13,13 @@ The format of this changelog is based on
     `Schematic` render. `OptionalStyle` flags are recognized automatically, and
     `DeviceLayout.register_render_kwarg!` registers other custom rendering options.
 
+### Fixed
+
+  - `SolidModelsExperimental` locators wrapped in a style, for example by `only_simulated!`
+    or `not_simulated!`, resolve like plain locators instead of throwing an `ArgumentError`.
+    Styles, including `OptionalStyle`s, don't affect selection; the `select_*` keywords of
+    `render!` turn it off.
+
 ## 1.22.0 (2026-11-16)
 
 ### Added

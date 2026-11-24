@@ -1668,6 +1668,7 @@ end
 
 @testitem "Locator resolution against flat geometry" begin
     using DeviceLayout
+    using DeviceLayout.SchematicDrivenLayout: not_simulated, only_simulated!
     using DeviceLayout.SolidModelsExperimental:
         Ground, LayerRef, Locator, LumpedPort, NULL, SourceLayer, SourceStack, Tag, Terminal
     import Unitful: μm, °
@@ -1705,6 +1706,19 @@ end
     bad = CoordinateSystem("bad_entity", μm)
     place!(bad, Rectangle(1μm, 1μm), Tag(:metal, "rect"))
     @test_throws ArgumentError SolidModelsExperimental.resolve_locators(flatten(bad), stack)
+    only_simulated!(bad)
+    @test_throws ArgumentError SolidModelsExperimental.resolve_locators(flatten(bad), stack)
+
+    # Styles, including optional ones at any depth, don't change resolution.
+    styled = CoordinateSystem("styled", μm)
+    place!(styled, MeshSized(1μm)(Locator(1μm, 2μm)), Tag(:metal, "simulated"))
+    only_simulated!(styled)
+    place!(styled, not_simulated(Locator(0μm, 0μm)), Ground(:metal))
+    styled_locators = SolidModelsExperimental.resolve_locators(flatten(styled), stack)
+    @test Dict(rl.meta => rl.r for rl in styled_locators) == Dict(
+        Tag(:metal, "simulated") => (1.0, 2.0, 0.0),
+        Ground(:metal) => (0.0, 0.0, 0.0)
+    )
 end
 
 @testitem "Deduplication partitions entities by PG membership" begin
@@ -1878,6 +1892,25 @@ end
         )
     end
     @test isempty(metadata["selections"]["tagged"])
+    @test isempty(metadata["selections"]["ports"])
+
+    # A simulation-only port locator resolves whatever `simulation` is, so without the
+    # port's geometry only `select_ports=false` avoids an error.
+    port_elements = findall(m -> layer(m) == :port, element_metadata(cs))
+    elements(cs)[port_elements] .= only_simulated.(elements(cs)[port_elements])
+    sg = SchematicGraph("simulated_port")
+    add_node!(sg, BasicComponent(cs); base_id="q1")
+    metadata = with_test_logger(_ -> false) do
+        return render("simulated_port"; select_terminals=false, simulation=true)
+    end
+    @test haskey(metadata["selections"]["ports"], "q1.drive")
+    no_port = log -> log.level == Logging.Error && log._module === SolidModelsExperimental
+    with_test_logger(no_port; required=no_port) do
+        @test_throws ErrorException render("simulated_port_missing"; select_terminals=false)
+    end
+    metadata = with_test_logger(_ -> false) do
+        return render("simulated_port_off"; select_terminals=false, select_ports=false)
+    end
     @test isempty(metadata["selections"]["ports"])
 end
 
