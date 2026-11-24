@@ -1522,6 +1522,8 @@ end
 Return a `Path` forming the halo of `pa`, equivalent to offsetting the geometry by `outer_delta`, then subtracting the offset by `inner_delta` if it is not `nothing`.
 
 Extends the start and/or end by `outer_delta` when the halo has nonzero extent at the endpoints.
+The halos of overlays on the first and last segments are extended in the same way, with the
+overlays' metadata.
 Each segment's style is the halo style of the original segment. `inner_delta` is not supported
 for paths with sharp corners (`corner!` with `Paths.SimpleTraceCorner`). If `pa` ends in a
 corner turning by more than 90°, the halo reaches `outer_delta * (tan(|α|/2) - 1)` past the
@@ -1553,18 +1555,23 @@ function halo(
         return halopath
     end
     # check if path's halo should be excluded
-    exclude = !(DeviceLayout.layer_included(pa.metadata, only_layers, ignore_layers))
+    inclusion = DeviceLayout.layer_inclusion(only_layers, ignore_layers)
+    exclude = !inclusion(pa.metadata)
     # Throw before `handle_generic_tapers!` modifies `pa`
     !exclude &&
         !isnothing(inner_delta) &&
-        any(node -> node.sty isa SimpleTraceCorner, pa) &&
+        any(node -> undecorated(node.sty) isa SimpleTraceCorner, pa) &&
         throw(corner_ring_error())
     taper_inds = handle_generic_tapers!(pa)
 
     # If the halo has nonzero extent at the start, extend it before the start
     cap0 = halo_cap(pa[1], zero(outer_delta), outer_delta, inner_delta)
+    overlay_caps0 =
+        overlay_halo_caps(pa[1], zero(outer_delta), outer_delta, inner_delta, inclusion)
+    overlay_caps1 =
+        overlay_halo_caps(pa[end], pathlength(pa[end]), outer_delta, inner_delta, inclusion)
     p0 = (
-        isnothing(cap0) ? pa.p0 :
+        (exclude || isnothing(cap0)) && isempty(overlay_caps0) ? pa.p0 :
         pa.p0 - Point{T}(outer_delta * cos(pa.α0), outer_delta * sin(pa.α0))
     )
 
@@ -1582,6 +1589,16 @@ function halo(
                 ignore_layers=ignore_layers,
                 memoized_halos=memoized_halos
             )
+        for (len, sty, meta) in overlay_caps0
+            cap_path = Path(p0, α0=pa.α0)
+            straight!(cap_path, len, sty)
+            place!(cs, cap_path, meta)
+        end
+        for (len, sty, meta) in overlay_caps1
+            cap_path = Path(p1(pa[end].seg), α0=α1(pa[end].seg))
+            straight!(cap_path, len, sty)
+            place!(cs, cap_path, meta)
+        end
 
         # return a path, to preserve type
         halopath = Path(zero(pa.p0), metadata=pa.metadata)
@@ -1591,7 +1608,7 @@ function halo(
         return halopath
     end
 
-    isnothing(cap0) || straight!(halopath, cap0...)
+    halo_cap!(halopath, cap0, overlay_caps0)
 
     # Create the halo of each original path segment
     dup_path = deepcopy(pa)
@@ -1634,9 +1651,42 @@ function halo(
 
     restore_generic_tapers!(pa, taper_inds)
 
-    isnothing(cap1) || straight!(halopath, cap1...)
+    halo_cap!(halopath, cap1, overlay_caps1)
     memoized_halos[pa] = halopath
     return halopath
+end
+
+# Extend `halopath` by `cap`, the extension `halo_cap` gives for its own style, overlaid with
+# the extensions `overlay_caps` of its overlays. All of these have the same length.
+function halo_cap!(halopath::Path, cap, overlay_caps)
+    isnothing(cap) && isempty(overlay_caps) && return halopath
+    len, sty = isnothing(cap) ? (first(first(overlay_caps)), Paths.NoRender()) : cap
+    straight!(halopath, len, sty)
+    for (_, oversty, meta) in overlay_caps
+        overlay!(halopath, oversty, meta)
+    end
+    return halopath
+end
+
+# Extensions of the halo past `node` at `t` (its start or end) for each overlay on `node`
+# whose metadata `inclusion` accepts, as `(length, style, metadata)`. Overlays render without
+# neighbors, so their halos get these extensions only from the path's halo.
+function overlay_halo_caps(
+    node::Paths.Node{T},
+    t,
+    outer_delta,
+    inner_delta,
+    inclusion
+) where {T}
+    caps = Tuple{T, Style, DeviceLayout.Meta}[]
+    sty = without_attachments(node.sty)
+    sty isa OverlayStyle || return caps
+    for (oversty, meta) in zip(sty.overlay, sty.overlay_metadata)
+        inclusion(meta) || continue
+        cap = halo_cap(Node{T}(node.seg, oversty), t, outer_delta, inner_delta)
+        isnothing(cap) || push!(caps, (cap..., meta))
+    end
+    return caps
 end
 
 function halo(node::Paths.Node{T}, outer_delta, inner_delta=nothing; kwargs...) where {T}
@@ -1707,7 +1757,8 @@ end
 # `ext * tan(|α|/2)` past the corner point. The halo's corner reaches
 # `(ext + outer_delta) * tan(|α|/2)`, far enough when |α| ≥ 90°. For |α| > 90° that is
 # `outer_delta * (tan(|α|/2) - 1)` too far, but no `Path` style gives the exact end.
-corner_has_cap(node::Paths.Node) = node.sty isa SimpleTraceCorner && abs(node.seg.α) < 90°
+corner_has_cap(node::Paths.Node) =
+    undecorated(node.sty) isa SimpleTraceCorner && abs(node.seg.α) < 90°
 
 # Whether `node` is the piece `corner!` leaves before a path's final corner, when that corner
 # gets an extension. On the inside of the turn, a halo for the piece would reach past the

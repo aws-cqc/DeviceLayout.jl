@@ -460,6 +460,22 @@
         @test isempty(elements(f))
         @test count(r -> r isa ArrayReference, refs(f)) == 1
         @test lls(f) ≈ lls(top_rot)
+        # A path's overlays are new structures on each call to `refs`
+        overlaid = Path(Point(0μm, 0μm))
+        straight!(overlaid, 100μm, Paths.Trace(10μm))
+        overlay!(overlaid, Paths.Trace(2μm), GDSMeta(1))
+        top_overlaid = CoordinateSystem("top_overlaid", nm)
+        for i = 1:3
+            addref!(top_overlaid, overlaid, Point(0μm, 20i * μm))
+        end
+        f = flatten(top_overlaid; max_copy=2)
+        @test isempty(elements(f))
+        @test length(refs(f)) == 3
+        @test all(r -> structure(r) === overlaid, refs(f))
+        f = flatten(top_overlaid; max_copy=3)
+        @test isempty(refs(f))
+        @test count(==(GDSMeta(1)), element_metadata(f)) == 3
+        @test nrect(f) == nrect(top_overlaid) == 6
     end
 
     @testset "Mapping metadata" begin
