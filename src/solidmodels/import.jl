@@ -153,9 +153,8 @@ function import_solid!(
 
     # From here until they are re-registered, the model's own groups exist only in
     # `own_groups` (a `.xao` merge strips them), so an error restores them before rethrowing.
-    local placed, placement_groups
-    try
-        placed, placement_groups = _place_copies!(
+    placed, placement_groups = try
+        _place_copies!(
             sm,
             filename,
             proto,
