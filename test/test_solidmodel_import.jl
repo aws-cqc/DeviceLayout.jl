@@ -571,6 +571,17 @@ end
         pg = sm["existing", 3]
         @test gmsh.model.getEntitiesForPhysicalGroup(3, pg.grouptag) == [c]
     end
+
+    @testset "a copy that doesn't coincide with its prototype is rejected" begin
+        # The pairing check guards against mislabeled groups; moving the copy before matching
+        # makes every center differ, which no real import reaches.
+        sm = SolidModel("copies_mismatch"; overwrite=true)
+        gmsh.model.set_current("copies_mismatch")
+        box = [(Int32(3), gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10))]
+        cp = gmsh.model.occ.copy(box)
+        gmsh.model.occ.translate(cp, 1, 0, 0)
+        @test_throws ErrorException SolidModels._copy_closures(sm, box, [cp])
+    end
 end
 
 @testitem "SolidModel CAD import conformal fusion" setup = [CommonTestSetup, QuietGmshSetup] begin
