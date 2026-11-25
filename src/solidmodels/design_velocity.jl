@@ -387,7 +387,9 @@ function _plane_profile(base, vel, z, win, zlo, zhi)
                 error(
                     "Rendered geometry on layer $(layer(e.meta)) at z = $w lies within the " *
                     "extrusion from z = $a to $b of moving geometry on layers $(join(moving, ", ")); " *
-                    "only sheets and extrusions that contain no other geometry can move"
+                    "only sheets and extrusions that contain no other geometry can move. " *
+                    "Should these layers move with the parameter? An area centered on the " *
+                    "layout's bounding box, for example, moves with its extent."
                 )
             end
         end

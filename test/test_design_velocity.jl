@@ -244,6 +244,30 @@ end
         zmap=m -> layer(m) == :pad ? height[] : 0μm,
         zlimits=(-10μm, 10μm)
     )
+    # A moving extrusion may contain no other geometry, as when a box centered on the
+    # layout's bounding box moves with its extent.
+    function centered_box(p)
+        cs = CoordinateSystem("centered_box", nm)
+        render!(cs, Rectangle(Point(0μm, -75μm), Point(p.w, 75μm)), SemanticMeta(:pad))
+        render!(
+            cs,
+            centered(Rectangle(600μm, 400μm); on_pt=Point(p.w / 2, 0μm)),
+            SemanticMeta(:box)
+        )
+        render!(
+            cs,
+            centered(Rectangle(10μm, 10μm); on_pt=Point(0μm, 150μm)),
+            SemanticMeta(:mid)
+        )
+        return cs
+    end
+    @test_throws r"Should these layers move" SM.design_velocities(
+        centered_box,
+        (w=240μm,);
+        zmap=m -> layer(m) == :mid ? 50μm : 0μm,
+        thickness=m -> layer(m) == :box ? 100μm : 0μm,
+        zlimits=(-10μm, 200μm)
+    )
     # Nothing bounds the profile without zlimits.
     @test_throws r"pass `zlimits`" SM.design_velocities(pad_in_cutout, PAD_P0)
     # Parameters must be continuous, known, and have a step if they are not lengths.

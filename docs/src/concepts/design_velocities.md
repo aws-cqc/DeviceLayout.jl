@@ -102,7 +102,9 @@ Rather than return a field that is not the derivative of the rendered geometry,
   - a moving edge crosses the window boundary;
   - a parameter changes the z or thickness of an entity (only in-plane velocities are
     supported);
-  - other rendered geometry lies inside a moving extrusion;
+  - other rendered geometry lies inside a moving extrusion, for example because a
+    simulation area centered on the layout's bounding box moves with its extent: center it
+    on a fixed point instead;
   - nothing bounds the profile in z, in which case `zlimits` must be given.
 
 A parameter that moves nothing gives a warning and a zero velocity.
