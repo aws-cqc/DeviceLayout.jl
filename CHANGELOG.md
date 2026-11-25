@@ -13,6 +13,13 @@ The format of this changelog is based on
     `Schematic` render. `OptionalStyle` flags are recognized automatically, and
     `DeviceLayout.register_render_kwarg!` registers other custom rendering options.
 
+### Changed
+
+  - `SolidModel` no longer turns on OpenCASCADE's threaded boolean operations
+    (`Geometry.OCCParallel`). In fragment timings they used 2× to 12× the CPU without
+    reducing wall time. To turn them back on, call
+    `SolidModels.gmsh.option.setNumber("Geometry.OCCParallel", 1)` after creating the model.
+
 ## 1.22.0 (2026-11-16)
 
 ### Added
