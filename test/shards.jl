@@ -33,6 +33,7 @@ const TEST_FILE_SECONDS = Dict(
     "test_corner_rounding.jl" => 27,
     "test_curve_recovery.jl" => 34,
     "test_deprecations.jl" => 17,
+    "test_design_velocity.jl" => 58,
     "test_entity.jl" => 38,
     "test_examples.jl" => 215,
     "test_intersection.jl" => 14,
