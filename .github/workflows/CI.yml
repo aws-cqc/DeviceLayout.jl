@@ -75,6 +75,9 @@ jobs:
       - uses: julia-actions/julia-runtest@v1
         env:
           DL_TEST_SHARD: ${{ matrix.shard }}
+          # 1.10 runs the suite on one thread and later versions on two, so that code using
+          # threads is tested both ways
+          JULIA_NUM_THREADS: ${{ matrix.version == '1.10' && '1' || '2' }}
       - uses: julia-actions/julia-processcoverage@v1
         with:
           directories: src
