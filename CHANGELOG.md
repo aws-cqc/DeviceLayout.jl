@@ -6,6 +6,13 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Changed
+
+  - `SolidModel` no longer turns on OpenCASCADE's threaded boolean operations
+    (`Geometry.OCCParallel`). In fragment timings they used 2× to 12× the CPU without
+    reducing wall time. To turn them back on, call
+    `SolidModels.gmsh.option.setNumber("Geometry.OCCParallel", 1)` after creating the model.
+
 ### Added
 
   - `render!` and `SolidModels.populate_size_fields!` warn about each keyword argument they
