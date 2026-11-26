@@ -292,13 +292,19 @@ function _clip(
     pfc::Clipper.PolyFillType=Clipper.PolyFillTypePositive
 ) where {T <: Union{Int64, Unitful.Quantity{Int64}}}
     clip = clipper()
-    Clipper.clear!(clip)
-    Clipper.add_subject!(clip, [s0.p for s0 in s])
-    Clipper.add_clip!(
-        clip,
-        pfs == pfc ? [c0.p for c0 in c] : _normalize_clip_fill(c, pfc, pfs)
-    )
-    result = convert(Clipper.PolyNode{Point{Int64}}, Clipper.execute_pt(clip, op, pfs))
+    # The engine outlives the call, so it is cleared afterward: the operands and solution it
+    # holds are on the C++ heap, which the GC can't see, and would stay there as long as
+    # the task is reachable.
+    result = try
+        Clipper.add_subject!(clip, [s0.p for s0 in s])
+        Clipper.add_clip!(
+            clip,
+            pfs == pfc ? [c0.p for c0 in c] : _normalize_clip_fill(c, pfc, pfs)
+        )
+        convert(Clipper.PolyNode{Point{Int64}}, Clipper.execute_pt(clip, op, pfs))
+    finally
+        Clipper.clear!(clip)
+    end
 
     return ClippedPolygon(recast(Clipper.PolyNode{Point{T}}, result))
 end
@@ -613,9 +619,17 @@ function _offset(
     # Clipper1 compat: all paths together take their orientation from the lowest one, so a
     # hole passed as its own polygon is offset as a hole. One batch is one Clipper2 group,
     # which does that; added one by one, each path would be its own group.
-    # Clipper1 compat: closed paths of zero area give nothing. Clipper2 grows them by
-    # `abs(d)` whatever the sign of `d`, so they are left out.
-    paths = [s0.p for s0 in s if e != Clipper.EndTypeClosedPolygon || !_zero_area(s0)]
+    # Clipper1 compat: closed paths whose vertices all lie on one line give nothing.
+    # Clipper2 grows them by `abs(d)` whatever the sign of `d`, so they are left out.
+    paths = [s0.p for s0 in s if e != Clipper.EndTypeClosedPolygon || !_collinear(s0)]
+    # Clipper1 compat: a self-intersecting path whose lobes cancel, like a symmetric bowtie,
+    # is offset like any other path. Clipper2 takes the sign of `d` from a path of nonzero
+    # signed area, and grows the paths by `abs(d)` when there is none, so a negative `d` then
+    # gives nothing, where Clipper1 shrank them.
+    e == Clipper.EndTypeClosedPolygon &&
+        d <= -0.5 &&
+        all(iszero ∘ Clipper.area, paths) &&
+        return Polygon{T}[]
     Clipper.add_paths!(c, paths, j, e)
     result = Clipper.execute(c, d)
     # Clipper1 compat: outer contours come back counterclockwise, which the rest of this
@@ -656,19 +670,20 @@ function _offset(
     return to_polygons(union2d(polys))
 end
 
-# Whether a polygon's signed area is exactly zero. Products of grid coordinates overflow
-# `Int64` for extents above about 3 μm on the femtometer grid, so they are taken in `Int128`.
-function _zero_area(p::Polygon)
+# Whether all of a polygon's vertices lie on one line, so that it encloses no area. Products
+# of grid coordinates overflow `Int64` for extents above about 3 μm on the femtometer grid,
+# so they are taken in `Int128`.
+function _collinear(p::Polygon)
     isempty(p.p) && return true
     o = first(p.p)
-    a2 = zero(Int128)
-    for i in eachindex(p.p)
-        u, v = p.p[i] - o, p.p[mod1(i + 1, length(p.p))] - o
-        a2 +=
-            widemul(ustrip(getx(u)), ustrip(gety(v))) -
-            widemul(ustrip(gety(u)), ustrip(getx(v)))
+    i = findfirst(!=(o), p.p)
+    isnothing(i) && return true
+    u = p.p[i] - o
+    return all(p.p) do q
+        v = q - o
+        return widemul(ustrip(getx(u)), ustrip(gety(v))) ==
+               widemul(ustrip(gety(u)), ustrip(getx(v)))
     end
-    return iszero(a2)
 end
 
 ### cutting algorithm
