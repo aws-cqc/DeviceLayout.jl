@@ -289,6 +289,8 @@ See [Shapes](./shapes.md).
 ```@docs
     render!
     DeviceLayout.register_render_kwarg!
+    save_render
+    RenderArtifact
     DeviceLayout.discretize_curve
 ```
 

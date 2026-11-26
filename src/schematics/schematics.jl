@@ -1724,6 +1724,13 @@ function render!(
     return cs
 end
 
+DeviceLayout.save_render(
+    image_path::AbstractString,
+    sch::Schematic,
+    target::LayoutTarget;
+    kwargs...
+) = _save_render_through_target(image_path, sch, target; kwargs...)
+
 function check_render_strict(sch::Schematic, strict, stage::Symbol)
     if strict == :error
         max_level_logged(sch, stage) >= Logging.Error && error(
