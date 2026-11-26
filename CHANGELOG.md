@@ -6,6 +6,13 @@ The format of this changelog is based on
 
 ## Unreleased
 
+### Changed
+
+  - `SolidModel` no longer turns on OpenCASCADE's threaded boolean operations
+    (`Geometry.OCCParallel`). In fragment timings they used 2× to 12× the CPU without
+    reducing wall time. To turn them back on, call
+    `SolidModels.gmsh.option.setNumber("Geometry.OCCParallel", 1)` after creating the model.
+
 ### Added
 
   - `render!` and `SolidModels.populate_size_fields!` warn about each keyword argument they
@@ -19,6 +26,10 @@ The format of this changelog is based on
     argument as a `Float64`. Previously, after `mesh_scale(1)` or `mesh_grading_default(1)`,
     every later call to the same function threw a `TypeError`, including the call to
     `mesh_scale()` in the mesh-size callback.
+  - `SolidModelsExperimental` locators wrapped in a style, for example by `only_simulated!`
+    or `not_simulated!`, resolve like plain locators instead of throwing an `ArgumentError`.
+    Styles, including `OptionalStyle`s, don't affect selection; the `select_*` keywords of
+    `render!` turn it off.
 
 ## 1.22.0 (2026-11-16)
 

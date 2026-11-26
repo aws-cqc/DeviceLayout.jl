@@ -169,8 +169,10 @@ struct SolidModel{T <: SolidModelKernel}
         iszero(gmsh.is_initialized()) && gmsh.initialize()
         # SolidModel initiated gmsh uses μm
         set_gmsh_option("Geometry.OCCTargetUnit", "UM")
-        # Use threads in open cascade
-        set_gmsh_option("Geometry.OCCParallel", 1)
+        # OpenCASCADE's threaded booleans stay off (gmsh 4.15.2): in fragment timings they
+        # used several times the CPU without reducing wall time. Setting it here, rather
+        # than leaving gmsh's default, undoes a value left by an earlier model.
+        set_gmsh_option("Geometry.OCCParallel", 0)
         # Default to no threads, as there appear to be race conditions within gmsh.
         # If set to zero, Gmsh will look for OMP_NUM_THREADS environment variables;
         # this needs to be >1 for HXT algorithm to use parallelism.

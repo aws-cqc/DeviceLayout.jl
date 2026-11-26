@@ -51,13 +51,15 @@ function resolve_locators(flat, stack::SourceStack)
             direction = DeviceLayout.extract_direction(entity)
             isnothing(direction) || push!(directed, (entity, meta.layer, direction))
         elseif meta isa LocatorMeta
-            entity isa Locator || throw(
+            # Styles never hide a locator; the `select_*` keywords of `render!` do that.
+            loc = DeviceLayout.unstyled(entity)
+            loc isa Locator || throw(
                 ArgumentError(
                     "locator metadata $(nameof(typeof(meta))) must annotate a Locator " *
                     "point entity"
                 )
             )
-            push!(placed, (entity, meta))
+            push!(placed, (loc, meta))
         end
     end
 

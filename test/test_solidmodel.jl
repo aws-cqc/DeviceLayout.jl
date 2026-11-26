@@ -2259,6 +2259,17 @@ end
     end
 end
 
+@testitem "SolidModel leaves OpenCASCADE threading off" setup = [CommonTestSetup] begin
+    using DeviceLayout.SolidModels
+
+    SolidModel("occ_parallel_a"; overwrite=true)
+    @test SolidModels.get_gmsh_number("Geometry.OCCParallel") == 0
+    # The option is global to gmsh, so a new model resets a value set for an earlier one.
+    SolidModels.set_gmsh_option("Geometry.OCCParallel", 1)
+    SolidModel("occ_parallel_b"; overwrite=true)
+    @test SolidModels.get_gmsh_number("Geometry.OCCParallel") == 0
+end
+
 @testitem "Physical group names survive a stale name registry" setup = [CommonTestSetup] begin
     using DeviceLayout.SolidModels
     import DeviceLayout.SolidModels: gmsh, dimtags, dimgroupdict
