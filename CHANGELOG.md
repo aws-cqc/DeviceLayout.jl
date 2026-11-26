@@ -12,6 +12,10 @@ The format of this changelog is based on
     (`Geometry.OCCParallel`). In fragment timings they used 2× to 12× the CPU without
     reducing wall time. To turn them back on, call
     `SolidModels.gmsh.option.setNumber("Geometry.OCCParallel", 1)` after creating the model.
+  - `gridpoints_in_polygon`, and so `autofill!`, is faster. For polygons with many edges it
+    is up to 40 times faster on one thread (10 times on the DemoQPU17 ground-plane fill) and
+    allocates up to 600 times less memory. For large inputs, the result is computed on
+    several threads when Julia has more than one. The result is unchanged.
 
 ### Added
 

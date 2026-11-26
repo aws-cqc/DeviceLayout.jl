@@ -1546,70 +1546,248 @@ starting from the lower left.
 All polygons should have the same orientation (clockwise or counterclockwise).
 A mix (for example to represent "holes") may not give the desired behavior on
 polygon or hole edges.
+
+For large inputs, the result is computed on several threads when Julia has more than one.
+The result doesn't depend on the number of threads.
 """
 function gridpoints_in_polygon(
     poly::AbstractArray{<:AbstractPolygon{T}},
     grid_x::AbstractArray,
     grid_y::AbstractArray
 ) where {T}
-    in_poly = falses(length(grid_x), length(grid_y))
-    isempty(poly) && return in_poly
+    return _gridpoints_in_polygon(poly, grid_x, grid_y, nothing)
+end
+
+# Grid points in one block's buffers, or one row if a row has more. Blocks bound the
+# working memory.
+const _GRIDPOINT_BLOCK_SIZE = 2^18
+# Blocks per task, so that a task that finishes early takes another block, and buffers
+# are smaller than the grid
+const _GRIDPOINT_BLOCKS_PER_TASK = 4
+# Least work per task, in grid points (see `_gridpoint_tasks`), worth spawning a task for
+const _GRIDPOINT_TASK_WORK = 2^16
+
+# A polygon edge, with the rows of the sorted grid that it counts for
+struct _GridEdge{T}
+    rows::UnitRange{Int}
+    p0::Point{T}
+    p1::Point{T}
+end
+
+# `ntasks === nothing` chooses the number of tasks from the work and `Threads.nthreads()`.
+# Tests pass a number to run several tasks on one thread.
+function _gridpoints_in_polygon(
+    poly::AbstractArray{<:AbstractPolygon{T}},
+    grid_x::AbstractArray,
+    grid_y::AbstractArray,
+    ntasks::Union{Int, Nothing}
+) where {T}
+    # Before converting: an empty grid's converted element type comes from inference
+    (isempty(poly) || isempty(grid_x) || isempty(grid_y)) &&
+        return falses(length(grid_x), length(grid_y))
 
     fT = float(T)
     grid_x = convert.(fT, sort(grid_x))
     grid_y = convert.(fT, sort(grid_y))
-    nx = length(grid_x)
+    issorted(grid_y) && return _gridpoints_in_sorted_grid(poly, grid_x, grid_y, ntasks)
+    # Mixed units that compare equal can be out of order after conversion
+    perm = sortperm(grid_y)
+    in_poly = falses(length(grid_x), length(grid_y))
+    in_poly[:, perm] = _gridpoints_in_sorted_grid(poly, grid_x, grid_y[perm], ntasks)
+    return in_poly
+end
+
+# `grid_x` and `grid_y` are nonempty and converted to `float(T)`, and `grid_y` is sorted.
+# `grid_x` was sorted before conversion; the result's rows are in its order.
+function _gridpoints_in_sorted_grid(
+    poly::AbstractArray{<:AbstractPolygon{T}},
+    grid_x::AbstractVector{fT},
+    grid_y::AbstractVector{fT},
+    ntasks::Union{Int, Nothing}
+) where {T, fT}
+    in_poly = falses(length(grid_x), length(grid_y))
+    nx, ny = length(grid_x), length(grid_y)
 
     # Pre-strip units once for horizontal edge lookups (avoids per-edge allocation)
     grid_x_stripped = ustrip.(grid_x)
 
-    # Segment endpoints
-    p0s = points.(poly)
-    p1s = map(p0s) do p_poly
-        return view(p_poly, ((1:length(p_poly)) .% length(p_poly)) .+ 1)
-    end
-    # Polygon edges as point pairs
-    edges = zip(Iterators.flatten(p0s), Iterators.flatten(p1s))
-    edge_ys = map(edges) do (p0, p1)
-        return (p0.y, p1.y)
+    edges = _GridEdge{T}[]
+    for p in poly
+        # An empty `ClippedPolygon` has untyped `points`
+        pts = points(p)
+        isempty(pts) || _push_grid_edges!(edges, pts, grid_y)
     end
 
-    # y-IntervalValues with (y0, y1) => edge (where y0 <= y1)
-    edge_iv = sort!( # IntervalTree requires sorted IntervalValues
-        map(zip(edge_ys, edges)) do (ys, edge)
-            return IntervalValue{fT, Tuple{Point{T}, Point{T}}}(minimum(ys), maximum(ys), edge)
-        end
+    isnothing(ntasks) && (ntasks = _gridpoint_tasks(edges, nx, ny))
+    rows_per_block = clamp(
+        min(cld(ny, _GRIDPOINT_BLOCKS_PER_TASK * ntasks), _GRIDPOINT_BLOCK_SIZE ÷ (nx + 1)),
+        1,
+        ny
     )
-    edge_tree = IntervalTrees.IntervalMap{fT, Tuple{Point{T}, Point{T}}}(edge_iv)
+    nblocks = cld(ny, rows_per_block)
+    block_offsets, block_edges = _edges_by_block(edges, rows_per_block, nblocks)
 
-    # Difference array for winding number accumulation (extra element as sentinel)
-    delta = zeros(Int32, nx + 1)
-    # For each grid y value, look at the edges containing that value
-    for (iy, y) in enumerate(grid_y)
-        for i2 in intersect(edge_tree, (y, y))
-            edge = i2.value
-            # Count horizontal edges only if grid point lies on them
-            if last(edge).y == first(edge).y
-                if first(edge).y == y
-                    x_lo = ustrip(min(first(edge).x, last(edge).x))
-                    x_hi = ustrip(max(first(edge).x, last(edge).x))
-                    i_lo = searchsortedfirst(grid_x_stripped, x_lo)
-                    i_hi = searchsortedlast(grid_x_stripped, x_hi)
-                    for i = i_lo:i_hi
-                        in_poly[i, iy] = true
-                    end
-                end
-                continue
+    next_block = Threads.Atomic{Int}(1)
+    copy_lock = ReentrantLock()
+    function fill_blocks!()
+        # Difference arrays for winding number accumulation (extra element as sentinel)
+        delta = Matrix{Int32}(undef, nx + 1, rows_per_block)
+        inside = Matrix{Bool}(undef, nx, rows_per_block)
+        while (b = Threads.atomic_add!(next_block, 1)) <= nblocks
+            rows = ((b - 1) * rows_per_block + 1):min(b * rows_per_block, ny)
+            _fill_gridpoint_rows!(
+                inside,
+                delta,
+                edges,
+                view(block_edges, (block_offsets[b] + 1):block_offsets[b + 1]),
+                grid_x,
+                grid_x_stripped,
+                grid_y,
+                rows
+            )
+            # Neighboring blocks can share a 64-bit word of `in_poly`'s bits
+            lock(copy_lock) do
+                return copyto!(
+                    in_poly,
+                    (first(rows) - 1) * nx + 1,
+                    inside,
+                    1,
+                    length(rows) * nx
+                )
             end
-            # This counts as one edge to the right:
-            # .     |_
-            #         |
-            first(i2) == y && continue
+        end
+    end
+    ntasks = min(nblocks, ntasks)
+    if ntasks == 1
+        fill_blocks!()
+    else
+        foreach(wait, [Threads.@spawn(fill_blocks!()) for _ = 1:ntasks])
+    end
+    return in_poly
+end
+
+# Append the edges of the nonempty polygon `pts` that count for some row of sorted `grid_y`,
+# with those rows: the rows on it if it is horizontal, otherwise those with
+# `y_lo < y <= y_hi`, so that this counts as one edge to the right:
+# .     |_
+#         |
+# Rows are compared as IEEE floats of the grid's type, so `-0.0 == 0.0`.
+function _push_grid_edges!(
+    edges::Vector{_GridEdge{T}},
+    pts::AbstractVector{Point{T}},
+    grid_y::AbstractVector{fT}
+) where {T, fT}
+    n = length(pts)
+    # The number of rows at or below each vertex is walked from the previous vertex's, so
+    # an edge costs the rows it crosses plus O(1)
+    first_count = _count_not_above(grid_y, convert(fT, first(pts).y))
+    count0 = first_count
+    for i = 1:n
+        p0, p1 = pts[i], pts[i % n + 1]
+        count1 =
+            i == n ? first_count : _walk_count_not_above(grid_y, convert(fT, p1.y), count0)
+        if p0.y == p1.y
+            y = convert(fT, p0.y)
+            first_row = count0 + 1
+            while first_row > 1 && grid_y[first_row - 1] == y
+                first_row -= 1
+            end
+            first_row <= count0 && push!(edges, _GridEdge(first_row:count0, p0, p1))
+        elseif count0 != count1
+            push!(edges, _GridEdge((min(count0, count1) + 1):max(count0, count1), p0, p1))
+        end
+        count0 = count1
+    end
+    return edges
+end
+
+# Number of elements of sorted `v` not greater than `x`
+function _count_not_above(v::AbstractVector, x)
+    lo, hi = 0, length(v) + 1
+    while hi - lo > 1
+        m = (lo + hi) >>> 1
+        v[m] <= x ? (lo = m) : (hi = m)
+    end
+    return lo
+end
+
+# `_count_not_above(v, x)`, walking from `k`, the value for a nearby `x`
+function _walk_count_not_above(v::AbstractVector, x, k::Int)
+    while k < length(v) && v[k + 1] <= x
+        k += 1
+    end
+    while k > 0 && x < v[k]
+        k -= 1
+    end
+    return k
+end
+
+# Number of tasks for filling the grid, from an estimate of the work in grid points of the
+# per-row prefix sum. An edge crossing a row costs about 100 of those.
+function _gridpoint_tasks(edges::Vector{<:_GridEdge}, nx::Int, ny::Int)
+    Threads.nthreads() == 1 && return 1
+    work = nx * ny + 100 * sum(edge -> length(edge.rows), edges; init=0)
+    return clamp(work ÷ _GRIDPOINT_TASK_WORK, 1, Threads.nthreads())
+end
+
+# Indices of the edges with rows in each block, in compressed sparse form: block `b` has
+# `block_edges[(block_offsets[b] + 1):block_offsets[b + 1]]`. That is one index per edge
+# and block, at most one per row the edge counts for.
+function _edges_by_block(edges::Vector{<:_GridEdge}, rows_per_block::Int, nblocks::Int)
+    block_of(row) = (row - 1) ÷ rows_per_block + 1
+    blocks(edge) = block_of(first(edge.rows)):block_of(last(edge.rows))
+    block_offsets = zeros(Int, nblocks + 1)
+    for edge in edges, b in blocks(edge)
+        block_offsets[b + 1] += 1
+    end
+    cumsum!(block_offsets, block_offsets)
+    block_edges = Vector{Int}(undef, last(block_offsets))
+    next_slot = block_offsets[1:nblocks]
+    for (i, edge) in enumerate(edges), b in blocks(edge)
+        next_slot[b] += 1
+        block_edges[next_slot[b]] = i
+    end
+    return block_offsets, block_edges
+end
+
+# Mark `inside[:, 1:length(rows)]` for grid points in `rows` that lie in or on a polygon,
+# given the edges with rows in that range
+function _fill_gridpoint_rows!(
+    inside::Matrix{Bool},
+    delta::Matrix{Int32},
+    edges::Vector{<:_GridEdge},
+    block_edges::AbstractVector{Int},
+    grid_x::AbstractVector,
+    grid_x_stripped::AbstractVector,
+    grid_y::AbstractVector,
+    rows::UnitRange{Int}
+)
+    nx = length(grid_x)
+    offset = first(rows) - 1
+    fill!(view(delta, :, 1:length(rows)), 0)
+    fill!(view(inside, :, 1:length(rows)), false)
+    for i in block_edges
+        (; p0, p1) = edges[i]
+        edge_rows = intersect(edges[i].rows, rows)
+        # Count horizontal edges only if grid point lies on them
+        if p0.y == p1.y
+            x_lo = ustrip(min(p0.x, p1.x))
+            x_hi = ustrip(max(p0.x, p1.x))
+            i_lo = searchsortedfirst(grid_x_stripped, x_lo)
+            i_hi = searchsortedlast(grid_x_stripped, x_hi)
+            for iy in edge_rows
+                p0.y == grid_y[iy] || continue
+                for ix = i_lo:i_hi
+                    inside[ix, iy - offset] = true
+                end
+            end
+            continue
+        end
+        s = Int32(sign(p1.y - p0.y))
+        for iy in edge_rows
+            y = grid_y[iy]
             # Find x of edge at y
-            x =
-                first(edge).x +
-                (last(edge).x - first(edge).x) * (y - first(edge).y) /
-                (last(edge).y - first(edge).y)
+            x = p0.x + (p1.x - p0.x) * (y - p0.y) / (p1.y - p0.y)
             x_right_minidx = searchsortedfirst(grid_x, x) # Can be nx + 1 if x > last(grid_x)
             # If a grid point lies on the edge, it's in the polygon. The computed
             # crossing x may round to either side of an on-edge grid point, so we
@@ -1618,27 +1796,24 @@ function gridpoints_in_polygon(
             # just above the grid point.
             x_right_minidx <= nx &&
                 isapprox(x, grid_x[x_right_minidx]) &&
-                (in_poly[x_right_minidx, iy] = true)
+                (inside[x_right_minidx, iy - offset] = true)
             x_right_minidx > 1 &&
                 isapprox(x, grid_x[x_right_minidx - 1]) &&
-                (in_poly[x_right_minidx - 1, iy] = true)
+                (inside[x_right_minidx - 1, iy - offset] = true)
             # Record edge crossing in difference array (O(1) instead of O(grid_x))
-            s = sign(last(edge).y - first(edge).y)
-            delta[1] += s
-            delta[x_right_minidx] -= s # In bounds thanks to sentinel
+            delta[1, iy - offset] += s
+            delta[x_right_minidx, iy - offset] -= s # In bounds thanks to sentinel
         end
-        # Prefix sum over delta to recover winding counts, then mark in_poly
+    end
+    # Prefix sum over delta to recover winding counts, then mark inside
+    for j in eachindex(rows)
         acc = zero(Int32)
         for ix = 1:nx
-            acc += delta[ix]
-            if acc != 0
-                in_poly[ix, iy] = true
-            end
+            acc += delta[ix, j]
+            acc != 0 && (inside[ix, j] = true)
         end
-        delta .= 0
     end
-
-    return in_poly
+    return inside
 end
 
 ### ClippedPolygon StyleDict and helpers

@@ -62,3 +62,12 @@ for (label, gx, gy) in _gip_grids
     SUITE["autofill"]["gridpoints_in_polygon"][label] =
         @benchmarkable gridpoints_in_polygon($_gip_poly, $gx, $gy)
 end
+
+# Many short edges, most crossing no grid row, as in a ground-plane exclusion
+const _gip_many_edges = vec([
+    Polygon([Point(x + 3μm * cospi(2k / 100), y + 3μm * sinpi(2k / 100)) for k = 0:99])
+    for x = (10μm):(20μm):(630μm), y = (10μm):(20μm):(630μm)
+])
+const _gip_many_grid = collect(range(0μm, 640μm, length=139))
+SUITE["autofill"]["gridpoints_in_polygon"]["100k_edges_139x139"] =
+    @benchmarkable gridpoints_in_polygon($_gip_many_edges, $_gip_many_grid, $_gip_many_grid)
