@@ -436,7 +436,8 @@ end
             return plan(g; log_dir=nothing)
         end
 
-        # Setup an optional "fine mesh" size field.
+        # Setup an optional "fine mesh" size field. The refined regions are small because
+        # meshing at 1 μm takes minutes over a few hundred μm
         refinement_style = OptionalStyle(
             MeshSized(1.0μm, 0.8),
             :finemesh,
@@ -445,7 +446,7 @@ end
         )
         sizing = [
             styled(
-                centered(Rectangle(400μm, 400μm), on_pt=Point(500μm, 0μm)),
+                centered(Rectangle(20μm, 20μm), on_pt=Point(500μm, 0μm)),
                 refinement_style
             ),
             styled(Ellipse(Point(-100.0μm, 0.0μm), (10.0μm, 4.0μm), 45°), refinement_style)
