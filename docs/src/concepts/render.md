@@ -87,10 +87,10 @@ cells into SVG, PDF, and EPS vector graphics formats, or into the PNG raster gra
 format. This enables patterns to be displayed in web browsers, publications, presentations,
 and so on. You can save a cell to a graphics file by, e.g. `save("/path/to/file.svg", mycell)`. Possible keyword arguments include:
 
-  - `width`: Output width. A unitless number gives Cairo canvas units: pixels for PNG/SVG and
-    points for PDF/EPS. A `Unitful.Quantity`, such as `u"4inch"`, is converted to canvas units
-    using `dpi`. If `height` is omitted, it is chosen to preserve the rendered region's aspect
-    ratio.
+  - `width`: Output width. A unitless number gives Cairo canvas units: pixels for PNG and
+    points for SVG/PDF/EPS. A `Unitful.Quantity`, such as `u"4inch"`, is converted to canvas
+    units using `dpi`. If `height` is omitted, it is chosen to preserve the rendered region's
+    aspect ratio.
   - `height`: Output height, with the same unitless-canvas or physical-length behavior as
     `width`. If `width` is omitted, it is chosen to preserve the aspect ratio. Supplying both
     dimensions uses them exactly.
@@ -157,8 +157,9 @@ manifest's `metadata_selection` is `"all"` or `"filtered"`. The
 `rendered_cell_fingerprint` identifies the complete pre-filter cell; the filter state is
 recorded separately. The manifest stores the image path relative to itself. The
 `layout_to_canvas.matrix` maps homogeneous layout coordinates to the recorded canvas unit
-(`px` for PNG/SVG and `pt` for PDF/EPS). For viewport `(xmin, ymin, xmax, ymax)` and uniform
-scale `s`, the top-left-anchored matrix is
+(`px` for PNG and `pt` for SVG/PDF/EPS). SVG document units are explicitly set to points so
+that the manifest and the serialized SVG have the same physical unit. For viewport
+`(xmin, ymin, xmax, ymax)` and uniform scale `s`, the top-left-anchored matrix is
 
 ```text
 [ s   0  -s*xmin ]
@@ -170,16 +171,22 @@ The manifest also contains its inverse and an exact content rectangle in the rec
 unit. This matters when explicitly supplied canvas dimensions have a different aspect ratio
 than the viewport.
 
-A `CoordinateSystem` can be rendered through a
+A `CoordinateSystem` or a `Schematic` can be rendered through a
 [`SchematicDrivenLayout.LayoutTarget`](@ref) without first constructing a `Cell`:
 
 ```julia
-artifact = save_render("overview.png", coordinate_system, layout_target; width=1600)
+artifact = save_render("overview.png", schematic, layout_target; width=1600)
+save("overview.gds", artifact.cell)
 ```
 
-That overload records semantic-to-GDS mappings encountered while constructing the intermediate
-cell; it never dumps the target's mutable mapping cache. Mappings are conservatively retained
+The artifact's `cell` is the `Cell` that was drawn, so the same geometry can be saved as GDS
+without rendering it again. A `Schematic` is rendered with its `render!` method, so it must
+have passed `check!`, and errors logged while rendering throw unless `strict` is relaxed in
+`render_options`.
+
+These overloads record semantic-to-GDS mappings encountered while constructing the cell; they
+never dump the target's mutable mapping cache. Mappings are conservatively retained
 when their output `GDSMeta` survives `metadata_filter`, including every encountered source when
 several semantic metadata values map to one selected output. Pass a `NamedTuple` as
-`render_options` for options used while constructing the intermediate cell. The other keyword
+`render_options` for options used while constructing the cell. The other keyword
 arguments are graphics options listed above.

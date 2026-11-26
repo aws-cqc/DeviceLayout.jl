@@ -227,13 +227,17 @@ const RENDER_MANIFEST_SCHEMA_VERSION = "0.1"
 """
     RenderArtifact
 
-Absolute image and manifest paths together with the JSON-shaped manifest snapshot.
-Changing `manifest` does not rewrite the saved manifest.
+Absolute image and manifest paths, the JSON-shaped manifest snapshot, and the `Cell` that
+was drawn. When `save_render` renders through a target, `cell` is the `Cell` it constructed,
+so that `Cell` can be saved as GDS without rendering again. `cell` is `nothing` for a
+`CoordinateSystem` drawn without a target. Changing `manifest` does not rewrite the saved
+manifest.
 """
 struct RenderArtifact
     image_path::String
     manifest_path::String
     manifest::Dict{String, Any}
+    cell::Union{Cell, Nothing}
 end
 
 struct GraphicsRenderPlan{T, F, E, M, R}
@@ -308,9 +312,25 @@ function prepare_graphics_render(
     )
 end
 
+const CAIRO_SVG_UNIT_PT = 7 # cairo_svg_unit_t.CAIRO_SVG_UNIT_PT
+
 function _surface(io, mime::MIMETypes, width, height)
     mime isa MIME"image/png" && return Cairo.CairoARGBSurface(width, height)
-    mime isa MIME"image/svg+xml" && return Cairo.CairoSVGSurface(io, width, height)
+    if mime isa MIME"image/svg+xml"
+        surface = Cairo.CairoSVGSurface(io, width, height)
+        # Cairo.jl does not expose cairo_svg_surface_set_document_unit. Set the
+        # document unit explicitly so the manifest's point coordinates match the
+        # physical units declared by the SVG root instead of depending on Cairo's
+        # default user-unit policy.
+        ccall(
+            (:cairo_svg_surface_set_document_unit, Cairo.libcairo),
+            Cvoid,
+            (Ptr{Nothing}, Cint),
+            surface.ptr,
+            CAIRO_SVG_UNIT_PT
+        )
+        return surface
+    end
     mime isa MIME"application/pdf" && return Cairo.CairoPDFSurface(io, width, height)
     mime isa MIME"application/postscript" && return Cairo.CairoEPSSurface(io, width, height)
     return error("unknown mime type")
@@ -325,7 +345,13 @@ function write_graphics(io, mime::MIMETypes, plan::GraphicsRenderPlan)
 
     # The viewport is top-left anchored. Clip before scaling so geometry crossing the
     # viewport cannot paint into unused canvas space when the aspect ratios differ.
-    Cairo.rectangle(ctx, 0, 0, plan.content_width, plan.content_height)
+    Cairo.rectangle(
+        ctx,
+        0,
+        0,
+        ceil(plan.content_width - 1e-6), # Avoid empty pixel row from rounded aspect ratio
+        ceil(plan.content_height - 1e-6)
+    )
     Cairo.clip(ctx)
     Cairo.scale(ctx, plan.scale, plan.scale)
     trans = Translation(-plan.viewport.ll.x, plan.viewport.ur.y) ∘ XReflection()
@@ -595,7 +621,7 @@ function _render_manifest(
     image_sha256
 )
     bnd = ustrip(plan.viewport)
-    canvas_unit = format in ("pdf", "eps") ? "pt" : "px"
+    canvas_unit = format == "png" ? "px" : "pt"
     return Dict{String, Any}(
         "schema_version" => RENDER_MANIFEST_SCHEMA_VERSION,
         "image" => relpath(image_path, dirname(manifest_path)),
@@ -628,8 +654,22 @@ function _render_manifest(
     )
 end
 
+# Like `mktemp`, but the file gets standard permissions (0o666 less the umask) like `save`
+function _create_temp(directory)
+    flags =
+        Base.Filesystem.JL_O_WRONLY | Base.Filesystem.JL_O_CREAT | Base.Filesystem.JL_O_EXCL
+    while true
+        path = tempname(directory; cleanup=false)
+        try
+            return path, Base.Filesystem.open(path, flags, 0o666)
+        catch err
+            err isa Base.IOError && err.code == Base.UV_EEXIST || rethrow()
+        end
+    end
+end
+
 function _write_manifest_temp(directory, manifest)
-    tmp_path, io = mktemp(directory)
+    tmp_path, io = _create_temp(directory)
     succeeded = false
     try
         JSON.json(io, manifest; pretty=true)
@@ -670,7 +710,7 @@ function _save_render(
     rendered_fingerprint =
         rendered_geom isa Cell ? Cells.geometry_fingerprint(rendered_geom) : nothing
 
-    image_tmp, image_io = mktemp(dirname(image_abs))
+    image_tmp, image_io = _create_temp(dirname(image_abs))
     manifest_tmp = nothing
     try
         write_graphics(image_io, mime, plan)
@@ -687,7 +727,12 @@ function _save_render(
             manifest_abs,
             image_sha256
         )
-        artifact = RenderArtifact(image_abs, manifest_abs, manifest)
+        artifact = RenderArtifact(
+            image_abs,
+            manifest_abs,
+            manifest,
+            rendered_geom isa Cell ? rendered_geom : nothing
+        )
         manifest_tmp = _write_manifest_temp(dirname(manifest_abs), manifest)
 
         # Remove the old sidecar before replacing the image. A publication failure can

@@ -109,9 +109,11 @@ function load end
 """
     save_render(image_path, geometry; manifest_path=nothing, options...)
     save_render(image_path, coordinate_system, layout_target; manifest_path=nothing, options...)
+    save_render(image_path, schematic, layout_target; manifest_path=nothing, options...)
 
 Save a PNG, SVG, PDF, or EPS rendering together with a versioned JSON manifest describing
-its viewport, canvas transform, selected metadata, resolved colors, and image hash.
+its viewport, canvas transform, selected metadata, resolved colors, and image hash. Returns a
+[`RenderArtifact`](@ref) holding the manifest and the rendered `Cell`.
 
 The default manifest path is `<image stem>.render.json`. Use `manifest_path` to override it.
 Ordinary `FileIO.save` remains file-only.

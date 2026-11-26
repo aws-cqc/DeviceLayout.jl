@@ -1456,6 +1456,20 @@ end
 
     matrix(json_matrix) = [Float64(json_matrix[i][j]) for i = 1:3, j = 1:3]
     metadata_pairs(records) = [(record["layer"], record["datatype"]) for record in records]
+    # Premultiplied 0xAARRGGBB pixels, indexed [row, column] from the top left
+    function png_pixels(path)
+        Cairo = DeviceLayout.Graphics.Cairo
+        surface = Cairo.read_from_png(path)
+        height, width = Int(surface.height), Int(surface.width)
+        row_length = div(Cairo.format_stride_for_width(Cairo.FORMAT_ARGB32, width), 4)
+        GC.@preserve surface begin
+            data = Ptr{UInt32}(Cairo.image_surface_get_data(surface))
+            return [
+                unsafe_load(data, (row - 1) * row_length + column) for row = 1:height,
+                column = 1:width
+            ]
+        end
+    end
 
     cell = Cell("artifact", nm)
     render!(cell, Rectangle(Point(10μm, 20μm), Point(30μm, 30μm)), GDSMeta(5, 1))
@@ -1479,11 +1493,12 @@ end
     @test artifact.manifest isa Dict{String, Any}
     @test artifact.image_path == abspath(image_path)
     @test artifact.manifest_path == abspath(manifest_path)
+    @test artifact.cell === cell
     @test isfile(image_path)
     @test isfile(manifest_path)
     if !Sys.iswindows()
-        @test filemode(image_path) & 0o077 == 0
-        @test filemode(manifest_path) & 0o077 == 0
+        @test filemode(image_path) & 0o777 == filemode(ordinary_path) & 0o777
+        @test filemode(manifest_path) & 0o777 == filemode(ordinary_path) & 0o777
     end
     @test png_dimensions(image_path) == (300, 300)
     parity_path = joinpath(tdir, "parity.png")
@@ -1543,6 +1558,38 @@ end
     @test forward * lower_right ≈ [300.0, 150.0, 1.0]
     @test inverse * (forward * lower_right) ≈ lower_right
 
+    # Geometry continuing past the bottom of the viewport
+    fill_cell = Cell("fill", nm)
+    render!(fill_cell, Rectangle(Point(0μm, 0μm), Point(30μm, 30μm)), GDSMeta(1, 0))
+    blue = Dict(GDSMeta(1, 0) => (0.0, 0.0, 1.0, 1.0))
+    fill_viewport = Rectangle(Point(0μm, 10μm), Point(30μm, 20μm))
+    # The derived height 33.3 px is rounded up to 34; the partial last row is filled
+    derived = save_render(
+        joinpath(tdir, "derived-height.png"),
+        fill_cell;
+        width=100,
+        bbox=fill_viewport,
+        background=:white,
+        layercolors=blue
+    )
+    derived_pixels = png_pixels(derived.image_path)
+    @test size(derived_pixels) == (34, 100)
+    @test derived.manifest["layout_to_canvas"]["content_rect"]["ymax"] ≈ 100 / 3
+    @test all(==(0xff0000ff), derived_pixels)
+    # With a mismatched explicit height, the clip stops at the pixel row holding the edge
+    mismatched = save_render(
+        joinpath(tdir, "mismatched-height.png"),
+        fill_cell;
+        width=100,
+        height=100,
+        bbox=fill_viewport,
+        background=:white,
+        layercolors=blue
+    )
+    mismatched_pixels = png_pixels(mismatched.image_path)
+    @test all(==(0xff0000ff), mismatched_pixels[1:34, :])
+    @test all(==(0xffffffff), mismatched_pixels[35:end, :])
+
     filtered = Cell("filtered", nm)
     render!(filtered, Rectangle(10μm, 10μm), GDSMeta(1, 0))
     render!(filtered, Rectangle(Point(20μm, 0μm), Point(30μm, 10μm)), GDSMeta(2, 0))
@@ -1563,7 +1610,11 @@ end
     @test metadata_pairs(filtered_manifest["selected_metadata"]) == [(2, 0)]
     @test collect(filtered_manifest["selected_metadata"][1]["rgba"]) == [0.0, 1.0, 0.0, 1.0]
     @test filtered_manifest["layout_to_canvas"]["content_rect"]["ymax"] ≈ 100
-    @test filtered_manifest["layout_to_canvas"]["content_rect"]["unit"] == "px"
+    @test filtered_manifest["canvas"]["unit"] == "pt"
+    @test filtered_manifest["render_options"]["width"]["unit"] == "pt"
+    @test filtered_manifest["layout_to_canvas"]["output_unit"] == "pt"
+    @test filtered_manifest["layout_to_canvas"]["content_rect"]["unit"] == "pt"
+    @test occursin("width=\"100pt\"", read(joinpath(tdir, "filtered.svg"), String))
 
     for format in ("pdf", "eps")
         vector_artifact =
@@ -1632,6 +1683,8 @@ end
     expected_cell = Cell(cs, target; atol=2nm)
     @test target_manifest["geometry"]["rendered_cell_fingerprint"]["sha256"] ==
           Cells.geometry_fingerprint(expected_cell)
+    @test Cells.geometry_fingerprint(target_artifact.cell) ==
+          Cells.geometry_fingerprint(expected_cell)
     geometry_options = target_manifest["render_options"]["geometry_render_options"]
     @test !geometry_options["simulation"]
     @test geometry_options["artwork"]
@@ -1673,6 +1726,35 @@ end
     plain_cs_artifact = save_render(joinpath(tdir, "plain-cs.png"), cs; width=100)
     plain_cs_manifest = JSON.parsefile(plain_cs_artifact.manifest_path)
     @test !haskey(plain_cs_manifest["geometry"], "rendered_cell_fingerprint")
+    @test isnothing(plain_cs_artifact.cell)
+
+    graph = SchematicGraph("semantic-schematic")
+    add_node!(graph, BasicComponent(cs))
+    sch = plan(graph; log_dir=nothing)
+    @test_throws "unchecked Schematic" save_render(
+        joinpath(tdir, "unchecked.png"),
+        sch,
+        target;
+        width=100
+    )
+    check!(sch)
+    schematic_artifact = save_render(
+        joinpath(tdir, "schematic.png"),
+        sch,
+        target;
+        width=100,
+        metadata_filter=layer_inclusion(GDSMeta(5, 0), [])
+    )
+    schematic_manifest = schematic_artifact.manifest
+    @test schematic_manifest["geometry"]["type"] == "Schematic"
+    @test schematic_manifest["geometry"]["name"] == "semantic-schematic"
+    schematic_cell = Cell("schematic-cell", nm)
+    render!(schematic_cell, sch, target)
+    @test Cells.geometry_fingerprint(schematic_artifact.cell) ==
+          Cells.geometry_fingerprint(schematic_cell)
+    @test [
+        record["source"]["layer"] for record in schematic_manifest["metadata_mapping"]
+    ] == ["a", "b", "disabled"]
 
     bad_target = ArtworkTarget(
         technology;

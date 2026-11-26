@@ -25,9 +25,10 @@ The format of this changelog is based on
     `DeviceLayout.register_render_kwarg!` registers other custom rendering options.
   - `save_render` writes a PNG, SVG, PDF, or EPS image together with a versioned JSON
     manifest containing the exact viewport-to-canvas transform, selected output metadata,
-    resolved colors, rendering options, and image SHA-256. An overload for a
-    `CoordinateSystem` and `LayoutTarget` records per-call semantic-to-GDS mappings without
-    serializing the target's mutable mapping cache.
+    resolved colors, rendering options, and image SHA-256. Overloads for a `CoordinateSystem`
+    or `Schematic` and a `LayoutTarget` record per-call semantic-to-GDS mappings without
+    serializing the target's mutable mapping cache, and return the rendered `Cell` so it can
+    be saved as GDS without rendering again.
 
 ### Fixed
 
