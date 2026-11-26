@@ -29,9 +29,11 @@ The format of this changelog is based on
       + Otherwise, results agree with Clipper1's to within the integer grid Clipper works
         on (1 fm for floating-point coordinates, one unit for integer coordinates), apart
         from edge cases at very sharp or nearly straight corners and the limitation below.
-      + `offset` gives nothing for closed polygons whose vertices all lie on one line,
-        whatever the sign of `delta`. With negative `delta`, it also gives nothing when no
-        polygon has nonzero signed area, as for a symmetric bowtie on its own.
+      + `offset` gives nothing for closed polygons of zero signed area, such as a rectangle of
+        zero width, whatever the sign of `delta`. This includes self-intersecting polygons
+        whose lobes cancel, like a symmetric bowtie. The documentation now states that the
+        results of operations other than clipping on self-intersecting polygons are
+        unspecified.
       + Some large operations are slower: up to 1.5× for a union whose result has thousands
         of holes.
       + Known Clipper2 limitation: nearly coincident edges can make Clipper2 fill a hole or

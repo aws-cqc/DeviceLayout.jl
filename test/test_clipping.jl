@@ -1123,16 +1123,6 @@ end
         @test Polygons.area(only(offset(Rectangle(4.294967296, 4.294967296), 1.0))) ≈
               6.294967296^2
         @test length(offset(Rectangle(8.589934592, 2.147483648), 0.5)) == 1
-        # A bowtie whose lobes cancel has zero signed area but encloses area, so it is offset.
-        @test Polygons.area(
-            only(offset(Polygon(Point{Int}[(0, 0), (2, 2), (2, 0), (0, 2)]), 1))
-        ) == 10
-        bt = Polygon(Point{Int}[(0, 0), (20, 20), (20, 0), (0, 20)])
-        sq = Polygon(Point{Int}[(100, 0), (110, 0), (110, 10), (100, 10)])
-        @test sort(Polygons.area.(offset([bt, sq], -1))) == [49, 64]
-        # With no path of nonzero signed area to take the sign of delta from, a negative
-        # delta gives nothing
-        @test isempty(offset(bt, -1))
     end
 
     @testset "Open end types" begin

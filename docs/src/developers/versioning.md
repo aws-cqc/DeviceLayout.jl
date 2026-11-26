@@ -41,6 +41,9 @@ Not breaking:
   both for this reason and because these names are already not stable for the same code run
   multiple times in a Julia session (unless `reset_uniquename!()` is called before each run).
 - Changes to autorouting solutions (`ChannelRouter`/`AutoChannelRouting`) are not breaking.
+- Changes to the results of operations other than clipping on self-intersecting polygons
+  are not breaking. Those results are unspecified (see
+  [Self-intersecting polygons](@ref)).
 
 For component packages in user PDKs rather than DeviceLayout itself, see
 [Component and package creation and versioning](@ref style-package) in the Style Guide.

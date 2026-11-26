@@ -30,6 +30,19 @@ The results of clipping are represented using the `ClippedPolygon <: AbstractPol
 
 A related operation is [`offset`](@ref), which grows or shrinks the polygon by offsetting its edges a given distance.
 
+### Self-intersecting polygons
+
+A polygon whose boundary crosses itself, like a bowtie, doesn't say what region it covers
+until a fill rule does. Clipping takes a fill rule. `union2d` and the other Boolean
+functions use `Clipper.PolyFillTypePositive`: a point is covered where the boundary winds
+around it counterclockwise more often than clockwise, so a bowtie's clockwise lobe is not
+covered. `clip` takes other rules as well. The results of other operations on
+self-intersecting polygons, such as `offset`, `halo`, and `Rounded`, are unspecified: they
+can include slivers or lose lobes, and they may change in any release (see
+[What counts as breaking?](@ref dev-breaking)). Rendering backends and GDS viewers may also
+disagree about what such a polygon covers. To get a polygon that doesn't cross itself, clip
+it first, for example with `union2d(p)`.
+
 ## Curvilinear polygons
 
 A [`CurvilinearPolygon`](@ref) is a polygon where some edges are replaced by circular arcs
