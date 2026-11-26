@@ -478,7 +478,7 @@ refinement to capture the geometry, but do not require refinement non-locally.
 
 See [`DeviceLayout.MeshSized`](@ref) for more details and the explicit mesh sizing formula.
 """
-mesh_scale(s) = MESHSIZE_PARAMS[:mesh_scale]::Float64 = s
+mesh_scale(s) = MESHSIZE_PARAMS[:mesh_scale] = Float64(s)
 mesh_scale() = MESHSIZE_PARAMS[:mesh_scale]::Float64
 
 """
@@ -510,7 +510,7 @@ See [`DeviceLayout.MeshSized`](@ref) for more details and the explicit mesh sizi
 mesh_grading_default() = MESHSIZE_PARAMS[:global_α]::Float64
 function mesh_grading_default(α)
     @assert 0 < α <= 1
-    MESHSIZE_PARAMS[:global_α]::Float64 = α
+    MESHSIZE_PARAMS[:global_α] = Float64(α)
     finalize_size_fields!()
     return MESHSIZE_PARAMS[:global_α]
 end
@@ -535,7 +535,7 @@ the radius, so a degenerate edge can otherwise drive the size toward zero.
 See [`DeviceLayout.MeshSized`](@ref) for the control-point sizing formula.
 """
 mesh_respect_lc() = MESHSIZE_PARAMS[:respect_lc]::Bool
-mesh_respect_lc(b::Bool) = MESHSIZE_PARAMS[:respect_lc]::Bool = b
+mesh_respect_lc(b::Bool) = MESHSIZE_PARAMS[:respect_lc] = b
 
 """
     add_mesh_size_point(; h, α=-1, p)

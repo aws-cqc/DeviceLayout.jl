@@ -22,6 +22,10 @@ The format of this changelog is based on
 
 ### Fixed
 
+  - `SolidModels.mesh_scale` and `SolidModels.mesh_grading_default` store an integer
+    argument as a `Float64`. Previously, after `mesh_scale(1)` or `mesh_grading_default(1)`,
+    every later call to the same function threw a `TypeError`, including the call to
+    `mesh_scale()` in the mesh-size callback.
   - `SolidModelsExperimental` locators wrapped in a style, for example by `only_simulated!`
     or `not_simulated!`, resolve like plain locators instead of throwing an `ArgumentError`.
     Styles, including `OptionalStyle`s, don't affect selection; the `select_*` keywords of
