@@ -269,6 +269,321 @@ end
     end
 end
 
+@testitem "SolidModel CAD import of many copies" setup = [CommonTestSetup, QuietGmshSetup] begin
+    import DeviceLayout: ScaledIsometry, Point
+    using DeviceLayout.SolidModels
+    import DeviceLayout.SolidModels: import_solid!, dimtags, dimgroupdict, gmsh, hasgroup
+
+    # Sources: a 10 μm cube as BREP, and a two-box .xao with a solid group per box and a face
+    # group on the top, as in the .xao import test.
+    sm0 = SolidModel("copies_author"; overwrite=true)
+    brep = joinpath(tdir, "copies_box.brep")
+    gmsh.model.add("copies_brep")
+    gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
+    gmsh.model.occ.synchronize()
+    gmsh.write(brep)
+    gmsh.model.remove()
+    gmsh.model.set_current("copies_author")
+    a = gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
+    b = gmsh.model.occ.addBox(10, 0, 0, 10, 10, 10)
+    gmsh.model.occ.fragment([(3, a)], [(3, b)])
+    gmsh.model.occ.synchronize()
+    sm0["left"] = [(3, a)]
+    sm0["right"] = [(3, b)]
+    sm0["top"] =
+        [(2, t) for (_, t) in gmsh.model.getEntitiesInBoundingBox(-1, -1, 9, 21, 11, 11, 2)]
+    xao = joinpath(tdir, "copies_part.xao")
+    DeviceLayout.save(xao, sm0)
+    gmsh.model.remove()
+
+    vol(dts) = sum(gmsh.model.occ.getMass(d, t) for (d, t) in dts)
+    com(dts) = gmsh.model.occ.getCenterOfMass(dts[1]...)
+    faces(dts) = Set(abs(t) for (_, t) in gmsh.model.getBoundary(dts, false, false, false))
+    # Rotated placements, as most real ones are.
+    trs = [
+        ScaledIsometry(Point(100μm, 0μm), 0°, false, 1.0),
+        ScaledIsometry(Point(0μm, 100μm), 90°, false, 1.0),
+        ScaledIsometry(Point(-100μm, -50μm), 33°, false, 1.0)
+    ]
+
+    @testset "copies match separate imports" begin
+        sm = SolidModel("copies_brep"; overwrite=true)
+        placed = import_solid!(sm, brep, trs; z=[0μm, 5μm, 10μm], scale=2.0)
+        @test length(placed) == 3
+        @test all(dts -> unique(first.(dts)) == Int32[3], placed)
+        # Every copy is in the default group, scaled once (read-time scaling for BREP).
+        @test length(dimtags(sm["imported", 3])) == 3
+        ref = SolidModel("copies_ref"; overwrite=true)
+        for (i, tr) in enumerate(trs)
+            gmsh.model.set_current("copies_ref")
+            one = import_solid!(ref, brep; transform=tr, z=5μm * (i - 1), scale=2.0)
+            c_ref, v_ref = com(one), vol(one)
+            gmsh.model.set_current("copies_brep")
+            @test vol(placed[i]) ≈ v_ref atol = 1e-6
+            @test vol(placed[i]) ≈ 8000.0 atol = 1e-6
+            @test all(isapprox.(com(placed[i]), c_ref; atol=1e-6))
+        end
+    end
+
+    @testset "per-copy and shared group names" begin
+        sm = SolidModel("copies_names"; overwrite=true)
+        import_solid!(sm, brep, trs; groupname=["c1", "c2", "c1"])
+        @test length(dimtags(sm["c1", 3])) == 2
+        @test length(dimtags(sm["c2", 3])) == 1
+        @test !hasgroup(sm, "imported", 3)
+    end
+
+    @testset ".xao groups follow each copy" begin
+        sm = SolidModel("copies_xao"; overwrite=true)
+        gmsh.model.set_current("copies_xao")
+        c = gmsh.model.occ.addBox(500, 500, 500, 1, 1, 1)
+        gmsh.model.occ.synchronize()
+        sm["existing"] = [(3, c)]
+        maps = [n -> "p$(i)_$n" for i in eachindex(trs)]
+        placed = import_solid!(sm, xao, trs; z=20μm, groupname=nothing, group_map=maps)
+        @test length(dimtags(sm["existing", 3])) == 1
+        @test !hasgroup(sm, "imported", 3)
+        for (i, tr) in enumerate(trs)
+            left, right = dimtags(sm["p$(i)_left", 3]), dimtags(sm["p$(i)_right", 3])
+            top = dimtags(sm["p$(i)_top", 2])
+            # Each copy's groups hold its own entities, placed like a single import.
+            @test Set(vcat(left, right)) == Set(placed[i])
+            @test vol(left) ≈ 1000.0 atol = 1e-6
+            expected = tr(Point(5μm, 5μm))
+            @test com(left)[1] ≈ ustrip(μm, getx(expected)) atol = 1e-6
+            @test com(left)[2] ≈ ustrip(μm, gety(expected)) atol = 1e-6
+            @test com(left)[3] ≈ 25.0 atol = 1e-6
+            # The shared face is still shared, and the face group lies on this copy's top.
+            @test length(intersect(faces(left), faces(right))) == 1
+            @test length(top) == 2
+            @test Set(t for (_, t) in top) ⊆ union(faces(left), faces(right))
+            for (_, t) in top
+                @test gmsh.model.occ.getCenterOfMass(2, t)[3] ≈ 30.0 atol = 1e-6
+            end
+        end
+
+        # One group_map for every copy collects each group from all copies.
+        sd = SolidModel("copies_xao_shared"; overwrite=true)
+        import_solid!(sd, xao, trs)
+        @test length(dimtags(sd["left", 3])) == 3
+        @test length(dimtags(sd["top", 2])) == 6
+        @test length(dimtags(sd["imported", 3])) == 6
+    end
+
+    @testset "argument checks" begin
+        sm = SolidModel("copies_err"; overwrite=true)
+        @test_throws ArgumentError import_solid!(sm, brep, ScaledIsometry[])
+        @test_throws ArgumentError import_solid!(sm, brep, trs; z=[0μm, 1μm])
+        @test_throws ArgumentError import_solid!(sm, brep, trs; groupname=["a"])
+    end
+
+    # Centers of mass of each group's entities, sorted, for comparing a copy with a single
+    # import of the same placement.
+    function group_signature(sm, prefix, names)
+        gmsh.model.set_current(SolidModels.name(sm))
+        return Dict(
+            (g, d) => sort([
+                round.(gmsh.model.occ.getCenterOfMass(dt...); digits=6) for
+                dt in dimtags(sm[prefix * g, d])
+            ]) for g in names for d = 0:3 if hasgroup(sm, prefix * g, d)
+        )
+    end
+
+    @testset "reflected and magnified .xao copies match single imports" begin
+        odd = [
+            ScaledIsometry(Point(100μm, 0μm), 30°, true, 1.0),
+            ScaledIsometry(Point(0μm, 50μm), 90°, false, 2.0),
+            ScaledIsometry(Point(-7μm, 3μm), 0°, true, 1.0)
+        ]
+        sm = SolidModel("copies_odd"; overwrite=true)
+        import_solid!(
+            sm,
+            xao,
+            odd;
+            scale=1.5,
+            z=[1μm, 2μm, 3μm],
+            groupname=["c$i" for i = 1:3],
+            group_map=[n -> "c$(i)_$n" for i = 1:3]
+        )
+        for i = 1:3
+            ref = SolidModel("copies_odd_ref$i"; overwrite=true)
+            import_solid!(
+                ref,
+                xao;
+                transform=odd[i],
+                scale=1.5,
+                z=i * 1μm,
+                group_map=n -> "c$(i)_$n"
+            )
+            names = ("left", "right", "top")
+            @test group_signature(sm, "c$(i)_", names) ==
+                  group_signature(ref, "c$(i)_", names)
+        end
+    end
+
+    @testset "free-standing group entities are copied" begin
+        # A cube plus a separate sheet that is on no solid's boundary, each with a group.
+        src = SolidModel("copies_sheet_author"; overwrite=true)
+        gmsh.model.set_current("copies_sheet_author")
+        cube = gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
+        sheet = gmsh.model.occ.addRectangle(20, 0, 0, 4, 4)
+        gmsh.model.occ.synchronize()
+        src["body"] = [(3, cube)]
+        src["port"] = [(2, sheet)]
+        sheetfile = joinpath(tdir, "copies_sheet.xao")
+        DeviceLayout.save(sheetfile, src)
+        gmsh.model.remove()
+
+        sm = SolidModel("copies_sheet"; overwrite=true)
+        placed = import_solid!(
+            sm,
+            sheetfile,
+            trs;
+            groupname=nothing,
+            group_map=[n -> "p$(i)_$n" for i in eachindex(trs)]
+        )
+        @test all(dts -> unique(first.(dts)) == Int32[3], placed)
+        for (i, tr) in enumerate(trs)
+            port = dimtags(sm["p$(i)_port", 2])
+            @test length(port) == 1
+            @test gmsh.model.occ.getMass(only(port)...) ≈ 16.0 atol = 1e-6
+            expected = tr(Point(22μm, 2μm))
+            c = gmsh.model.occ.getCenterOfMass(only(port)...)
+            @test c[1] ≈ ustrip(μm, getx(expected)) atol = 1e-6
+            @test c[2] ≈ ustrip(μm, gety(expected)) atol = 1e-6
+        end
+        # Each copy's sheet is its own entity.
+        @test allunique(only(dimtags(sm["p$(i)_port", 2])) for i in eachindex(trs))
+    end
+
+    @testset "a sheet attached to solids is read once per copy" begin
+        # Two pads with a sheet in the gap whose side edges are the pads' bottom edges, as
+        # for a lumped port. Copying would give each copy's sheet its own edges.
+        src = SolidModel("copies_port_author"; overwrite=true)
+        gmsh.model.set_current("copies_port_author")
+        pa = gmsh.model.occ.addBox(0, 0, 0, 10, 10, 1)
+        pb = gmsh.model.occ.addBox(12, 0, 0, 10, 10, 1)
+        gap = gmsh.model.occ.addRectangle(10, 0, 0, 2, 10)
+        gmsh.model.occ.fragment([(3, pa), (3, pb)], [(2, gap)])
+        gmsh.model.occ.synchronize()
+        src["pads"] = gmsh.model.getEntities(3)
+        # The gap is the only face entirely within this box.
+        src["port"] = gmsh.model.getEntitiesInBoundingBox(9, -1, -1, 13, 11, 1e-3, 2)
+        @test length(dimtags(src["port", 2])) == 1
+        portfile = joinpath(tdir, "copies_port.xao")
+        DeviceLayout.save(portfile, src)
+        gmsh.model.remove()
+
+        # The curves on the boundary of `dts`.
+        curves(dts) = Set(abs(t) for (d, t) in SolidModels._boundary_closure(dts) if d == 1)
+        names = ("pads", "port")
+        sm = SolidModel("copies_port"; overwrite=true)
+        placed = import_solid!(
+            sm,
+            portfile,
+            trs;
+            groupname=["q$i" for i in eachindex(trs)],
+            group_map=[n -> "q$(i)_$n" for i in eachindex(trs)]
+        )
+        for (i, tr) in enumerate(trs)
+            ref = SolidModel("copies_port_ref$i"; overwrite=true)
+            import_solid!(ref, portfile; transform=tr, group_map=n -> "q$(i)_$n")
+            @test group_signature(sm, "q$(i)_", names) ==
+                  group_signature(ref, "q$(i)_", names)
+            gmsh.model.set_current("copies_port")
+            @test Set(placed[i]) == Set(dimtags(sm["q$i", 3]))
+            # The sheet still shares its edges with this copy's pads.
+            port, pads = dimtags(sm["q$(i)_port", 2]), dimtags(sm["q$(i)_pads", 3])
+            @test length(intersect(curves(port), curves(pads))) == 2
+        end
+
+        # Without group tracking the copies are still read whole, so the model holds as many
+        # curves as three separate imports.
+        one = SolidModel("copies_port_one"; overwrite=true)
+        import_solid!(one, portfile)
+        ncurves = length(gmsh.model.getEntities(1))
+        sn = SolidModel("copies_port_nomap"; overwrite=true)
+        import_solid!(sn, portfile, trs; group_map=nothing)
+        @test length(gmsh.model.getEntities(1)) == 3 * ncurves
+        @test length(dimtags(sn["imported", 3])) == 6
+
+        # With the default shared names, each group collects its entities from every copy
+        # rather than being replaced by the last one.
+        sd = SolidModel("copies_port_shared"; overwrite=true)
+        @test_logs (:debug, r"read once per copy") min_level = Logging.Debug match_mode =
+            :any import_solid!(sd, portfile, trs)
+        @test length(dimtags(sd["imported", 3])) == 6
+        @test length(dimtags(sd["pads", 3])) == 6
+        @test length(dimtags(sd["port", 2])) == 3
+        @test sum(gmsh.model.occ.getMass(dt...) for dt in dimtags(sd["port", 2])) ≈ 60.0 atol =
+            1e-6
+    end
+
+    @testset "concentric faces keep their groups" begin
+        # A tube: its inner and outer walls share a center of mass but not an area.
+        src = SolidModel("copies_tube_author"; overwrite=true)
+        gmsh.model.set_current("copies_tube_author")
+        outer = gmsh.model.occ.addCylinder(0, 0, 0, 0, 0, 10, 5)
+        inner = gmsh.model.occ.addCylinder(0, 0, 0, 0, 0, 10, 2)
+        tube, _ = gmsh.model.occ.cut([(3, outer)], [(3, inner)])
+        gmsh.model.occ.synchronize()
+        walls = [
+            (2, abs(t)) for
+            (_, t) in gmsh.model.getBoundary(tube, false, false, false) if
+            gmsh.model.getType(2, abs(t)) == "Cylinder"
+        ]
+        area(dt) = gmsh.model.occ.getMass(dt...)
+        src["inner"] = [argmin(area, walls)]
+        src["outer"] = [argmax(area, walls)]
+        tubefile = joinpath(tdir, "copies_tube.xao")
+        DeviceLayout.save(tubefile, src)
+        gmsh.model.remove()
+
+        sm = SolidModel("copies_tube"; overwrite=true)
+        import_solid!(
+            sm,
+            tubefile,
+            trs;
+            group_map=[n -> "t$(i)_$n" for i in eachindex(trs)]
+        )
+        for i in eachindex(trs)
+            @test area(only(dimtags(sm["t$(i)_inner", 2]))) ≈ 2π * 2 * 10 atol = 1e-6
+            @test area(only(dimtags(sm["t$(i)_outer", 2]))) ≈ 2π * 5 * 10 atol = 1e-6
+        end
+    end
+
+    @testset "Symbol group names" begin
+        sm = SolidModel("copies_symbol"; overwrite=true)
+        import_solid!(sm, brep; groupname=:part)
+        import_solid!(sm, brep, trs; groupname=[:a, :b, :a])
+        @test hasgroup(sm, "part", 3)
+        @test length(dimtags(sm["a", 3])) == 2
+    end
+
+    @testset "an error restores the model's groups" begin
+        sm = SolidModel("copies_restore"; overwrite=true)
+        gmsh.model.set_current("copies_restore")
+        c = gmsh.model.occ.addBox(500, 500, 500, 1, 1, 1)
+        gmsh.model.occ.synchronize()
+        sm["existing"] = [(3, c)]
+        # A unitless z fails while placing a copy, after the merge has stripped all groups.
+        @test_throws Exception import_solid!(sm, xao, trs; z=Any[0μm, 1.0, 0μm])
+        pg = sm["existing", 3]
+        @test gmsh.model.getEntitiesForPhysicalGroup(3, pg.grouptag) == [c]
+    end
+
+    @testset "a copy that doesn't coincide with its prototype is rejected" begin
+        # The pairing check guards against mislabeled groups; moving the copy before matching
+        # makes every center differ, which no real import reaches.
+        sm = SolidModel("copies_mismatch"; overwrite=true)
+        gmsh.model.set_current("copies_mismatch")
+        box = [(Int32(3), gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10))]
+        cp = gmsh.model.occ.copy(box)
+        gmsh.model.occ.translate(cp, 1, 0, 0)
+        @test_throws ErrorException SolidModels._copy_closures(sm, box, [cp])
+    end
+end
+
 @testitem "SolidModel CAD import conformal fusion" setup = [CommonTestSetup, QuietGmshSetup] begin
     using DeviceLayout.SolidModels
     import DeviceLayout.SolidModels: import_solid!, dimtags, gmsh, _fragment_and_map!
@@ -691,6 +1006,9 @@ end
     render!(sm, sch, SolidModelTarget(tech))
 
     @test allunique(ids)
+    # The three instances share a file, so one operation imports them all.
+    ops = SchematicDrivenLayout.component_solidmodel_ops(sch, SolidModelTarget(tech))
+    @test length(ops.postrender) == 1
     for id in ids
         # One solid named after the node, and the file's groups prefixed with the node id.
         @test hasgroup(sm, id, 3)
@@ -732,6 +1050,35 @@ end
     end
     cvols = [only(dimtags(smc[id, 3])) for id in cids]
     @test allunique(cvols)
+
+    # Instances at different scales need their own read; `:near` fragments every instance
+    # of a batch in its one `fragment_near!`.
+    reset_uniquename!()
+    gs = SchematicGraph("smcn_scales")
+    s1 = add_node!(gs, Spacer(; p1=Point(100μm, 0μm)))
+    scaled = SolidModelComponent(xao, SemanticMeta(:conn); name="conn2", scale=2.0)
+    sids = [
+        fuse!(gs, s1 => :p0_west, conn => :east).id,
+        fuse!(gs, s1 => :p1_east, scaled => :west).id
+    ]
+    schs = plan(gs; log_dir=nothing)
+    check!(schs)
+    @test length(
+        SchematicDrivenLayout.component_solidmodel_ops(
+            schs,
+            SolidModelTarget(tech)
+        ).postrender
+    ) == 2
+    near = SchematicDrivenLayout.component_solidmodel_ops(
+        sch,
+        SolidModelTarget(tech);
+        fragment=:near
+    )
+    @test length(near.post_fragment) == 2      # one batched import, one fragment_near!
+    @test last(near.post_fragment)[3] == (ids,)
+    smnear = SolidModel("smcn_near"; overwrite=true)
+    render!(smnear, sch, SolidModelTarget(tech); component_fragment=:near)
+    @test all(id -> hasgroup(smnear, id, 3) && hasgroup(smnear, "$(id)_pin", 2), ids)
 end
 
 @testitem "SolidModelComponent placement: rotation and layer z" setup =
