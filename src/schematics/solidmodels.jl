@@ -434,6 +434,15 @@ The `strict=:warn` keyword option causes `render!` to throw an error if any warn
 This is disabled by default. Using `strict=:warn` is suggested for use in automated
 pipelines, where warnings may require human review.
 
+After rendering, `render!` warns for each pair of retained physical groups of dimension 1, 2
+or 3 that overlap, meaning they share an entity of that dimension. Not checked:
+
+  - A render without a retained list, which keeps every group.
+  - Overlaps with geometry that `post_fragment_ops` add without fragmenting it against the
+    model.
+  - Renders with `skip_postrender=true`, and models using the `GmshNative` kernel, which
+    does not fragment.
+
 Additional keyword arguments may be used for certain entity types for controlling
 how geometry entities are converted to primitives and added to `sm`.
 
@@ -464,6 +473,13 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
         "cannot render an unchecked Schematic. Run check!(sch::Schematic), or override by setting sch.checked[] = true (not recommended!)"
     )
     DeviceLayout.reset_render_kwarg_warnings!()
+    # The target's rendering options carry their own `retained_physical_groups`, which win
+    # over the field, so the overlap check reads the list from the options the render gets.
+    options = merge(
+        (; retained_physical_groups=target.retained_physical_groups),
+        _without_schematic_options(kwargs),
+        _without_schematic_options(target.rendering_options)
+    )
     reopen_logfile(sch, :render_solidmodel)
     try
         with_logger(sch.logger) do
@@ -505,10 +521,21 @@ function render!(sm::SolidModel, sch::Schematic, target::Target; strict=:error, 
                     postrender_ops=postrender_ops,
                     post_fragment_ops=post_fragment_ops,
                     map_meta=_map_meta_fn(target),
-                    retained_physical_groups=target.retained_physical_groups,
-                    _without_schematic_options(kwargs)...,
-                    _without_schematic_options(target.rendering_options)...
+                    options...
                 )
+            end
+            # Without a retained list, every intermediate group is kept, and groups such as
+            # the operands of a Boolean operation overlap by construction. Without
+            # postrendering, nothing is fragmented, so no groups share entities.
+            if !isempty(options.retained_physical_groups) &&
+               !get(options, :skip_postrender, false)
+                for (name1, name2, dim) in SolidModels.shared_entity_overlaps(sm)
+                    @warn "Retained physical groups \"$name1\" and \"$name2\" of " *
+                          "dimension $dim overlap, so the mesh elements they share will " *
+                          "belong to both. If one should contain the other, retain only " *
+                          "one of them; otherwise subtract one from the other in the " *
+                          "target's postrender operations."
+                end
             end
         end
     finally

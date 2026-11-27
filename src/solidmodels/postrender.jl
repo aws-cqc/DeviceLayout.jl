@@ -1556,6 +1556,25 @@ function check_overlap(sm::SolidModel)
     return overlapping_groups
 end
 
+# Pairs of groups of the same dimension that share an entity of that dimension, as
+# `(group1, group2, dimension)`. After fragmentation, geometry two groups have in common is
+# an entity of both, so this finds overlaps without Boolean operations. It misses overlaps
+# between entities that were never fragmented against each other.
+function shared_entity_overlaps(sm::SolidModel)
+    overlaps = Tuple{String, String, Int}[]
+    for dim = 1:3
+        groups = sort!(
+            [(name, Set(entitytags(pg))) for (name, pg) in dimgroupdict(sm, dim)],
+            by=first
+        )
+        for i in eachindex(groups), j = (i + 1):lastindex(groups)
+            (name1, tags1), (name2, tags2) = groups[i], groups[j]
+            isdisjoint(tags1, tags2) || push!(overlaps, (name1, name2, dim))
+        end
+    end
+    return overlaps
+end
+
 """
     staple_bridge_postrendering(; levels=[], base, bridge, bridge_height=1μm, output="bridge_metal")
 
