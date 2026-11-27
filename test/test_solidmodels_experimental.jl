@@ -1948,6 +1948,7 @@ end
     import Unitful: °, ustrip
 
     output_dir = abspath(joinpath(@__DIR__, "build"))
+    mkpath(output_dir) # Gitignored, so a fresh checkout has no such directory
 
     @compdef struct MockTransmon <: Component
         name::String = "transmon"
