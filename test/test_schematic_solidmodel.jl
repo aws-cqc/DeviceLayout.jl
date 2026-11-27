@@ -554,7 +554,17 @@ end
         sm = SolidModel("test", overwrite=true)
         # SolidModels.set_gmsh_option("")
         render!(sm, floorplan, target)
-        @test all(log -> log.level < Logging.Warn, logger.logs)
+        warnings = filter(log -> log.level >= Logging.Warn, logger.logs)
+        if bridges
+            # `conductor` contains `bridge_metal`, and both are retained
+            @test length(warnings) == 1
+            @test contains(
+                only(warnings).message,
+                "\"bridge_metal\" and \"conductor\" of dimension 2 overlap"
+            )
+        else
+            @test isempty(warnings)
+        end
         cp_rendered = SolidModels.mesh_control_points()
         @test !isempty(cp_rendered)
         # Solid-model projections can preserve circular path turns that the default
@@ -1503,7 +1513,8 @@ end
         ### 3. Build schematic
         g = SchematicGraph("issue_172_repro")
         add_node!(g, pth)
-        floorplan = plan(g; log_dir=nothing)
+        logger = TestLogger()
+        floorplan = with_logger(() -> plan(g; log_dir=nothing), logger)
 
         chip = centered(Rectangle(6mm, 6mm))
         render!(floorplan.coordinate_system, chip, SemanticMeta(:chip_outline))
@@ -1582,13 +1593,91 @@ end
         ### 5. Render and mesh
         sm = SolidModel("issue_172_repro", overwrite=true)
         SolidModels.set_gmsh_option("General.Verbosity", 0)
-        @test_nowarn render!(sm, floorplan, target; strict=:no)
+        render!(sm, floorplan, target; strict=:no)
+        # The recipe leaves `port1` on `metal`
+        warnings = filter(log -> log.level >= Logging.Warn, logger.logs)
+        @test contains(
+            only(warnings).message,
+            "\"metal\" and \"port1\" of dimension 2 overlap"
+        )
         try
             @test_nowarn SolidModels.gmsh.model.mesh.generate(3)  # PLC Error with DL 1.9
         finally
             SolidModels.gmsh.finalize()
         end
     end
+end
+
+@testitem "Schematic + SolidModel + Overlapping groups" setup =
+    [CommonTestSetup, QuietGmshSetup] begin
+    using .SchematicDrivenLayout
+
+    # `b` is `a` shifted by `shift`; `c`, not retained, overlaps both
+    function overlap_schematic(logger, shift)
+        g = SchematicGraph("overlap")
+        sch = with_logger(() -> plan(g; log_dir=nothing), logger)
+        r = Rectangle(2μm, 2μm)
+        render!(sch.coordinate_system, r, SemanticMeta(:a))
+        render!(sch.coordinate_system, r + Point(shift, 0μm), SemanticMeta(:b))
+        render!(sch.coordinate_system, r + Point(0μm, 1μm), SemanticMeta(:c))
+        check!(sch)
+        return sch
+    end
+    tech = ProcessTechnology(
+        (; a=GDSMeta(1), b=GDSMeta(2), c=GDSMeta(3)),
+        (; height=(;), thickness=(; a=1μm, b=1μm))
+    )
+    function render_warnings(target, shift)
+        logger = TestLogger()
+        render!(
+            SolidModel("overlap"; overwrite=true),
+            overlap_schematic(logger, shift),
+            target
+        )
+        return [log.message for log in logger.logs if log.level >= Logging.Warn]
+    end
+
+    target = SolidModelTarget(tech; retained_physical_groups=[("a", 2), ("b", 2)])
+    warnings = render_warnings(target, 1μm)
+    @test length(warnings) == 1
+    @test contains(only(warnings), "\"a\" and \"b\" of dimension 2 overlap")
+    # Sharing only an edge is not an overlap
+    @test isempty(render_warnings(target, 2μm))
+    # Subtracting one group from the other, as the warning advises, clears it
+    fixed = SolidModelTarget(
+        tech;
+        postrender_ops=[("a", SolidModels.difference_geom!, ("a", "b", 2, 2))],
+        retained_physical_groups=[("a", 2), ("b", 2)]
+    )
+    @test isempty(render_warnings(fixed, 1μm))
+    # Without a retained list, nothing is checked
+    @test isempty(render_warnings(SolidModelTarget(tech), 1μm))
+    # The render filters by the list in the rendering options, and so does the check
+    from_options = SolidModelTarget(tech)
+    append!(from_options.rendering_options.retained_physical_groups, [("a", 2), ("b", 2)])
+    warnings = render_warnings(from_options, 1μm)
+    @test length(warnings) == 1
+    @test contains(only(warnings), "\"a\" and \"b\" of dimension 2 overlap")
+    # A list appended to the field of a target built without one doesn't reach the render,
+    # which keeps every group, so nothing is checked
+    from_field = SolidModelTarget(tech)
+    append!(from_field.retained_physical_groups, [("a", 2), ("b", 2)])
+    @test isempty(render_warnings(from_field, 2μm))
+    @test_throws "encountered warnings" render!(
+        SolidModel("strict"; overwrite=true),
+        overlap_schematic(TestLogger(), 1μm),
+        target;
+        strict=:warn
+    )
+
+    target3 = SolidModelTarget(
+        tech;
+        retained_physical_groups=[("a_extrusion", 3), ("b_extrusion", 3)]
+    )
+    warnings = render_warnings(target3, 1μm)
+    @test length(warnings) == 1
+    @test contains(only(warnings), "\"a_extrusion\" and \"b_extrusion\" of dimension 3")
+    @test isempty(render_warnings(target3, 2μm))
 end
 
 @testitem "Schematic + SolidModel + levelwise extrusion signs" setup =

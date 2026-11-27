@@ -37,6 +37,12 @@ The format of this changelog is based on
     it as expected. (#247)
       + The warning is logged at each conversion, so `bounds` and `render!` on the same path
         each warn, and rendering a schematic with `strict=:warn` throws.
+  - `render!(sm::SolidModel, sch::Schematic, target)` warns for each pair of the target's
+  `retained_physical_groups` of dimension 1, 2 or 3 that overlap, such as a port that was
+  not subtracted from the metal around it. With `strict=:warn`, this is an error. (#10)
+  - A retained group that another retained group contains, such as bridge metal that is
+    also part of a retained conductor group, warns too, so `strict=:warn` renders with
+    such a target now fail. Retain only one of the two.
 
 ### Fixed
 
