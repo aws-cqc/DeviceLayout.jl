@@ -420,17 +420,29 @@ end
     StyledHook{T, H<:Hook{T}, S<:Paths.Style} <: Hook{T}
         h::H
         style::S
+        metadata::DeviceLayout.Meta
+    StyledHook(h::Hook, style, metadata=UNDEF_META)
 
-A `Hook` augmented with a path-style object. Used by graph-level `terminate!`
-(and other style-aware operations) to read the cross-section that terminates at
-the hook without consulting the owning component's internals. Wraps any
-underlying `Hook` so `style` composes orthogonally with handedness.
+A `Hook` augmented with the path cross section at the hook: a path-style object and the
+metadata of the path that would be drawn with it. (Overlays in an `OverlayStyle` carry their own
+metadata.) Used by graph-level `terminate!`, [`SchematicDrivenLayout.hook_styles_match`](@ref DeviceLayout.SchematicDrivenLayout.hook_styles_match),
+and other style-aware operations to read the cross section that terminates at the hook without
+consulting the owning component's internals. Wraps any underlying `Hook` so `style` composes
+orthogonally with handedness.
+
+The `metadata` should be supplied: the default `UNDEF_META` means the hook's layer is unknown,
+so `hook_styles_match` reports it as a violation. A `style` of `nothing` is stored as
+`Paths.NoRenderContinuous()`.
 """
 struct StyledHook{T, H <: Hook{T}, S <: Paths.Style} <: Hook{T}
     h::H
     style::S
+    metadata::Meta
 end
-StyledHook(h::Hook, ::Nothing) = StyledHook(h, Paths.NoRenderContinuous())
+StyledHook{T, H, S}(h, sty) where {T, H, S} = StyledHook{T, H, S}(h, sty, UNDEF_META)
+StyledHook(h::Hook, sty::Paths.Style) = StyledHook(h, sty, UNDEF_META)
+StyledHook(h::Hook, ::Nothing, m::Meta=UNDEF_META) =
+    StyledHook(h, Paths.NoRenderContinuous(), m)
 
 show(io::IO, h::StyledHook) = print(io, getfield(h, :h), " styled as ", getfield(h, :style))
 
@@ -441,20 +453,21 @@ DeviceLayout.transformation(h1::StyledHook, h2::Hook) = transformation(getfield(
 DeviceLayout.transformation(h1::Hook, h2::StyledHook) = transformation(h1, getfield(h2, :h))
 
 function Base.getproperty(h::StyledHook, s::Symbol)
-    (s === :h || s === :style) && return getfield(h, s)
+    s in (:h, :style, :metadata) && return getfield(h, s)
     return getproperty(getfield(h, :h), s)
 end
 
 function Base.propertynames(h::StyledHook)
-    return (:h, :style, propertynames(getfield(h, :h))...)
+    return (:h, :style, :metadata, propertynames(getfield(h, :h))...)
 end
 
 DeviceLayout.in_direction(h::StyledHook) = in_direction(getfield(h, :h))
 
 DeviceLayout.transform(x::StyledHook, f::Transformation) =
-    StyledHook(transform(getfield(x, :h), f), getfield(x, :style))
+    StyledHook(transform(getfield(x, :h), f), getfield(x, :style), getfield(x, :metadata))
 
 DeviceLayout.hook_style(h::StyledHook) = getfield(h, :style)
+DeviceLayout.hook_metadata(h::StyledHook) = h.metadata
 
 """
     mutable struct Path{T<:Coordinate} <: AbstractComponent{T}
@@ -546,25 +559,51 @@ A `Path` starting at h, pointing along its outward direction.
 path_out(h::Hook) = Path(h.p, α0=out_direction(h))
 
 """
-    p0_hook(pa::Path, right_handed=true) = StyledHook(HandedPointHook(p0(pa), α0(pa), right_handed), style)
+    p0_hook(pa::Path, right_handed=true)
 
-A `StyledHook` wrapping a `HandedPointHook` looking into the start of path `pa` with a `style`.
+A `StyledHook` wrapping a `HandedPointHook` looking into the start of path `pa`.
 
-The style is `nothing` for an empty path and otherwise `nextstyle` of the reversed initial node.
+The hook's style is the cross section where `pa` starts: the style of the first non-virtual
+continuous segment, evaluated at its start, without attachments. (The capped end of a
+termination gives `NoRenderContinuous`, as does a path with no such segment.) The hook's
+metadata is `pa.metadata`.
 """
 p0_hook(pa::Path, right_handed=true) = StyledHook(
     HandedPointHook(p0(pa), α0(pa), right_handed),
-    isempty(pa.nodes) ? nothing :
-    nextstyle(without_attachments(reverse(pa[1].sty, pathlength(pa[1].seg))))
+    _end_cross_section(pa, true),
+    pa.metadata
 )
 
 """
-    p1_hook(pa::Path, right_handed=true) = StyledHook(HandedPointHook(p1(pa), α1(pa) + π, right_handed), nextstyle(pa))
+    p1_hook(pa::Path, right_handed=true)
 
-A `StyledHook` wrapping a `HandedPointHook` looking into the end of path `pa` with `nextstyle(pa)`.
+A `StyledHook` wrapping a `HandedPointHook` looking into the end of path `pa`.
+
+The hook's style is the cross section where `pa` ends: the style of the last non-virtual
+continuous segment, evaluated at its end, without attachments. (The capped end of a
+termination gives `NoRenderContinuous`, as does a path with no such segment.) The hook's
+metadata is `pa.metadata`.
 """
-p1_hook(pa::Path, right_handed=true) =
-    StyledHook(HandedPointHook(p1(pa), α1(pa) + π, right_handed), nextstyle(pa))
+p1_hook(pa::Path, right_handed=true) = StyledHook(
+    HandedPointHook(p1(pa), α1(pa) + π, right_handed),
+    _end_cross_section(pa, false),
+    pa.metadata
+)
+
+# Cross section at the start (`initial`) or end of `pa`, or `nothing` if it has none.
+# Virtual segments (from corners or `tap!`, for example) aren't drawn, so they're skipped.
+function _end_cross_section(pa::Path, initial::Bool)
+    isdrawn(n) = style(n) isa ContinuousStyle && !isvirtual(style(n))
+    idx = initial ? findfirst(isdrawn, nodes(pa)) : findlast(isdrawn, nodes(pa))
+    isnothing(idx) && return nothing
+    n = nodes(pa)[idx]
+    t = initial ? zero(pathlength(n)) : pathlength(n)
+    # `nextstyle` turns a termination into `NoRenderContinuous`
+    return nextstyle(cross_section_at(style(n), t, initial))
+end
+# Constant style drawn just after (`initial`) or just before pathlength `t` along `sty`, without
+# attachments
+cross_section_at(sty::Style, t, initial) = cross_section_style(sty, t)
 
 """
     hooks(pa::Path)
@@ -574,10 +613,10 @@ Hooks at the start and endpoints of `pa`, along with left-handed variants.
 Hooks look into the path: `:p0` hooks have inward direction `α0(pa)`, and `:p1` hooks have inward direction
 opposite `α1(pa)`.
 
-  - `:p0`: A right-handed `StyledHook` looking into the start of path `pa` with `nextstyle` of the reversed path.
-  - `:p1`: A right-handed `StyledHook` looking into the end of path `pa` with `nextstyle(pa)`.
-  - `:p0_lh`: A left-handed `StyledHook` looking into the start of path `pa` with `nextstyle` of the reversed path.
-  - `:p1_lh`: A left-handed `StyledHook` looking into the end of path `pa` with `nextstyle(pa)`.
+  - `:p0`: A right-handed `StyledHook` looking into the start of path `pa` (see [`p0_hook`](@ref)).
+  - `:p1`: A right-handed `StyledHook` looking into the end of path `pa` (see [`p1_hook`](@ref)).
+  - `:p0_lh`: A left-handed `StyledHook` looking into the start of path `pa`.
+  - `:p1_lh`: A left-handed `StyledHook` looking into the end of path `pa`.
 """
 DeviceLayout.hooks(pa::Path) =
     (p0=p0_hook(pa), p1=p1_hook(pa), p0_lh=p0_hook(pa, false), p1_lh=p1_hook(pa, false))
@@ -874,10 +913,10 @@ function DeviceLayout.map_metadata!(path::Path, map_meta, visited::Set{Any}=Set{
     for s in structure.(refs(path))
         map_metadata!(s, map_meta, visited)
     end
-    # Overlay styles store their own metadata
-    overlay_inds = findall(x -> isa(style(x), Paths.OverlayStyle), path.nodes)
-    for i in overlay_inds
-        path[i].sty.overlay_metadata .= map_meta.(path[i].sty.overlay_metadata)
+    # Overlay styles store their own metadata. A node's style can be shared with other nodes,
+    # hooks, or component parameters, so give the node a new style instead of mapping in place.
+    for node in path.nodes
+        node.sty = map_overlay_metadata(style(node), map_meta)
     end
     return nothing
 end

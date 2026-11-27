@@ -25,6 +25,14 @@
 
     # DeviceLayout.in_direction respects the wrapper
     @test in_direction(sh) === in_direction(h)
+
+    # The documented three type parameters still construct a concrete hook
+    H, S = typeof(h), typeof(sty)
+    @test isconcretetype(StyledHook{coordinatetype(h), H, S})
+    @test StyledHook{coordinatetype(h), H, S}(h, sty) isa
+          StyledHook{coordinatetype(h), H, S}
+    @test hook_metadata(StyledHook{coordinatetype(h), H, S}(h, sty)) ==
+          DeviceLayout.UNDEF_META
 end
 
 @testitem "StyledHook transformation preserves style (translation only)" setup =
@@ -108,6 +116,112 @@ end
     @test hook_style(p1_hook(pa)) == Paths.NoRenderContinuous()
     terminate!(pa; initial=true)
     @test all(hook_style.(values(hooks(pa))) .== Ref(Paths.NoRenderContinuous()))
+
+    # Virtual segments are skipped
+    pa = Path()
+    straight!(pa, 20μm, Paths.SimpleNoRender(22μm; virtual=true))
+    straight!(pa, 100μm, sty)
+    straight!(pa, 20μm, Paths.SimpleNoRender(22μm; virtual=true))
+    @test all(hook_style.(values(hooks(pa))) .== Ref(sty))
+    pa = Path()
+    straight!(pa, 20μm, Paths.SimpleNoRender(22μm; virtual=true))
+    @test all(hook_style.(values(hooks(pa))) .== Ref(Paths.NoRenderContinuous()))
+
+    # Varying styles give the cross section at each end
+    hook_width(h) = Paths.width(hook_style(h), 0μm)
+    pa = Path()
+    straight!(pa, 100μm, Paths.Trace(x -> 10μm + x / 10))
+    @test hook_width(p0_hook(pa)) ≈ 10μm
+    @test hook_width(p1_hook(pa)) ≈ 20μm
+    pa = Path()
+    straight!(pa, 100μm, Paths.SimpleTrace(10μm))
+    straight!(pa, 100μm, Paths.TaperTrace(10μm, 20μm))
+    simplify!(pa)
+    @test hook_width(p0_hook(pa)) ≈ 10μm
+    @test hook_width(p1_hook(pa)) ≈ 20μm
+
+    # Periodic styles: a substyle boundary at an end belongs to the substyle being drawn
+    template = Path()
+    straight!(template, 0.8mm, Paths.SimpleTrace(10μm))
+    straight!(template, 0.8mm, Paths.SimpleTrace(20μm))
+    for (len, w1) in ((1mm, 20μm), (0.8mm, 10μm), (1.6mm, 20μm), (0.1mm * 16, 20μm))
+        pp = Path()
+        straight!(pp, len, Paths.PeriodicStyle(template))
+        @test hook_width(p0_hook(pp)) ≈ 10μm
+        @test hook_width(p1_hook(pp)) ≈ w1
+    end
+    # Continued from a previous segment
+    pa = Path()
+    straight!(pa, 0.5mm, Paths.PeriodicStyle(template))
+    straight!(pa, 0.3mm)
+    @test hook_width(p1_hook(pa)) ≈ 10μm
+    # Inside compound styles from `simplify!`, and under overlays
+    for (len1, len2) in ((0.4mm, 0.4mm), (0.5mm, 0.3mm))
+        ps = Path()
+        straight!(ps, len1, Paths.PeriodicStyle(template))
+        straight!(ps, len2)
+        simplify!(ps)
+        @test hook_width(p0_hook(ps)) ≈ 10μm
+        @test hook_width(p1_hook(ps)) ≈ 10μm
+    end
+    pa = Path()
+    straight!(pa, 0.8mm, Paths.PeriodicStyle(template))
+    overlay!(pa, Paths.SimpleTrace(5μm), GDSMeta(2))
+    @test Paths.width(hook_style(p1_hook(pa)).s, 0μm) ≈ 10μm
+    # Virtual substyles of a compound style are skipped
+    pa = Path()
+    straight!(pa, 20μm, Paths.SimpleNoRender(22μm; virtual=true))
+    straight!(pa, 100μm, Paths.Trace(10μm))
+    straight!(pa, 20μm, Paths.SimpleNoRender(22μm; virtual=true))
+    simplify!(pa)
+    @test all(hook_style.(values(hooks(pa))) .== Ref(Paths.Trace(10μm)))
+
+    # Tapers give their stored end values, also when they have zero length
+    pa = Path()
+    straight!(pa, 30μm, Paths.TaperCPW(10μm, 6μm, 2μm, 1μm))
+    @test hook_style(p0_hook(pa)) == Paths.CPW(10.0μm, 6.0μm)
+    @test hook_style(p1_hook(pa)) == Paths.CPW(2.0μm, 1.0μm)
+    for (taper, sty0, sty1) in (
+        (
+            Paths.TaperCPW(10μm, 6μm, 2μm, 1μm),
+            Paths.CPW(10.0μm, 6.0μm),
+            Paths.CPW(2.0μm, 1.0μm)
+        ),
+        (Paths.TaperTrace(10μm, 20μm), Paths.Trace(10.0μm), Paths.Trace(20.0μm))
+    )
+        pz = Path()
+        straight!(pz, 0μm, taper)
+        @test hook_style(p0_hook(pz)) == sty0
+        @test hook_style(p1_hook(pz)) == sty1
+    end
+
+    # A path that is only a termination has the terminated cross section where it connects
+    for xsty in (Paths.CPW(10μm, 6μm), Paths.Trace(10μm))
+        pt = Path()
+        straight!(pt, 2μm, xsty)
+        terminate!(pt; rounding=2μm)
+        @test length(pt) == 1
+        @test hook_style(p0_hook(pt)) == xsty
+        @test hook_style(p1_hook(pt)) == Paths.NoRenderContinuous()
+    end
+
+    # Substyles at a periodic boundary get pathlengths of the path's coordinate type
+    seen = []
+    template = Path(μm)
+    straight!(template, 800μm, Paths.Trace(x -> (push!(seen, typeof(x)); 10μm)))
+    straight!(template, 800μm, Paths.SimpleTrace(20μm))
+    pp = Path(μm)
+    straight!(pp, 800μm, Paths.PeriodicStyle(template))
+    empty!(seen)
+    @test hook_width(p1_hook(pp)) ≈ 10μm
+    @test unique(seen) == [typeof(pathlength(pp))]
+    # Also for an integer path
+    template = Path{Float64}()
+    straight!(template, 800.0, Paths.SimpleTrace(10.0))
+    straight!(template, 800.0, Paths.SimpleTrace(20.0))
+    pp = Path{Int}()
+    straight!(pp, 800, Paths.PeriodicStyle(template))
+    @test hook_style(p0_hook(pp)) == Paths.Trace(10.0)
 end
 
 # --- Graph-level terminate! -----------------------------------------------
@@ -183,6 +297,28 @@ end
     @test_throws ErrorException terminate!(g, nd, :west)
 end
 
+@testitem "terminate! metadata resolution" setup = [CommonTestSetup] begin
+    using DeviceLayout.Paths
+    using DeviceLayout.SchematicDrivenLayout
+
+    sty = Paths.CPW(10μm, 6μm)
+    pa = Path(0mm, 0mm; α0=0°, name="base_meta", metadata=GDSMeta(3))
+    straight!(pa, 100μm, sty)
+
+    g = SchematicGraph("g_meta")
+    nd = add_node!(g, pa)
+    # From the StyledHook
+    @test component(terminate!(g, nd => :p1)).metadata == GDSMeta(3)
+    # Explicit metadata wins
+    @test component(terminate!(g, nd => :p0; metadata=GDSMeta(4))).metadata == GDSMeta(4)
+    # Bare hook: explicit metadata, otherwise undefined
+    nd = add_node!(g, WeatherVane{typeof(1.0nm)}())
+    @test component(terminate!(g, nd => :west; style=sty, metadata=GDSMeta(5))).metadata ==
+          GDSMeta(5)
+    @test component(terminate!(g, nd => :east; style=sty)).metadata ==
+          DeviceLayout.UNDEF_META
+end
+
 @testitem "terminate!(g, node => :hook) Pair form works" setup = [CommonTestSetup] begin
     using DeviceLayout.Paths
     using DeviceLayout.SchematicDrivenLayout
@@ -206,7 +342,8 @@ end
     # Use the internal helper directly via fully-qualified access.
     tp = DeviceLayout.SchematicDrivenLayout._build_termination_path(
         h,
-        sty;
+        sty,
+        GDSMeta();
         rounding=3μm,
         margin=2μm,
         gap=5μm
@@ -261,9 +398,27 @@ end
         GDSMeta()
     )
     rc = component(rn)
-    @test hook_style(hooks(rc).p0) == Paths.Trace(10μm)
-    @test hook_style(hooks(rc).p1) == Paths.Trace(1μm)
-    @test in_direction(hooks(rc).p1) % 360° == 180°
+    rc_hooks = @test_logs (:warn, r"has not been planned") hooks(rc)
+    @test hook_style(rc_hooks.p0) == Paths.Trace(10μm)
+    @test hook_style(rc_hooks.p1) == Paths.Trace(1μm)
+    @test in_direction(rc_hooks.p1) % 360° == 180°
+    # Once planned, hooks are at the planned endpoints
+    sch = plan(g; log_dir=nothing)
+    rc_hooks = @test_logs hooks(rc)
+    @test rc_hooks.p1.p ≈ hooks(sch, n2).east.p
+    # Once built, hook styles are the path's end cross sections
+    pa = SchematicDrivenLayout.path(rc)
+    @test hook_style(hooks(rc).p1) == hook_style(p1_hook(pa))
+    @test hooks(rc).p1 isa StyledHook{<:Any, <:PointHook}
+    # A route given with its endpoints needs no planning
+    explicit = RouteComponent(
+        "explicit",
+        Paths.Route(Paths.StraightAnd90(), Point(0μm, 0μm), Point(1mm, 0μm), 0°, 0°),
+        false,
+        Paths.Trace(10μm),
+        GDSMeta()
+    )
+    @test (@test_logs hooks(explicit)).p1.p == Point(1mm, 0μm)
     # terminate! on RouteComponent doesn't work, because RC hook position is determined last
     @test_throws ArgumentError terminate!(g, rn => :p1; rounding=0.1μm)
 end

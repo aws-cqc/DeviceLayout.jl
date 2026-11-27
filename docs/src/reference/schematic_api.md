@@ -62,6 +62,7 @@ SchematicDrivenLayout.map_hooks
     StyledHook
     DeviceLayout.hooks(::Path)
     hook_style
+    hook_metadata
     SchematicDrivenLayout.p0_hook
     SchematicDrivenLayout.p1_hook
     SchematicDrivenLayout.in_direction
@@ -119,6 +120,7 @@ SchematicDrivenLayout.origin(::SchematicDrivenLayout.Schematic, ::SchematicDrive
 SchematicDrivenLayout.position_dependent_replace!
 SchematicDrivenLayout.replace_component!
 SchematicDrivenLayout.rotations_valid
+SchematicDrivenLayout.hook_styles_match
 SchematicDrivenLayout.transformation(::SchematicDrivenLayout.Schematic, ::SchematicDrivenLayout.ComponentNode)
 SchematicDrivenLayout.check!
 SchematicDrivenLayout.build!

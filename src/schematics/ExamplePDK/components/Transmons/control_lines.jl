@@ -160,7 +160,7 @@ end
 function _path(z::ExampleZTermination)
     (; z_length, z_style, feedline_style, taper_length, z_bend_angle, z_bend_radius) =
         parameters(z)
-    path = Path()
+    path = Path(; metadata=METAL_NEGATIVE)
     straight!(path, taper_length, Paths.TaperCPW(feedline_style, z_style))
     !iszero(z_bend_angle) && turn!(path, z_bend_angle, z_bend_radius, z_style)
     straight!(path, z_length, z_style)

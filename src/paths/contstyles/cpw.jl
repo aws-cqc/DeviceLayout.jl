@@ -65,3 +65,5 @@ CPW(trace, gap) = GeneralCPW(trace, gap)
 
 summary(::GeneralCPW) = "CPW with variable width and gap"
 summary(s::SimpleCPW) = string("CPW with width ", s.trace, " and gap ", s.gap)
+
+cross_section_style(sty::CPW, l) = SimpleCPW(trace(sty, l), gap(sty, l))

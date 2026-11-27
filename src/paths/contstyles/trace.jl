@@ -160,3 +160,5 @@ function insert_rounded_transitions!(pa::Path; α_max, radius, side)
         splice!(pa, donor_idx:donor_idx, parts)
     end
 end
+
+cross_section_style(sty::Trace, l) = SimpleTrace(width(sty, l))

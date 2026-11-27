@@ -144,6 +144,15 @@ return `nothing`.
 """
 hook_style(::Hook) = nothing
 
+"""
+    hook_metadata(h::Hook)
+
+Return the metadata of the path cross section associated with a hook, or `nothing` if the hook
+has no style. Only `StyledHook` carries metadata; bare `PointHook` and `HandedPointHook` return
+`nothing`.
+"""
+hook_metadata(::Hook) = nothing
+
 Base.keys(h::Hook) = error(
     "No method matching keys(::Hook). You might be missing a leading semicolon in a `hooks` method returning a single hook: `return (hookname=h)` should be `return (; hookname=h)`."
 )

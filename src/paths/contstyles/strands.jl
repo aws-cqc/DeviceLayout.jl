@@ -54,6 +54,8 @@ translate(s::GeneralStrands, t) =
     GeneralStrands(x -> s.offset(x + t), x -> s.width(x + t), x -> s.spacing(x + t), s.num)
 reverse(s::GeneralStrands, l) =
     GeneralStrands(x -> s.offset(l - x), x -> s.width(l - x), x -> s.spacing(l - x), s.num)
+cross_section_style(s::GeneralStrands, l) =
+    Strands(offset(s, l), width(s, l), spacing(s, l), num(s))
 
 """
     struct SimpleStrands{T<:Coordinate} <: Strands{false}

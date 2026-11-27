@@ -29,6 +29,23 @@ function _check_variant_kwargs(::Type{T}, kwargs) where {T}
     )
 end
 
+# A variant's `map_meta` applies to the metadata carried by its hooks as well as to its geometry,
+# so that termination and `hook_styles_match` see the layers that are actually drawn
+map_hook_metadata(hs::NamedTuple, ::Nothing) = hs
+map_hook_metadata(hs::NamedTuple, map_meta) = map(h -> map_hook_metadata(h, map_meta), hs)
+map_hook_metadata(hs::Union{AbstractArray, Tuple}, map_meta) =
+    map(h -> map_hook_metadata(h, map_meta), hs)
+map_hook_metadata(h::Hook, map_meta) = h
+map_hook_metadata(h::StyledHook, map_meta) = StyledHook(
+    h.h,
+    Paths.map_overlay_metadata(hook_style(h), map_meta),
+    map_meta(hook_metadata(h))
+)
+
+# The `map_meta` of a `@composite_variant`, applied by `hooks(::AbstractCompositeComponent)`.
+# Applying it there rather than in a generated `hooks` method leaves `hooks` free to override.
+composite_map_meta(::AbstractCompositeComponent) = nothing
+
 function variant_expr(T::Expr, name::Symbol; new_defaults::Expr=:((;)), map_meta=nothing)
     escname = esc(name)
     esctype = esc(:(Type{$name}))
@@ -66,8 +83,9 @@ function variant_expr(T::Expr, name::Symbol; new_defaults::Expr=:((;)), map_meta
         SchematicDrivenLayout.base_variant(comp::$escname) =
             create_component($T, comp.name; select(comp.parameters, parameter_names($T))...)
         SchematicDrivenLayout.base_variant(::$esctype) = $T
-        # Hooks are the same
-        SchematicDrivenLayout.hooks(comp::$escname) = hooks(base_variant(comp))
+        # Hooks are the same, except for metadata if a map_meta function was specified
+        SchematicDrivenLayout.hooks(comp::$escname) =
+            map_hook_metadata(hooks(base_variant(comp)), $map_meta)
         # Geometry is the same, unless a map_meta function was specified
         SchematicDrivenLayout._geometry!(cs::CoordinateSystem, comp::$escname) = begin
             _geometry!(cs, base_variant(comp))
@@ -96,7 +114,7 @@ function composite_variant_expr(
             parameters::NamedTuple
             _graph::SchematicGraph
             _schematic::Schematic{coordinatetype($T)}
-            _hooks::Dict{Symbol, Union{Hook, <:Vector{Hook}}}
+            _hooks::Dict{Symbol, Union{Hook, Vector{<:Hook}}}
         end)
 
         SchematicDrivenLayout.parameters(comp::$escname) = comp.parameters
@@ -128,7 +146,7 @@ function composite_variant_expr(
             params = merge_recursive(default_parameters($escname), (; pairs(kwargs)...))
             g = isnothing(_graph) ? SchematicGraph(uniquename(params.name)) : _graph
             sch = something(_schematic, Schematic{coordinatetype($T)}(g; log_dir=nothing))
-            h = something(_hooks, Dict{Symbol, Union{Hook, <:Vector{Hook}}}())
+            h = something(_hooks, Dict{Symbol, Union{Hook, Vector{<:Hook}}}())
             return ($escname)(params, g, sch, h)
         end
 
@@ -147,6 +165,8 @@ function composite_variant_expr(
         SchematicDrivenLayout.base_variant(::$esctype) = $T
         # Hook map is the same
         SchematicDrivenLayout.map_hooks(::$esctype) = map_hooks($T)
+        # Hooks are the same, except for metadata if a map_meta function was specified
+        SchematicDrivenLayout.composite_map_meta(::$escname) = $map_meta
         SchematicDrivenLayout.map_hooks(comp::$escname) = map_hooks(base_variant(comp))
         # Subcomponents are the same
         SchematicDrivenLayout._build_subcomponents(comp::$escname) =
@@ -162,7 +182,12 @@ function composite_variant_expr(
             floorplan = schematic(cc)
             floorplan.checked[] = true # Skip check
             build!(floorplan)
-            !isnothing($map_meta) && map_metadata!(floorplan.coordinate_system, $map_meta)
+            if !isnothing($map_meta)
+                # Hooks read metadata from the subcomponents, which this maps in place, so cache
+                # them first
+                composite_hooks(cc)
+                map_metadata!(floorplan.coordinate_system, $map_meta)
+            end
             return floorplan.coordinate_system
         end
         # Allowed rotations are the same
@@ -184,7 +209,8 @@ You can override the original defaults or add entirely new parameters this way.
 Passing a keyword that is not a parameter of the new type throws an `ArgumentError`.
 
 If provided, `map_meta` should be a function of `DeviceLayout.Meta` that returns another `DeviceLayout.Meta`.
-It will be applied recursively to the geometry of the base component using `map_metadata!`.
+It will be applied recursively to the geometry of the base component using `map_metadata!`,
+and to the metadata carried by its `StyledHook`s (including overlay metadata).
 
 Individual methods like `hooks` and `_geometry!` can then be overridden to create variant behavior.
 """
@@ -213,7 +239,8 @@ attaches the `ParameterSet` `ps` to the variant's graph, and the base type's
 `_build_subcomponents` sees it via `parameter_set(cc._graph)`.
 
 If provided, `map_meta` should be a function of `DeviceLayout.Meta` that returns another `DeviceLayout.Meta`.
-It will be applied recursively to the geometry of the base component using [`map_metadata!`](@ref).
+It will be applied recursively to the geometry of the base component using [`map_metadata!`](@ref),
+and to the metadata carried by its `StyledHook`s (including overlay metadata).
 
 Individual methods like `hooks` and `_geometry!` can then be overridden to create variant behavior.
 """
@@ -223,7 +250,7 @@ macro composite_variant(new_type, base_type, kws...)
         Base.Meta.isexpr(kw, :(=)) || error("""
                                       Invalid macro call: @variant $new_type $base_type $(join(kws," "))"
                                       """)
-        push!(kwargs, Pair(kw.args...))
+        push!(kwargs, Pair(kw.args[1], esc(kw.args[2])))
     end
     return composite_variant_expr(esc(base_type), new_type; kwargs...)
 end

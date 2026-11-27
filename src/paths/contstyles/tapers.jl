@@ -47,6 +47,12 @@ function TaperTrace(width_start::Coordinate, width_end::Coordinate)
 end
 
 nextstyle(sty::TaperTrace) = Trace(sty.width_end)
+# Use the stored widths at the ends, which interpolation can't give for a zero-length taper
+function cross_section_at(s::TaperTrace, t, initial)
+    initial && iszero(t) && return SimpleTrace(s.width_start)
+    !initial && t >= s.length && return SimpleTrace(s.width_end)
+    return cross_section_style(s, t)
+end
 
 """
     struct TaperCPW{T<:Coordinate} <: CPW{true}
@@ -131,6 +137,11 @@ reverse(s::TaperCPW{T}, l) where {T} =
     TaperCPW{T}(s.trace_end, s.gap_end, s.trace_start, s.gap_start, s.length)
 
 nextstyle(sty::TaperCPW) = CPW(sty.trace_end, sty.gap_end)
+function cross_section_at(s::TaperCPW, t, initial)
+    initial && iszero(t) && return SimpleCPW(s.trace_start, s.gap_start)
+    !initial && t >= s.length && return SimpleCPW(s.trace_end, s.gap_end)
+    return cross_section_style(s, t)
+end
 
 summary(s::TaperTrace) = string(
     "Tapered trace with initial width ",

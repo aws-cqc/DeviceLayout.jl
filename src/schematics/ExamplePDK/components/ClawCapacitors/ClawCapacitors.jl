@@ -116,8 +116,17 @@ function _path(cc::ExampleSeriesClawCapacitor)
 end
 
 function SchematicDrivenLayout.hooks(cc::ExampleSeriesClawCapacitor)
-    path = _path(cc)
-    return hooks(path)
+    hs = hooks(_path(cc))
+    # The path ends in a `NoRender` segment spanning the claw, and has no input segment at all
+    # when `input_length <= rounding`, so give the hooks the input and output cross sections
+    input(h) = StyledHook(h.h, cc.input_style, METAL_NEGATIVE)
+    output(h) = StyledHook(h.h, cc.output_style, METAL_NEGATIVE)
+    return (;
+        p0=input(hs.p0),
+        p1=output(hs.p1),
+        p0_lh=input(hs.p0_lh),
+        p1_lh=output(hs.p1_lh)
+    )
 end
 
 # Shared by ExampleSeriesClawCapacitor and ExampleShuntClawCapacitor (the latter is
@@ -296,7 +305,9 @@ function SchematicDrivenLayout.hooks(cc::ExampleShuntClawCapacitor)
         tap, # Extend tap to get to the connection point on the other side
         inner_cap_width + 2 * (rounding + claw_outer_gap + claw_trace + claw_inner_gap)
     )
-    return merge(hooks(pa), (; p2=p1_hook(tap), p2_lh=p1_hook(tap, false)))
+    # The tap continues in the input style, but the output line connects at its end
+    output(h) = StyledHook(h.h, cc.output_style, METAL_NEGATIVE)
+    return merge(hooks(pa), (; p2=output(p1_hook(tap)), p2_lh=output(p1_hook(tap, false))))
 end
 
 end # module

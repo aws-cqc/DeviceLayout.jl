@@ -128,7 +128,9 @@ compose_hookname(cc::AbstractCompositeComponent, i::Int, h::Symbol) =
 
 function decompose_hookname(cc::AbstractCompositeComponent, comp_h::Symbol)
     for (i, c) in enumerate(components(cc))
-        for h in keys(hooks(c))
+        # Only names are needed, and `hooks` of an unplanned route warns
+        hooknames = c isa RouteComponent ? (:p0, :p1) : keys(hooks(c))
+        for h in hooknames
             if compose_hookname(cc, i, h) == comp_h
                 return i => h
             end
@@ -170,7 +172,11 @@ A hook `hcc` is returned for each hook (name `h`) of every subcomponent node (in
 `keys(map_hooks(cc))` contains `i => h`, then the corresponding composite hook is
 `map_hooks(cc)[h]`. Otherwise, it is `_\$(i)_\$h`.
 """
-function hooks(cc::T) where {T <: AbstractCompositeComponent}
+hooks(cc::AbstractCompositeComponent) =
+    map_hook_metadata(composite_hooks(cc), composite_map_meta(cc))
+
+# Hooks before any `map_meta`, cached in `cc._hooks` if `cc` has that field
+function composite_hooks(cc::T) where {T <: AbstractCompositeComponent}
     if hasfield(T, :_hooks)
         !isempty(cc._hooks) && return (; pairs(cc._hooks)...)
     end

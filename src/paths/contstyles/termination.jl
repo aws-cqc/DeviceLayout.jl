@@ -336,6 +336,12 @@ function nextstyle(::Union{TraceTermination, CPWOpenTermination, CPWShortTermina
     return NoRenderContinuous()
 end
 
+# The end a termination connects to has the terminated cross section; the capped end has none
+cross_section_at(sty::Union{CPWOpenTermination, CPWShortTermination}, t, initial) =
+    initial == sty.initial ? sty : SimpleCPW(sty.trace, sty.gap)
+cross_section_at(sty::TraceTermination, t, initial) =
+    initial == sty.initial ? sty : SimpleTrace(sty.width)
+
 function reverse(sty::CPWOpenTermination{T}, l) where {T}
     return CPWOpenTermination{T}(
         sty.trace,
