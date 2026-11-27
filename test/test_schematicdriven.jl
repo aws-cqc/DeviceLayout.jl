@@ -411,19 +411,30 @@
                     node = fuse!(g, node => :w, compass => :e)
                 end
                 node = fuse!(g, node => :w, compass => :n) # add rotated compass
-                floorplan = plan(g; log_dir=nothing)
+                # Plan inside `@test_logs`, since the schematic logger writes to the logger
+                # that is current when the schematic is planned
+                floorplan =
+                    @test_logs (:error, r"Invalid rotation") (:error, r"failed design rule") begin
+                        fp = plan(g; log_dir=nothing)
+                        @test fp.checked[] == false
+                        @test_throws ErrorException check!(fp) # check! should fail
+                        fp
+                    end
                 @test floorplan.checked[] == false
-                @test_throws ErrorException check!(floorplan) # check! should fail
-                @test floorplan.checked[] == false
+                @test !(@test_logs (:error, r"Invalid rotation.*must be one of") SchematicDrivenLayout.rotations_valid(
+                    floorplan
+                ))
                 @test_throws ErrorException build!(floorplan) # build should fail too
 
                 # Test within composite component
                 composite = BasicCompositeComponent(g)
                 g = SchematicGraph("test_g_4")
                 add_node!(g, composite)
-                floorplan = plan(g; log_dir=nothing)
                 # check! should fail even though the problem is hidden inside composite
-                @test_throws ErrorException check!(floorplan)
+                @test_logs (:error, r"Invalid rotation") (:error, r"failed design rule") begin
+                    floorplan = plan(g; log_dir=nothing)
+                    @test_throws ErrorException check!(floorplan)
+                end
 
                 g = SchematicGraph("test_g_3")
 
@@ -456,11 +467,15 @@
                     node = fuse!(g, node => :e, compass => :w)
                 end
                 node = fuse!(g, node => :e, compass => :n)
-                floorplan = plan(g; log_dir=nothing)
-                # node 4 is the corner of the L
-                floorplan[nodes(g)[4]].xrefl = true
-                @test floorplan.checked[] == false
-                @test_throws ErrorException check!(floorplan) # check! should fail
+                floorplan =
+                    @test_logs (:error, r"Invalid rotation") (:error, r"failed design rule") begin
+                        fp = plan(g; log_dir=nothing)
+                        # node 4 is the corner of the L
+                        fp[nodes(g)[4]].xrefl = true
+                        @test fp.checked[] == false
+                        @test_throws ErrorException check!(fp) # check! should fail
+                        fp
+                    end
                 @test floorplan.checked[] == false
                 @test_throws ErrorException build!(floorplan) # build should fail too
             end
@@ -1113,6 +1128,24 @@
         @test component(graph(TestWrapperVariant())[1]).jj_width == 200nm
         @test hooks(TestWrapperVariant()).xy1.p == hooks(c).xy1.p # Uses base variant map_hooks
 
+        # Vector-valued hooks of subcomponents
+        @compdef struct VectorHookComposite <: AbstractCompositeComponent{typeof(1.0nm)}
+            name::String = "vector_hooks"
+        end
+        SchematicDrivenLayout._build_subcomponents(comp::VectorHookComposite) = (
+            GDSComponent(
+                Cell("vh", nm),
+                (; arr=[PointHook(0mm, i * 1mm, 90°) for i = 1:2])
+            ),
+        )
+        SchematicDrivenLayout._graph!(
+            g::SchematicGraph,
+            comp::VectorHookComposite,
+            subcomps::NamedTuple
+        ) = add_node!(g, only(subcomps))
+        @composite_variant VectorHookCompositeVariant VectorHookComposite
+        @test hooks(VectorHookCompositeVariant()) == hooks(VectorHookComposite())
+
         # Variants reject unknown keyword arguments, as the base `@compdef` constructor does
         @test_throws MethodError TestComponent(; widht=1μm)
         @test_throws ArgumentError TestCompVariant(; widht=1μm)
@@ -1625,4 +1658,614 @@
         @test dp2.x == 3
         @test dp2.y == 9       # 3^2
     end
+end
+
+@testitem "Schematic rule checking: Hook styles" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+    import .SchematicDrivenLayout: hook_styles_match, _cross_sections_match, route!
+    cpw_1 = Paths.SimpleCPW(10μm, 10μm)
+    cpw_2 = Paths.SimpleCPW(10μm, 20μm)
+    trace_1 = Paths.SimpleTrace(10μm)
+    trace_2 = Paths.SimpleTrace(20μm)
+    nr = Paths.NoRender()
+    snr_1 = Paths.SimpleNoRender(10μm)
+    snr_2 = Paths.SimpleNoRender(20μm)
+    @test _cross_sections_match(cpw_1, cpw_1)
+    @test !_cross_sections_match(cpw_1, cpw_2)
+    @test _cross_sections_match(trace_1, trace_1)
+    @test !_cross_sections_match(trace_1, trace_2)
+    @test !_cross_sections_match(trace_1, cpw_1)
+    @test !_cross_sections_match(trace_1, nr)
+    @test !_cross_sections_match(cpw_1, nr)
+    @test _cross_sections_match(nr, nr)
+    @test !_cross_sections_match(snr_1, snr_2)
+    @test _cross_sections_match(snr_1, snr_1)
+    # Same dimensions in different units or with rounding error match
+    @test _cross_sections_match(cpw_1, Paths.SimpleCPW(0.01mm, 0.01mm))
+    @test _cross_sections_match(cpw_1, Paths.SimpleCPW((10 + 1e-12)μm, 10μm))
+    @test !_cross_sections_match(cpw_1, Paths.SimpleCPW(10.001μm, 10μm))
+    @test _cross_sections_match(trace_1, Paths.SimpleTrace(10_000.0nm))
+    @test _cross_sections_match(snr_1, Paths.SimpleNoRender(0.01mm))
+
+    # In a schematic
+    pa1 = Path(; name="start", metadata=SemanticMeta(:test))
+    straight!(pa1, 0.1mm, trace_1)
+
+    pa2 = Path(Point(1mm, 0mm); name="stop", metadata=SemanticMeta(:test))
+    straight!(pa2, 0.1mm, trace_2)
+    terminate!(pa2; rounding=1μm)
+
+    g = SchematicGraph("good")
+    n1 = add_node!(g, pa1)
+    fuse!(g, n1 => :p1, pa1 => :p0)
+    sch = plan(g; log_dir=nothing)
+    @test (@test_logs hook_styles_match(sch))
+
+    g = SchematicGraph("bad")
+    n1 = add_node!(g, pa2)
+    fuse!(g, n1 => :p1, pa2 => :p0) # Terminated style doesn't match
+    sch = plan(g; log_dir=nothing)
+    @test !(@test_logs (:error, r"Mismatched cross sections") hook_styles_match(sch))
+
+    g = SchematicGraph("bad")
+    n1 = add_node!(g, pa1)
+    fuse!(g, n1 => :p1, pa2 => :p0)
+    sch = plan(g; log_dir=nothing)
+    @test !(@test_logs (:error, r"Mismatched cross sections") hook_styles_match(sch))
+
+    # Works for routes
+    g = SchematicGraph("good")
+    n1 = add_node!(g, pa1)
+    n2 = add_node!(g, pa2)
+    route!(
+        g,
+        Paths.StraightAnd90(1mm),
+        n1 => :p1,
+        n2 => :p0,
+        Paths.TaperTrace(trace_1.width, trace_2.width),
+        SemanticMeta(:test)
+    )
+    sch = plan(g; log_dir=nothing)
+    @test (@test_logs hook_styles_match(sch))
+
+    g = SchematicGraph("bad")
+    n1 = add_node!(g, pa1)
+    n2 = add_node!(g, pa2)
+    route!(
+        g,
+        Paths.StraightAnd90(1mm),
+        n1 => :p1,
+        n2 => :p0,
+        Paths.Trace(0.15mm),
+        SemanticMeta(:test)
+    )
+    # Violations are logged to the console and the log file, then `check!` fails
+    sch = @test_logs (:error, r"Mismatched cross sections.*start => :p1") (
+        :error,
+        r"Mismatched cross sections.*stop => :p0"
+    ) (:error, r"failed design rule `hook_styles_match`") begin
+        sch_logged = plan(g; log_dir=mktempdir())
+        @test_throws "failed design rule checks" check!(
+            sch_logged;
+            rules=[hook_styles_match]
+        )
+        sch_logged
+    end
+    @test !sch.checked[]
+    @test contains(
+        read(sch.logger.logname, String),
+        "check | [Error] Mismatched cross sections where"
+    )
+    # A rule that throws is reported and the remaining rules still run
+    @test_logs (:error, r"`throwing_rule` threw an error") (
+        :error,
+        r"Mismatched cross sections"
+    ) (:error, r"failed design rule `hook_styles_match`") match_mode = :any begin
+        throwing_rule(_) = error("rule error")
+        @test_throws "failed design rule checks" check!(
+            plan(g; log_dir=nothing);
+            rules=[throwing_rule, hook_styles_match]
+        )
+    end
+    # Rerunning `check!` reports only the current violations
+    check!(sch; rules=[])
+    @test sch.checked[]
+
+    # PeriodicStyle
+    pa_template = Path(; name="periodic_template", metadata=SemanticMeta(:test))
+    straight!(pa_template, 0.8mm, trace_1)
+    straight!(pa_template, 0.8mm, trace_2)
+    periodic_sty = Paths.PeriodicStyle(pa_template)
+    g = SchematicGraph("good")
+    n1 = add_node!(g, pa1)
+    n2 = add_node!(g, pa2)
+    route!(
+        g,
+        Paths.StraightAnd90(1mm),
+        n1 => :p1,
+        n2 => :p0,
+        periodic_sty,
+        SemanticMeta(:test)
+    )
+    sch = plan(g; log_dir=nothing)
+    @test (@test_logs hook_styles_match(sch)) # Takes into account route length
+
+    pa_template = Path(; name="periodic_template")
+    straight!(pa_template, 0.4mm, trace_1)
+    straight!(pa_template, 0.4mm, trace_2)
+    periodic_sty = Paths.PeriodicStyle(pa_template)
+    g = SchematicGraph("bad")
+    n1 = add_node!(g, pa1)
+    n2 = add_node!(g, pa2)
+    route!(
+        g,
+        Paths.StraightAnd90(1mm),
+        n1 => :p1,
+        n2 => :p0,
+        periodic_sty,
+        SemanticMeta(:test)
+    )
+    sch = plan(g; log_dir=nothing)
+    @test !(@test_logs (:error, r"Mismatched cross sections") hook_styles_match(sch))
+
+    # Metadata must match, and undefined metadata never matches
+    for (meta1, meta2, msg) in [
+        (SemanticMeta(:test), SemanticMeta(:test2), r"metadata do not match"),
+        (SemanticMeta(:test), DeviceLayout.UNDEF_META, r"metadata is undefined"),
+        (DeviceLayout.UNDEF_META, DeviceLayout.UNDEF_META, r"metadata is undefined")
+    ]
+        pa_m1 = Path(; name="m1", metadata=meta1)
+        straight!(pa_m1, 0.1mm, trace_1)
+        pa_m2 = Path(Point(1mm, 0mm); name="m2", metadata=meta2)
+        straight!(pa_m2, 0.1mm, trace_1)
+        g_meta = SchematicGraph("meta")
+        n_meta = add_node!(g_meta, pa_m1)
+        fuse!(g_meta, n_meta => :p1, pa_m2 => :p0)
+        @test !(@test_logs (:error, msg) hook_styles_match(plan(g_meta; log_dir=nothing)))
+    end
+    # Undefined overlay metadata never matches, and the message shows overlay metadata
+    for (ometa1, ometa2, msg) in [
+        (
+            DeviceLayout.UNDEF_META,
+            DeviceLayout.UNDEF_META,
+            r"overlay metadata is undefined"
+        ),
+        (SemanticMeta(:a), SemanticMeta(:b), r"overlay metadata")
+    ]
+        pa_o1 = Path(; name="o1", metadata=SemanticMeta(:test))
+        straight!(pa_o1, 0.1mm, trace_1)
+        overlay!(pa_o1, trace_2, ometa1)
+        pa_o2 = Path(Point(1mm, 0mm); name="o2", metadata=SemanticMeta(:test))
+        straight!(pa_o2, 0.1mm, trace_1)
+        overlay!(pa_o2, trace_2, ometa2)
+        g_meta = SchematicGraph("overlay_meta")
+        n_meta = add_node!(g_meta, pa_o1)
+        fuse!(g_meta, n_meta => :p1, pa_o2 => :p0)
+        @test !(@test_logs (:error, msg) hook_styles_match(plan(g_meta; log_dir=nothing)))
+    end
+    # Hooks without styles are not checked
+    pa_undef = Path(; name="undef")
+    straight!(pa_undef, 0.1mm, trace_1)
+    g = SchematicGraph("bare")
+    n1 = add_node!(g, WeatherVane{typeof(1.0nm)}())
+    fuse!(g, n1 => :east, pa_undef => :p0)
+    sch = plan(g; log_dir=nothing)
+    @test (@test_logs hook_styles_match(sch))
+
+    # Overlay
+    pa_overlay_1 = Path(; name="start", metadata=SemanticMeta(:test))
+    straight!(pa_overlay_1, 0.1mm, trace_1)
+    overlay!(pa_overlay_1, trace_2, SemanticMeta(:test))
+
+    pa_overlay_2 = Path(Point(1mm, 0mm); name="stop", metadata=SemanticMeta(:test))
+    straight!(pa_overlay_2, 0.1mm, trace_1)
+    overlay!(pa_overlay_2, trace_2, SemanticMeta(:test2)) # Different metadata
+
+    @test _cross_sections_match(pa_overlay_1[1].sty, pa_overlay_1[1].sty)
+    @test !_cross_sections_match(pa_overlay_1[1].sty, pa_overlay_2[1].sty)
+    @test _cross_sections_match(pa_overlay_2[1].sty, pa_overlay_2[1].sty)
+    # Overlays in a different order match
+    ov(overlays...) = Paths.OverlayStyle(
+        trace_1,
+        collect(Paths.Style, first.(overlays)),
+        collect(last.(overlays))
+    )
+    o1, o2 = (trace_2, SemanticMeta(:a)), (cpw_1, SemanticMeta(:b))
+    @test _cross_sections_match(ov(o1, o2), ov(o2, o1))
+    @test !_cross_sections_match(ov(o1, o2), ov(o1, o1))
+    # Strands in different units match
+    @test _cross_sections_match(
+        Paths.Strands(5μm, 2μm, 2μm, 3),
+        Paths.Strands(5000nm, 2000nm, 2000nm, 3)
+    )
+    @test !_cross_sections_match(
+        Paths.Strands(5μm, 2μm, 2μm, 3),
+        Paths.Strands(5μm, 2μm, 2μm, 2)
+    )
+    # Varying strands give their dimensions at the hook
+    strands = @test_deprecated Paths.Strands(x -> 5μm, x -> 2μm + x / 10, x -> 2μm, 3)
+    pa_strands = Path()
+    @test_logs min_level = Logging.Error straight!(pa_strands, 100μm, strands)
+    @test _cross_sections_match(
+        hook_style(p0_hook(pa_strands)),
+        Paths.Strands(5μm, 2μm, 2μm, 3)
+    )
+    @test _cross_sections_match(
+        hook_style(p1_hook(pa_strands)),
+        Paths.Strands(5μm, 12μm, 2μm, 3)
+    )
+
+    # Hand-written hook styles that are not cross sections
+    function fused_hooks_sch(sty1, sty2)
+        c1 = GDSComponent(
+            Cell("h1", nm),
+            (; p=StyledHook(PointHook(0μm, 0μm, 180°), sty1, SemanticMeta(:test)))
+        )
+        c2 = GDSComponent(
+            Cell("h2", nm),
+            (; p=StyledHook(PointHook(0μm, 0μm, 0°), sty2, SemanticMeta(:test)))
+        )
+        g = SchematicGraph("handwritten")
+        n1 = add_node!(g, c1)
+        fuse!(g, n1 => :p, c2 => :p)
+        return plan(g; log_dir=nothing)
+    end
+    @test (@test_logs hook_styles_match(fused_hooks_sch(nr, nr)))
+    taper = Paths.TaperTrace(10μm, 20μm)
+    @test (@test_logs hook_styles_match(fused_hooks_sch(taper, taper)))
+
+    # Building routes for the check doesn't hide routing errors from `build!`
+    function bad_route_graph()
+        pa_a = Path(; name="a", metadata=SemanticMeta(:test))
+        straight!(pa_a, 0.1mm, trace_1)
+        pa_b = Path(Point(1mm, 0.3mm); α0=45°, name="b", metadata=SemanticMeta(:test))
+        straight!(pa_b, 0.1mm, trace_1)
+        g = SchematicGraph("bad_route")
+        n1 = add_node!(g, pa_a)
+        n2 = add_node!(g, pa_b)
+        rn = route!(
+            g,
+            Paths.StraightAnd90(0.05mm),
+            n1 => :p1,
+            n2 => :p0,
+            trace_1,
+            SemanticMeta(:test)
+        )
+        return g, rn
+    end
+    @test_logs (:error, r"same 4-point compass") match_mode = :any begin
+        g, rn = bad_route_graph()
+        sch = plan(g; log_dir=nothing)
+        hooks(sch, rn)
+        check!(sch)
+        @test_throws "Encountered errors" build!(sch)
+
+        g, rn = bad_route_graph()
+        sch = plan(g; log_dir=nothing)
+        @test_throws "failed design rule checks" check!(sch; rules=[hook_styles_match])
+        @test isempty(component(rn)._path)
+        check!(sch)
+        @test_throws "Encountered errors" build!(sch)
+    end
+
+    # Checking doesn't keep route paths, so planning again routes to the new endpoints
+    pa_end = Path(Point(1mm, 0mm); name="end", metadata=SemanticMeta(:test))
+    straight!(pa_end, 0.1mm, trace_1)
+    g = SchematicGraph("replan")
+    n1 = add_node!(g, pa1)
+    n2 = add_node!(g, pa_end)
+    rn = route!(
+        g,
+        Paths.StraightAnd90(0.05mm),
+        n1 => :p1,
+        n2 => :p0,
+        trace_1,
+        SemanticMeta(:test)
+    )
+    sch = plan(g; log_dir=nothing)
+    hooks(sch, rn)
+    check!(sch; rules=[hook_styles_match])
+    pa_end.p0 = Point(2mm, 0mm)
+    sch = plan(g; log_dir=nothing)
+    @test p1(SchematicDrivenLayout.path(component(rn))) ≈ Point(2mm, 0mm)
+
+    # A failing check leaves a previously checked schematic unchecked
+    sch = @test_logs (:error, r"failed design rule") begin
+        sch_checked = plan(g; log_dir=nothing)
+        check!(sch_checked; rules=[])
+        @test sch_checked.checked[]
+        @test_throws "failed design rule checks" check!(sch_checked; rules=[_ -> false])
+        sch_checked
+    end
+    @test !sch.checked[]
+
+    # Failures are detected even when the logger drops the error messages
+    using Logging: NullLogger, with_logger
+    for rule in (_ -> false, _ -> error("rule error"))
+        with_logger(NullLogger()) do
+            sch_null = plan(g; log_dir=nothing)
+            @test_throws "failed design rule checks" check!(sch_null; rules=[rule])
+            @test !sch_null.checked[]
+        end
+    end
+
+    # Graph-level termination, including a rounded one that leaves only the termination style
+    for kwargs in ((;), (; gap=0μm), (; rounding=2μm))
+        pa_t = Path(; name="t", metadata=SemanticMeta(:test))
+        straight!(pa_t, 0.1mm, cpw_1)
+        g_t = SchematicGraph("terminated")
+        n_t = add_node!(g_t, pa_t)
+        terminate!(g_t, n_t => :p0; kwargs...)
+        terminate!(g_t, n_t => :p1; kwargs...)
+        @test (@test_logs hook_styles_match(plan(g_t; log_dir=nothing)))
+    end
+
+    # Building routes for the check leaves the planned route unchanged, so an S-shaped route,
+    # where routing inserts a waypoint, plans and builds the same afterward
+    function s_route_graph()
+        pa_a = Path(; name="a", metadata=SemanticMeta(:test))
+        straight!(pa_a, 0.1mm, trace_1)
+        pa_b = Path(Point(1mm, 0.5mm); name="b", metadata=SemanticMeta(:test))
+        straight!(pa_b, 0.1mm, trace_1)
+        g = SchematicGraph("s_route")
+        n1 = add_node!(g, pa_a)
+        n2 = add_node!(g, pa_b)
+        rn = route!(
+            g,
+            Paths.StraightAnd90(0.05mm),
+            n1 => :p1,
+            n2 => :p0,
+            trace_1,
+            SemanticMeta(:test)
+        )
+        return g, rn
+    end
+    route_points(rn) = [(p0(n.seg), p1(n.seg)) for n in component(rn)._path]
+    built = map((true, false)) do with_rule
+        g_s, rn_s = s_route_graph()
+        sch_s = plan(g_s; log_dir=nothing)
+        with_rule && check!(sch_s; rules=[hook_styles_match])
+        @test isempty(component(rn_s).r.waypoints)
+        sch_s = plan(g_s; log_dir=nothing)
+        check!(sch_s)
+        build!(sch_s)
+        return route_points(rn_s)
+    end
+    @test built[1] == built[2]
+
+    # A route that throws while it is built is reported, and the other hooks are still checked
+    struct NoLegRule <: Paths.RouteRule end
+    pa_a = Path(; name="a", metadata=SemanticMeta(:test))
+    straight!(pa_a, 0.1mm, trace_1)
+    pa_b = Path(Point(1mm, 0mm); name="b", metadata=SemanticMeta(:test))
+    straight!(pa_b, 0.1mm, trace_1)
+    pa_c = Path(; name="c", metadata=SemanticMeta(:test))
+    straight!(pa_c, 0.1mm, trace_2)
+    g_noleg = SchematicGraph("noleg")
+    n_a = add_node!(g_noleg, pa_a)
+    n_b = add_node!(g_noleg, pa_b)
+    rn = route!(g_noleg, NoLegRule(), n_a => :p1, n_b => :p0, trace_1, SemanticMeta(:test))
+    fuse!(g_noleg, n_b => :p1, pa_c => :p0)
+    sch_noleg = plan(g_noleg; log_dir=nothing)
+    @test !(@test_logs (:error, r"threw an error while it was built") (
+        :error,
+        r"Mismatched cross sections where b => :p1 is fused to c => :p0"
+    ) hook_styles_match(sch_noleg))
+    @test isempty(component(rn)._path)
+end
+
+@testitem "Schematic rule checking: Hook styles in composite components" setup =
+    [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+    import .SchematicDrivenLayout: hook_styles_match, route!
+
+    @compdef struct HookStylesComposite <: CompositeComponent
+        name = "hsc"
+        inner_width = 10μm
+    end
+    function SchematicDrivenLayout._build_subcomponents(cc::HookStylesComposite)
+        pa = Path(; name="a", metadata=SemanticMeta(:test))
+        straight!(pa, 0.1mm, Paths.Trace(10μm))
+        pb = Path(Point(1mm, 0mm); name="b", metadata=SemanticMeta(:test))
+        straight!(pb, 0.1mm, Paths.Trace(10μm))
+        pc = Path(; name="c", metadata=SemanticMeta(:test))
+        straight!(pc, 0.1mm, Paths.Trace(cc.inner_width))
+        return (pa, pb, pc)
+    end
+    function SchematicDrivenLayout._graph!(
+        g::SchematicGraph,
+        ::HookStylesComposite,
+        subcomps
+    )
+        na = add_node!(g, subcomps[1])
+        nb = add_node!(g, subcomps[2])
+        route!(
+            g,
+            Paths.StraightAnd90(0.05mm),
+            na => :p1,
+            nb => :p0,
+            Paths.Trace(10μm),
+            SemanticMeta(:test)
+        )
+        fuse!(g, nb => :p1, subcomps[3] => :p0)
+        return g
+    end
+
+    # The hook name after the route doesn't need the route's hooks, which would warn
+    cc = HookStylesComposite()
+    @test (@test_logs SchematicDrivenLayout.decompose_hookname(cc, :_4_p1)) == (4 => :p1)
+    pa_out = Path(; name="out", metadata=SemanticMeta(:test))
+    straight!(pa_out, 0.1mm, Paths.Trace(10μm))
+    g = SchematicGraph("outer")
+    n = add_node!(g, cc)
+    fuse!(g, n => :_4_p1, pa_out => :p0)
+    @test (@test_logs hook_styles_match(plan(g; log_dir=nothing)))
+
+    g = SchematicGraph("outer_bad")
+    add_node!(g, HookStylesComposite(; name="bad", inner_width=20μm))
+    @test !(@test_logs (:error, r"Mismatched cross sections in composite bad where") hook_styles_match(
+        plan(g; log_dir=nothing)
+    ))
+
+    # Hooks that a composite exposes at a route's ends don't carry the route's attachments
+    @compdef struct AttachedRouteComposite <: CompositeComponent
+        name = "arc"
+    end
+    function SchematicDrivenLayout._build_subcomponents(::AttachedRouteComposite)
+        pa = Path(; name="a", metadata=SemanticMeta(:test))
+        straight!(pa, 0.1mm, Paths.Trace(10μm))
+        pb = Path(Point(1mm, 0mm); name="b", metadata=SemanticMeta(:test))
+        straight!(pb, 0.1mm, Paths.Trace(10μm))
+        return (pa, pb)
+    end
+    function SchematicDrivenLayout._graph!(
+        g::SchematicGraph,
+        ::AttachedRouteComposite,
+        subcomps
+    )
+        na = add_node!(g, subcomps[1])
+        nb = add_node!(g, subcomps[2])
+        rn = route!(
+            g,
+            Paths.StraightAnd90(0.05mm),
+            na => :p1,
+            nb => :p0,
+            Paths.Trace(10μm),
+            SemanticMeta(:test)
+        )
+        attach!(component(rn), sref(Cell("dot", nm)), 0.1mm)
+        return g
+    end
+    pa_out = Path(; name="out", metadata=SemanticMeta(:test))
+    straight!(pa_out, 0.1mm, Paths.Trace(10μm))
+    g = SchematicGraph("outer_attached")
+    n = add_node!(g, AttachedRouteComposite())
+    fuse!(g, n => :_3_p1, pa_out => :p0)
+    @test (@test_logs hook_styles_match(plan(g; log_dir=nothing)))
+end
+
+@testitem "Variant map_meta applies to hook metadata" setup = [CommonTestSetup] begin
+    using .SchematicDrivenLayout
+    import .SchematicDrivenLayout.ExamplePDK.Transmons:
+        ExampleXYTermination, ExampleStarTransmon
+    import .SchematicDrivenLayout.ExamplePDK.LayerVocabulary: METAL_NEGATIVE
+
+    @variant FlippedXYTermination ExampleXYTermination map_meta = facing
+    @test hook_metadata(hooks(ExampleXYTermination()).line) == METAL_NEGATIVE
+    @test hook_metadata(hooks(FlippedXYTermination()).line) == facing(METAL_NEGATIVE)
+    # Graph-level termination uses the mapped metadata
+    g = SchematicGraph("flipped")
+    n = add_node!(g, FlippedXYTermination())
+    @test component(terminate!(g, n => :line)).metadata == facing(METAL_NEGATIVE)
+
+    @composite_variant FlippedStarTransmon ExampleStarTransmon map_meta = facing
+    @test hook_metadata(hooks(ExampleStarTransmon()).z) == METAL_NEGATIVE
+    @test hook_metadata(hooks(FlippedStarTransmon()).z) == facing(METAL_NEGATIVE)
+    # Keyword values are resolved where the macro is called
+    flip_here(m) = facing(m)
+    star_name = "flipped_here"
+    @composite_variant FlippedHereStarTransmon ExampleStarTransmon new_defaults =
+        (; name=star_name) map_meta = flip_here
+    @test FlippedHereStarTransmon().name == star_name
+    @test hook_metadata(hooks(FlippedHereStarTransmon()).z) == facing(METAL_NEGATIVE)
+
+    # Overlay metadata is mapped too
+    pa = Path(; metadata=METAL_NEGATIVE)
+    straight!(pa, 10μm, Paths.SimpleTrace(10μm))
+    overlay!(pa, Paths.SimpleTrace(20μm), SemanticMeta(:test))
+    mapped = SchematicDrivenLayout.map_hook_metadata((; p1=p1_hook(pa)), facing).p1
+    @test hook_style(mapped).overlay_metadata == [facing(SemanticMeta(:test))]
+    @test hook_metadata(mapped) == facing(METAL_NEGATIVE)
+    # Geometry maps it too when the overlay has attachments
+    attach!(pa, sref(Cell("attachment", nm)), 5μm)
+    map_metadata!(pa, facing)
+    @test Paths.without_attachments(pa[1].sty).overlay_metadata ==
+          [facing(SemanticMeta(:test))]
+
+    # Undefined metadata is mapped like any other, and array- and tuple-valued hooks are mapped
+    # elementwise
+    @compdef struct HookShapes <: Component
+        name = "hs"
+    end
+    SchematicDrivenLayout._geometry!(cs::CoordinateSystem, ::HookShapes) =
+        place!(cs, centered(Rectangle(10μm, 10μm)), METAL_NEGATIVE)
+    SchematicDrivenLayout.hooks(::HookShapes) = (;
+        undef=StyledHook(PointHook(0μm, 0μm, 0°), Paths.CPW(10μm, 6μm)),
+        line=StyledHook(PointHook(0μm, 0μm, 0°), Paths.CPW(10μm, 6μm), METAL_NEGATIVE),
+        grid=[PointHook(Point(i * 1μm, j * 1μm), 0°) for i = 1:2, j = 1:2],
+        pair=(PointHook(0μm, 0μm, 0°), PointHook(1μm, 0μm, 0°))
+    )
+    layer_map = Dict(
+        METAL_NEGATIVE => facing(METAL_NEGATIVE),
+        DeviceLayout.UNDEF_META => SemanticMeta(:unset)
+    )
+    @variant HookShapesMapped HookShapes map_meta = m -> layer_map[m]
+    hs = hooks(HookShapesMapped())
+    @test hook_metadata(hs.undef) == SemanticMeta(:unset)
+    @test hook_metadata(hs.line) == facing(METAL_NEGATIVE)
+    @test hooks(HookShapesMapped(), :grid_3) == hooks(HookShapes(), :grid_3)
+    @test hs.pair == hooks(HookShapes()).pair
+
+    # Composite variant hooks are mapped once, whether or not the geometry was built first
+    @compdef struct OverlayPathComposite <: CompositeComponent
+        name = "opc"
+    end
+    function SchematicDrivenLayout._build_subcomponents(::OverlayPathComposite)
+        pa = Path(; name="p", metadata=METAL_NEGATIVE)
+        straight!(pa, 10μm, Paths.Trace(2μm))
+        overlay!(pa, Paths.Trace(4μm), SemanticMeta(:test))
+        return (pa,)
+    end
+    function SchematicDrivenLayout._graph!(
+        g::SchematicGraph,
+        ::OverlayPathComposite,
+        subcomps
+    )
+        add_node!(g, subcomps[1])
+        return g
+    end
+    @composite_variant FlippedOverlayPathComposite OverlayPathComposite map_meta = facing
+    function p1_metadata(cc)
+        h = hooks(cc)._1_p1
+        return (hook_metadata(h), hook_style(h).overlay_metadata)
+    end
+    expected = (facing(METAL_NEGATIVE), [facing(SemanticMeta(:test))])
+    hooks_first = FlippedOverlayPathComposite()
+    @test p1_metadata(hooks_first) == expected
+    geometry(hooks_first)
+    @test p1_metadata(hooks_first) == expected
+    geometry_first = FlippedOverlayPathComposite()
+    geometry(geometry_first)
+    @test p1_metadata(geometry_first) == expected
+
+    # An overlay style shared by a parameter, a hook, and several segments is mapped once for
+    # each, and the parameter is unchanged
+    overlay_map = Dict(
+        SemanticMeta(:a) => SemanticMeta(:b),
+        SemanticMeta(:b) => SemanticMeta(:c),
+        METAL_NEGATIVE => METAL_NEGATIVE
+    )
+    @compdef struct SharedOverlay <: Component
+        name = "so"
+        sty = Paths.OverlayStyle(
+            Paths.Trace(10μm),
+            Paths.Style[Paths.Trace(2μm)],
+            DeviceLayout.Meta[SemanticMeta(:a)]
+        )
+    end
+    function SchematicDrivenLayout._geometry!(cs::CoordinateSystem, c::SharedOverlay)
+        pa = Path(; metadata=METAL_NEGATIVE)
+        straight!(pa, 10μm, c.sty)
+        straight!(pa, 10μm, c.sty)
+        return addref!(cs, pa)
+    end
+    SchematicDrivenLayout.hooks(c::SharedOverlay) =
+        (; p=StyledHook(PointHook(0μm, 0μm, 0°), c.sty, METAL_NEGATIVE))
+    @variant SharedOverlayMapped SharedOverlay map_meta = m -> overlay_map[m]
+    v = SharedOverlayMapped()
+    @test hook_style(hooks(v).p).overlay_metadata == [SemanticMeta(:b)]
+    pa_v = structure(only(refs(geometry(v))))
+    @test all(n -> n.sty.overlay_metadata == [SemanticMeta(:b)], pa_v.nodes)
+    @test hook_style(hooks(v).p).overlay_metadata == [SemanticMeta(:b)]
+    @test v.sty.overlay_metadata == [SemanticMeta(:a)]
 end

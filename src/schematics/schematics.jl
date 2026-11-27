@@ -409,7 +409,7 @@ end
 
 """
     terminate!(g::SchematicGraph, node::ComponentNode, hook_name::Symbol;
-               style=nothing, kwargs...)
+               style=nothing, metadata=nothing, kwargs...)
     terminate!(g::SchematicGraph, p::Pair{<:ComponentNode, Symbol}; kwargs...)
 
 Attach a termination component to `node`'s `hook_name` hook in the schematic
@@ -425,9 +425,12 @@ rendered termination cap (open gap, short, rounded, ...) — see
 A bare `PointHook` or `HandedPointHook` without an explicit `style=` kwarg
 errors with an actionable message.
 
+The termination path's metadata is `metadata` if supplied, otherwise the hook's
+[`hook_metadata`](@ref), or `UNDEF_META` for a bare hook.
+
 # Keyword arguments
 
-All kwargs are forwarded to [`Paths.terminate!`](@ref):
+Other than `style` and `metadata`, all kwargs are forwarded to [`Paths.terminate!`](@ref):
 
   - `rounding` — corner rounding radius (default `zero(T)`)
   - `initial::Bool` — direction flag (unused here; `terminate!` always caps the
@@ -449,17 +452,24 @@ terminate!(g, qubit, :xy; rounding=5μm)
 # short instead of open
 terminate!(g, qubit, :xy; gap=0μm)
 
-# bare hook: pass style explicitly
-terminate!(g, some_node, :p1; style=Paths.CPW(10μm, 6μm))
+# bare hook: pass style and metadata explicitly
+terminate!(
+    g,
+    some_node,
+    :p1;
+    style=Paths.CPW(10μm, 6μm),
+    metadata=SemanticMeta(:metal_negative)
+)
 ```
 
-See also: [`StyledHook`](@ref), [`hook_style`](@ref), [`Paths.terminate!`](@ref).
+See also: [`StyledHook`](@ref), [`hook_style`](@ref), [`hook_metadata`](@ref), [`Paths.terminate!`](@ref).
 """
 function DeviceLayout.terminate!(
     g::SchematicGraph,
     node::ComponentNode,
     hook_name::Symbol;
     style=nothing,
+    metadata=nothing,
     kwargs...
 )
     # Fusion to RouteComponent hooks is not allowed (route nodes are planned last), so RC termination fails
@@ -467,7 +477,8 @@ function DeviceLayout.terminate!(
         throw(ArgumentError("RouteComponents cannot be terminated"))
     h = hooks(component(node), hook_name)
     sty = _resolve_termination_style(h, style, node, hook_name)
-    termpath = _build_termination_path(h, sty; kwargs...)
+    meta = something(metadata, hook_metadata(h), DeviceLayout.UNDEF_META)
+    termpath = _build_termination_path(h, sty, meta; kwargs...)
     return fuse!(g, node => hook_name, termpath => :p0)
 end
 
@@ -482,26 +493,33 @@ function _resolve_termination_style(h::Hook, user_style, node, hook_name)
         "terminate!(g, $(repr(node.id)), $(repr(hook_name))): hook carries no style " *
         "(it is a bare $(typeof(h).name.name), not a StyledHook). " *
         "Pass style=<Paths.Style> explicitly, or wrap the hook as " *
-        "StyledHook(h, style) in the component's hooks() method."
+        "StyledHook(h, style, metadata) in the component's hooks() method."
     )
 end
 
 """
-    _build_termination_path(h::Hook, sty; rounding, margin, kwargs...) -> Path
+    _build_termination_path(h::Hook, sty, meta; rounding, margin, kwargs...) -> Path
 
-Build a minimal termination `Path` that attaches at `h` and ends in a
+Build a minimal termination `Path` with metadata `meta` that attaches at `h` and ends in a
 [`Paths.terminate!`](@ref) cap in the given style `sty`. The initial straight
 segment length equals `backtracking = rounding + margin` so that
 `Paths.terminate!`'s `splice!` backtrack consumes exactly this stub rather
 than eating into the fused parent component.
 """
-function _build_termination_path(h::Hook, sty; rounding=nothing, margin=nothing, kwargs...)
+function _build_termination_path(
+    h::Hook,
+    sty,
+    meta;
+    rounding=nothing,
+    margin=nothing,
+    kwargs...
+)
     T = eltype(h.p)
     z = zero(T)
     rnd = isnothing(rounding) ? z : rounding
     mrg = isnothing(margin) ? z : margin
     backtracking = rnd + mrg
-    pa = Path(h.p; α0=out_direction(h), name=uniquename("term"))
+    pa = Path(h.p; α0=out_direction(h), name=uniquename("term"), metadata=meta)
     # Invariant: initial straight must be at least `backtracking` long so that
     # Paths.terminate! eats into this stub and not into the parent component via
     # the fused hook.
@@ -1329,6 +1347,8 @@ function _plan_route!(
         comp1.r.waypoints = rot.(comp1.r.waypoints) .+ Ref(comp1.r.p0)
         comp1.r.waydirs = comp1.r.waydirs .+ comp1.r.α0
     end
+    # The endpoints are set, so rules can read the route's hooks in `_update_with_plan!`
+    comp1._planned = true
     _update_with_plan!(comp1.r.rule, node, sch)
     return addref!(node_cs, comp1)
 end
@@ -1393,42 +1413,6 @@ function _plan!(
                 (e, catch_backtrace()) _group = :plan
         end
     end
-end
-
-"""
-    check!(sch::Schematic; rules=[rotations_valid])
-
-Verifies that `sch` satisfies `rule(sch) == true` for each `rule` in `rules`, and sets `sch.checked = true` if it does.
-
-By default, checks that all checkable components have an allowed global orientation
-([`rotations_valid(::Schematic)`](@ref)).
-"""
-function check!(sch::Schematic; rules=[rotations_valid])
-    for rule in rules
-        @assert rule(sch)
-    end
-    sch.checked[] = true
-    return sch
-end
-
-"""
-    rotations_valid(sch::Schematic)
-
-Verifies that all checkable components in `sch` have the right orientation in the
-global coordinate system (returns `true` if successful and throws an error otherwise).
-A component of type `T` is checkable if `check_rotation(::T) = true`.
-"""
-function rotations_valid(sch::Schematic)
-    for node_idx_path in find_components(check_rotation, sch.graph)
-        node = sch.graph[node_idx_path]
-        comp = component(node)
-        θ = rotation(transformation(sch, node_idx_path...))
-        if !any(ϕ -> isapprox_angle(ϕ, θ; atol=1e-6), allowed_rotation_angles(comp))
-            error("The $(typeof(comp)) $(name(comp)) in node $(node.id) doesn't have
-                    the correct global orientation.")
-        end
-    end
-    return true # no errors encountered at this point
 end
 
 function index_layer!(sch::Schematic, ly, nextindex=1)

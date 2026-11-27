@@ -136,7 +136,14 @@ function qpu17_demo(; savegds=true, dir=pwd())
 
     #### Floorplanning (place and route)
     @time "Floorplanning" schematic = plan(g; log_dir=dir) # Place components and define routes
-    @time "Schematic design rule checking" check!(schematic) # Make sure schematic follows any relevant rules
+    # Make sure schematic follows any relevant rules
+    @time "Schematic design rule checking" check!(
+        schematic;
+        rules=[
+            SchematicDrivenLayout.rotations_valid,
+            SchematicDrivenLayout.hook_styles_match
+        ]
+    )
     # Optional: Readout line length calculations
     # calculate_readout_lengths(nodes.readout_nodes, nodes.route_nodes.readout, p)
 

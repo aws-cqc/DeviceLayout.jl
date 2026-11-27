@@ -651,13 +651,20 @@ Length to next halfwave: 7.744774112603247 mm (-0.7000838592277392 mm)
 
 ## Schematic design rule checking
 
-Before going further, we run `check!` to make sure the schematic follows any desired rules. Here, we only use the default `rotations_valid` rule, which checks that any components that must be oriented in certain ways are oriented correctly. You can define other rules as part of your PDK and use the `rules` keyword argument in `check!` to run those checks.
+Before going further, we run `check!` to make sure the schematic follows any desired rules. Here, we use the default `rotations_valid` rule, which checks that any components that must be oriented in certain ways are oriented correctly, along with `hook_styles_match`, which checks that wherever two hooks carrying path styles are fused, their cross sections (style and metadata) match. You can define other rules as part of your PDK and use the `rules` keyword argument in `check!` to run those checks.
 
 ```julia
-@time "Schematic design rule checking" check!(schematic) # Make sure schematic follows any relevant rules
+# Make sure schematic follows any relevant rules
+@time "Schematic design rule checking" check!(
+    schematic;
+    rules=[
+        SchematicDrivenLayout.rotations_valid,
+        SchematicDrivenLayout.hook_styles_match
+    ]
+)
 ```
 
-In this case, the only components to check are the [`ExampleSimpleSQUID`](examplepdk.md#SimpleJunctions) subcomponents of our transmons, which must be oriented so that junction leads run north to south. This is enabled by defining `check_rotation` and `allowed_rotation_angles` methods for that component.
+In this case, the only components with rotations to check are the [`ExampleSimpleSQUID`](examplepdk.md#SimpleJunctions) subcomponents of our transmons, which must be oriented so that junction leads run north to south. This is enabled by defining `check_rotation` and `allowed_rotation_angles` methods for that component.
 
 ## Finishing touches
 

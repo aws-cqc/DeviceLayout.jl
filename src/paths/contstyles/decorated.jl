@@ -373,3 +373,25 @@ end
 function nextstyle(sty::OverlayStyle)
     return OverlayStyle(nextstyle(sty.s), nextstyle.(sty.overlay), sty.overlay_metadata)
 end
+
+cross_section_at(sty::DecoratedStyle, t, initial) = cross_section_at(sty.s, t, initial)
+# Copy the metadata, which `overlay!` can add to in place, so that a hook doesn't change with the
+# path it came from
+function cross_section_at(sty::OverlayStyle, t, initial)
+    return OverlayStyle(
+        cross_section_at(sty.s, t, initial),
+        [cross_section_at(o, t, initial) for o in sty.overlay],
+        copy(sty.overlay_metadata)
+    )
+end
+
+# A new style with `map_meta` applied to overlay metadata, including under attachments
+map_overlay_metadata(sty::Style, map_meta) = sty
+map_overlay_metadata(sty::OverlayStyle, map_meta) =
+    OverlayStyle(sty.s, sty.overlay, map_meta.(sty.overlay_metadata))
+map_overlay_metadata(sty::DecoratedStyle, map_meta) = DecoratedStyle(
+    map_overlay_metadata(sty.s, map_meta),
+    copy(sty.ts),
+    copy(sty.dirs),
+    copy(sty.refs)
+)

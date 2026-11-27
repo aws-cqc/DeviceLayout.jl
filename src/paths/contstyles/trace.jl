@@ -30,7 +30,7 @@ A single trace with fixed width as a function of path length.
 struct SimpleTrace{T <: Coordinate} <: Trace{false}
     width::T
 end
-copy(x::SimpleTrace) = Trace(x.width)
+copy(x::SimpleTrace) = SimpleTrace(x.width)
 extent(s::SimpleTrace, t...) = 0.5 * s.width
 width(s::SimpleTrace, t...) = s.width
 trace(s::SimpleTrace, t...) = s.width
@@ -160,3 +160,5 @@ function insert_rounded_transitions!(pa::Path; α_max, radius, side)
         splice!(pa, donor_idx:donor_idx, parts)
     end
 end
+
+cross_section_style(sty::Trace, l) = SimpleTrace(width(sty, l))

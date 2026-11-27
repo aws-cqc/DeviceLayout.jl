@@ -15,6 +15,7 @@ Route(rule, hook0::PointHook, hook1::PointHook; kwargs...) =
         sty::Vector{Paths.Style}
         meta::Meta
         _path::Path{T}
+        _planned::Bool
 
 Wraps a `Route` in a `Component` type for use with schematics.
 
@@ -34,6 +35,7 @@ mutable struct RouteComponent{T, R <: Paths.RouteRule} <: AbstractComponent{T}
     sty::Vector{Paths.Style}
     meta::Meta
     _path::Path{T}
+    _planned::Bool
     function RouteComponent{T, R}(n, r, g, s, m) where {T, R}
         length(s) > 1 && Base.depwarn(
             "A `RouteComponent` with a vector of styles is deprecated and will be removed " *
@@ -41,7 +43,7 @@ mutable struct RouteComponent{T, R <: Paths.RouteRule} <: AbstractComponent{T}
             "leg, each with a single style.",
             :RouteComponent
         )
-        return new{T, R}(n, r, g, s, m, Path{T}(n))
+        return new{T, R}(n, r, g, s, m, Path{T}(n), true)
     end
 end
 RouteComponent(
@@ -53,11 +55,22 @@ RouteComponent(
 ) where {T, R} = RouteComponent{T, R}(name, r, gw, [sty], meta)
 
 function hooks(rc::RouteComponent{T}) where {T}
+    rc._planned ||
+        @warn "Route component $(rc.name) has not been planned; returning hooks at its unplanned endpoints with its declared styles. Call `plan` first."
+    # Once the path is built, take styles from its ends, since they can depend on its length.
+    # Don't build it here: `build!` reuses a built path, so it wouldn't report routing errors.
+    built = !isempty(rc._path)
     p0 = StyledHook(
         PointHook(rc.r.p0, rc.r.α0),
-        Paths.nextstyle(reverse(rc.sty[1], pathlength(rc._path)))
+        built ? hook_style(p0_hook(rc._path)) :
+        Paths.nextstyle(reverse(_undec(rc.sty[1]), pathlength(rc._path))),
+        rc.meta
     )
-    p1 = StyledHook(PointHook(rc.r.p1, rc.r.α1 + 180°), Paths.nextstyle(rc.sty[end]))
+    p1 = StyledHook(
+        PointHook(rc.r.p1, rc.r.α1 + 180°),
+        built ? hook_style(p1_hook(rc._path)) : Paths.nextstyle(_undec(rc.sty[end])),
+        rc.meta
+    )
     return (; p0, p1)
 end
 
@@ -90,6 +103,7 @@ function path(rc::RouteComponent)
     path.α0 = r.α0
     path.name = rc.name
     path.metadata = rc.meta
+    # Routing can insert waypoints, so pass copies to leave the planned route unchanged
     if length(rc.sty) == 1
         route!(
             path,
@@ -97,8 +111,8 @@ function path(rc::RouteComponent)
             r.α1,
             r.rule,
             _undec(rc.sty[1]);
-            waypoints=r.waypoints,
-            waydirs=r.waydirs
+            waypoints=copy(r.waypoints),
+            waydirs=copy(r.waydirs)
         )
         redecorate!(path, rc.sty[1]) # apply decorations
     else # Vector of styles for each segment
@@ -108,8 +122,8 @@ function path(rc::RouteComponent)
             r.α1,
             r.rule,
             _undec.(rc.sty);
-            waypoints=r.waypoints,
-            waydirs=r.waydirs
+            waypoints=copy(r.waypoints),
+            waydirs=copy(r.waydirs)
         )
         redecorate!.(Ref(path), rc.sty)
     end
@@ -232,6 +246,8 @@ function route!(
         waydirs=waydirs
     )
     rc = RouteComponent(name, r, global_waypoints, sty, meta)
+    # Its endpoints are placeholders until `plan` sets them
+    rc._planned = false
     # Add node and fuse to nodehook1
     rn = add_node!(g, rc; kwargs...)
     fuse!(g, nodehook1, rn => :p0)

@@ -35,7 +35,7 @@ import DeviceLayout:
     StyledHook,
     Transformation,
     UPREFERRED
-import DeviceLayout: hook_style
+import DeviceLayout: hook_metadata, hook_style
 import DeviceLayout:
     attach!,
     autofill!,
@@ -150,6 +150,7 @@ include("utils.jl")
 include("targets.jl")
 include("parameter_set.jl")
 include("schematics.jl")
+include("check.jl")
 include("components/components.jl")
 include("components/compdef.jl")
 include("components/composite_components.jl")

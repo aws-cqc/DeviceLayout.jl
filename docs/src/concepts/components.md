@@ -166,10 +166,11 @@ all(level.(element_metadata(geometry(fq))) .== 2)
 
 This creates a new type, `FlipchipQubit`, and automatically defines the required
 methods for `Component` implementation using the `Qubit` implementation. It has the same
-`default_parameters`, `hooks`, and almost the same `_geometry!`. Since we supplied
+`default_parameters`, and almost the same `hooks` and `_geometry!`. Since we supplied
 the optional keyword `map_meta`, the geometry method for the new type creates a `Qubit` and
 then applies `facing` to each element (and referenced structure, recursively), as in the
-`map_metadata!` example above. But unlike with using `map_metadata!` on a single `Qubit` instance,
+`map_metadata!` example above. Its `hooks` are the `Qubit` hooks with `facing` applied to any
+defined metadata of their `StyledHook`s. But unlike with using `map_metadata!` on a single `Qubit` instance,
 you can replace `fq` with another `typeof(fq)` without losing the level information.
 
 You can also go further with manual modifications. You could add a cutout

@@ -22,6 +22,30 @@ for x in (:extent, :width, :trace, :gap)
         return Base.Fix1(($x), s)
     end
 end
+# At a boundary, `s(t)` gives the following substyle, but the end of a segment is drawn with the
+# preceding one. Look just inside the segment to choose the substyle, so that this also holds
+# after rounding error, but use the exact length into it where possible.
+function cross_section_at(s::AbstractCompoundStyle, t, initial)
+    sty, t_into = s(t)
+    # In the unit of `t`, since substyles may be functions of it
+    δ = oftype(float(t), 1e-6 * DeviceLayout.onenanometer(typeof(t)))
+    # Repeated substyles are the same object, so also check that `t_inside` is in the same span
+    if initial
+        sty_inside, t_inside = s(t + δ)
+        if sty_inside !== sty || t_inside < t_into
+            sty, t_into = sty_inside, t_inside - δ
+        end
+    else
+        δ = min(t, δ)
+        sty_inside, t_inside = s(t - δ)
+        if sty_inside !== sty || t_inside > t_into
+            sty, t_into = sty_inside, t_inside + δ
+        end
+    end
+    sty, t_into = _skip_virtual(s, sty, t, t_into, initial)
+    return cross_section_at(sty, t_into, initial)
+end
+_skip_virtual(s::AbstractCompoundStyle, sty, t, t_into, initial) = (sty, t_into)
 
 isvirtual(s::AbstractCompoundStyle) = all(isvirtual.(s.styles))
 change_handedness!(sty::AbstractCompoundStyle) = change_handedness!.(sty.styles)
@@ -69,6 +93,15 @@ function _style1(s::CompoundStyle, T)
     # Similarly simplifying compound or decorated nodes is risky, but just in case
     i = findlast(x -> isa(x, T) && !isvirtual(x), s.styles)
     return _style1(without_attachments(s.styles[i]), T)
+end
+
+# Virtual substyles aren't drawn, so take the nearest drawn one, as `_style1` does
+function _skip_virtual(s::CompoundStyle, sty, t, t_into, initial)
+    isvirtual(sty) || return sty, t_into
+    i = argmin(abs.(s.grid[1:(end - 1)] .- (t - t_into)))
+    j = initial ? findnext(!isvirtual, s.styles, i) : findprev(!isvirtual, s.styles, i)
+    isnothing(j) && return sty, t_into
+    return s.styles[j], initial ? zero(t_into) : s.grid[j + 1] - s.grid[j]
 end
 
 """

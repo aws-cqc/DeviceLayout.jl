@@ -46,3 +46,5 @@ the style assuming it is applied to a segment of pathlength `l`.
 """
 function reverse end
 # Reversing a GeneralTrace/CPW requires knowing its length, so we require that as an argument even if unused
+
+cross_section_style(s::ContinuousStyle, x) = s

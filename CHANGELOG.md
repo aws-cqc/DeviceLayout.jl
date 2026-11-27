@@ -16,6 +16,31 @@ The format of this changelog is based on
     is up to 40 times faster on one thread (10 times on the DemoQPU17 ground-plane fill) and
     allocates up to 600 times less memory. For large inputs, the result is computed on
     several threads when Julia has more than one. The result is unchanged.
+  - `check!` runs every rule and reports every violation before failing, instead of stopping at
+    the first. Rules log each violation with `@error`, which goes to the console and to the
+    schematic's log file under the `check` stage, and `check!` then throws an `ErrorException`
+    pointing to the log. A rule that throws is reported the same way without stopping the other
+    rules. Previously, a failing rule threw an `AssertionError`, and a rule's own exception
+    propagated.
+    `rotations_valid` logs each misoriented component, with its rotation and the allowed
+    rotations, and returns `false` instead of throwing.
+  - The style of `p0_hook` and `p1_hook`, and so of `hooks(::Path)`, is the cross section drawn
+    at that end of the path. Virtual segments are skipped, attachments are dropped, and varying
+    styles give a constant style matching that end: for example, a `GeneralTrace` gives a
+    `SimpleTrace` with its width at that end, and a `PeriodicStyle` gives the substyle drawn at
+    that end, also inside a compound style from `simplify!`. Previously `p1_hook` used
+    `nextstyle(pa)`, which repeats a `GeneralTrace` or `PeriodicStyle`, and `p0_hook` used
+    `nextstyle` of the reversed first segment, which gave a reversed `GeneralTrace` or the whole
+    `CompoundStyle` of a simplified path, and did not skip virtual segments.
+  - Once a route's path is built, `RouteComponent` hook styles are its end cross sections, so
+    they account for styles that depend on the route's length. Calling `hooks` on a route added
+    with `route!` that has not been planned logs a warning.
+  - `@variant` and `@composite_variant` apply `map_meta` to the metadata carried by hooks
+    (including overlay metadata), as well as to geometry, so `map_meta` must also handle
+    `UNDEF_META`, the metadata of hooks built without any.
+  - In the ExamplePDK, `ExampleZTermination` and `ExampleSeriesClawCapacitor` hooks carry the
+    style and metadata of their lines, and the `p2` hooks of `ExampleShuntClawCapacitor` have
+    its `output_style` instead of its `input_style`.
 
 ### Added
 
@@ -43,6 +68,20 @@ The format of this changelog is based on
   - A retained group that another retained group contains, such as bridge metal that is
     also part of a retained conductor group, warns too, so `strict=:warn` renders with
     such a target now fail. Retain only one of the two.
+  - `SchematicDrivenLayout.hook_styles_match`, a design rule for `check!` that verifies that
+    wherever two `StyledHook`s are fused, including inside composite components, their cross
+    sections match: the same path style (up to 1e-6 nm) and the same metadata, including overlay
+    styles and metadata in any order. A styled hook whose metadata or overlay metadata is
+    undefined fails the check.
+    Routes that have not been built are built for the check and then discarded. Run it with
+    `check!(sch; rules=[SchematicDrivenLayout.rotations_valid, SchematicDrivenLayout.hook_styles_match])`;
+    the DemoQPU17 example does.
+  - `StyledHook` carries the metadata of the path cross section at the hook, returned by the new
+    `hook_metadata` (`nothing` for hooks without a style). `StyledHook(h, style)` leaves it
+    `UNDEF_META`; pass it as `StyledHook(h, style, metadata)`. Path hooks use the path's
+    metadata, and `RouteComponent` hooks use the route's.
+  - Graph-level `terminate!` accepts a `metadata` keyword. Without it, the termination uses the
+    hook's metadata rather than `UNDEF_META`.
 
 ### Fixed
 
@@ -61,6 +100,19 @@ The format of this changelog is based on
     an edge of a path's style on a B-spline segment that is farther from the centerline than
     the radius of curvature on the inside of a bend. Discretization now stops refining at the
     tolerance.
+  - `hooks` of a `@composite_variant` no longer errors when the base component has a
+    vector-valued hook.
+  - `@composite_variant` resolves its `new_defaults` and `map_meta` in the module that calls
+    it, as `@variant` does, so they can use names that `SchematicDrivenLayout` doesn't define.
+  - A failing `check!` leaves the schematic unchecked even if an earlier `check!` passed.
+  - `map_metadata!` of a path maps overlay metadata on segments that also have attachments,
+    so `@variant` with `map_meta` maps it too. It gives each segment a new style instead of
+    changing the overlay style in place, so a style that a segment shares with other segments
+    or with a component parameter is mapped once for each segment and leaves the parameter
+    unchanged.
+  - `copy` of a `Paths.SimpleTrace` keeps the type of its width. Previously it converted an
+    integer width to floating point, so on Julia 1.10 `deepcopy` of a path with such a style
+    threw a `TypeError`, as did `Paths.PeriodicStyle(pa)`, which copies `pa`.
 
 ## 1.22.0 (2026-11-16)
 
