@@ -232,6 +232,123 @@ end
     end
 end
 
+@testitem "BSpline offset cusps" setup = [CommonTestSetup] begin
+    # Edges of a style following a 90° B-spline bend; the inner edge of a trace is `[2]`
+    function edges(sty; kwargs...)
+        pa = Path()
+        bspline!(pa, [Point(500.0μm, 500.0μm)], 90°, sty; kwargs...)
+        return [c for cs in vcat(Curvilinear.pathtopolys(pa[1])) for c in cs.curves]
+    end
+    # Minimum curvature radius of this bend is about 337.5μm
+    bend = (; endpoints_speed=800.0μm, auto_curvature=true)
+    nowarn(c; kwargs...) =
+        @test_logs min_level = Logging.Warn DeviceLayout.discretize_curve(
+            c,
+            1.0nm;
+            kwargs...
+        )
+    warns(c; kwargs...) =
+        @test_logs (:warn, r"runs backward") DeviceLayout.discretize_curve(
+            c,
+            1.0nm;
+            kwargs...
+        )
+
+    # Half the trace width stays below the minimum radius: no warning
+    c = edges(Paths.Trace(600.0μm); bend...)[2]
+    @test c isa Paths.ConstantOffset
+    nowarn(c)
+    nowarn(c; rtol=1e-3)
+
+    # Half the trace width exceeds the minimum radius: one warning for the curve
+    c = edges(Paths.Trace(680.0μm); bend...)[2]
+    warns(c)
+    warns(c; rtol=1e-3)
+
+    # Same for general offsets, whether constant or varying
+    c = edges(Paths.Trace(x -> 680.0μm); bend...)[2]
+    @test c isa Paths.GeneralOffset
+    warns(c)
+    warns(edges(Paths.Trace(x -> 600.0μm + 0.5 * x); bend...)[2])
+    nowarn(edges(Paths.TaperTrace(600.0μm, 660.0μm); bend...)[2])
+    warns(edges(Paths.TaperTrace(660.0μm, 720.0μm); bend...)[2])
+
+    # Both edges of the gap on the inside of the bend pass the radius; the outer one is
+    # stored reversed, so their offsets have opposite signs
+    cpw = edges(Paths.CPW(680.0μm, 60.0μm); bend...)
+    @test sign(cpw[3].offset) != sign(cpw[4].offset)
+    nowarn.(cpw[1:2])
+    warns.(cpw[3:4])
+
+    # Offset within 5% of the base curvature radius (about 500μm) along the whole bend
+    # without exceeding it: the edge is tight everywhere but does not fold back
+    nowarn(edges(Paths.Trace(970.0μm); endpoints_speed=824.0μm)[2])
+
+    # Offset past the radius along the whole segment: the edge is reversed throughout
+    pa = Path()
+    turn!(pa, 90°, 100.0μm, Paths.Trace(1.0μm))
+    arc = Paths.bspline_approximation(pa[1].seg).segments[1]
+    nowarn(Paths.offset(arc, 95.0μm))
+    warns(Paths.offset(arc, 150.0μm))
+
+    # Unitless coordinates
+    for sty in (Paths.Trace(680.0), Paths.Trace(x -> 680.0))
+        local pa = Path{Float64}()
+        bspline!(
+            pa,
+            [Point(500.0, 500.0)],
+            90°,
+            sty;
+            endpoints_speed=800.0,
+            auto_curvature=true
+        )
+        local c = Curvilinear.pathtopolys(pa[1]).curves[2]
+        @test_logs (:warn, r"runs backward") DeviceLayout.discretize_curve(c, 1e-3)
+    end
+
+    # The warning reaches the user once per affected edge when rendering
+    pa = Path()
+    bspline!(pa, [Point(500.0μm, 500.0μm)], 90°, Paths.Trace(680.0μm); bend...)
+    @test_logs (:warn, r"runs backward") render!(Cell("cusp", nm), pa, GDSMeta())
+end
+
+@testitem "Discretizing a curve through a cusp" setup = [CommonTestSetup] begin
+    # The CPW's outer edges are offset by more than the B-splines' radius of curvature
+    # where they bend, so their offset curves have cusps. One is at the end of an edge,
+    # where discretization finishes only by stopping refinement at the tolerance.
+    # Rendering still warns about each edge; the test is that it finishes.
+    pa = Path(Point(0.0μm, 0.0μm))
+    sty = Paths.CPW(8μm, 5μm)
+    bspline!(pa, [Point(0.0μm, -18.0μm)], -90°, sty; endpoints_speed=18μm)
+    bspline!(pa, [Point(16.0μm, -4.0μm)], 105°, sty; endpoints_speed=sqrt(452) * μm)
+    c = Cell("cusp", nm)
+    @test_logs match_mode = :any (:warn, r"runs backward") render!(c, pa, GDSMeta())
+    @test length(c.elements) == 4
+    @test all(p -> length(points(p)) < 1000, c.elements)
+
+    # A cusp at the end of the curve: the floored step stops at the end
+    pa = Path(Point(0.0μm, 0.0μm))
+    bspline!(
+        pa,
+        [Point(0.0μm, 35.0μm)],
+        150°,
+        Paths.CPW(6.0μm, 4.0μm);
+        endpoints_speed=35.0μm
+    )
+    c = Cell("endcusp", nm)
+    @test_logs match_mode = :any (:warn, r"runs backward") render!(c, pa, GDSMeta())
+    @test length(c.elements) == 2
+    @test all(p -> length(points(p)) < 1000, c.elements)
+    pa = Path(Point(0.0, 0.0))
+    sty = Paths.CPW(6.0, 4.0)
+    bspline!(pa, [Point(0.0, 35.0)], 150°, sty; endpoints_speed=35.0)
+    straight!(pa, 10.0, sty)
+    c = Cell{Float64}("endcusp")
+    @test_logs match_mode = :any (:warn, r"runs backward") render!(c, pa, GDSMeta())
+    @test length(c.elements) == 4
+    @test all(p -> length(points(p)) < 1000, c.elements)
+end
+
 @testitem "BSpline approximation" setup = [CommonTestSetup] begin
     pa = Path(Point(0.0, 0.0)nm, α0=90°)
     bspline!(

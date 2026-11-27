@@ -71,6 +71,11 @@ The job of rendering to a `Cell` is to approximate these curves by closed polygo
 of styles along generic paths in the plane, segment/style rendering falls back to this same
 curvature-based discretization when no specialized polygon method is available.
 
+When an edge of a style on a B-spline segment lies on the inside of a bend, farther from the
+centerline than the centerline's radius of curvature, the edge runs backward along the path
+there, and the rendered polygon may fold or cross itself. Converting such an edge to polygons
+logs a warning each time (the check uses the points where discretization samples the curve).
+
 In some cases, custom rendering methods are implemented when it would improve performance
 for simple structures or when special attention is required. The rendering methods can
 specialize on either the `Segment` or `Style` types, or both.

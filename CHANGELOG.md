@@ -29,6 +29,14 @@ The format of this changelog is based on
     or `Schematic` and a `LayoutTarget` record per-call semantic-to-GDS mappings without
     serializing the target's mutable mapping cache, and return the rendered `Cell` so it can
     be saved as GDS without rendering again.
+  - Converting a B-spline path segment to polygons (for example, rendering it to a `Cell`)
+    warns when an edge on the inside of a bend is farther from the centerline than the
+    centerline's radius of curvature, as when half the trace plus the gap of a `Paths.CPW`
+    is larger than the tightest bend radius. Such an edge runs backward along the path, so
+    the polygon may fold or cross itself and operations like `union2d_curved` may not handle
+    it as expected. (#247)
+      + The warning is logged at each conversion, so `bounds` and `render!` on the same path
+        each warn, and rendering a schematic with `strict=:warn` throws.
 
 ### Fixed
 
@@ -43,6 +51,10 @@ The format of this changelog is based on
   - Graphics export now clips viewport content to the top-left content rectangle when explicit
     canvas dimensions have a different aspect ratio from the viewport, preventing geometry from
     painting into the unused canvas area.
+  - Converting a curve with a cusp to polygons could run without end and exhaust memory, as for
+    an edge of a path's style on a B-spline segment that is farther from the centerline than
+    the radius of curvature on the inside of a bend. Discretization now stops refining at the
+    tolerance.
 
 ## 1.22.0 (2026-11-16)
 

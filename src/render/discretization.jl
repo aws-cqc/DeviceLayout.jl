@@ -73,7 +73,8 @@ function discretization_grid(s::Paths.Segment, tolerance; rtol=nothing)
         t -> Paths.signed_curvature(s, t * l),
         tolerance;
         t_scale=l,
-        rtol=rtol
+        rtol=rtol,
+        dt_min=uconvert(NoUnits, tolerance / l)
     )
 end
 
@@ -96,7 +97,8 @@ function discretization_grid(s::Paths.ConstantOffset, tolerance; rtol=nothing)
         t -> Paths.signed_curvature(s, t * l),
         tolerance;
         t_scale=actual_l,
-        rtol=rtol
+        rtol=rtol,
+        dt_min=uconvert(NoUnits, tolerance / actual_l)
     )
 end
 
@@ -121,7 +123,8 @@ function discretization_grid(s::Paths.BSpline, tolerance; rtol=nothing)
         t -> _bspline_curvature(s.r, t),
         tolerance;
         t_scale=l,
-        rtol=rtol
+        rtol=rtol,
+        dt_min=uconvert(NoUnits, tolerance / l)
     )
 end
 
@@ -136,12 +139,17 @@ function discretization_grid(
     κ0 = _bspline_signed_curvature(s.seg.r, 0.0)
     κ1 = _bspline_signed_curvature(s.seg.r, 1.0)
     max_speed = max(abs(1 - s.offset * κ0), abs(1 - s.offset * κ1))
-    return discretization_grid(
-        t -> _offset_bspline_curvature(s, t),
+    t_scale = l * max_speed
+    tracker = _CuspTracker()
+    grid = discretization_grid(
+        t -> _offset_bspline_curvature(s, t, tracker),
         tolerance;
-        t_scale=l * max_speed,
-        rtol=rtol
+        t_scale,
+        rtol=rtol,
+        dt_min=uconvert(NoUnits, tolerance / t_scale)
     )
+    tracker.tangential_min < 0 && _warn_cusp(s.offset, s.seg.r, tracker.t_min)
+    return grid
 end
 
 function discretization_grid(
@@ -157,12 +165,20 @@ function discretization_grid(
         (1 - Paths.getoffset(s, zero(l)) * κ0)^2 + Paths.offset_derivative(s, zero(l))^2
     )
     speed1 = sqrt((1 - Paths.getoffset(s, l) * κ1)^2 + Paths.offset_derivative(s, l)^2)
-    return discretization_grid(
-        t -> _offset_bspline_curvature(s, t),
+    t_scale = l * max(speed0, speed1)
+    tracker = _CuspTracker()
+    grid = discretization_grid(
+        t -> _offset_bspline_curvature(s, t, tracker),
         tolerance;
-        t_scale=l * max(speed0, speed1),
-        rtol=rtol
+        t_scale,
+        rtol=rtol,
+        dt_min=uconvert(NoUnits, tolerance / t_scale)
     )
+    if tracker.tangential_min < 0
+        offset = Paths.getoffset(s, Paths.t_to_arclength(s.seg, tracker.t_min))
+        _warn_cusp(offset, s.seg.r, tracker.t_min)
+    end
+    return grid
 end
 
 function _bspline_signed_curvature(r, t)
@@ -184,23 +200,45 @@ function _offset_bspline_point(s::Paths.GeneralOffset, t)
     return s.seg.r(t) + Paths.getoffset(s, l) * Point(-tangent.y, tangent.x)
 end
 
+# Records the smallest tangential speed component 1 − offset·κ over the curvature
+# evaluations the marching kernel makes, and where it occurred. Where it is negative the
+# offset exceeds the radius of curvature on its side, so the offset curve runs backward
+# along the base curve there. Points between the kernel's evaluations are not checked.
+mutable struct _CuspTracker
+    tangential_min::Float64
+    t_min::Float64
+end
+_CuspTracker() = _CuspTracker(Inf, NaN)
+
+function _track_cusp!(tracker::_CuspTracker, tangential, t)
+    if tangential < tracker.tangential_min
+        tracker.tangential_min = tangential
+        tracker.t_min = t
+    end
+    return nothing
+end
+
 # Offset-BSpline curvature in base spline `t` space, avoiding an arclength-to-`t`
 # root-find at every discretization step.
-function _offset_bspline_curvature(s::Paths.ConstantOffset, t)
+function _offset_bspline_curvature(s::Paths.ConstantOffset, t, tracker::_CuspTracker)
     κ = _bspline_signed_curvature(s.seg.r, t)
-    return abs(κ) / abs(1 - s.offset * κ)
+    tangential = 1 - s.offset * κ
+    _track_cusp!(tracker, tangential, t)
+    return abs(κ) / abs(tangential)
 end
 
 # Mirrors curvatureradius(::GeneralOffset, s), including its ignored offset*dκ/ds term.
-function _offset_bspline_curvature(s::Paths.GeneralOffset, t)
+function _offset_bspline_curvature(s::Paths.GeneralOffset, t, tracker::_CuspTracker)
     l = Paths.t_to_arclength(s.seg, t)
     r = 1 / _bspline_signed_curvature(s.seg.r, t)
     offset = Paths.getoffset(s, l)
     doffset = Paths.offset_derivative(s, l)
     d2offset = Paths.ForwardDiff.derivative(l_ -> Paths.offset_derivative(s, l_), l)
 
-    ds_dl = 1 / sqrt((1 - offset / r)^2 + doffset^2)
-    d2s_dl2 = -ds_dl^3 * doffset * (d2offset - (1 - offset / r) / r)
+    tangential = 1 - offset / r
+    _track_cusp!(tracker, tangential, t)
+    ds_dl = 1 / sqrt(tangential^2 + doffset^2)
+    d2s_dl2 = -ds_dl^3 * doffset * (d2offset - tangential / r)
 
     g = Paths.Interpolations.gradient(s.seg.r, t)[1]
     base_tangent = g / norm(g)
@@ -216,19 +254,38 @@ function _offset_bspline_curvature(s::Paths.GeneralOffset, t)
     return norm(d2_seg)
 end
 
+function _warn_cusp(offset, spline, t)
+    radius = 1 / abs(_bspline_signed_curvature(spline, t))
+    pt = spline(t)
+    round6(x) = round(x / oneunit(x); sigdigits=6) * oneunit(x)
+    @warn """
+       A curve's offset $(round6(abs(offset))) from a B-spline, on the inside of a bend, \
+       exceeds the B-spline's radius of curvature $(round6(radius)) near \
+       $(Point(round6(pt.x), round6(pt.y))), so the offset curve runs backward there and \
+       a polygon with that curve as an edge may fold or cross itself. Operations such as \
+       `union2d_curved` may not handle this as expected. If the curve is an edge of a \
+       path's style, reduce the edge's distance from the centerline (the style's width, \
+       or its halo) or loosen the bend.
+       """
+end
+
 # Discretize using marching algorithm based on Hessian or curvature.
 #
 # Known limitation: the curvature guard below is t_scale-dependent, so it over-refines
 # short, tight arcs (a 30°/2μm fillet gets ~101 points vs ~10 from circular_arc).
 # A correct fix must be t_scale-independent while still sampling the middle of
-# variable-curvature curves whose endpoints have cc≈0. That touches the broader
-# path-rendering pipeline, so it is deferred from the rounding unification.
+# variable-curvature curves whose endpoints have cc≈0.
+#
+# `dt_min` is the step floor. Callers whose `t_scale` converts `t` to arc length pass
+# `tolerance / t_scale`, effectively an arc length floor at the tolerance, so that
+# diverging curvature at a cusp does not cause steps to shrink towards zero.
 function discretization_grid(
     ddf,
     tolerance,
     bnds::Tuple{Float64, Float64}=(0.0, 1.0);
     t_scale=1.0,
-    rtol=nothing
+    rtol=nothing,
+    dt_min=0.0
 )
     bnds[1] == bnds[2] && return [bnds[1]]
     dt = 0.01 * bnds[2]
@@ -247,7 +304,7 @@ function discretization_grid(
         # Set dt based on distance from chord assuming constant curvature.
         # See the known limitation above for the curvature guard below.
         if cc >= 100 * 8 * eff_tol / (bnds[2]^2 * t_scale^2) # Update dt if curvature is not near zero
-            dt = uconvert(NoUnits, sqrt(8 * eff_tol / cc) / t_scale)
+            dt = max(uconvert(NoUnits, sqrt(8 * eff_tol / cc) / t_scale), dt_min)
         end
         if t + dt >= bnds[2]
             dt = bnds[2] - t
@@ -260,6 +317,10 @@ function discretization_grid(
             tolerance
         if (t_scale * dt)^2 * (cc_next - cc) / 24 > eff_tol_next
             dt = uconvert(NoUnits, sqrt(8 * eff_tol_next / cc_next) / t_scale)
+            if dt < dt_min
+                # The floored step can be longer than the one clamped to the end above
+                dt = min(dt_min, bnds[2] - t)
+            end
             cc_next = norm(ddf(t + dt))
         end
         cc = cc_next
