@@ -29,9 +29,9 @@ function cross_section_at(s::AbstractCompoundStyle, t, initial)
     sty, t_into = s(t)
     # In the unit of `t`, since substyles may be functions of it
     δ = oftype(float(t), 1e-6 * DeviceLayout.onenanometer(typeof(t)))
+    # Repeated substyles are the same object, so also check that `t_inside` is in the same span
     if initial
         sty_inside, t_inside = s(t + δ)
-        # Repeated substyles are the same object, so also check that `t_inside` is in the same span
         if sty_inside !== sty || t_inside < t_into
             sty, t_into = sty_inside, t_inside - δ
         end

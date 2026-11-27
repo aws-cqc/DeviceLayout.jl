@@ -17,6 +17,12 @@
     # Unit tests
     @test copy(psty).styles !== psty.styles
     @test contains(Paths.summary(psty), "2 substyles")
+    # `copy` keeps an integer width, which `deepcopy` of a path, as in `PeriodicStyle(pa)`,
+    # requires on Julia 1.10
+    @test copy(Paths.SimpleTrace(2μm)) === Paths.SimpleTrace(2μm)
+    pa_int = Path()
+    straight!(pa_int, 10μm, Paths.SimpleTrace(2μm))
+    @test only(PeriodicStyle(pa_int).styles) === Paths.SimpleTrace(2μm)
 
     # Direct 2-arg call for the generic Segment/PeriodicStyle method.
     seg = Paths.Straight{typeof(1.0μm)}(50μm, Point(0.0μm, 0.0μm), 0.0)

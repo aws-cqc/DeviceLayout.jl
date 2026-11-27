@@ -30,7 +30,7 @@ A single trace with fixed width as a function of path length.
 struct SimpleTrace{T <: Coordinate} <: Trace{false}
     width::T
 end
-copy(x::SimpleTrace) = Trace(x.width)
+copy(x::SimpleTrace) = SimpleTrace(x.width)
 extent(s::SimpleTrace, t...) = 0.5 * s.width
 width(s::SimpleTrace, t...) = s.width
 trace(s::SimpleTrace, t...) = s.width

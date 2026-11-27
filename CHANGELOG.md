@@ -110,6 +110,9 @@ The format of this changelog is based on
     changing the overlay style in place, so a style that a segment shares with other segments
     or with a component parameter is mapped once for each segment and leaves the parameter
     unchanged.
+  - `copy` of a `Paths.SimpleTrace` keeps the type of its width. Previously it converted an
+    integer width to floating point, so on Julia 1.10 `deepcopy` of a path with such a style
+    threw a `TypeError`, as did `Paths.PeriodicStyle(pa)`, which copies `pa`.
 
 ## 1.22.0 (2026-11-16)
 

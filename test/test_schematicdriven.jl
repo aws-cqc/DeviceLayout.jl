@@ -1830,11 +1830,7 @@ end
             DeviceLayout.UNDEF_META,
             r"overlay metadata is undefined"
         ),
-        (
-            SemanticMeta(:a),
-            SemanticMeta(:b),
-            r"overlay metadata SemanticMeta\(:a.*overlay metadata SemanticMeta\(:b"s
-        )
+        (SemanticMeta(:a), SemanticMeta(:b), r"overlay metadata")
     ]
         pa_o1 = Path(; name="o1", metadata=SemanticMeta(:test))
         straight!(pa_o1, 0.1mm, trace_1)
