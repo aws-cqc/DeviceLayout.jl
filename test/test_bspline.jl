@@ -312,6 +312,43 @@ end
     @test_logs (:warn, r"runs backward") render!(Cell("cusp", nm), pa, GDSMeta())
 end
 
+@testitem "Discretizing a curve through a cusp" setup = [CommonTestSetup] begin
+    # The CPW's outer edges are offset by more than the B-splines' radius of curvature
+    # where they bend, so their offset curves have cusps. One is at the end of an edge,
+    # where discretization finishes only by stopping refinement at the tolerance.
+    # Rendering still warns about each edge; the test is that it finishes.
+    pa = Path(Point(0.0μm, 0.0μm))
+    sty = Paths.CPW(8μm, 5μm)
+    bspline!(pa, [Point(0.0μm, -18.0μm)], -90°, sty; endpoints_speed=18μm)
+    bspline!(pa, [Point(16.0μm, -4.0μm)], 105°, sty; endpoints_speed=sqrt(452) * μm)
+    c = Cell("cusp", nm)
+    @test_logs match_mode = :any (:warn, r"runs backward") render!(c, pa, GDSMeta())
+    @test length(c.elements) == 4
+    @test all(p -> length(points(p)) < 1000, c.elements)
+
+    # A cusp at the end of the curve: the floored step stops at the end
+    pa = Path(Point(0.0μm, 0.0μm))
+    bspline!(
+        pa,
+        [Point(0.0μm, 35.0μm)],
+        150°,
+        Paths.CPW(6.0μm, 4.0μm);
+        endpoints_speed=35.0μm
+    )
+    c = Cell("endcusp", nm)
+    @test_logs match_mode = :any (:warn, r"runs backward") render!(c, pa, GDSMeta())
+    @test length(c.elements) == 2
+    @test all(p -> length(points(p)) < 1000, c.elements)
+    pa = Path(Point(0.0, 0.0))
+    sty = Paths.CPW(6.0, 4.0)
+    bspline!(pa, [Point(0.0, 35.0)], 150°, sty; endpoints_speed=35.0)
+    straight!(pa, 10.0, sty)
+    c = Cell{Float64}("endcusp")
+    @test_logs match_mode = :any (:warn, r"runs backward") render!(c, pa, GDSMeta())
+    @test length(c.elements) == 4
+    @test all(p -> length(points(p)) < 1000, c.elements)
+end
+
 @testitem "BSpline approximation" setup = [CommonTestSetup] begin
     pa = Path(Point(0.0, 0.0)nm, α0=90°)
     bspline!(
